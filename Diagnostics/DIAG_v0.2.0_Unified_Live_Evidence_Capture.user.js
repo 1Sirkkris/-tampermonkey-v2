@@ -21,6 +21,7 @@
 
   const VERSION = '0.2.0';
   const STORE_KEY = '__bwu2_live_evidence_v020';
+  const DETAIL_STORE_KEY = '__bwu2_live_evidence_detail_v020';
   const MAX_EVENTS = 600;
   const MAX_DEPTH = 6;
   const MAX_BODY_CHARS = 12000;
@@ -32,18 +33,34 @@
   const CAMEL_IDENTIFIER_KEY = /(?:Id|ID)$/;
   const FINGERPRINT_VALUE = /^<[^<>#]+#[a-z0-9]{7}:\d+>$/;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
+  const SAFE_ROUTE_PART = /^(?:api|action|status|end|container-hierarchy|scan-source-container|scanitem|move-items|close-container|move-container|edititems|fcskuflip|moveitems|v\d{1,2})$/i;
   const INTERESTING_PATH = /(?:\/api\/|\/action|\/status|\/end|container-hierarchy|edititems|fcskuflip|moveitems|move-container)/i;
+  const DETAIL_PATHS = Object.freeze([
+    '/api/scan-source-container',
+    '/api/scanitem',
+    '/api/move-items',
+    '/api/close-container',
+    '/status',
+    '/action',
+    '/end',
+    '/api/move-container',
+    '/container-hierarchy'
+  ]);
 
   let active = true;
+  let detailed = loadDetailed();
   let mounted = false;
   let host;
   let statusNode;
+  let detailButton;
+  let privacyNote;
   let flushTimer = 0;
   let mutationObserver;
   let mutationStarted = performance.now();
   let mutationStats = emptyMutationStats();
   const startedAt = new Date().toISOString();
   const events = loadEvents();
+  if (!detailed) events.splice(0, events.length, ...events.map(eventForExport));
 
   function emptyMutationStats() {
     return { batches:0, records:0, added:0, removed:0, attributes:0, text:0, maxBatch:0, targets:{} };
@@ -86,7 +103,7 @@
     if (!decoded) return '';
     const scrubbed = scrubText(decoded);
     if (scrubbed !== decoded) return scrubbed;
-    if (/^[a-z][a-z_-]{0,40}$/.test(decoded) || /^v\d{1,2}$/i.test(decoded)) return decoded;
+    if (SAFE_ROUTE_PART.test(decoded)) return decoded;
     return fingerprint(decoded, kind);
   }
 
@@ -132,24 +149,86 @@
     if (body == null) return null;
     try {
       if (typeof body === 'string') {
-        try { return sanitize(JSON.parse(body)); } catch { return scrubText(body); }
+        try { return capBody(sanitize(JSON.parse(body))); } catch { return scrubText(body); }
       }
-      if (body instanceof URLSearchParams) return sanitize(Object.fromEntries(body.entries()));
-      if (body instanceof FormData) return sanitize(Object.fromEntries(body.entries()));
+      if (body instanceof URLSearchParams) return capBody(sanitize(Object.fromEntries(body.entries())));
+      if (body instanceof FormData) return capBody(sanitize(Object.fromEntries(body.entries())));
       if (body instanceof Blob) return `<Blob:${body.type || 'unknown'}:${body.size}>`;
       if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return `<binary:${body.byteLength}>`;
-      return sanitize(body);
+      return capBody(sanitize(body));
     } catch (error) {
       return `<body-read-failed:${scrubText(error?.message || error)}>`;
+    }
+  }
+
+  function capBody(value) {
+    if (typeof value === 'string') return scrubText(value);
+    try {
+      const serialized = JSON.stringify(value);
+      return serialized.length > MAX_BODY_CHARS ? scrubText(serialized) : value;
+    } catch {
+      return '<body-cap-failed>';
     }
   }
 
   function parseResponseText(text, contentType = '') {
     const raw = String(text ?? '');
     if (/json/i.test(contentType) || /^[\s]*[\[{]/.test(raw)) {
-      try { return sanitize(JSON.parse(raw)); } catch {}
+      try { return capBody(sanitize(JSON.parse(raw))); } catch {}
     }
     return scrubText(raw);
+  }
+
+  function loadDetailed() {
+    try { return sessionStorage.getItem(DETAIL_STORE_KEY) === '1'; } catch { return false; }
+  }
+
+  function detailAllowed(value) {
+    if (!detailed) return false;
+    try {
+      const path = new URL(String(value ?? ''), location.href).pathname.replace(/\/+$/, '') || '/';
+      return DETAIL_PATHS.includes(path);
+    } catch {
+      return false;
+    }
+  }
+
+  function bodySize(body) {
+    try {
+      if (typeof body === 'string') return { value:body.length, unit:'chars' };
+      if (body instanceof URLSearchParams) return { value:body.toString().length, unit:'chars' };
+      if (body instanceof Blob) return { value:body.size, unit:'bytes' };
+      if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return { value:body.byteLength, unit:'bytes' };
+    } catch {}
+    return null;
+  }
+
+  function attachDetailedBodies(base, allowed, requestBody, responseBody) {
+    if (!allowed) return base;
+    const output = { ...base };
+    if (requestBody !== undefined) output.requestBody = requestBody;
+    if (responseBody !== undefined) output.responseBody = responseBody;
+    return output;
+  }
+
+  function eventForExport(event) {
+    const output = sanitize(event);
+    if (detailed || output?.type !== 'network' || !output.data) return output;
+    const { requestBody, responseBody, ...metadata } = output.data;
+    return { ...output, data:metadata };
+  }
+
+  function setDetailed(value) {
+    detailed = Boolean(value);
+    try {
+      if (detailed) sessionStorage.setItem(DETAIL_STORE_KEY, '1');
+      else sessionStorage.removeItem(DETAIL_STORE_KEY);
+    } catch {}
+    if (!detailed) {
+      events.splice(0, events.length, ...events.map(eventForExport));
+      persistNow();
+    }
+    renderStatus();
   }
 
   function loadEvents() {
@@ -224,28 +303,45 @@
     window.fetch = async function(input, init) {
       const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input?.url || '';
       const method = String(init?.method || input?.method || 'GET').toUpperCase();
-      const requestBody = bodyFromRequest(input, init);
+      const captureDetail = detailAllowed(rawUrl);
+      const requestBody = captureDetail ? bodyFromRequest(input, init) : undefined;
+      const requestSize = bodySize(init?.body);
       const started = performance.now();
       try {
         const response = await original.apply(this, arguments);
         const base = {
-          transport:'fetch', method, url:sanitizeUrl(rawUrl), requestBody,
+          transport:'fetch', method, url:sanitizeUrl(rawUrl),
           status:response.status, ok:response.ok, ms:Math.round(performance.now() - started),
-          contentType:response.headers.get('content-type') || ''
+          contentType:response.headers.get('content-type') || '',
+          requestSize,
+          responseSize:null
         };
-        const skipped = responseBodySkip(base.contentType, response.headers.get('content-length'));
-        if (skipped) add('network', { ...base, responseBody:skipped });
+        if (!captureDetail) {
+          add('network', base);
+          return response;
+        }
+        const skipped = responseBodySkip(base.contentType);
+        if (skipped) add('network', attachDetailedBodies(base, true, requestBody, skipped));
         else {
           void response.clone().text()
-            .then(text => add('network', { ...base, responseBody:parseResponseText(text, base.contentType) }))
-            .catch(error => add('network', { ...base, responseReadError:scrubText(error?.message || error) }));
+            .then(text => add('network', attachDetailedBodies(
+              { ...base, responseSize:base.responseSize || { value:text.length, unit:'chars' } },
+              true,
+              requestBody,
+              parseResponseText(text, base.contentType)
+            )))
+            .catch(error => add('network', attachDetailedBodies(
+              { ...base, responseReadError:scrubText(error?.message || error) },
+              true,
+              requestBody
+            )));
         }
         return response;
       } catch (error) {
-        add('network', {
-          transport:'fetch', method, url:sanitizeUrl(rawUrl), requestBody,
+        add('network', attachDetailedBodies({
+          transport:'fetch', method, url:sanitizeUrl(rawUrl), requestSize,
           error:scrubText(error?.message || error), ms:Math.round(performance.now() - started)
-        });
+        }, captureDetail, requestBody));
         throw error;
       }
     };
@@ -264,27 +360,39 @@
 
     XHR.prototype.send = function(body) {
       const meta = this.__bwu2Evidence || { method:'GET', url:'' };
+      const captureDetail = detailAllowed(meta.url);
+      const requestBody = captureDetail ? parseBody(body) : undefined;
+      const requestSize = bodySize(body);
       const started = performance.now();
       this.addEventListener('loadend', () => {
-        let responseBody = null;
+        let contentType = '';
+        let responseSize = null;
+        let responseBody;
         try {
-          const contentType = this.getResponseHeader('content-type') || '';
-          const responseLength = this.responseType && this.responseType !== 'text'
-            ? Number(this.response?.size || this.response?.byteLength || 0)
-            : String(this.responseText || '').length;
-          responseBody = responseBodySkip(contentType, responseLength) || (
-            this.responseType && this.responseType !== 'text'
-              ? sanitize(this.response)
-              : parseResponseText(this.responseText, contentType)
-          );
+          contentType = this.getResponseHeader('content-type') || '';
+          if (this.responseType && this.responseType !== 'text') {
+            responseSize = bodySize(this.response);
+          }
+          if (!responseSize && (!this.responseType || this.responseType === 'text')) {
+            responseSize = { value:String(this.responseText || '').length, unit:'chars' };
+          }
+          if (captureDetail) {
+            const length = responseSize?.value || 0;
+            responseBody = responseBodySkip(contentType, length) || (
+              this.responseType && this.responseType !== 'text'
+                ? sanitize(this.response)
+                : parseResponseText(this.responseText, contentType)
+            );
+          }
         } catch (error) {
-          responseBody = `<response-read-failed:${scrubText(error?.message || error)}>`;
+          if (captureDetail) responseBody = `<response-read-failed:${scrubText(error?.message || error)}>`;
         }
-        add('network', {
-          transport:'xhr', method:meta.method, url:sanitizeUrl(meta.url), requestBody:parseBody(body),
+        const base = {
+          transport:'xhr', method:meta.method, url:sanitizeUrl(meta.url), requestSize,
           status:this.status, ok:this.status >= 200 && this.status < 300,
-          ms:Math.round(performance.now() - started), responseBody
-        });
+          ms:Math.round(performance.now() - started), contentType, responseSize
+        };
+        add('network', attachDetailedBodies(base, captureDetail, requestBody, responseBody));
       }, { once:true });
       return originalSend.apply(this, arguments);
     };
@@ -392,12 +500,19 @@
   }
 
   function report() {
+    const exportedEvents = events.map(eventForExport);
     return {
-      capture:{ name:'BWU2 Unified Live Evidence', version:VERSION, startedAt, exportedAt:new Date().toISOString() },
-      privacy:{ headers:'only response content-type captured', cookies:'not captured', credentials:'not captured', identifiers:'fingerprinted' },
+      capture:{
+        name:'BWU2 Unified Live Evidence', version:VERSION, startedAt, exportedAt:new Date().toISOString(),
+        detailedCapture:detailed, detailAllowlist:[...DETAIL_PATHS]
+      },
+      privacy:{
+        headers:'only response content-type captured', cookies:'not captured', credentials:'not captured',
+        identifiers:'fingerprinted', networkBodies:detailed ? 'allowlisted opt-in' : 'not captured'
+      },
       environment:{ host:location.host, path:new URL(sanitizeUrl(location.href)).pathname, userAgent:navigator.userAgent, viewport:`${innerWidth}x${innerHeight}` },
-      summary:{ events:events.length, networks:events.filter(event => event.type === 'network').length, requests:networkSummary() },
-      events
+      summary:{ events:exportedEvents.length, networks:exportedEvents.filter(event => event.type === 'network').length, requests:networkSummary() },
+      events:exportedEvents
     };
   }
 
@@ -427,8 +542,14 @@
   function renderStatus() {
     if (!statusNode) return;
     const networks = events.filter(event => event.type === 'network').length;
-    statusNode.textContent = `${active ? 'CAPTURING' : 'PAUSED'} • ${events.length} events • ${networks} network`;
+    statusNode.textContent = `${active ? 'CAPTURING' : 'PAUSED'} • ${detailed ? 'DETAIL ON' : 'METADATA ONLY'} • ${events.length} events • ${networks} network`;
     statusNode.style.color = active ? '#166534' : '#9a3412';
+    if (detailButton) detailButton.textContent = detailed ? 'Disable detail' : 'Enable detail';
+    if (privacyNote) {
+      privacyNote.textContent = detailed
+        ? 'Detail ON for allowlisted workflow endpoints only. Bodies redacted and capped.'
+        : 'Metadata only. No request or response bodies captured.';
+    }
   }
 
   function button(label, onClick) {
@@ -461,17 +582,21 @@
       node.textContent = active ? 'Pause' : 'Resume';
       renderStatus();
     });
+    detailButton = button('Enable detail', () => {
+      if (!detailed && !confirm('Enable sanitized body capture for allowlisted workflow endpoints in this tab session?')) return;
+      setDetailed(!detailed);
+    });
     actions.append(
       button('Mark', () => add('manual.mark', { note:scrubText(prompt('Short marker (no IDs):', '') || '') })),
       button('Copy', copyOutput),
       button('Download', downloadOutput),
       button('Clear', () => { events.length = 0; try { sessionStorage.removeItem(STORE_KEY); } catch {} renderStatus(); }),
-      pause
+      pause,
+      detailButton
     );
-    const note = document.createElement('div');
-    note.textContent = 'Only Content-Type retained. IDs fingerprinted. Review before sharing.';
-    note.style.cssText = 'margin-top:6px;color:#475569;font:10px/1.25 Arial';
-    panel.append(title, statusNode, actions, note);
+    privacyNote = document.createElement('div');
+    privacyNote.style.cssText = 'margin-top:6px;color:#475569;font:10px/1.25 Arial';
+    panel.append(title, statusNode, actions, privacyNote);
     shadow.append(panel);
     document.documentElement.appendChild(host);
     renderStatus();
@@ -482,6 +607,7 @@
     mark:note => add('manual.mark', { note:scrubText(note) }),
     pause:() => { active = false; renderStatus(); },
     resume:() => { active = true; renderStatus(); },
+    detailed:() => detailed,
     clear:() => { events.length = 0; try { sessionStorage.removeItem(STORE_KEY); } catch {} renderStatus(); },
     report,
     output

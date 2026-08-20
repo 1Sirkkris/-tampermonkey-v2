@@ -79,6 +79,7 @@
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
         "const SUSSY_MAX_PARALLEL = 6;",
         "client: 'stow'",
+        "window.addEventListener(CORE_RESPONSE_EVENT, event => {",
         "dataset.fcrToolUi = '1'",
         "[data-fcr-tool-ui=\"1\"]"
       ]
@@ -90,6 +91,7 @@
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
         "client: 'fclite'",
+        "window.addEventListener(CORE_RESPONSE_EVENT, event => {",
         "root.dataset.fcrToolUi = '1';",
         "COPY STATS",
         "FULL FCRESEARCH ↗"
@@ -103,6 +105,7 @@
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
         "client: 'master'",
+        "window.addEventListener(CORE_RESPONSE_EVENT, event => {",
         "element.dataset.fcrToolUi = '1';",
         "[data-fcr-tool-ui=\"1\"]",
         "window.dispatchEvent(new CustomEvent('fcrm:size-resolved'"
@@ -114,6 +117,8 @@
         "const REQUEST_EVENT = 'fcr-data-core:request';",
         "const RESPONSE_EVENT = 'fcr-data-core:response';",
         "const USAGE_EVENT = 'fcr-usage:event';",
+        "window.addEventListener(REQUEST_EVENT, event => {",
+        "window.addEventListener(USAGE_EVENT, event => {",
         "containerScannableId: source,",
         "isMasterpack: null,",
         "itemAndonContext: null,",
@@ -133,11 +138,16 @@
         "if (window.__bwu2UnifiedEvidence_v020) return;",
         "const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;",
         "const IDENTIFIER_KEY = /asin|barcode|code|container|customer|destination|fcsku|fnsku|(?:^|_)id(?:$|_)|item|lpn|object|pod|scannable|sku|source/i;",
+        "const DETAIL_PATHS = Object.freeze([",
+        "const requestBody = captureDetail ? bodyFromRequest(input, init) : undefined;",
+        "detailedCapture:detailed, detailAllowlist:[...DETAIL_PATHS]",
         "headers:'only response content-type captured'",
         "window.__bwu2LiveEvidence = Object.freeze({"
       ],
       "forbidden": [
         "getAllResponseHeaders(",
+        "getAllRequestHeaders(",
+        "'content-length'",
         "document.cookie",
         "request.headers"
       ]

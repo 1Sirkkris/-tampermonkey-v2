@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedFrom": "offline-cleanup-pass-1",
   "scripts": {
     "MAIN_v0.2.1_Sideline_API_Move_TEST.txt": {
@@ -35,16 +35,7 @@
         "shortcuts": "8cc0540c17bc2c9d0676618a7ce09ffeb6368a35f5b860d44a1750b19412426e",
         "events": "6b8410ecbf9c9d8fbb67eb794ad89caa5e377957dd20d7f404b6a404a347f327",
         "labels": "7aa4a27bb8feb6a4b21d76569bb0b266d67ea07512832b5eec9b70cca2dbfe09",
-        "payloadShapes": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "functions": "faf01b72ee918423110dda179e6d6b771fbf2ca4505f9dfbf8a25f3b14fd1af8",
-        "listeners": "97108aae9fb8238d5ce1b5e0935f73434737882760a14509c622a2a3bc111039"
-      },
-      "duplicateFunctions": {
-        "renderPicker": 2
-      },
-      "duplicateListeners": {
-        "document:keydown": 2,
-        "root:click": 2
+        "payloadShapes": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       }
     },
     "MAIN_v0.9.4_AFT_Edit-SKU-Move_master_PRODUCTION_CLEAN.txt": {
@@ -85,13 +76,7 @@
         "shortcuts": "b9da1b7ec79b0a8859656dd701300cffb5c66f0ca86deaab8f9a94bdc1f58602",
         "events": "3c96b4294cf8962093bcbf563f29e5e750dbe8d97f1efa73d7a71cf4aab4773c",
         "labels": "d7926f65e84f3213e89b9279f23563cb23ce450317ea88390f078720945afb09",
-        "payloadShapes": "a759620e4b2ef86fddde873791cc957b90b183fd2daf0ee6ed7ece0b0e87666e",
-        "functions": "dee621790b692c2d7f12146c27e5a473d35009176ec9bb6353fe45e72aa30706",
-        "listeners": "94720f401ee4006d86688e81228fa5ee20e6ecce3d804b3836db166d0f3e1e86"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {
-        "el:change": 2
+        "payloadShapes": "a759620e4b2ef86fddde873791cc957b90b183fd2daf0ee6ed7ece0b0e87666e"
       }
     },
     "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt": {
@@ -129,13 +114,7 @@
         "shortcuts": "96d8502e7d881cdef882538d3664b798356b5dbc4d12dbbae17a3735336f879c",
         "events": "2cce9bf6bad035cedb11e5ab6b7070db1c0e562dcbc3a63d0b74caab003e9e37",
         "labels": "c4c08f1fbd60e8b0781c07c5fc3cbc68888645889b605464127cc71fb785af13",
-        "payloadShapes": "8d2da72d58e1d5d427c562911528c71f27a7d016b19064892787737b5cf17e80",
-        "functions": "47b0663e3a9ebdf659de8fbdcc123c34eb45947fe3c2e13132a7bf88b4beab67",
-        "listeners": "98895eefd6c3bd76d2afe2d838a7dfb5a822bdcaa3d1fd800f3e463eec705b86"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {
-        "document:click": 2
+        "payloadShapes": "8d2da72d58e1d5d427c562911528c71f27a7d016b19064892787737b5cf17e80"
       }
     },
     "TEST_v0.1.29_FC-Lite_USAGE.txt": {
@@ -175,12 +154,8 @@
         "shortcuts": "aebae4ec8b180440d2072cb2a119de87d28af05f925b332b0a6d2219513982da",
         "events": "7b16a1afea1f844fe9b18c65b240bec526cb4e539ded5312f90debc844a59408",
         "labels": "89af23cbc53972a61ec1e8e54dda5442bfeb34a4abfed7394b95dc5c11b34c94",
-        "payloadShapes": "8d2da72d58e1d5d427c562911528c71f27a7d016b19064892787737b5cf17e80",
-        "functions": "b4e8d47206a42dae96516f9d4c747ac8cacd637e6caf01459d59135acc5635c3",
-        "listeners": "92be19a80df1593a0451692d155294d33f18dd300db51e86c95107dbed73905e"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {}
+        "payloadShapes": "8d2da72d58e1d5d427c562911528c71f27a7d016b19064892787737b5cf17e80"
+      }
     },
     "TEST_v0.1.5_BWU2_Super_Tracer.txt": {
       "metadata": {
@@ -227,13 +202,7 @@
         "shortcuts": "ad152d2fcbe7ba62eb63be85897343c54d53523d2f359ffe68b13b400c215716",
         "events": "2616a7abc484d2b6108fd96b5e91b12a4dcd2b7104ac8a13bc4fd43f06a4c2d5",
         "labels": "b67b1655668b03afe1fbbf749b88c6369e501ea2fd48cec716a28832521e2e26",
-        "payloadShapes": "e26e930fb5e0a6d85bbe581af2ca899ab888cce0b66182d00baefee24ca6f696",
-        "functions": "eaec2d79b77bd0933bb3031c6f310bf81deb99d0311fc25dd4d85f1fd7b6aa9f",
-        "listeners": "4b4893a07106d6b6ea772d58042328918c2ef9597c3eefd01ffd6d025ace5d7c"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {
-        "document:DOMContentLoaded": 2
+        "payloadShapes": "e26e930fb5e0a6d85bbe581af2ca899ab888cce0b66182d00baefee24ca6f696"
       }
     },
     "TEST_v0.2.16_Dropzone_Selector_Queue.txt": {
@@ -270,12 +239,8 @@
         "shortcuts": "a0c0064643b521e7ab1fefbde5253b7b2bd0abe6cfbccb9e4365a38decf98b4c",
         "events": "bd45f12f419799627bcfb03d90084f409847837e1418d30601960df49d6bc676",
         "labels": "3c6eeec0fa8e40687613ddec2ada15742b96c3814694b4f036ad381109adc711",
-        "payloadShapes": "61902fb7dc732a73d979f4137b5ac5f10089d1cb43bbae5644238519495d029a",
-        "functions": "a4f9926b095d8ed140e59eb2b1f677363fdb33c1b2f280a55048f2c0672b2251",
-        "listeners": "1c467c7a6702a7ddbed191fc39e238646160b54aae7213c63ba9e633f41695b8"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {}
+        "payloadShapes": "61902fb7dc732a73d979f4137b5ac5f10089d1cb43bbae5644238519495d029a"
+      }
     },
     "TEST_v0.2.3_FCR_Data_Core_USAGE.txt": {
       "metadata": {
@@ -317,12 +282,8 @@
         "shortcuts": "017d8483ce43a6f9ed7889fa99aab5b3c103daeab34f0e1cc83ba070cea8df23",
         "events": "3c8b136902906d14974584fd6d0ba6dd2540f3164b4f51bfc763d6dd525942b9",
         "labels": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "payloadShapes": "b8b35b5e26eb9e28d535b03cadfd339322f28b8ca3b2afcf2d2e83b18aa2d880",
-        "functions": "95a00e074d002718bba419f8ee5221269475c89e276f3dd243db1f9904162633",
-        "listeners": "97516d77caedfdd05383b21502c352bfdb5278e773468b8f82832a09554542ca"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {}
+        "payloadShapes": "b8b35b5e26eb9e28d535b03cadfd339322f28b8ca3b2afcf2d2e83b18aa2d880"
+      }
     },
     "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt": {
       "metadata": {
@@ -362,14 +323,7 @@
         "shortcuts": "c7f97db1748da7431717f0f692b7250565453626262defb96948864e46da9255",
         "events": "2daf62634117700dcb844eb4552ad2decefc44fa3666a4eb9b8f5924674a90ba",
         "labels": "a750d5cfce0880326a00b09a251bfe465da3025b0ceca94ab2029e3ce4161a2d",
-        "payloadShapes": "533e65a4d027901f381ea5834e78cfde18e351b373355c1f3ef8bf9dacad0dc2",
-        "functions": "ead08b1a41a44202e0dbd71fe9aadda38f4fa3e93ad844259a628ae2a4927546",
-        "listeners": "b913ef6f52d0790ca62a509e232ff4f031bf0a4e4f8fd319d8d9cf3b8a397184"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {
-        "button:click": 2,
-        "input:change": 2
+        "payloadShapes": "533e65a4d027901f381ea5834e78cfde18e351b373355c1f3ef8bf9dacad0dc2"
       }
     },
     "TEST_v7.3.6_Bin_check_Overlay_USAGE.txt": {
@@ -403,12 +357,8 @@
         "shortcuts": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         "events": "91816c9873c28069cea3bfd65a0cebe8804f62ddbec99069a5323d32c239837b",
         "labels": "9959863cf1ce320dda8cb804b692abc5536eb75952a1045dd376291870ccfc46",
-        "payloadShapes": "f9ba5f51eeb2e314732c495bb8366c1058f43a25a812277d4aa7a55de8f740c3",
-        "functions": "a24cfe635d2ecd319985941527edab8da6ff07efd86fa4036eca6cc7e01000d7",
-        "listeners": "6bbf8945152dc9e26082c9107752c8b96b38579ebb913e26d7b8ada56d73306d"
-      },
-      "duplicateFunctions": {},
-      "duplicateListeners": {}
+        "payloadShapes": "f9ba5f51eeb2e314732c495bb8366c1058f43a25a812277d4aa7a55de8f740c3"
+      }
     }
   }
 }

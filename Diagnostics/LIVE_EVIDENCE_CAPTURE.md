@@ -4,15 +4,18 @@ Install `DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js` for the next interna
 
 ## Privacy and safety
 
-- Request headers and sensitive response headers, cookies, credentials, and browser tokens are never collected. Response `Content-Type` is retained only to parse the body safely.
+- Request headers and sensitive response headers, cookies, credentials, and browser tokens are never collected. Only response `Content-Type` is retained.
 - Known identifier fields and common container/pod values are replaced with deterministic fingerprints. The same value remains correlatable inside one export without exposing the value.
 - Captures stay in memory and same-tab `sessionStorage`. Clear removes the current origin's capture.
-- Response bodies are capped. Review the export once before sharing it.
+- The default is **METADATA ONLY**: transport, method, sanitized URL, result, timing, safe sizes, duplicate signatures, and errors. No request or response bodies are captured or exported.
+- **Enable detail** is an explicit, same-tab-session opt-in. It captures redacted, size/depth/item-capped bodies only for the listed Sideline, AFT, Dropzone, and Bin workflow endpoints. Disabling detail removes captured bodies from the session. The panel and export always state the current mode and allowlist.
 - The diagnostic observes normal work. It does not send requests, click controls, or alter payloads.
 
 ## One-shift checklist
 
 Use **Mark** before each case, perform the normal workflow once, then use **Copy** or **Download**. Export before changing to a different host.
+
+Stay in **METADATA ONLY** for request duplication, timing, observer, polling, and lifecycle evidence. Enable detail only immediately before a case that needs request/response structure evidence, confirm the panel says **DETAIL ON**, then disable it after that case. Review every export before sharing.
 
 ### Sideline
 

@@ -174,25 +174,6 @@ function stringLiterals(source) {
   return uniqueSorted(literalTokens(source).map(token => token.value));
 }
 
-function functionCounts(source) {
-  const counts = {};
-  for (const name of collect(source, /\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
-    const pattern = new RegExp(`\\b(?:async\\s+)?function\\s+${name.replace(/[$]/g, '\\$&')}\\s*\\(`, 'g');
-    counts[name] = [...source.matchAll(pattern)].length;
-  }
-  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
-}
-
-function listenerSignatures(source) {
-  const counts = {};
-  const pattern = /(?:([A-Za-z_$][\w$]*(?:\?\.|\.)?[\w$]*(?:\([^\n]{0,80}\))?)\.)?addEventListener\(\s*(['"])([^'"]+)\2/g;
-  for (const match of source.matchAll(pattern)) {
-    const key = `${normalize(match[1] || 'window')}:${match[3]}`;
-    counts[key] = (counts[key] || 0) + 1;
-  }
-  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
-}
-
 function payloadKeys(source) {
   const shapes = [];
   const marker = /JSON\.stringify\s*\(\s*\{/g;
@@ -255,25 +236,18 @@ export function extractContractCategories(source) {
     shortcuts: uniqueSorted(shortcutLines),
     events: uniqueSorted(eventNames),
     labels: uniqueSorted(labels.filter(value => value.length <= MAX_CONTRACT_LITERAL_CHARS)),
-    payloadShapes: payloadKeys(source),
-    functions: functionCounts(source),
-    listeners: listenerSignatures(source)
+    payloadShapes: payloadKeys(source)
   };
 }
 
 export function lockView(categories) {
   const digests = {};
   for (const [key, value] of Object.entries(categories)) digests[key] = digest(value);
-  return {
-    metadata: categories.metadata,
-    digests,
-    duplicateFunctions: Object.fromEntries(Object.entries(categories.functions).filter(([, count]) => count > 1)),
-    duplicateListeners: Object.fromEntries(Object.entries(categories.listeners).filter(([, count]) => count > 1))
-  };
+  return { metadata:categories.metadata, digests };
 }
 
 export async function buildLock() {
   const scripts = {};
   for (const file of CURRENT_SCRIPTS) scripts[file] = lockView(extractContractCategories(await readScript(file)));
-  return { schemaVersion:1, generatedFrom:'offline-cleanup-pass-1', scripts };
+  return { schemaVersion:2, generatedFrom:'offline-cleanup-pass-1', scripts };
 }

@@ -1,4 +1,3 @@
-import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -83,6 +82,10 @@ async function lockChecks() {
   }
 
   const expected = JSON.parse(await readFile(LOCK_FILE, 'utf8'));
+  if (expected.schemaVersion !== current.schemaVersion) {
+    fail(`contract lock schema ${expected.schemaVersion}; expected ${current.schemaVersion}. Regenerate the lock deliberately.`);
+    return;
+  }
   for (const file of CURRENT_SCRIPTS) {
     const actualView = current.scripts[file];
     const expectedView = expected.scripts?.[file];
@@ -91,12 +94,6 @@ async function lockChecks() {
       if (actualView.digests[category] === expectedView.digests?.[category]) continue;
       const actual = extractContractCategories(await readScript(file));
       fail(`${file} changed protected ${category}. Current extracted value:\n${JSON.stringify(actual[category], null, 2)}`);
-    }
-    try {
-      assert.deepEqual(actualView.duplicateFunctions, expectedView.duplicateFunctions);
-      assert.deepEqual(actualView.duplicateListeners, expectedView.duplicateListeners);
-    } catch {
-      fail(`${file} changed duplicate function/listener inventory`);
     }
   }
 }

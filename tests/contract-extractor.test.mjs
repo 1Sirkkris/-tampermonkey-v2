@@ -37,29 +37,26 @@ function once() {}
   assert.deepEqual(contract.events, ['keydown','shared:sample']);
   assert.deepEqual(contract.labels, ['Protected label']);
   assert.deepEqual(contract.payloadShapes, ['nested,quantity,sourceId']);
-  assert.deepEqual(contract.functions, { once:1 });
-  assert.deepEqual(contract.listeners, { 'document:keydown':1 });
 });
 
 test('every metadata-bearing userscript is explicitly classified', async () => {
   assert.deepEqual(await discoverUserscriptFiles(), [...CURRENT_SCRIPTS, ...DIAGNOSTIC_SCRIPTS].sort());
 });
 
-test('new duplicate functions and listeners change extracted inventory', () => {
-  const source = `
-function duplicate() {}
-function duplicate() {}
-document.addEventListener('click', handler);
-document.addEventListener('click', handler);
-`;
-  const contract = extractContractCategories(source);
-  assert.equal(contract.functions.duplicate, 2);
-  assert.equal(contract.listeners['document:click'], 2);
-});
-
-test('bare global listeners are inventoried as window listeners', () => {
-  const contract = extractContractCategories("addEventListener('hashchange', handler);");
-  assert.deepEqual(contract.listeners, { 'window:hashchange':1 });
+test('helper refactors and listener counts are not locked as implementation contracts', () => {
+  const before = extractContractCategories(`
+const ENDPOINT = '/api/sample';
+document.addEventListener('click', first);
+function oldHelper() {}
+`);
+  const after = extractContractCategories(`
+const ENDPOINT = '/api/sample';
+document.addEventListener('click', first);
+document.addEventListener('click', second);
+function renamedHelper() {}
+function splitHelper() {}
+`);
+  assert.deepEqual(before, after);
 });
 
 test('regexes and nested templates do not corrupt literal contracts', () => {
