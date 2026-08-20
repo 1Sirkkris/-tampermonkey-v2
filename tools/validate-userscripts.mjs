@@ -7,6 +7,7 @@ import {
   DIAGNOSTIC_SCRIPTS,
   ROOT,
   buildLock,
+  discoverUserscriptFiles,
   extractContractCategories,
   lockView,
   readScript
@@ -33,6 +34,17 @@ async function syntaxChecks() {
   }
 }
 
+async function inventoryChecks() {
+  const declared = [...CURRENT_SCRIPTS, ...DIAGNOSTIC_SCRIPTS].sort();
+  const discovered = await discoverUserscriptFiles();
+  for (const file of discovered.filter(file => !declared.includes(file))) {
+    fail(`${file} is an unclassified userscript and would escape validation`);
+  }
+  for (const file of declared.filter(file => !discovered.includes(file))) {
+    fail(`${file} is declared for validation but is missing or lacks userscript metadata`);
+  }
+}
+
 async function criticalChecks() {
   const manifest = JSON.parse(await readFile(CRITICAL_FILE, 'utf8'));
   for (const [file, contract] of Object.entries(manifest.scripts)) {
@@ -47,7 +59,11 @@ async function criticalChecks() {
 
   for (const shared of manifest.sharedInterfaces || []) {
     let occurrences = 0;
-    for (const file of shared.files) occurrences += (await readScript(file)).split(shared.anchor).length - 1;
+    for (const file of shared.files) {
+      const fileOccurrences = (await readScript(file)).split(shared.anchor).length - 1;
+      if (!fileOccurrences) fail(`${file} lost shared interface ${JSON.stringify(shared.anchor)}`);
+      occurrences += fileOccurrences;
+    }
     if (occurrences < shared.minimumOccurrences) {
       fail(`shared interface ${JSON.stringify(shared.anchor)} has ${occurrences}; expected at least ${shared.minimumOccurrences}`);
     }
@@ -85,6 +101,7 @@ async function lockChecks() {
   }
 }
 
+await inventoryChecks();
 await syntaxChecks();
 await criticalChecks();
 await lockChecks();

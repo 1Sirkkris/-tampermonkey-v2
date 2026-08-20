@@ -63,6 +63,8 @@
         "const MAX_CONCURRENT_REQUESTS = 12;",
         "return `${base}/container-hierarchy?s=${encodeURIComponent(pod)}`;",
         "credentials: 'same-origin', cache: 'no-store', signal: controller.signal",
+        "button.dataset.fcrToolUi = '1';",
+        "overlay.dataset.fcrToolUi = \"1\";",
         "div.a-span6:nth-child(1) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)",
         "P-level overlay sorter",
         "Lazy bin check"
@@ -74,7 +76,10 @@
         "const MOVE_URL = 'https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container';",
         "sourceScannableId: null, destinationScannableId: dest, containerScannableId: container, confirmed: 'true'",
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
-        "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';"
+        "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
+        "client: 'stow'",
+        "dataset.fcrToolUi = '1'",
+        "[data-fcr-tool-ui=\"1\"]"
       ]
     },
     "TEST_v0.1.29_FC-Lite_USAGE.txt": {
@@ -84,6 +89,7 @@
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
         "client: 'fclite'",
+        "root.dataset.fcrToolUi = '1';",
         "COPY STATS",
         "FULL FCRESEARCH ↗"
       ]
@@ -96,6 +102,8 @@
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
         "client: 'master'",
+        "element.dataset.fcrToolUi = '1';",
+        "[data-fcr-tool-ui=\"1\"]",
         "window.dispatchEvent(new CustomEvent('fcrm:size-resolved'"
       ]
     },

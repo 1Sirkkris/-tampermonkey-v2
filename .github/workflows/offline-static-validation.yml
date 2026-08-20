@@ -3,6 +3,7 @@ name: Offline static validation
 on:
   push:
     branches:
+      - main
       - master
       - offline-cleanup-pass-1
   pull_request:

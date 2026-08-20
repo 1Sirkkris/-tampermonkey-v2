@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
@@ -29,6 +29,22 @@ const MAX_CONTRACT_LITERAL_CHARS = 500;
 
 export async function readScript(file) {
   return readFile(path.join(ROOT, file), 'utf8');
+}
+
+export async function discoverUserscriptFiles() {
+  const found = [];
+  async function walk(directory, relative = '') {
+    for (const entry of await readdir(directory, { withFileTypes:true })) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue;
+      const file = relative ? `${relative}/${entry.name}` : entry.name;
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) { await walk(absolute, file); continue; }
+      if (!entry.isFile() || (!entry.name.endsWith('.txt') && !entry.name.endsWith('.user.js'))) continue;
+      if (parseMetadata(await readFile(absolute, 'utf8'))) found.push(file);
+    }
+  }
+  await walk(ROOT);
+  return found.sort();
 }
 
 export function parseMetadata(source) {

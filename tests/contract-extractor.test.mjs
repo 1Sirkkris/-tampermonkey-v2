@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractContractCategories, readScript } from '../tools/userscript-contracts.mjs';
+import {
+  CURRENT_SCRIPTS,
+  DIAGNOSTIC_SCRIPTS,
+  discoverUserscriptFiles,
+  extractContractCategories,
+  readScript
+} from '../tools/userscript-contracts.mjs';
 
 test('contract extractor covers every protected category', () => {
   const source = `// ==UserScript==
@@ -33,6 +39,10 @@ function once() {}
   assert.deepEqual(contract.payloadShapes, ['nested,quantity,sourceId']);
   assert.deepEqual(contract.functions, { once:1 });
   assert.deepEqual(contract.listeners, { 'document:keydown':1 });
+});
+
+test('every metadata-bearing userscript is explicitly classified', async () => {
+  assert.deepEqual(await discoverUserscriptFiles(), [...CURRENT_SCRIPTS, ...DIAGNOSTIC_SCRIPTS].sort());
 });
 
 test('new duplicate functions and listeners change extracted inventory', () => {
