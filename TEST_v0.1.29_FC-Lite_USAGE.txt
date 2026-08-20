@@ -49,6 +49,7 @@
   let systemInventoryRows = [];
 
   const scanAliases = new Map();
+  const rescanTimers = new WeakMap();
 
   let root;
   let scanInput;
@@ -531,7 +532,11 @@
     row.classList.remove('rescan');
     void row.offsetWidth;
     row.classList.add('rescan');
-    setTimeout(() => row?.classList.remove('rescan'), 420);
+    clearTimeout(rescanTimers.get(row));
+    rescanTimers.set(row, setTimeout(() => {
+      row?.classList.remove('rescan');
+      rescanTimers.delete(row);
+    }, 420));
 
     const resultState = row.dataset.resultState || 'pending';
     if (resultState === 'found') {
