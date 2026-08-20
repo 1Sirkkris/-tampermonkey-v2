@@ -44,7 +44,6 @@
   };
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const norm = value => clean(value).toLowerCase();
-  const upper = value => clean(value).toUpperCase();
 
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
@@ -209,7 +208,7 @@
     const tableBody = body.tBodies[0] || body;
 
     for (const row of tableBody.rows) {
-      const cells = [...row.cells];
+      const cells = row.cells;
       for (const cell of cells) cell.classList?.remove('poch__unfilled', 'poch__cancelled', 'poch__dateold', 'poch__band');
 
       const dateCell = idxDate >= 0 ? cells[idxDate] : null;
@@ -265,7 +264,13 @@
       if (!label) continue;
       rows.set(norm(label), { row, labelCell, valueCell, label, ...cleanProductCell(valueCell) });
     }
-    const get = (...labels) => labels.map(label => rows.get(norm(label))).find(Boolean) || null;
+    const get = (...labels) => {
+      for (const label of labels) {
+        const entry = rows.get(norm(label));
+        if (entry) return entry;
+      }
+      return null;
+    };
     const asin = get('ASIN');
     const isbn = get('ISBN');
     const fnsku = get('FNSku', 'FNSKU');
@@ -921,9 +926,13 @@
     for (const record of records) {
       const target = record.target instanceof Element ? record.target : record.target?.parentElement;
       if (target?.closest?.('[data-fcr-tool-ui="1"]')) continue;
-      const changed = [...record.addedNodes, ...record.removedNodes];
-      if (!changed.length) return true;
-      if (changed.some(node => { const el = node instanceof Element ? node : node.parentElement; return !el?.closest?.('[data-fcr-tool-ui="1"]'); })) return true;
+      if (!record.addedNodes.length && !record.removedNodes.length) return true;
+      for (const nodes of [record.addedNodes, record.removedNodes]) {
+        for (const node of nodes) {
+          const element = node instanceof Element ? node : node.parentElement;
+          if (!element?.closest?.('[data-fcr-tool-ui="1"]')) return true;
+        }
+      }
     }
     return false;
   }
