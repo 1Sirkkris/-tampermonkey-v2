@@ -1,0 +1,30 @@
+{
+  "objectIds": [
+    {
+      "name": "quoted state object",
+      "html": "<script type=\"a-state\">{\"objectId\":\"OBJECT-SANITIZED-1\"}</script>",
+      "expected": "OBJECT-SANITIZED-1"
+    },
+    {
+      "name": "entity encoded state object",
+      "html": "<div data-state=\"{&quot;objectId&quot;:&quot;OBJECT-SANITIZED-2&quot;}\"></div>",
+      "expected": "OBJECT-SANITIZED-2"
+    },
+    {
+      "name": "instruction-prefixed uuid fallback",
+      "html": "<main>QT-00000000-0000-0000-0000-000000000000</main>",
+      "expected": "QT-00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "name": "missing object",
+      "html": "<main>No workflow object is present</main>",
+      "expected": null
+    }
+  ],
+  "knownStatuses": ["READY", "PROCESSING", "COMPLETE", "ERRORED"],
+  "quantityHtml": [
+    { "html": "<script>{\"quantity\":3}</script>", "expected": 3 },
+    { "html": "<div>Quantity: 12</div>", "expected": 12 },
+    { "html": "<div>Verify item</div>", "expected": null, "verify": true }
+  ]
+}

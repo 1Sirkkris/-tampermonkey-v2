@@ -1,0 +1,111 @@
+{
+  "resolveItem": [
+    {
+      "name": "invalid barcode",
+      "response": { "@type": "InvalidBarcodeResponse", "success": false },
+      "barcode": "ITEM-SANITIZED",
+      "expected": { "ok": false, "invalid": true, "type": "InvalidBarcodeResponse" }
+    },
+    {
+      "name": "item not in source",
+      "response": {
+        "@type": "ItemNotInContainerResponse",
+        "items": [{
+          "quantity": 0,
+          "consumer": null,
+          "disposition": "SELLABLE",
+          "referenceId": "REFERENCE-SANITIZED",
+          "scannableId": "SCANNABLE-SANITIZED",
+          "skuDetail": {
+            "asin": "ASIN-SANITIZED",
+            "fnSku": "FNSKU-SANITIZED",
+            "fcSku": "FCSKU-SANITIZED",
+            "datelotDetail": { "expirationPromptType": "NONE" }
+          }
+        }]
+      },
+      "barcode": "ITEM-SANITIZED",
+      "expectedFlags": { "ok": true, "notInSource": true, "type": "ItemNotInContainerResponse" }
+    },
+    {
+      "name": "normal item",
+      "response": {
+        "@type": "ScanItemResponse",
+        "items": [{
+          "quantity": 2,
+          "consumer": "CONSUMER-SANITIZED",
+          "disposition": "SELLABLE",
+          "referenceId": "REFERENCE-SANITIZED",
+          "scannableId": "SCANNABLE-SANITIZED",
+          "skuDetail": {
+            "asin": "ASIN-SANITIZED",
+            "fnSku": "FNSKU-SANITIZED",
+            "fcSku": "FCSKU-SANITIZED",
+            "datelotDetail": { "expirationPromptType": "DATE" },
+            "mlcDetail": { "mlcClass": "UNKNOWN", "mlcMissing": false }
+          }
+        }]
+      },
+      "barcode": "ITEM-SANITIZED",
+      "expectedFlags": { "ok": true, "notInSource": false, "type": "ScanItemResponse" }
+    }
+  ],
+  "moveResponses": [
+    {
+      "name": "success",
+      "response": { "@type": "MoveItemsResponse", "success": true },
+      "ok": true
+    },
+    {
+      "name": "damaged destination",
+      "response": {
+        "@type": "MoveItemsResponse",
+        "success": false,
+        "filterResult": {
+          "compatible": false,
+          "filterType": "DamagedItemsFilter",
+          "reason": { "@type": "DamagedItemsFilterResultReason", "containerDamaged": true }
+        }
+      },
+      "ok": false,
+      "reason": "DESTINATION DAMAGED",
+      "damaged": true
+    },
+    {
+      "name": "hazmat incompatibility",
+      "response": {
+        "@type": "MoveItemsResponse",
+        "success": false,
+        "filterResult": {
+          "compatible": false,
+          "reason": { "@type": "RAFilterResultReason", "type": "HAZMAT" }
+        }
+      },
+      "ok": false,
+      "reason": "HAZMAT",
+      "damaged": false
+    },
+    {
+      "name": "problem list",
+      "response": {
+        "@type": "MoveItemsResponse",
+        "success": false,
+        "problems": [{ "description": "Sanitized known problem" }]
+      },
+      "ok": false,
+      "reason": "Sanitized known problem",
+      "damaged": false
+    },
+    {
+      "name": "predicant nested flag",
+      "response": {
+        "@type": "MoveItemsResponse",
+        "success": true,
+        "workflow": { "predicantRequired": true }
+      },
+      "ok": false,
+      "predicant": true,
+      "damaged": false
+    }
+  ]
+}

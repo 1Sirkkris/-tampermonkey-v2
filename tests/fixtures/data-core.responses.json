@@ -1,0 +1,29 @@
+{
+  "products": [
+    {
+      "name": "boolean text and suspicious equal dimensions",
+      "input": {
+        "asin": " ASIN-SANITIZED ",
+        "fnsku": " FNSKU-SANITIZED ",
+        "sortableText": "YES",
+        "dimensions": "10.00 x 10.00 x 3.00",
+        "weight": " 2 kg "
+      },
+      "expected": { "sortable": true, "sortableText": "true", "suspicious": true }
+    },
+    {
+      "name": "unknown sortable and normal dimensions",
+      "input": {
+        "isbn": "ISBN-SANITIZED",
+        "sortableText": "UNKNOWN",
+        "dimensions": "12.3 x 8.4 x 5.7"
+      },
+      "expected": { "sortable": null, "sortableText": "unknown", "suspicious": false }
+    },
+    {
+      "name": "explicit false",
+      "input": { "primary": "PRIMARY-SANITIZED", "sortable": false },
+      "expected": { "sortable": false, "sortableText": "false", "suspicious": false }
+    }
+  ]
+}

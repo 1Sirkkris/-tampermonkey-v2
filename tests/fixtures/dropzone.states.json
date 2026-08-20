@@ -1,0 +1,11 @@
+{
+  "containerInputs": [
+    { "input": "tsXABC123", "expected": "tsXABC123" },
+    { "input": " csXDEF456 ", "expected": "csXDEF456" },
+    { "input": "dz-P-Hazmat-P2", "expected": "" },
+    { "input": "", "expected": "" }
+  ],
+  "knownItemStates": ["queued", "active", "done", "attention"],
+  "fatalStatuses": [0, 401, 403, 429, 500, 503],
+  "nonFatalStatuses": [400, 404, 409, 422]
+}

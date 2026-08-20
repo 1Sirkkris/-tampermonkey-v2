@@ -1,0 +1,13 @@
+{
+  "hierarchyHtml": [
+    { "floorCell": "2, sanitized detail", "expected": { "num": "2", "label": "P2", "cls": "p2", "floorNum": 2 } },
+    { "floorCell": "3, sanitized detail", "expected": { "num": "3", "label": "P3", "cls": "p3", "floorNum": 3 } },
+    { "floorCell": "Floor 4", "expected": { "num": "4", "label": "P4", "cls": "p4", "floorNum": 4 } },
+    { "floorCell": "Unknown", "expected": { "num": "", "label": "P-", "cls": "px", "floorNum": 99 } }
+  ],
+  "quantities": [
+    { "input": "1,234 units", "expected": 1234 },
+    { "input": "-2", "expected": -2 },
+    { "input": "none", "expected": 0 }
+  ]
+}
