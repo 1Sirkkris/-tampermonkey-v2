@@ -1,0 +1,36 @@
+name: Offline static validation
+
+on:
+  push:
+    branches:
+      - master
+      - offline-cleanup-pass-1
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-static-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Userscript contracts and fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check syntax and protected contracts
+        run: npm run validate
+
+      - name: Replay sanitized response fixtures
+        run: node --test tests/fixtures-replay.test.mjs
