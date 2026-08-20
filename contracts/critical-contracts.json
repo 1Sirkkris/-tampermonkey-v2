@@ -118,6 +118,20 @@
         "__BWU2_TRACE__",
         "setInterval(autoDumpTick, 15000);"
       ]
+    },
+    "Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js": {
+      "anchors": [
+        "if (window.__bwu2UnifiedEvidence_v020) return;",
+        "const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;",
+        "const IDENTIFIER_KEY = /asin|barcode|code|container|customer|destination|fcsku|fnsku|(?:^|_)id(?:$|_)|item|lpn|object|pod|scannable|sku|source/i;",
+        "headers:'only response content-type captured'",
+        "window.__bwu2LiveEvidence = Object.freeze({"
+      ],
+      "forbidden": [
+        "getAllResponseHeaders(",
+        "document.cookie",
+        "request.headers"
+      ]
     }
   },
   "sharedInterfaces": [

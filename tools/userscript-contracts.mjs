@@ -97,7 +97,7 @@ function payloadKeys(source) {
     }
     if (end < 0) continue;
     const body = source.slice(start + 1, end);
-    const keys = collect(body, /(?:^|[,{]\s*)(?:\.\.\.)?(['"]?)([A-Za-z_$][\w$-]*)\1\s*:/gm, 2);
+    const keys = collect(body, /(?:^|[,{])\s*(?:\.\.\.)?(['"]?)([A-Za-z_$][\w$-]*)\1\s*:/gm, 2);
     if (keys.length) shapes.push(keys);
   }
   return uniqueSorted(shapes.map(keys => keys.join(',')));

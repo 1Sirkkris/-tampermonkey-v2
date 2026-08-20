@@ -27,7 +27,7 @@
   const FLUSH_MS = 300;
   const MUTATION_REPORT_MS = 5000;
   const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;
-  const IDENTIFIER_KEY = /(?:^|_)(?:asin|barcode|code|container|customer|destination|fcsku|fnsku|id|item|lpn|object|pod|scannable|sku|source)(?:$|_)/i;
+  const IDENTIFIER_KEY = /asin|barcode|code|container|customer|destination|fcsku|fnsku|(?:^|_)id(?:$|_)|item|lpn|object|pod|scannable|sku|source/i;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
   const INTERESTING_PATH = /(?:\/api\/|\/action|\/status|\/end|container-hierarchy|edititems|fcskuflip|moveitems|move-container)/i;
 
