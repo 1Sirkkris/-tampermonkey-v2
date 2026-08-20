@@ -38,6 +38,11 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+  function setTextIfChanged(el, value) {
+    const text = String(value);
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   function makeAbortError(message='Run cancelled') {
     const error = new Error(message);
     error.name = 'AbortError';
@@ -631,12 +636,16 @@
 
   function applyPanels() {
     for (const b of dockButtons) b.classList.toggle('sh-on', feature[b.dataset.key]);
-    for (const [key,p] of Object.entries(panels)) p.style.display = feature[key] ? 'block' : 'none';
+    for (const [key,p] of Object.entries(panels)) {
+      const display = feature[key] ? 'block' : 'none';
+      if (p.style.display !== display) p.style.display = display;
+    }
     let bottom = 58;
     for (const key of ['live','lazy','scrub','queue']) {
       const p = panels[key];
       if (!p || !feature[key]) continue;
-      p.style.bottom = `${bottom}px`;
+      const position = `${bottom}px`;
+      if (p.style.bottom !== position) p.style.bottom = position;
       bottom += Math.max(80, p.offsetHeight) + 10;
     }
     renderScrub();
@@ -671,7 +680,7 @@
   }
 
   function renderScrub() {
-    scrubStatus.textContent = feature.scrub ? 'ACTIVE — Change container → Yes' : 'OFF';
+    setTextIfChanged(scrubStatus, feature.scrub ? 'ACTIVE — Change container → Yes' : 'OFF');
     let w = $('#sh-scrub-warning');
     if (feature.scrub && !w) {
       w = document.createElement('div');
@@ -721,8 +730,8 @@
 
   function renderQueue(note='') {
     const cur = q.list[q.index] || '—';
-    qStatus.textContent = `${q.running ? (q.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'} | ${Math.min(q.index,q.list.length)}/${q.list.length} | Current: ${cur}${note ? ' | '+note : ''}`;
-    qError.textContent = q.failed.length ? `Errors: ${q.failed.join(', ')}` : '';
+    setTextIfChanged(qStatus, `${q.running ? (q.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'} | ${Math.min(q.index,q.list.length)}/${q.list.length} | Current: ${cur}${note ? ' | '+note : ''}`);
+    setTextIfChanged(qError, q.failed.length ? `Errors: ${q.failed.join(', ')}` : '');
   }
 
   async function queuePump() {
@@ -1341,10 +1350,10 @@
       ? itemQty(live.current)
       : 0;
 
-    liveMoved.textContent = live.moved;
-    liveQueued.textContent = queuedUnits + currentUnits;
-    liveExpiry.textContent = expiryUnits;
-    liveSkipped.textContent = live.skipped;
+    setTextIfChanged(liveMoved, live.moved);
+    setTextIfChanged(liveQueued, queuedUnits + currentUnits);
+    setTextIfChanged(liveExpiry, expiryUnits);
+    setTextIfChanged(liveSkipped, live.skipped);
 
     const precheckedQueuedUnits = live.queue.reduce(
       (sum, item) => sum + (item.preflightStatus ? itemQty(item) : 0),
@@ -1388,8 +1397,8 @@
     const issueAheadSuffix = issueAheadUnits
       ? ` | ⚠ ISSUE AHEAD ${issueAheadUnits}`
       : '';
-    liveStatus.textContent = `${state}${live.note ? ` | ${live.note}` : ''}${precheckSuffix}${expirySuffix}${issueAheadSuffix}`;
-    liveError.textContent = live.error || '';
+    setTextIfChanged(liveStatus, `${state}${live.note ? ` | ${live.note}` : ''}${precheckSuffix}${expirySuffix}${issueAheadSuffix}`);
+    setTextIfChanged(liveError, live.error || '');
 
     const hardIssueHtml = liveIssueHtml();
     const issueHtml = hardIssueHtml || livePreflightIssueHtml(preflightIssues);
@@ -1398,22 +1407,23 @@
         liveIssue.dataset.html = issueHtml;
         liveIssue.innerHTML = issueHtml;
       }
-      liveIssue.classList.add('show','sh-live-blocked');
     } else {
-      liveIssue.dataset.html = '';
-      liveIssue.innerHTML = '';
-      liveIssue.classList.remove('show','sh-live-blocked');
+      if (liveIssue.dataset.html !== '') liveIssue.dataset.html = '';
+      if (liveIssue.innerHTML) liveIssue.innerHTML = '';
     }
+    liveIssue.classList.toggle('show', !!issueHtml);
+    liveIssue.classList.toggle('sh-live-blocked', !!issueHtml);
 
     if (live.current) {
       const meta = liveItemMeta();
-      liveCurrent.style.display = 'block';
-      liveCurrent.innerHTML =
+      const html =
         `${esc(live.current.status || 'CURRENT')} &nbsp; | &nbsp; ${esc(meta.scan)} &nbsp; | &nbsp; QTY ${esc(String(live.current.qty || 1))}` +
         (meta.fnsku !== '—' ? ` &nbsp; | &nbsp; ${esc(meta.fnsku)}` : '');
+      if (liveCurrent.style.display !== 'block') liveCurrent.style.display = 'block';
+      if (liveCurrent.innerHTML !== html) liveCurrent.innerHTML = html;
     } else {
-      liveCurrent.style.display = 'none';
-      liveCurrent.innerHTML = '';
+      if (liveCurrent.style.display !== 'none') liveCurrent.style.display = 'none';
+      if (liveCurrent.innerHTML) liveCurrent.innerHTML = '';
     }
 
     const historyToken = `${live.history.length}:${live.history[0]?.id || ''}`;
@@ -2417,11 +2427,11 @@
     const remainingUnits = Math.max(0, total - movedUnits - failedUnits);
 
     const uniqueItems = lazy.items.length;
-    mTotal.textContent = total;
-    mUnique.textContent = uniqueItems;
-    mMoved.textContent = movedUnits;
-    mFailed.textContent = failedUnits;
-    mRemaining.textContent = remainingUnits;
+    setTextIfChanged(mTotal, total);
+    setTextIfChanged(mUnique, uniqueItems);
+    setTextIfChanged(mMoved, movedUnits);
+    setTextIfChanged(mFailed, failedUnits);
+    setTextIfChanged(mRemaining, remainingUnits);
 
     const compactInput = !!lazy.inputCollapsed;
     const autoCapture = !!(
@@ -2432,14 +2442,14 @@
       )
     );
 
-    lInputSummaryText.textContent = autoCapture
+    setTextIfChanged(lInputSummaryText, autoCapture
       ? `AUTO SCAN ON • ${uniqueItems} unique / ${total} units`
-      : `${uniqueItems} unique / ${total} units`;
+      : `${uniqueItems} unique / ${total} units`);
 
     lItems.classList.toggle('sh-lazy-collapsed', compactInput);
     lInputSummary.classList.toggle('show', compactInput);
     lInputSummary.classList.toggle('auto', autoCapture);
-    lInputToggle.textContent = compactInput ? 'Expand' : 'Collapse';
+    setTextIfChanged(lInputToggle, compactInput ? 'Expand' : 'Collapse');
 
     lErrorCountLine.classList.toggle('show', failedUnits > 0);
 
@@ -2453,30 +2463,28 @@
         lPredicantCard.dataset.html = predicantHtml;
         lPredicantCard.innerHTML = predicantHtml;
       }
-      lPredicantCard.classList.add('show');
-      lItems.classList.add('sh-predicant-scan');
     } else {
       if (lPredicantCard.dataset.html) {
         lPredicantCard.dataset.html = '';
         lPredicantCard.innerHTML = '';
       }
-      lPredicantCard.classList.remove('show');
-      lItems.classList.remove('sh-predicant-scan');
     }
+    lPredicantCard.classList.toggle('show', lazy.predicant);
+    lItems.classList.toggle('sh-predicant-scan', lazy.predicant);
 
-    if (failedItems.length && lazy.running) {
+    const showFailures = !!(failedItems.length && lazy.running);
+    if (showFailures) {
       const preview = failedItems.slice(0, 2).map(it => it.code).join(', ');
       const extra = failedItems.length > 2 ? ` +${failedItems.length - 2} more` : '';
-      lFailurePill.textContent = `Failures: ${failedUnits} — ${preview}${extra} [click to copy]`;
-      lFailurePill.classList.add('show');
+      setTextIfChanged(lFailurePill, `Failures: ${failedUnits} — ${preview}${extra} [click to copy]`);
     } else {
-      lFailurePill.textContent = '';
-      lFailurePill.classList.remove('show');
+      setTextIfChanged(lFailurePill, '');
     }
+    lFailurePill.classList.toggle('show', showFailures);
 
     const mode = lazy.predicant ? 'PREDICANT' : lazy.running ? (lazy.paused ? 'PAUSED' : 'RUNNING') : 'IDLE';
-    lStatus.textContent = `${mode}${lazy.note ? ` | ${lazy.note}` : ''}${note ? ' | '+note : ''}`;
-    lError.textContent = lazy.error;
+    setTextIfChanged(lStatus, `${mode}${lazy.note ? ` | ${lazy.note}` : ''}${note ? ' | '+note : ''}`);
+    setTextIfChanged(lError, lazy.error);
 
     let summaryHtml = '';
     if (!lazy.running && (movedItems.length || failedItems.length)) {
