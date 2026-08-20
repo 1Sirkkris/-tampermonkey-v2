@@ -144,11 +144,12 @@
       const raw = sessionStorage.getItem(storageKey);
       if (!raw) return null;
       const pack = JSON.parse(raw);
-      if (!pack?.ts || Date.now() - Number(pack.ts) > ttl) {
+      const ts = Number(pack?.ts);
+      if (!Number.isFinite(ts) || ts <= 0 || Date.now() - ts > ttl) {
         sessionStorage.removeItem(storageKey);
         return null;
       }
-      return pack.value ?? null;
+      return { ts, value: pack.value ?? null };
     } catch {
       return null;
     }
@@ -227,8 +228,8 @@
       productMemory.delete(key);
     }
     const stored = readStored('product', key, PRODUCT_TTL);
-    if (stored) productMemory.set(key, { ts: Date.now(), value: stored });
-    return stored;
+    if (stored?.value) productMemory.set(key, stored);
+    return stored?.value ?? null;
   }
 
   // Exact query only
@@ -433,9 +434,9 @@
     }
 
     const stored = readStored('history', key, HISTORY_TTL);
-    if (stored) {
-      historyMemory.set(key, { ts: Date.now(), value: stored });
-      return stored;
+    if (stored?.value) {
+      historyMemory.set(key, stored);
+      return stored.value;
     }
     return null;
   }
@@ -626,9 +627,10 @@
       if (Date.now() - memory.ts < BIN_TTL) return memory.value;
       binMemory.delete(key);
     }
-    const stored = clean(readStored('bin', key, BIN_TTL) || '');
-    if (stored) binMemory.set(key, { ts: Date.now(), value: stored });
-    return stored;
+    const stored = readStored('bin', key, BIN_TTL);
+    const value = clean(stored?.value || '');
+    if (value) binMemory.set(key, { ts: stored.ts, value });
+    return value;
   }
 
   function saveBin(container, item, size, aliases = []) {
