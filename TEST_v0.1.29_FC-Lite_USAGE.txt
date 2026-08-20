@@ -1591,17 +1591,26 @@
     root.querySelector('.reset').addEventListener('click', () => clearSession());
     root.querySelector('.fcratc-lite-brand').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
-    root.querySelector('.fcratc-copy-stats').addEventListener('click', async event => {
+    const copyStatsButton = root.querySelector('.fcratc-copy-stats');
+    const copyStatsLabel = copyStatsButton.textContent;
+    let copyStatsRun = 0;
+    let copyStatsRestoreTimer = 0;
+    copyStatsButton.addEventListener('click', async event => {
       const button = event.currentTarget;
-      const old = button.textContent;
+      const run = ++copyStatsRun;
+      clearTimeout(copyStatsRestoreTimer);
       try {
         const result = await coreRequest('usageStats', {});
         await navigator.clipboard.writeText(result?.text || 'No usage stats');
+        if (run !== copyStatsRun) return;
         button.textContent = 'COPIED ✓';
       } catch {
+        if (run !== copyStatsRun) return;
         button.textContent = 'COPY FAILED';
       }
-      setTimeout(() => { if (button.isConnected) button.textContent = old; }, 1200);
+      copyStatsRestoreTimer = setTimeout(() => {
+        if (button.isConnected && run === copyStatsRun) button.textContent = copyStatsLabel;
+      }, 1200);
     });
     stateBadge.addEventListener('click', focusScanner);
     updateCoreStatus();
