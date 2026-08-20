@@ -1,0 +1,16 @@
+WORK LAPTOP PACK
+
+Install these 9 scripts in Tampermonkey and enable all 9.
+Disable older copies first.
+
+01 Sideline
+02 AFT Edit-SKU-Move
+03 FCR Data Core
+04 FCResearch Master
+05 FC-Lite
+06 Stow Andons
+07 Bin Check Overlay
+08 Dropzone Queue
+09 LIVE EVIDENCE CAPTURE
+
+09 is always-on passive capture. Mark can be used BEFORE or AFTER an interesting event. On FCResearch, INV Probe is available for targeted /results/inventory testing.
