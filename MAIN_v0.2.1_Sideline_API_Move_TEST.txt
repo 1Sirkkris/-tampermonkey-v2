@@ -1169,7 +1169,9 @@
             ? { kind:'aborted' }
             : { kind:'error', error };
         } finally {
-          live.lookupActive = Math.max(0, live.lookupActive - 1);
+          if (currentLiveRun(run)) {
+            live.lookupActive = Math.max(0, live.lookupActive - 1);
+          }
 
           const settle = item.resolveSettle;
           item.resolveSettle = null;
