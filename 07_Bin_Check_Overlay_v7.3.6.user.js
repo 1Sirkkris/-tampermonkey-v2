@@ -46,8 +46,10 @@
     refreshTimer: null,
     runId: 0,
     controllers: new Set(),
-    retryTimers: new Set()
+    retryTimers: new Set(),
+    loadRunId: 0
   };
+  const buttonFlashes = new WeakMap();
 
   function installStartButton() {
     const table = document.getElementById('table-inventory');
@@ -69,7 +71,7 @@
       usage('open');
       button.hidden = true;
       buildOverlay();
-      loadAllRows(table);
+      loadAllRows(table, ++state.loadRunId);
     });
     nav.appendChild(button);
     return true;
@@ -99,10 +101,11 @@
     return replacement;
   }
 
-  function loadAllRows(table) {
+  function loadAllRows(table, loadRunId) {
+    if (loadRunId !== state.loadRunId) return;
     if (state.paused) {
       updateStatus();
-      setTimeout(() => loadAllRows(table), 300);
+      setTimeout(() => loadAllRows(table, loadRunId), 300);
       return;
     }
 
@@ -116,7 +119,7 @@
 
     if (shown < total && shown < 1000) {
       scroller.scrollTop = scroller.scrollHeight;
-      setTimeout(() => loadAllRows(table), 10);
+      setTimeout(() => loadAllRows(table, loadRunId), 10);
       return;
     }
 
@@ -184,19 +187,20 @@
     const header = table.tHead?.rows?.[0] || table.rows?.[0];
     if (!header) return indexes;
 
-    Array.from(header.cells).forEach((cell, index) => {
+    for (let index = 0; index < header.cells.length; index++) {
+      const cell = header.cells[index];
       const name = cleanText(cell).toLowerCase();
       if (name === "container") indexes.container = index;
       if (name === "fnsku") indexes.fnsku = index;
       if (name === "fcsku") indexes.fcsku = index;
       if (name.startsWith("quantity")) indexes.quantity = index;
-    });
+    }
 
     return indexes;
   }
 
   function makeRowRecord(row, indexes) {
-    const cells = Array.from(row.cells || []);
+    const cells = row.cells || [];
     const containerCell = cells[indexes.container];
     if (!containerCell) return null;
 
@@ -508,7 +512,8 @@
     const loaded = state.processedPods;
     const total = state.totalPods;
     const remaining = Math.max(total - loaded, 0);
-    status.textContent = `- Loaded ${loaded} - Remaining ${remaining} - Total ${total}`;
+    const text = `- Loaded ${loaded} - Remaining ${remaining} - Total ${total}`;
+    if (status.textContent !== text) status.textContent = text;
   }
 
   function copyLazyBinCheck() {
@@ -538,10 +543,16 @@
   }
 
   function highestQuantityBin(rows, floor) {
-    return rows
-      .filter(row => row.floorLabel === floor && row.containerText)
-      .sort((a, b) => (b.quantityValue - a.quantityValue) || a.containerText.localeCompare(b.containerText))[0]
-      ?.containerText || "";
+    let best = null;
+    for (const row of rows) {
+      if (row.floorLabel !== floor || !row.containerText) continue;
+      if (
+        !best ||
+        row.quantityValue > best.quantityValue ||
+        (row.quantityValue === best.quantityValue && row.containerText.localeCompare(best.containerText) < 0)
+      ) best = row;
+    }
+    return best?.containerText || "";
   }
 
   function copyText(text, buttonId) {
@@ -577,9 +588,15 @@
   function flashButton(id, message) {
     const button = document.getElementById(id);
     if (!button) return;
-    const original = button.textContent;
+    const current = buttonFlashes.get(button);
+    const original = current?.original ?? button.textContent;
+    clearTimeout(current?.timer);
     button.textContent = message;
-    setTimeout(() => { button.textContent = original; }, 1000);
+    const timer = setTimeout(() => {
+      button.textContent = original;
+      buttonFlashes.delete(button);
+    }, 1000);
+    buttonFlashes.set(button, { original, timer });
   }
 
   function numericQuantity(value) {

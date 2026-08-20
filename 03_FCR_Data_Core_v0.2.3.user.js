@@ -253,12 +253,20 @@
 
   function parseProductHtml(html) {
     const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-    const table = doc.querySelector('.a-box-group .a-keyvalue')
-      || [...doc.querySelectorAll('table')].find(t => {
-        const labels = [...t.querySelectorAll('th')].map(th => clean(th.textContent).toLowerCase());
-        return labels.includes('asin') || labels.includes('isbn') || labels.includes('fnsku');
-      })
-      || doc.querySelector('.a-keyvalue');
+    let table = doc.querySelector('.a-box-group .a-keyvalue');
+    if (!table) {
+      for (const candidate of doc.querySelectorAll('table')) {
+        for (const th of candidate.querySelectorAll('th')) {
+          const label = clean(th.textContent).toLowerCase();
+          if (label === 'asin' || label === 'isbn' || label === 'fnsku') {
+            table = candidate;
+            break;
+          }
+        }
+        if (table) break;
+      }
+    }
+    if (!table) table = doc.querySelector('.a-keyvalue');
 
     if (!table) return null;
     const data = {};
@@ -419,7 +427,10 @@
     const key = upper(code);
     if (!key) return null;
     const memory = historyMemory.get(key);
-    if (memory && Date.now() - memory.ts < HISTORY_TTL) return memory.value;
+    if (memory) {
+      if (Date.now() - memory.ts < HISTORY_TTL) return memory.value;
+      historyMemory.delete(key);
+    }
 
     const stored = readStored('history', key, HISTORY_TTL);
     if (stored) {
@@ -623,7 +634,14 @@
   function saveBin(container, item, size, aliases = []) {
     const value = clean(size);
     if (!value) return '';
-    for (const alias of [...new Set([item, ...aliases].map(upper).filter(Boolean))]) {
+    const normalizedAliases = new Set();
+    const itemCode = upper(item);
+    if (itemCode) normalizedAliases.add(itemCode);
+    for (const alias of aliases) {
+      const code = upper(alias);
+      if (code) normalizedAliases.add(code);
+    }
+    for (const alias of normalizedAliases) {
       const key = binKey(container, alias);
       binMemory.set(key, { ts: Date.now(), value });
       writeStored('bin', key, value);
@@ -687,14 +705,14 @@
       const payload = JSON.parse(response.responseText || '{}');
       const items = Array.isArray(payload.items) ? payload.items : [];
       const wanted = upper(code);
-      const exact = items.find(entry => [
-        entry?.scannableId,
-        entry?.value,
-        entry?.scannedBarcode,
-        entry?.skuDetail?.fnSku,
-        entry?.skuDetail?.asin,
-        entry?.skuDetail?.fcSku
-      ].map(upper).includes(wanted));
+      const exact = items.find(entry =>
+        upper(entry?.scannableId) === wanted
+        || upper(entry?.value) === wanted
+        || upper(entry?.scannedBarcode) === wanted
+        || upper(entry?.skuDetail?.fnSku) === wanted
+        || upper(entry?.skuDetail?.asin) === wanted
+        || upper(entry?.skuDetail?.fcSku) === wanted
+      );
       const result = exact || items.find(entry => entry?.binDescription) || items[0];
       const size = clean(result?.binDescription || '');
       if (size) {

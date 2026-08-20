@@ -53,7 +53,6 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-  const upper = value => clean(value).toUpperCase();
 
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
@@ -101,6 +100,7 @@
   let sussyRun = 0;
   let lastSussySignature = '';
   let lastUrl = location.href;
+  const moveButtonFeedback = new WeakMap();
 
   function setCookie(name, value) {
     document.cookie = `${name}=${encodeURIComponent(value)}; expires=${new Date(Date.now() + 31536000000).toUTCString()}; path=/`;
@@ -335,13 +335,22 @@
     if (!container) return toast('No container in URL', true);
     if (!dest) return toast(`Bad destination for ${key}`, true);
 
-    const original = button?.textContent || '';
-    if (button) { button.disabled = true; button.textContent = 'Moving…'; }
+    const feedback = button ? moveButtonFeedback.get(button) : null;
+    const original = feedback?.original ?? button?.textContent ?? '';
+    if (button) {
+      clearTimeout(feedback?.timer);
+      button.disabled = true;
+      button.textContent = 'Moving…';
+    }
     const finish = (text, failed = false) => {
       if (button) {
         button.disabled = false;
         button.textContent = text;
-        setTimeout(() => { if (button.isConnected) button.textContent = original; }, 1200);
+        const timer = setTimeout(() => {
+          if (button.isConnected) button.textContent = original;
+          moveButtonFeedback.delete(button);
+        }, 1200);
+        moveButtonFeedback.set(button, { original, timer });
       }
       if (failed) toast(text, true);
       refocusSearch(80);
@@ -403,8 +412,8 @@
     return null;
   }
 
-  function injectInlineControls() {
-    if (!isContainerPage() || document.querySelector('.vm-drop-inline')) return;
+  function injectInlineControls(containerPage) {
+    if (!containerPage || document.querySelector('.vm-drop-inline')) return;
     const found = findInventoryHeading();
     if (!found) return;
     let floor = getCookie(COOKIE.floor);
@@ -513,8 +522,8 @@
     if (hover) hover.style.display = 'none';
   }
 
-  function attachHovers() {
-    if (!isContainerPage()) return;
+  function attachHovers(containerPage) {
+    if (!containerPage) return;
     const table = inventoryTable();
     if (!table || table === hoverTable) return;
     hoverTable = table;
@@ -572,8 +581,8 @@
     return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
-  async function scanSussy() {
-    if (!isContainerPage()) { lastSussySignature = ''; return; }
+  async function scanSussy(containerPage) {
+    if (!containerPage) { lastSussySignature = ''; return; }
     const table = inventoryTable();
     if (!table) return;
     const { fnsku, qty } = inventoryColumns(table);
@@ -582,8 +591,10 @@
     const signatureParts = [];
     for (const row of $$('tbody tr', table)) {
       if (row.cells?.length <= fnsku) continue;
-      rows.push(row);
-      signatureParts.push(`${clean(row.cells?.[fnsku]?.textContent)}:${qty >= 0 ? quantity(row.cells?.[qty]) : 1}`);
+      const fnskuCell = row.cells[fnsku];
+      const quantityValue = qty >= 0 ? quantity(row.cells?.[qty]) : 1;
+      rows.push({ row, fnskuCell, units: quantityValue || 1 });
+      signatureParts.push(`${clean(fnskuCell.textContent)}:${quantityValue}`);
     }
     if (!rows.length) return;
 
@@ -599,12 +610,11 @@
     let totalUnits = 0;
     const groups = new Map();
 
-    rows.forEach(row => {
+    rows.forEach(({ row, fnskuCell, units }) => {
       row.classList.remove('vm-suspicious-dims-row');
-      row.cells?.[fnsku]?.classList.remove('vm-suspicious-dims-cell');
-      const units = qty >= 0 ? (quantity(row.cells?.[qty]) || 1) : 1;
+      fnskuCell.classList.remove('vm-suspicious-dims-cell');
       totalUnits += units;
-      const code = clean(row.cells?.[fnsku]?.querySelector('a')?.textContent || row.cells?.[fnsku]?.textContent);
+      const code = clean(fnskuCell.querySelector('a')?.textContent || fnskuCell.textContent);
       if (!code) return;
       if (!groups.has(code)) groups.set(code, []);
       groups.get(code).push({ row, units });
@@ -634,9 +644,10 @@
 
   function refresh() {
     ensureUi();
-    injectInlineControls();
-    attachHovers();
-    scanSussy();
+    const containerPage = isContainerPage();
+    injectInlineControls(containerPage);
+    attachHovers(containerPage);
+    scanSussy(containerPage);
   }
 
   function scheduleRefresh() {
@@ -645,12 +656,18 @@
   }
 
   function mutationNeedsRefresh(records) {
-    return records.some(record => {
+    for (const record of records) {
       const target = record.target instanceof Element ? record.target : record.target?.parentElement;
-      if (target?.closest?.('[data-fcr-tool-ui="1"]')) return false;
-      const changed = [...record.addedNodes, ...record.removedNodes];
-      return !changed.length || changed.some(node => { const el = node instanceof Element ? node : node.parentElement; return !el?.closest?.('[data-fcr-tool-ui="1"]'); });
-    });
+      if (target?.closest?.('[data-fcr-tool-ui="1"]')) continue;
+      if (!record.addedNodes.length && !record.removedNodes.length) return true;
+      for (const nodes of [record.addedNodes, record.removedNodes]) {
+        for (const node of nodes) {
+          const element = node instanceof Element ? node : node.parentElement;
+          if (!element?.closest?.('[data-fcr-tool-ui="1"]')) return true;
+        }
+      }
+    }
+    return false;
   }
 
   const start = () => {
@@ -660,6 +677,7 @@
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         lastSussySignature = '';
+        sussyRun++;
         scheduleRefresh();
         return;
       }

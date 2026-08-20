@@ -1722,10 +1722,11 @@
     updateModeNote() {
       if (!this.modeNoteEl) return;
       const mode = this.detectMode();
-      this.modeNoteEl.textContent =
+      const text =
         mode === 'multi' ? 'Multi • native QualityTools API' :
         mode === 'each' ? 'Each • native QualityTools API' :
         'Waiting for native Multi / Each mode…';
+      if (this.modeNoteEl.textContent !== text) this.modeNoteEl.textContent = text;
     },
 
     status(text) {
@@ -2512,22 +2513,22 @@
       route();
     },
 
-    currentLabel() {
-      if (Edit.match()) {
-        if (!this.enabled('edit')) return 'AFT • EDIT OFF';
+    currentLabel(editPage = Edit.match(), movePage = MoveItems.match(), editOn = this.enabled('edit'), moveOn = this.enabled('move')) {
+      if (editPage) {
+        if (!editOn) return 'AFT • EDIT OFF';
         const mode = Edit.mode ? Edit.mode.toUpperCase() : 'EDIT';
         return `AFT • ${mode}`;
       }
 
-      if (MoveItems.match()) {
-        return this.enabled('move') ? 'AFT • MOVE' : 'AFT • MOVE OFF';
+      if (movePage) {
+        return moveOn ? 'AFT • MOVE' : 'AFT • MOVE OFF';
       }
 
       return 'AFT';
     },
 
-    render() {
-      if (!document.body || this.panel?.isConnected || !this.relevantPage()) return;
+    render(relevant = this.relevantPage()) {
+      if (!document.body || this.panel?.isConnected || !relevant) return;
 
       const panel = document.createElement('section');
       panel.id = 'aftm-control';
@@ -2568,37 +2569,47 @@
 
     },
 
-    paint() {
+    paint(editPage = Edit.match(), movePage = MoveItems.match()) {
       const panel = this.panel;
       if (!panel?.isConnected) return;
 
       const editOn = this.enabled('edit');
       const moveOn = this.enabled('move');
-      const editActive = Edit.match() && editOn && Edit.active;
-      const moveActive = MoveItems.match() && moveOn && MoveItems.active;
-
-      this.titleEl.textContent = this.currentLabel();
-      this.editBtn.dataset.on = editOn ? '1' : '0';
-      this.moveBtn.dataset.on = moveOn ? '1' : '0';
-      this.editBtn.dataset.active = editActive ? '1' : '0';
-      this.moveBtn.dataset.active = moveActive ? '1' : '0';
-      this.editBtn.textContent = `EditItems  ${editOn ? 'ON' : 'OFF'}${editActive ? ' • ACTIVE' : ''}`;
-      this.moveBtn.textContent = `MoveItems  ${moveOn ? 'ON' : 'OFF'}${moveActive ? ' • ACTIVE' : ''}`;
-      this.noteEl.textContent = Edit.match()
+      const editActive = editPage && editOn && Edit.active;
+      const moveActive = movePage && moveOn && MoveItems.active;
+      const title = this.currentLabel(editPage, movePage, editOn, moveOn);
+      const editState = editOn ? '1' : '0';
+      const moveState = moveOn ? '1' : '0';
+      const editActiveState = editActive ? '1' : '0';
+      const moveActiveState = moveActive ? '1' : '0';
+      const editText = `EditItems  ${editOn ? 'ON' : 'OFF'}${editActive ? ' • ACTIVE' : ''}`;
+      const moveText = `MoveItems  ${moveOn ? 'ON' : 'OFF'}${moveActive ? ' • ACTIVE' : ''}`;
+      const note = editPage
         ? `Page: EditItems${Edit.mode ? ` / ${Edit.mode.toUpperCase()}` : ''}`
-        : MoveItems.match() ? 'Page: MoveItems / Native' : '';
+        : movePage ? 'Page: MoveItems / Native' : '';
+
+      if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
+      if (this.editBtn.dataset.on !== editState) this.editBtn.dataset.on = editState;
+      if (this.moveBtn.dataset.on !== moveState) this.moveBtn.dataset.on = moveState;
+      if (this.editBtn.dataset.active !== editActiveState) this.editBtn.dataset.active = editActiveState;
+      if (this.moveBtn.dataset.active !== moveActiveState) this.moveBtn.dataset.active = moveActiveState;
+      if (this.editBtn.textContent !== editText) this.editBtn.textContent = editText;
+      if (this.moveBtn.textContent !== moveText) this.moveBtn.textContent = moveText;
+      if (this.noteEl.textContent !== note) this.noteEl.textContent = note;
     },
 
     refresh() {
-      if (!this.relevantPage()) {
+      const editPage = Edit.match();
+      const movePage = MoveItems.match();
+      if (!editPage && !movePage) {
         this.panel?.remove();
         this.panel = null;
         this.editBtn = this.moveBtn = this.titleEl = this.noteEl = null;
         return;
       }
 
-      this.render();
-      this.paint();
+      this.render(true);
+      this.paint(editPage, movePage);
     }
   };
 

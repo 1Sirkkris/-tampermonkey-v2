@@ -44,10 +44,12 @@
   let containerLoading = false;
   let inventoryLoadSerial = 0;
   let sessionSerial = 0;
+  let systemAnnotationSerial = 0;
   const pendingScans = [];
   let systemInventoryRows = [];
 
   const scanAliases = new Map();
+  const rescanTimers = new WeakMap();
 
   let root;
   let scanInput;
@@ -62,6 +64,7 @@
   let systemRecheckButton;
   let hoverCard;
   let hoverSerial = 0;
+  let flashTimer = 0;
   let liteContainerText;
   let systemSussyBadge;
 
@@ -412,6 +415,7 @@
   function clearSession(keepStatus = false) {
     sessionSerial++;
     inventoryLoadSerial++;
+    systemAnnotationSerial++;
     containerLoading = false;
     container = '';
     containerRows = [];
@@ -438,6 +442,7 @@
     const wanted = clean(value);
     if (!wanted) return;
     const serial = ++inventoryLoadSerial;
+    const annotationSerial = ++systemAnnotationSerial;
     let loadedOk = false;
     containerLoading = true;
     container = wanted;
@@ -459,7 +464,7 @@
       renderSystemInventory(rows);
 
       annotateSystemHazmat(false).catch(() => {});
-      annotateSystemSussy().catch(() => {});
+      annotateSystemSussy(annotationSerial).catch(() => {});
 
       loadedOk = true;
       setStatus(`✓ ${wanted} ready — ${rows.length} row${rows.length === 1 ? '' : 's'} • keep scanning`, 'success');
@@ -527,7 +532,11 @@
     row.classList.remove('rescan');
     void row.offsetWidth;
     row.classList.add('rescan');
-    setTimeout(() => row?.classList.remove('rescan'), 420);
+    clearTimeout(rescanTimers.get(row));
+    rescanTimers.set(row, setTimeout(() => {
+      row?.classList.remove('rescan');
+      rescanTimers.delete(row);
+    }, 420));
 
     const resultState = row.dataset.resultState || 'pending';
     if (resultState === 'found') {
@@ -826,8 +835,8 @@
   }
 
 
-  async function annotateSystemSussy() {
-    if (!systemTbody || !systemInventoryRows.length) return;
+  async function annotateSystemSussy(serial) {
+    if (serial !== systemAnnotationSerial || !systemTbody || !systemInventoryRows.length) return;
     const domRows = [...systemTbody.querySelectorAll('tr[data-system-row]')];
     const groups = new Map();
     let total = 0;
@@ -851,6 +860,7 @@
     await runWithConcurrency([...groups.entries()], 6, async ([code, indexes]) => {
       try {
         const result = await coreRequest('product', { code, require: ['dimensions'] });
+        if (serial !== systemAnnotationSerial) return;
         const flagged = result?.product?.suspicious === true;
         for (const index of indexes) {
           const tr = domRows[index];
@@ -862,12 +872,13 @@
           checked++;
         }
       } catch {
+        if (serial !== systemAnnotationSerial) return;
         checked += indexes.length;
       }
-      if (systemSussyBadge) systemSussyBadge.textContent = `DIMS ${sussy}/${checked}`;
+      if (serial === systemAnnotationSerial && systemSussyBadge) systemSussyBadge.textContent = `DIMS ${sussy}/${checked}`;
     });
 
-    if (!systemSussyBadge) return;
+    if (serial !== systemAnnotationSerial || !systemSussyBadge) return;
     systemSussyBadge.classList.remove('loading');
     systemSussyBadge.classList.toggle('clear', sussy === 0);
     systemSussyBadge.textContent = sussy ? `SUSSY DIMS ${sussy}/${total}` : `DIMS CLEAR ${total}/${total}`;
@@ -891,10 +902,14 @@
   }
 
   function flash(kind) {
+    clearTimeout(flashTimer);
     root.classList.remove('flash-found', 'flash-missing', 'flash-error');
     void root.offsetWidth;
     root.classList.add(`flash-${kind}`);
-    setTimeout(() => root?.classList.remove(`flash-${kind}`), 650);
+    flashTimer = setTimeout(() => {
+      root?.classList.remove(`flash-${kind}`);
+      flashTimer = 0;
+    }, 650);
   }
 
   function injectStyles() {
@@ -1576,17 +1591,26 @@
     root.querySelector('.reset').addEventListener('click', () => clearSession());
     root.querySelector('.fcratc-lite-brand').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
-    root.querySelector('.fcratc-copy-stats').addEventListener('click', async event => {
+    const copyStatsButton = root.querySelector('.fcratc-copy-stats');
+    const copyStatsLabel = copyStatsButton.textContent;
+    let copyStatsRun = 0;
+    let copyStatsRestoreTimer = 0;
+    copyStatsButton.addEventListener('click', async event => {
       const button = event.currentTarget;
-      const old = button.textContent;
+      const run = ++copyStatsRun;
+      clearTimeout(copyStatsRestoreTimer);
       try {
         const result = await coreRequest('usageStats', {});
         await navigator.clipboard.writeText(result?.text || 'No usage stats');
+        if (run !== copyStatsRun) return;
         button.textContent = 'COPIED ✓';
       } catch {
+        if (run !== copyStatsRun) return;
         button.textContent = 'COPY FAILED';
       }
-      setTimeout(() => { if (button.isConnected) button.textContent = old; }, 1200);
+      copyStatsRestoreTimer = setTimeout(() => {
+        if (button.isConnected && run === copyStatsRun) button.textContent = copyStatsLabel;
+      }, 1200);
     });
     stateBadge.addEventListener('click', focusScanner);
     updateCoreStatus();
