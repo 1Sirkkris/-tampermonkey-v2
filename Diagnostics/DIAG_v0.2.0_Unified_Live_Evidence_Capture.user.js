@@ -24,6 +24,7 @@
   const MAX_EVENTS = 600;
   const MAX_DEPTH = 6;
   const MAX_BODY_CHARS = 12000;
+  const MAX_RESPONSE_READ_BYTES = 65536;
   const FLUSH_MS = 300;
   const MUTATION_REPORT_MS = 5000;
   const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;
@@ -160,12 +161,15 @@
     }
   }
 
+  function persistNow() {
+    clearTimeout(flushTimer);
+    flushTimer = 0;
+    try { sessionStorage.setItem(STORE_KEY, JSON.stringify(events)); } catch {}
+  }
+
   function schedulePersist() {
     clearTimeout(flushTimer);
-    flushTimer = setTimeout(() => {
-      flushTimer = 0;
-      try { sessionStorage.setItem(STORE_KEY, JSON.stringify(events)); } catch {}
-    }, FLUSH_MS);
+    flushTimer = setTimeout(persistNow, FLUSH_MS);
   }
 
   function add(type, data = {}) {
@@ -203,6 +207,16 @@
     return null;
   }
 
+  function responseBodySkip(contentType, length = 0) {
+    const bytes = Number(length || 0);
+    if (Number.isFinite(bytes) && bytes > MAX_RESPONSE_READ_BYTES) return `<response-body-skipped:${bytes}-bytes>`;
+    const type = String(contentType || '').split(';', 1)[0].trim().toLowerCase();
+    if (type && !/(?:json|javascript|xml|text|x-www-form-urlencoded)/i.test(type)) {
+      return `<response-body-skipped:${scrubText(type)}>`;
+    }
+    return '';
+  }
+
   function installFetchCapture() {
     const original = window.fetch;
     if (typeof original !== 'function') return;
@@ -219,9 +233,13 @@
           status:response.status, ok:response.ok, ms:Math.round(performance.now() - started),
           contentType:response.headers.get('content-type') || ''
         };
-        void response.clone().text()
-          .then(text => add('network', { ...base, responseBody:parseResponseText(text, base.contentType) }))
-          .catch(error => add('network', { ...base, responseReadError:scrubText(error?.message || error) }));
+        const skipped = responseBodySkip(base.contentType, response.headers.get('content-length'));
+        if (skipped) add('network', { ...base, responseBody:skipped });
+        else {
+          void response.clone().text()
+            .then(text => add('network', { ...base, responseBody:parseResponseText(text, base.contentType) }))
+            .catch(error => add('network', { ...base, responseReadError:scrubText(error?.message || error) }));
+        }
         return response;
       } catch (error) {
         add('network', {
@@ -250,9 +268,15 @@
       this.addEventListener('loadend', () => {
         let responseBody = null;
         try {
-          responseBody = this.responseType && this.responseType !== 'text'
-            ? sanitize(this.response)
-            : parseResponseText(this.responseText, this.getResponseHeader('content-type') || '');
+          const contentType = this.getResponseHeader('content-type') || '';
+          const responseLength = this.responseType && this.responseType !== 'text'
+            ? Number(this.response?.size || this.response?.byteLength || 0)
+            : String(this.responseText || '').length;
+          responseBody = responseBodySkip(contentType, responseLength) || (
+            this.responseType && this.responseType !== 'text'
+              ? sanitize(this.response)
+              : parseResponseText(this.responseText, contentType)
+          );
         } catch (error) {
           responseBody = `<response-read-failed:${scrubText(error?.message || error)}>`;
         }
@@ -280,7 +304,10 @@
       });
     }, true);
     for (const name of ['hashchange','popstate','pageshow','pagehide']) {
-      window.addEventListener(name, () => add(`page.${name}`, { visibility:document.visibilityState }), true);
+      window.addEventListener(name, () => {
+        add(`page.${name}`, { visibility:document.visibilityState });
+        if (name === 'pagehide') persistNow();
+      }, true);
     }
     document.addEventListener('visibilitychange', () => add('page.visibility', { visibility:document.visibilityState }), true);
   }

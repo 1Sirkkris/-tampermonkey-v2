@@ -78,3 +78,31 @@ test('unified diagnostic text scrubber caps body size', async () => {
   assert.ok(output.length < 12100);
   assert.match(output, /<truncated:13000>/);
 });
+
+test('unified diagnostic avoids buffering oversized or binary responses', async () => {
+  const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  const responseBodySkip = compileFunction(source, 'responseBodySkip', {
+    MAX_RESPONSE_READ_BYTES:65536,
+    scrubText:value => String(value)
+  });
+  assert.equal(responseBodySkip('application/json', 1024), '');
+  assert.equal(responseBodySkip('text/html; charset=utf-8', 1024), '');
+  assert.equal(responseBodySkip('application/octet-stream', 1024), '<response-body-skipped:application/octet-stream>');
+  assert.equal(responseBodySkip('application/json', 65537), '<response-body-skipped:65537-bytes>');
+});
+
+test('unified diagnostic has a synchronous persistence path for page exit', async () => {
+  const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  let stored = null;
+  const events = [{ type:'page.pagehide' }];
+  const persistNow = compileFunction(source, 'persistNow', {
+    clearTimeout:() => {},
+    flushTimer:1,
+    sessionStorage:{ setItem:(key, value) => { stored = { key, value }; } },
+    STORE_KEY:'test-store',
+    JSON,
+    events
+  });
+  persistNow();
+  assert.deepEqual(stored, { key:'test-store', value:JSON.stringify(events) });
+});
