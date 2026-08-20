@@ -77,6 +77,7 @@
         "sourceScannableId: null, destinationScannableId: dest, containerScannableId: container, confirmed: 'true'",
         "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
         "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
+        "const SUSSY_MAX_PARALLEL = 6;",
         "client: 'stow'",
         "dataset.fcrToolUi = '1'",
         "[data-fcr-tool-ui=\"1\"]"

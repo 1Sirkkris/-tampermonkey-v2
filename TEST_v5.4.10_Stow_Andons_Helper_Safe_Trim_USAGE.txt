@@ -58,6 +58,7 @@
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
   const CORE_TIMEOUT_MS = 17000;
+  const SUSSY_MAX_PARALLEL = 6;
   const corePending = new Map();
 
   window.addEventListener(CORE_RESPONSE_EVENT, event => {
@@ -620,7 +621,8 @@
       groups.get(code).push({ row, units });
     });
 
-    await Promise.all([...groups.entries()].map(async ([code, entries]) => {
+    await runWithConcurrency([...groups.entries()], SUSSY_MAX_PARALLEL, async ([code, entries]) => {
+      if (run !== sussyRun) return;
       const info = await fetchProduct(code);
       if (run !== sussyRun || !info.suspicious) return;
       for (const { row, units } of entries) {
@@ -630,7 +632,7 @@
         row.classList.add('vm-suspicious-dims-row');
         row.cells?.[fnsku]?.classList.add('vm-suspicious-dims-cell');
       }
-    }));
+    });
 
     if (run !== sussyRun) return;
     const currentBadge = ensureSussyBadge();
@@ -640,6 +642,13 @@
     currentBadge.className = `vm-suspicious-dims-summary${suspiciousCount ? '' : ' vm-clear'}`;
     currentBadge.textContent = `Sussy: ${suspiciousCount}/${rows.length} (${pct}%)`;
     currentBadge.title = `${suspiciousUnits}/${totalUnits} units (${unitPct}%) from FNSKU-only checks`;
+  }
+
+  async function runWithConcurrency(items, limit, worker) {
+    let index = 0;
+    await Promise.all(Array.from({ length:Math.min(limit, items.length) }, async () => {
+      while (index < items.length) await worker(items[index++]);
+    }));
   }
 
   function refresh() {
