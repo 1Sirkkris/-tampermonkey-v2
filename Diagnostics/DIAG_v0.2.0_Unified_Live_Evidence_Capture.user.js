@@ -28,6 +28,8 @@
   const MUTATION_REPORT_MS = 5000;
   const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;
   const IDENTIFIER_KEY = /asin|barcode|code|container|customer|destination|fcsku|fnsku|(?:^|_)id(?:$|_)|item|lpn|object|pod|scannable|sku|source/i;
+  const CAMEL_IDENTIFIER_KEY = /(?:Id|ID)$/;
+  const FINGERPRINT_VALUE = /^<[^<>#]+#[a-z0-9]{7}:\d+>$/;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
   const INTERESTING_PATH = /(?:\/api\/|\/action|\/status|\/end|container-hierarchy|edititems|fcskuflip|moveitems|move-container)/i;
 
@@ -63,6 +65,8 @@
   function scrubText(value) {
     let text = String(value ?? '');
     text = text
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer <redacted>')
+      .replace(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '<jwt:redacted>')
       .replace(/(["']?(?:authorization|cookie|csrf|jwt|password|secret|session|signature|token)["']?\s*[:=]\s*)["']?[^,"'\s}]+/gi, '$1<redacted>')
       .replace(/\b(?:ts|cs)x[A-Za-z0-9_-]+\b/gi, match => fingerprint(match, 'container'))
       .replace(/\bP-\d-(?:[A-Z]\d{3}){2}\b/g, match => fingerprint(match, 'pod'))
@@ -75,12 +79,24 @@
       : text;
   }
 
+  function sanitizeRoutePart(value, kind) {
+    let decoded = String(value ?? '');
+    try { decoded = decodeURIComponent(decoded); } catch {}
+    if (!decoded) return '';
+    const scrubbed = scrubText(decoded);
+    if (scrubbed !== decoded) return scrubbed;
+    if (/^[a-z][a-z_-]{0,40}$/.test(decoded) || /^v\d{1,2}$/i.test(decoded)) return decoded;
+    return fingerprint(decoded, kind);
+  }
+
   function sanitizeUrl(value) {
     try {
       const url = new URL(String(value ?? ''), location.href);
+      url.pathname = url.pathname.split('/').map((part, index) => sanitizeRoutePart(part, `path:${index}`)).join('/');
       for (const [key, raw] of [...url.searchParams.entries()]) {
         url.searchParams.set(key, SAFE_QUERY_KEY.test(key) ? scrubText(raw) : fingerprint(raw, `query:${key}`));
       }
+      if (url.hash) url.hash = sanitizeRoutePart(url.hash.slice(1), 'fragment');
       url.username = '';
       url.password = '';
       return url.href;
@@ -94,7 +110,8 @@
     if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
     if (typeof value === 'bigint') return String(value);
     if (typeof value === 'string') {
-      if (IDENTIFIER_KEY.test(key)) return fingerprint(value, key || 'id');
+      if (FINGERPRINT_VALUE.test(value)) return value;
+      if (IDENTIFIER_KEY.test(key) || CAMEL_IDENTIFIER_KEY.test(key)) return fingerprint(value, key || 'id');
       if (/url|uri|href/i.test(key) || /^https?:\/\//i.test(value)) return sanitizeUrl(value);
       return scrubText(value);
     }
@@ -105,7 +122,7 @@
     if (Array.isArray(value)) return value.slice(0, 50).map(item => sanitize(item, key, depth + 1, seen));
     const output = {};
     for (const [childKey, childValue] of Object.entries(value).slice(0, 100)) {
-      output[childKey] = sanitize(childValue, childKey, depth + 1, seen);
+      output[scrubText(childKey)] = sanitize(childValue, childKey, depth + 1, seen);
     }
     return output;
   }
@@ -137,7 +154,7 @@
   function loadEvents() {
     try {
       const parsed = JSON.parse(sessionStorage.getItem(STORE_KEY) || '[]');
-      return Array.isArray(parsed) ? parsed.slice(-MAX_EVENTS) : [];
+      return Array.isArray(parsed) ? parsed.slice(-MAX_EVENTS).map(event => sanitize(event)) : [];
     } catch {
       return [];
     }
@@ -171,7 +188,7 @@
     const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.innerText || element.textContent || '';
     return {
       tag: element.tagName?.toLowerCase() || 'unknown',
-      id: element.id ? scrubText(element.id) : '',
+      id: element.id ? fingerprint(element.id, 'dom-id') : '',
       classes: [...element.classList].slice(0, 8).map(scrubText),
       role: element.getAttribute('role') || '',
       name: element.getAttribute('name') || '',
@@ -272,7 +289,7 @@
     const element = target?.nodeType === 1 ? target : target?.parentElement;
     if (!element) return 'unknown';
     if (host?.contains(element)) return 'diagnostic';
-    return `${element.tagName?.toLowerCase() || 'node'}${element.id ? `#${element.id}` : ''}`.slice(0, 100);
+    return `${element.tagName?.toLowerCase() || 'node'}${element.id ? `#${fingerprint(element.id, 'dom-id')}` : ''}`.slice(0, 100);
   }
 
   function installMutationCapture() {
@@ -351,7 +368,7 @@
     return {
       capture:{ name:'BWU2 Unified Live Evidence', version:VERSION, startedAt, exportedAt:new Date().toISOString() },
       privacy:{ headers:'only response content-type captured', cookies:'not captured', credentials:'not captured', identifiers:'fingerprinted' },
-      environment:{ host:location.host, path:location.pathname, userAgent:navigator.userAgent, viewport:`${innerWidth}x${innerHeight}` },
+      environment:{ host:location.host, path:new URL(sanitizeUrl(location.href)).pathname, userAgent:navigator.userAgent, viewport:`${innerWidth}x${innerHeight}` },
       summary:{ events:events.length, networks:events.filter(event => event.type === 'network').length, requests:networkSummary() },
       events
     };
@@ -449,5 +466,5 @@
   installMutationCapture();
   installPerformanceCapture();
   document.documentElement ? mount() : document.addEventListener('DOMContentLoaded', mount, { once:true });
-  add('capture.start', { version:VERSION, host:location.host, path:location.pathname });
+  add('capture.start', { version:VERSION, host:location.host, page:sanitizeUrl(location.href) });
 })();
