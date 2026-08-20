@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "scripts": {
+    "MAIN_v0.2.1_Sideline_API_Move_TEST.txt": {
+      "anchors": [
+        "if (window.__sidelineApiMoveTest_v0201) return;",
+        "const PANEL_STATE_KEY = 'sidelineClean.panelStates.v1';",
+        "const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';",
+        "const API_SCAN_SOURCE = '/api/scan-source-container';",
+        "const API_SCAN_ITEM = '/api/scanitem';",
+        "const API_MOVE_ITEMS = '/api/move-items';",
+        "return { containerScannableId:container, requestId:requestId(), tool:TOOL };",
+        "containerScannableId:source,",
+        "itemBarcode:barcode,",
+        "sourceContainerScannableId:source,",
+        "destinationContainerScannableId:destination,",
+        "foundProblems:[null,null,null],",
+        "scannedSourceContainerAsDestination:false,",
+        "itemMovedToISS:false,",
+        "processPath:sourceMeta?.processPath ?? 'UNDETERMINED'",
+        "const helperSelector = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast';",
+        "const START_TRIGGER = '123START';"
+      ],
+      "forbidden": [
+        "const API_CLOSE_CONTAINER",
+        "'/api/close-container'"
+      ]
+    },
+    "MAIN_v0.9.4_AFT_Edit-SKU-Move_master_PRODUCTION_CLEAN.txt": {
+      "anchors": [
+        "if (window.__AFT_MASTER_V094__) return;",
+        "const res = await post('/status', id(objectId), `${label} status`);",
+        "await post('/action', { ...id(objectId), action: actionName, input }, `${label} action`);",
+        "end: o => post('/end', { ...id(o), tool }, 'End')",
+        "const id = objectId => ({ id: { instructionId, objectId } });",
+        "sku: 'aftm_sku_entry'",
+        "source: 'aftm_move_source'",
+        "old: 'fcsku_direct_queue_old'",
+        "edit: 'aftm_toggle_edititems'",
+        "move: 'aftm_toggle_moveitems'",
+        "const MOVE_QTY_PATTERNS = ["
+      ]
+    },
+    "TEST_v0.2.16_Dropzone_Selector_Queue.txt": {
+      "anchors": [
+        "const STORAGE_DZ = 'moveapp_dz_selector_type_v021';",
+        "const STORAGE_FLOOR = 'moveapp_dz_selector_floor_v021';",
+        "const STORAGE_ENABLED = 'moveapp_dz_selector_enabled_v021';",
+        "const STORAGE_QUEUE = 'moveapp_dz_selector_queue_v2';",
+        "const STORAGE_QUEUE_DRAFT = 'moveapp_dz_selector_queue_draft_v1';",
+        "const STORAGE_QUEUE_INPUT_ENABLED = 'moveapp_dz_selector_queue_input_enabled_v1';",
+        "const MOVE_URL = 'https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container';",
+        "sourceScannableId: null,",
+        "destinationScannableId: destinationId,",
+        "containerScannableId: container,",
+        "confirmed: 'true'",
+        "if (e.altKey && (e.key === '=' || e.key === '+'))"
+      ]
+    },
+    "TEST_v7.3.6_Bin_check_Overlay_USAGE.txt": {
+      "anchors": [
+        "if (window.__binOverlay_v736test || location.hash.startsWith(\"#fcr-tote-checker\")) return;",
+        "const MAX_CONCURRENT_REQUESTS = 12;",
+        "return `${base}/container-hierarchy?s=${encodeURIComponent(pod)}`;",
+        "credentials: 'same-origin', cache: 'no-store', signal: controller.signal",
+        "div.a-span6:nth-child(1) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)",
+        "P-level overlay sorter",
+        "Lazy bin check"
+      ]
+    },
+    "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt": {
+      "anchors": [
+        "if (window.__stowAndonsCore548test || location.hash.startsWith('#fcr-tote-checker')) return;",
+        "const MOVE_URL = 'https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container';",
+        "sourceScannableId: null, destinationScannableId: dest, containerScannableId: container, confirmed: 'true'",
+        "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
+        "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';"
+      ]
+    },
+    "TEST_v0.1.29_FC-Lite_USAGE.txt": {
+      "anchors": [
+        "if (window.__fcrLite_v0129test) return;",
+        "const STANDALONE_HASH = '#fcr-tote-checker';",
+        "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
+        "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
+        "client: 'fclite'",
+        "COPY STATS",
+        "FULL FCRESEARCH ↗"
+      ]
+    },
+    "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt": {
+      "anchors": [
+        "if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;",
+        "const SIDELINE_CONTAINER_KEY = 'fcr_sideline_container';",
+        "const SIDELINE_CONTAINER_TIME_KEY = 'fcr_sideline_container_saved_at';",
+        "const CORE_REQUEST_EVENT = 'fcr-data-core:request';",
+        "const CORE_RESPONSE_EVENT = 'fcr-data-core:response';",
+        "client: 'master'",
+        "window.dispatchEvent(new CustomEvent('fcrm:size-resolved'"
+      ]
+    },
+    "TEST_v0.2.3_FCR_Data_Core_USAGE.txt": {
+      "anchors": [
+        "if (window.__fcrDataCore_v023test) return;",
+        "const REQUEST_EVENT = 'fcr-data-core:request';",
+        "const RESPONSE_EVENT = 'fcr-data-core:response';",
+        "const USAGE_EVENT = 'fcr-usage:event';",
+        "containerScannableId: source,",
+        "isMasterpack: null,",
+        "itemAndonContext: null,",
+        "detail: JSON.stringify({ id, ok, data, error, version: VERSION })"
+      ]
+    },
+    "TEST_v0.1.5_BWU2_Super_Tracer.txt": {
+      "anchors": [
+        "const PREFIX = 'bwu2:supertrace:v010:';",
+        "window.BWU2Trace",
+        "__BWU2_TRACE__",
+        "setInterval(autoDumpTick, 15000);"
+      ]
+    }
+  },
+  "sharedInterfaces": [
+    {
+      "anchor": "fcr-data-core:request",
+      "files": [
+        "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt",
+        "TEST_v0.1.29_FC-Lite_USAGE.txt",
+        "TEST_v0.2.3_FCR_Data_Core_USAGE.txt",
+        "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt"
+      ],
+      "minimumOccurrences": 4
+    },
+    {
+      "anchor": "fcr-data-core:response",
+      "files": [
+        "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt",
+        "TEST_v0.1.29_FC-Lite_USAGE.txt",
+        "TEST_v0.2.3_FCR_Data_Core_USAGE.txt",
+        "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt"
+      ],
+      "minimumOccurrences": 4
+    },
+    {
+      "anchor": "fcr-usage:event",
+      "files": [
+        "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt",
+        "TEST_v0.1.29_FC-Lite_USAGE.txt",
+        "TEST_v0.2.3_FCR_Data_Core_USAGE.txt",
+        "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt",
+        "TEST_v7.3.6_Bin_check_Overlay_USAGE.txt"
+      ],
+      "minimumOccurrences": 5
+    }
+  ]
+}

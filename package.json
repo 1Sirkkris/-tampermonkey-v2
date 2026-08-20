@@ -1,0 +1,13 @@
+{
+  "name": "tampermonkey-v2-offline-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node tools/validate-userscripts.mjs",
+    "contracts:update": "node tools/validate-userscripts.mjs --write-lock",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,414 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "offline-cleanup-pass-1",
+  "scripts": {
+    "MAIN_v0.2.1_Sideline_API_Move_TEST.txt": {
+      "metadata": {
+        "name": [
+          "MAIN v0.2.1 Sideline API Move TEST"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.2.1"
+        ],
+        "description": [
+          "Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows."
+        ],
+        "match": [
+          "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*"
+        ],
+        "run-at": [
+          "document-end"
+        ],
+        "grant": [
+          "none"
+        ]
+      },
+      "digests": {
+        "metadata": "4d6da7a3c85b1b6d824dd41f4f037103ba1e338dd0f8b57c0e8ac9284a6dd117",
+        "initGuards": "304b620e77c0790e83f69116d87febb9493df845d58c25ef85fc136ee2e8ff4f",
+        "endpoints": "d2da32d2e778d85e8849df2c3a3db513ac108923fc52cba2c1905fa57e472fb6",
+        "storageKeys": "5ee7b2061d71477d30350966ba419ae5caec3b85df532e4fb0da67804b4c5c3d",
+        "selectors": "c34ef1c62852c2d09f3768aa2bf60381188678d1b20ded23b258d533bd469287",
+        "shortcuts": "8cc0540c17bc2c9d0676618a7ce09ffeb6368a35f5b860d44a1750b19412426e",
+        "events": "6b8410ecbf9c9d8fbb67eb794ad89caa5e377957dd20d7f404b6a404a347f327",
+        "labels": "ce082c029932f9a9f33f189aad11ed26fdb727d33f931e87d82a9b770809e5e2",
+        "payloadShapes": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "faf01b72ee918423110dda179e6d6b771fbf2ca4505f9dfbf8a25f3b14fd1af8",
+        "listeners": "97108aae9fb8238d5ce1b5e0935f73434737882760a14509c622a2a3bc111039"
+      },
+      "duplicateFunctions": {
+        "renderPicker": 2
+      },
+      "duplicateListeners": {
+        "document:keydown": 2,
+        "root:click": 2
+      }
+    },
+    "MAIN_v0.9.4_AFT_Edit-SKU-Move_master_PRODUCTION_CLEAN.txt": {
+      "metadata": {
+        "name": [
+          "MAIN v0.9.4 AFT Edit/SKU/Move master"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.9.4"
+        ],
+        "description": [
+          "Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API."
+        ],
+        "include": [
+          "*://aft-qt-*.corp.amazon.com/app/edititems*",
+          "*://aft-qt-*.corp.amazon.com/app/fcskuflip*",
+          "*://aft-qt-*.corp.amazon.com/app/moveitems*"
+        ],
+        "run-at": [
+          "document-start"
+        ],
+        "noframes": [
+          ""
+        ],
+        "grant": [
+          "none"
+        ]
+      },
+      "digests": {
+        "metadata": "c05a9a2b85791f13cc6c7ade1ab43ccfc75e246d1580ae891a64e4312d9e14ca",
+        "initGuards": "83f72dbb4997c15f1fdfd179162b4d5782ce893f6dae0a96a41cde504cc03cda",
+        "endpoints": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "storageKeys": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selectors": "09acb7ea72cd8cfaddc608f0e9bf53dae3162c1328d80e17fe7db681a0cffad5",
+        "shortcuts": "b9da1b7ec79b0a8859656dd701300cffb5c66f0ca86deaab8f9a94bdc1f58602",
+        "events": "3c96b4294cf8962093bcbf563f29e5e750dbe8d97f1efa73d7a71cf4aab4773c",
+        "labels": "cf3abe4f4ab29eed87a5f5370023bb7c6f576b97d4d2216e47d9fc830569aede",
+        "payloadShapes": "f4d4fa8a357b468953256c839e575d942e9838fea83543bd3abdd69d52898bce",
+        "functions": "dee621790b692c2d7f12146c27e5a473d35009176ec9bb6353fe45e72aa30706",
+        "listeners": "dea287e870ad739597d84799b1fd7e39adc1dd39a97e56f3aa1338964c8b2dd1"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {
+        "el:change": 2
+      }
+    },
+    "TEST_v0.1.10_FCResearch_Master_CLEAN_TEST_USAGE.txt": {
+      "metadata": {
+        "name": [
+          "TEST v0.1.10 FCResearch Master CLEAN TEST"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.1.10"
+        ],
+        "description": [
+          "TEST: Clean FCResearch Master using shared FCR Data Core."
+        ],
+        "include": [
+          "/^https?:\\/\\/.*fcresearch.*\\//",
+          "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        ],
+        "run-at": [
+          "document-idle"
+        ],
+        "grant": [
+          "GM_getValue",
+          "GM_setValue"
+        ]
+      },
+      "digests": {
+        "metadata": "1812aa18f7c4c7e6a1d4880e5851da79d4321720ef29be22b38e83662e10427a",
+        "initGuards": "b4585200f525bc74b2027bd32f26b6ece2e0463a820ea1f080735e25cdf6cdf0",
+        "endpoints": "e710626189c8647af548a399187f5966596db5443064c58de891c2e55606ab39",
+        "storageKeys": "6799c315311a4454628a4d7c6fc41e503578169ee7872258ead533f4cac7e3dc",
+        "selectors": "1d8a305a3c4e9eab425af49910337181751bd07083154caad93ffadf17ab3605",
+        "shortcuts": "96d8502e7d881cdef882538d3664b798356b5dbc4d12dbbae17a3735336f879c",
+        "events": "2cce9bf6bad035cedb11e5ab6b7070db1c0e562dcbc3a63d0b74caab003e9e37",
+        "labels": "27cb0dc4aef733be5ad6bc075d8dd852df043b6c85e1556c60711c4e0127eb96",
+        "payloadShapes": "037d8b796e33b54608fd3b530a7451e9088e6ed4482a19ed5e4669bac7951be8",
+        "functions": "47b0663e3a9ebdf659de8fbdcc123c34eb45947fe3c2e13132a7bf88b4beab67",
+        "listeners": "98895eefd6c3bd76d2afe2d838a7dfb5a822bdcaa3d1fd800f3e463eec705b86"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {
+        "document:click": 2
+      }
+    },
+    "TEST_v0.1.29_FC-Lite_USAGE.txt": {
+      "metadata": {
+        "name": [
+          "TEST v0.1.29 FC-Lite"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.1.29"
+        ],
+        "description": [
+          "TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core."
+        ],
+        "author": [
+          "ChatGPT"
+        ],
+        "include": [
+          "/^https?:\\/\\/.*fcresearch.*\\//",
+          "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        ],
+        "run-at": [
+          "document-start"
+        ],
+        "grant": [
+          "none"
+        ]
+      },
+      "digests": {
+        "metadata": "f5f158f0a3f9e042ab26c06866a1ef98582a5d7f45a784f7978ac5e5132439b7",
+        "initGuards": "0334403853170f634d551780297931378559bdf3d69729106ba6b47281c37cda",
+        "endpoints": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "storageKeys": "6753e80f96834c8fcc195710cef8c2afa349e1d7f96abc0e3ddb48f59a48c8dc",
+        "selectors": "991fd536320ba8a740853aaf31154fce0465fc83e82605c8883b61de90b83be0",
+        "shortcuts": "aebae4ec8b180440d2072cb2a119de87d28af05f925b332b0a6d2219513982da",
+        "events": "7b16a1afea1f844fe9b18c65b240bec526cb4e539ded5312f90debc844a59408",
+        "labels": "a3d8a022a6689da4f497ec0d9b916a74f6f3dd0ca30a7ee4dfb48f01bc769ef4",
+        "payloadShapes": "037d8b796e33b54608fd3b530a7451e9088e6ed4482a19ed5e4669bac7951be8",
+        "functions": "b4e8d47206a42dae96516f9d4c747ac8cacd637e6caf01459d59135acc5635c3",
+        "listeners": "92be19a80df1593a0451692d155294d33f18dd300db51e86c95107dbed73905e"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {}
+    },
+    "TEST_v0.1.5_BWU2_Super_Tracer.txt": {
+      "metadata": {
+        "name": [
+          "TEST v0.1.5 BWU2 Super Tracer"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.1.5"
+        ],
+        "description": [
+          "Read-only BWU2 performance tracer: global multi-tab input→API, idle union, network, FCResearch fan-out, DOM/event-loop health and silent snapshots."
+        ],
+        "author": [
+          "ChatGPT"
+        ],
+        "include": [
+          "/^https?:\\/\\/(?:[^\\/]*fcresearch[^\\/]*|qifcr\\.fe\\.aftx\\.amazonoperations\\.app)\\//",
+          "/^https?:\\/\\/aft-moveapp-[^\\/]+\\.nrt\\.proxy\\.amazon\\.com\\//",
+          "/^https?:\\/\\/aft-moveapp-[^\\/]+\\.proxy\\.amazon\\.com\\//",
+          "/^https?:\\/\\/aft-poirot-website-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
+          "/^https?:\\/\\/aft-qt-[^\\/]+(?:\\.aka\\.[^\\/]+)?\\.corp\\.amazon\\.com\\//"
+        ],
+        "run-at": [
+          "document-start"
+        ],
+        "grant": [
+          "GM_deleteValue",
+          "GM_getValue",
+          "GM_listValues",
+          "GM_registerMenuCommand",
+          "GM_setValue",
+          "unsafeWindow"
+        ]
+      },
+      "digests": {
+        "metadata": "2762bd64f95c7178bfa8241239dbf3ba90cdc9d1d9e6a20a37df8da552145506",
+        "initGuards": "d1600227b1aa401d51bda2f98190bd91b03732b4c6495d743b6ed7a207e8fa9d",
+        "endpoints": "5fee185421eda17e7fdef404844ab0ea5c5de9d84dd70fe74cdca60c9eb9cfe9",
+        "storageKeys": "a717ea964b15cfd1f8b9897c1fe2d11798e142a5069ab9c24cfc9c9495309318",
+        "selectors": "812a77cc6ee19097a7231689ab538383bdbff7528ef2201432bd0c4c2cd389de",
+        "shortcuts": "ad152d2fcbe7ba62eb63be85897343c54d53523d2f359ffe68b13b400c215716",
+        "events": "2616a7abc484d2b6108fd96b5e91b12a4dcd2b7104ac8a13bc4fd43f06a4c2d5",
+        "labels": "4ee3c6c1de457f643287cd3bd3ad3f17f5aab56cd58fcc5c9a9995b9faa4b1fb",
+        "payloadShapes": "5b2eaa035f3f5330aea04a3416493e103b49b85315747b2aea22ce81f8ec5cfc",
+        "functions": "eaec2d79b77bd0933bb3031c6f310bf81deb99d0311fc25dd4d85f1fd7b6aa9f",
+        "listeners": "4b4893a07106d6b6ea772d58042328918c2ef9597c3eefd01ffd6d025ace5d7c"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {
+        "document:DOMContentLoaded": 2
+      }
+    },
+    "TEST_v0.2.16_Dropzone_Selector_Queue.txt": {
+      "metadata": {
+        "name": [
+          "TEST v0.2.16 Dropzone Selector Queue"
+        ],
+        "namespace": [
+          "MONKIES"
+        ],
+        "version": [
+          "0.2.16"
+        ],
+        "description": [
+          "TEST: Dropzone Selector with direct sequential MoveContainer API queue. Normal single-container DZ auto-scan remains unchanged."
+        ],
+        "match": [
+          "aft-moveapp-*.proxy.amazon.com/move-container*",
+          "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/move-container*"
+        ],
+        "grant": [
+          "GM_xmlhttpRequest"
+        ],
+        "connect": [
+          "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com"
+        ]
+      },
+      "digests": {
+        "metadata": "eda07ded2e6c64700ea5ca9e063069c378f0d206d008f63810edd3b534ac1c67",
+        "initGuards": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "endpoints": "937366790b9c8d1b9f0ca995a4d07ad3f745632b5be831c49896a9bdfcd65f55",
+        "storageKeys": "35e1ff19a34ad87b376457d4883835d33a06565ecdf852668ca92939901588b8",
+        "selectors": "c817bf007a2593b9c61b89cb03ac4c0c70b5c994ce61de021dc4bf30b970ad99",
+        "shortcuts": "a0c0064643b521e7ab1fefbde5253b7b2bd0abe6cfbccb9e4365a38decf98b4c",
+        "events": "bd45f12f419799627bcfb03d90084f409847837e1418d30601960df49d6bc676",
+        "labels": "3c6eeec0fa8e40687613ddec2ada15742b96c3814694b4f036ad381109adc711",
+        "payloadShapes": "6007fabc9a964a8e5661172dee5d2cd7fd2637ad7d98f6e4301fa2eeb69fab89",
+        "functions": "a4f9926b095d8ed140e59eb2b1f677363fdb33c1b2f280a55048f2c0672b2251",
+        "listeners": "1c467c7a6702a7ddbed191fc39e238646160b54aae7213c63ba9e633f41695b8"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {}
+    },
+    "TEST_v0.2.3_FCR_Data_Core_USAGE.txt": {
+      "metadata": {
+        "name": [
+          "TEST v0.2.3 FCR Data Core"
+        ],
+        "namespace": [
+          "https://github.com/1Sirkkris"
+        ],
+        "version": [
+          "0.2.3"
+        ],
+        "description": [
+          "Shared modular FCResearch data engine: product, inventory, history, Hazmat, bin-size, cache and request dedupe."
+        ],
+        "include": [
+          "/^https?:\\/\\/.*fcresearch.*\\//",
+          "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        ],
+        "run-at": [
+          "document-start"
+        ],
+        "grant": [
+          "GM_getValue",
+          "GM_setValue",
+          "GM_xmlhttpRequest"
+        ],
+        "connect": [
+          "aft-poirot-website-nrt.nrt.proxy.amazon.com",
+          "pandash.amazon.com"
+        ]
+      },
+      "digests": {
+        "metadata": "ba5576dd023807599913168cbc94d7e7c3b18194ada8096107c16e893e8a6088",
+        "initGuards": "78b9895be5cada42a522c093daa80992b7f575d2c1139ecf5dcd28cddcf696c6",
+        "endpoints": "0f3d019673fa307dc87326106860ef558154d9371cee9e913149078f96918f82",
+        "storageKeys": "59f6830cbc35fd449b051ed19f7183c2709277d51f30c0e077d301d8c4a09cb8",
+        "selectors": "e3a0b7e4d212a28877a597e49e6c33db80c60707fb20cc4ab4420497e2451763",
+        "shortcuts": "017d8483ce43a6f9ed7889fa99aab5b3c103daeab34f0e1cc83ba070cea8df23",
+        "events": "3c8b136902906d14974584fd6d0ba6dd2540f3164b4f51bfc763d6dd525942b9",
+        "labels": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "payloadShapes": "9033f19144022ab84a7bf9e5caa7b047a42983d808fde316d831914e63d9f178",
+        "functions": "95a00e074d002718bba419f8ee5221269475c89e276f3dd243db1f9904162633",
+        "listeners": "97516d77caedfdd05383b21502c352bfdb5278e773468b8f82832a09554542ca"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {}
+    },
+    "TEST_v5.4.10_Stow_Andons_Helper_Safe_Trim_USAGE.txt": {
+      "metadata": {
+        "name": [
+          "TEST v5.4.10 Stow Andons Helper — Safe Trim"
+        ],
+        "namespace": [
+          "Violentmonkey Scripts"
+        ],
+        "include": [
+          "/^https?:\\/\\/.*fcresearch.*\\//",
+          "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        ],
+        "grant": [
+          "GM_xmlhttpRequest"
+        ],
+        "connect": [
+          "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com",
+          "localhost"
+        ],
+        "version": [
+          "5.4.10"
+        ],
+        "description": [
+          "TEST: Clean Safe Trim using shared FCR Data Core."
+        ],
+        "run-at": [
+          "document-idle"
+        ]
+      },
+      "digests": {
+        "metadata": "67af6b275bd2e0182174dca1f98a6202f02aadf25443d5141d0e32156f0cc474",
+        "initGuards": "623dacdabdddfcaab10d7539a66d242576cdf55f743b73f712316a7cfb4162d0",
+        "endpoints": "8b8847b90dcd1631e34022df861aac22df5ca164f07a2a870cbfecdfccfc014d",
+        "storageKeys": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selectors": "bd5991dea923fd2ee39c574159ff69861dd35a557fe4dda89ae4c1f24803fe84",
+        "shortcuts": "c7f97db1748da7431717f0f692b7250565453626262defb96948864e46da9255",
+        "events": "2daf62634117700dcb844eb4552ad2decefc44fa3666a4eb9b8f5924674a90ba",
+        "labels": "386c1cb568d68aca4abfc184dca6f9dd3b0f218df398ad6d0b4accb3ffbf1448",
+        "payloadShapes": "f7e8700a21f04f35b05207346396e8a7114aa5fd968afb8865cac8c8e7f72f38",
+        "functions": "34ee0a2146c6ce3f4e8323012d3ddd3cdac3b6cf35fb7ac8ea6024930d7eb23c",
+        "listeners": "b913ef6f52d0790ca62a509e232ff4f031bf0a4e4f8fd319d8d9cf3b8a397184"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {
+        "button:click": 2,
+        "input:change": 2
+      }
+    },
+    "TEST_v7.3.6_Bin_check_Overlay_USAGE.txt": {
+      "metadata": {
+        "name": [
+          "TEST v7.3.6 Bin check Overlay"
+        ],
+        "namespace": [
+          "https://gist.github.com/1Sirkkris"
+        ],
+        "version": [
+          "7.3.6"
+        ],
+        "description": [
+          "TEST: Clean native bin overlay with floor filters, quantity sorting and lazy P2/P3/P4 copy."
+        ],
+        "author": [
+          "mojordaq / ChatGPT edit"
+        ],
+        "include": [
+          "/^https?:\\/\\/.*fcresearch.*\\//",
+          "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        ]
+      },
+      "digests": {
+        "metadata": "1f5268f1e21c682953dbf26f342cf9e61d1f2219c9fe0097286339c806afddf5",
+        "initGuards": "851f377107780165f95b8e8270a1c9cdcd9692648b23cb47f3a1e16931b83faf",
+        "endpoints": "f79945d15fb1c4987ce4c427ff2c2e033a50ff6314de732cd7c9ed2297e17165",
+        "storageKeys": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selectors": "4f99bc1e41084eaf23d7ea15327f21fe53ad8c0d2f7668f16bed02905030e0b0",
+        "shortcuts": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "events": "91816c9873c28069cea3bfd65a0cebe8804f62ddbec99069a5323d32c239837b",
+        "labels": "775043b1c5ffe299660f9f6967f8d37be236c2f4568c66b6be244ec5a1ec80b0",
+        "payloadShapes": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "functions": "a24cfe635d2ecd319985941527edab8da6ff07efd86fa4036eca6cc7e01000d7",
+        "listeners": "6bbf8945152dc9e26082c9107752c8b96b38579ebb913e26d7b8ada56d73306d"
+      },
+      "duplicateFunctions": {},
+      "duplicateListeners": {}
+    }
+  }
+}
