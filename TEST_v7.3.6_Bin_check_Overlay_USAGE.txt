@@ -49,6 +49,7 @@
     retryTimers: new Set(),
     loadRunId: 0
   };
+  const buttonFlashes = new WeakMap();
 
   function installStartButton() {
     const table = document.getElementById('table-inventory');
@@ -587,9 +588,15 @@
   function flashButton(id, message) {
     const button = document.getElementById(id);
     if (!button) return;
-    const original = button.textContent;
+    const current = buttonFlashes.get(button);
+    const original = current?.original ?? button.textContent;
+    clearTimeout(current?.timer);
     button.textContent = message;
-    setTimeout(() => { button.textContent = original; }, 1000);
+    const timer = setTimeout(() => {
+      button.textContent = original;
+      buttonFlashes.delete(button);
+    }, 1000);
+    buttonFlashes.set(button, { original, timer });
   }
 
   function numericQuantity(value) {
