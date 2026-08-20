@@ -100,6 +100,7 @@
   let sussyRun = 0;
   let lastSussySignature = '';
   let lastUrl = location.href;
+  const moveButtonFeedback = new WeakMap();
 
   function setCookie(name, value) {
     document.cookie = `${name}=${encodeURIComponent(value)}; expires=${new Date(Date.now() + 31536000000).toUTCString()}; path=/`;
@@ -334,13 +335,22 @@
     if (!container) return toast('No container in URL', true);
     if (!dest) return toast(`Bad destination for ${key}`, true);
 
-    const original = button?.textContent || '';
-    if (button) { button.disabled = true; button.textContent = 'Moving…'; }
+    const feedback = button ? moveButtonFeedback.get(button) : null;
+    const original = feedback?.original ?? button?.textContent ?? '';
+    if (button) {
+      clearTimeout(feedback?.timer);
+      button.disabled = true;
+      button.textContent = 'Moving…';
+    }
     const finish = (text, failed = false) => {
       if (button) {
         button.disabled = false;
         button.textContent = text;
-        setTimeout(() => { if (button.isConnected) button.textContent = original; }, 1200);
+        const timer = setTimeout(() => {
+          if (button.isConnected) button.textContent = original;
+          moveButtonFeedback.delete(button);
+        }, 1200);
+        moveButtonFeedback.set(button, { original, timer });
       }
       if (failed) toast(text, true);
       refocusSearch(80);
