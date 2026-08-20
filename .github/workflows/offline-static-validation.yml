@@ -32,5 +32,5 @@ jobs:
       - name: Check syntax and protected contracts
         run: npm run validate
 
-      - name: Replay sanitized response fixtures
-        run: node --test tests/fixtures-replay.test.mjs
+      - name: Run offline regression suite
+        run: npm test
