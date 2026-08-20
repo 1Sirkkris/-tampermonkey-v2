@@ -80,3 +80,58 @@ export function compileFunction(source, name, bindings = {}) {
   const body = `"use strict"; return (${extractFunction(source, name)});`;
   return Function(...keys, body)(...values);
 }
+
+export function extractInitializer(source, name) {
+  const escaped = name.replace(/[$]/g, '\\$&');
+  const match = new RegExp(`\\b(?:const|let|var)\\s+${escaped}\\s*=`).exec(source);
+  if (!match) throw new Error(`Variable ${name} not found`);
+  const start = match.index + match[0].length;
+  let mode = 'code';
+  let escapedChar = false;
+  let regexClass = false;
+  let quote = '';
+  let previous = '=';
+  let round = 0;
+  let square = 0;
+  let curly = 0;
+
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (mode === 'line') { if (char === '\n') mode = 'code'; continue; }
+    if (mode === 'block') { if (char === '*' && next === '/') { mode = 'code'; index++; } continue; }
+    if (mode === 'string') {
+      if (escapedChar) escapedChar = false;
+      else if (char === '\\') escapedChar = true;
+      else if (char === quote) mode = 'code';
+      continue;
+    }
+    if (mode === 'regex') {
+      if (escapedChar) escapedChar = false;
+      else if (char === '\\') escapedChar = true;
+      else if (char === '[') regexClass = true;
+      else if (char === ']') regexClass = false;
+      else if (char === '/' && !regexClass) mode = 'code';
+      continue;
+    }
+    if (char === '/' && next === '/') { mode = 'line'; index++; continue; }
+    if (char === '/' && next === '*') { mode = 'block'; index++; continue; }
+    if (char === '"' || char === "'" || char === '`') { mode = 'string'; quote = char; continue; }
+    if (char === '/' && /[([=,:;!&|?{}]/.test(previous || '=')) { mode = 'regex'; regexClass = false; continue; }
+    if (char === '(') round++;
+    else if (char === ')') round--;
+    else if (char === '[') square++;
+    else if (char === ']') square--;
+    else if (char === '{') curly++;
+    else if (char === '}') curly--;
+    else if (char === ';' && round === 0 && square === 0 && curly === 0) return source.slice(start, index).trim();
+    if (!/\s/.test(char)) previous = char;
+  }
+  throw new Error(`Variable ${name} initializer is not terminated`);
+}
+
+export function compileValue(source, name, bindings = {}) {
+  const keys = Object.keys(bindings);
+  const values = Object.values(bindings);
+  return Function(...keys, `"use strict"; return (${extractInitializer(source, name)});`)(...values);
+}

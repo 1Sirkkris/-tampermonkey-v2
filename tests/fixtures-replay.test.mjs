@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT, readScript } from '../tools/userscript-contracts.mjs';
-import { compileFunction } from './lib/source-functions.mjs';
+import { compileFunction, compileValue } from './lib/source-functions.mjs';
 
 const fixture = async name => JSON.parse(await readFile(path.join(ROOT, 'tests', 'fixtures', name), 'utf8'));
 const clean = value => String(value ?? '').trim();
@@ -51,10 +51,7 @@ test('AFT objectId fixtures replay through production extraction', async () => {
   const objectId = compileFunction(source, 'objectId');
   const aftNorm = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const readQuantity = compileFunction(source, 'readQuantity');
-  const MOVE_QTY_PATTERNS = [
-    /(?:["']|&quot;)quantity(?:["']|&quot;)\s*[:=]\s*(?:["']|&quot;)?([0-9]{1,6})\b/i,
-    /\bQuantity\b(?:<[^>]+>|\s|&nbsp;|&#160;|:|-){0,20}([0-9]{1,6})\b/i
-  ];
+  const MOVE_QTY_PATTERNS = compileValue(source, 'MOVE_QTY_PATTERNS');
   class TextDOMParser {
     parseFromString(html) {
       const textContent = String(html).replace(/<[^>]+>/g, ' ');
@@ -69,7 +66,22 @@ test('AFT objectId fixtures replay through production extraction', async () => {
   });
   const data = await fixture('aft.responses.json');
   for (const row of data.objectIds) assert.equal(objectId(row.html), row.expected, row.name);
-  assert.deepEqual(data.knownStatuses, ['READY','PROCESSING','COMPLETE','ERRORED']);
+  const statusQueue = [];
+  const post = async () => ({ json:async () => ({ status:statusQueue.shift() }) });
+  let tick = 0;
+  const api = compileFunction(source, 'makeApi', {
+    performance:{ now:() => tick++ },
+    post,
+    sleep:async () => {},
+    Error
+  })('InstructionSanitized', 'ToolSanitized');
+  statusQueue.push('PROCESSING', 'READY');
+  assert.deepEqual(await api.wait('ObjectSanitized', 'Ready replay'), { state:'READY' });
+  statusQueue.push('COMPLETE');
+  assert.deepEqual(await api.wait('ObjectSanitized', 'Complete replay', { complete:true }), { state:'COMPLETE' });
+  statusQueue.push('ERRORED');
+  await assert.rejects(api.wait('ObjectSanitized', 'Error replay'), /backend ERRORED/);
+  assert.deepEqual(new Set(data.knownStatuses), new Set(['READY','PROCESSING','COMPLETE','ERRORED']));
   for (const row of data.quantityHtml) {
     const actual = quantityInfoFromHtml(row.html);
     assert.equal(actual.qty, row.expected, row.html);
@@ -80,9 +92,26 @@ test('AFT objectId fixtures replay through production extraction', async () => {
 test('Dropzone state inputs replay through production normalization', async () => {
   const source = await readScript('TEST_v0.2.16_Dropzone_Selector_Queue.txt');
   const normalizeContainer = compileFunction(source, 'normalizeContainer');
+  const defaultQueueState = compileFunction(source, 'defaultQueueState');
   const data = await fixture('dropzone.states.json');
   for (const row of data.containerInputs) assert.equal(normalizeContainer(row.input), row.expected);
-  const fatal = status => status === 0 || status === 401 || status === 403 || status === 429 || status >= 500;
+  const localStorage = {
+    value:'',
+    getItem() { return this.value; }
+  };
+  const loadQueueState = compileFunction(source, 'loadQueueState', {
+    localStorage,
+    defaultQueueState,
+    STORAGE_QUEUE:'moveapp_dz_selector_queue_v2'
+  });
+  for (const status of data.knownItemStates) {
+    localStorage.value = JSON.stringify({ items:[{ id:'tsXSTATE1', status, error:'' }] });
+    assert.equal(loadQueueState().items[0].status, status);
+  }
+  localStorage.value = JSON.stringify({ items:[{ id:'tsXSTATE1', status:'unknown', error:'' }] });
+  assert.equal(loadQueueState().items[0].status, 'queued');
+
+  const fatal = status => compileValue(source, 'fatal', { status });
   for (const status of data.fatalStatuses) assert.equal(fatal(status), true, `fatal ${status}`);
   for (const status of data.nonFatalStatuses) assert.equal(fatal(status), false, `nonfatal ${status}`);
 });
