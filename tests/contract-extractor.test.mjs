@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractContractCategories } from '../tools/userscript-contracts.mjs';
+import { extractContractCategories, readScript } from '../tools/userscript-contracts.mjs';
 
 test('contract extractor covers every protected category', () => {
   const source = `// ==UserScript==
@@ -45,4 +45,44 @@ document.addEventListener('click', handler);
   const contract = extractContractCategories(source);
   assert.equal(contract.functions.duplicate, 2);
   assert.equal(contract.listeners['document:click'], 2);
+});
+
+test('bare global listeners are inventoried as window listeners', () => {
+  const contract = extractContractCategories("addEventListener('hashchange', handler);");
+  assert.deepEqual(contract.listeners, { 'window:hashchange':1 });
+});
+
+test('regexes and nested templates do not corrupt literal contracts', () => {
+  const source = [
+    'const pattern = /["\u0027]/g;',
+    "const endpoint = '/api/real';",
+    "const label = `outer ${items.map(item => `<b>${item || 'fallback'}</b>`).join('')}`;",
+    "const storage = 'sideline.real.key';"
+  ].join('\n');
+  const contract = extractContractCategories(source);
+  assert.deepEqual(contract.endpoints, ['/api/real']);
+  assert.deepEqual(contract.storageKeys, ['sideline.real.key']);
+  assert.ok(contract.endpoints.every(value => value.length < 100));
+});
+
+test('real-script endpoint and storage inventories stay readable', async () => {
+  const sideline = extractContractCategories(await readScript('MAIN_v0.2.1_Sideline_API_Move_TEST.txt'));
+  for (const endpoint of ['/api/move-items','/api/scan-source-container','/api/scanitem']) assert.ok(sideline.endpoints.includes(endpoint));
+  assert.ok(sideline.endpoints.every(value => value.length < 500));
+  assert.deepEqual(sideline.storageKeys, ['sidelineApiLazy.clearSource','sidelineClean.panelStates.v1']);
+
+  const aft = extractContractCategories(await readScript('MAIN_v0.9.4_AFT_Edit-SKU-Move_master_PRODUCTION_CLEAN.txt'));
+  assert.deepEqual(aft.endpoints, ['/action','/end','/status']);
+  assert.ok(aft.storageKeys.includes('aftm_sku_entry'));
+
+  const lite = extractContractCategories(await readScript('TEST_v0.1.29_FC-Lite_USAGE.txt'));
+  assert.equal(lite.storageKeys.some(value => /\s/.test(value)), false);
+
+  const tracer = extractContractCategories(await readScript('TEST_v0.1.5_BWU2_Super_Tracer.txt'));
+  assert.deepEqual(tracer.storageKeys, ['bwu2:supertrace:v010:']);
+
+  for (const contract of [sideline, aft, lite, tracer]) {
+    assert.ok(contract.selectors.every(value => value.length < 500));
+    assert.ok(contract.labels.every(value => value.length < 500));
+  }
 });

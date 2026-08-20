@@ -25,6 +25,7 @@ export const DIAGNOSTIC_SCRIPTS = [
 const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort();
 const normalize = value => String(value ?? '').replace(/\r/g, '').replace(/\s+/g, ' ').trim();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const MAX_CONTRACT_LITERAL_CHARS = 500;
 
 export async function readScript(file) {
   return readFile(path.join(ROOT, file), 'utf8');
@@ -51,8 +52,110 @@ function collect(source, pattern, group = 1) {
   return uniqueSorted(values);
 }
 
+function literalTokens(source) {
+  const tokens = [];
+  const regexPrefixes = new Set([
+    '', '(', '[', '{', ',', ';', '=', ':', '!', '?', '&&', '||', '=>',
+    'return', 'case', 'throw', 'else', 'do', 'yield', 'await'
+  ]);
+
+  function quoted(index, quote) {
+    const tokenStart = index;
+    const start = ++index;
+    while (index < source.length) {
+      if (source[index] === '\\') { index += 2; continue; }
+      if (source[index] === quote) {
+        tokens.push({ value:normalize(source.slice(start, index)), start:tokenStart, end:index });
+        return index + 1;
+      }
+      index++;
+    }
+    return index;
+  }
+
+  function regex(index) {
+    let inClass = false;
+    index++;
+    while (index < source.length) {
+      const char = source[index];
+      if (char === '\\') { index += 2; continue; }
+      if (char === '[') inClass = true;
+      else if (char === ']') inClass = false;
+      else if (char === '/' && !inClass) {
+        index++;
+        while (/[A-Za-z]/.test(source[index] || '')) index++;
+        return index;
+      }
+      index++;
+    }
+    return index;
+  }
+
+  function template(index) {
+    const tokenStart = index;
+    const start = ++index;
+    while (index < source.length) {
+      if (source[index] === '\\') { index += 2; continue; }
+      if (source[index] === '`') {
+        tokens.push({ value:normalize(source.slice(start, index)), start:tokenStart, end:index });
+        return index + 1;
+      }
+      if (source[index] === '$' && source[index + 1] === '{') {
+        index = code(index + 2, true);
+        continue;
+      }
+      index++;
+    }
+    return index;
+  }
+
+  function code(index = 0, stopAtBrace = false) {
+    let braceDepth = stopAtBrace ? 1 : 0;
+    let previous = '';
+    while (index < source.length) {
+      const char = source[index];
+      const next = source[index + 1];
+      if (/\s/.test(char)) { index++; continue; }
+      if (char === '/' && next === '/') {
+        index += 2;
+        while (index < source.length && source[index] !== '\n') index++;
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        const end = source.indexOf('*/', index + 2);
+        index = end < 0 ? source.length : end + 2;
+        continue;
+      }
+      if (char === '"' || char === "'") { index = quoted(index, char); previous = 'value'; continue; }
+      if (char === '`') { index = template(index); previous = 'value'; continue; }
+      if (char === '/' && regexPrefixes.has(previous)) { index = regex(index); previous = 'value'; continue; }
+      if (/[A-Za-z_$]/.test(char)) {
+        const match = source.slice(index).match(/^[A-Za-z_$][\w$]*/);
+        previous = match[0];
+        index += match[0].length;
+        continue;
+      }
+      if (/\d/.test(char)) {
+        const match = source.slice(index).match(/^\d+(?:\.\d+)?/);
+        previous = 'value';
+        index += match[0].length;
+        continue;
+      }
+      if (stopAtBrace && char === '{') braceDepth++;
+      if (stopAtBrace && char === '}' && --braceDepth === 0) return index + 1;
+      const pair = source.slice(index, index + 2);
+      previous = ['&&', '||', '=>'].includes(pair) ? pair : char;
+      index += previous.length;
+    }
+    return index;
+  }
+
+  code();
+  return tokens;
+}
+
 function stringLiterals(source) {
-  return collect(source, /(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g, 2);
+  return uniqueSorted(literalTokens(source).map(token => token.value));
 }
 
 function functionCounts(source) {
@@ -66,9 +169,9 @@ function functionCounts(source) {
 
 function listenerSignatures(source) {
   const counts = {};
-  const pattern = /([A-Za-z_$][\w$]*(?:\?\.|\.)?[\w$]*(?:\([^\n]{0,80}\))?)\.addEventListener\(\s*(['"])([^'"]+)\2/g;
+  const pattern = /(?:([A-Za-z_$][\w$]*(?:\?\.|\.)?[\w$]*(?:\([^\n]{0,80}\))?)\.)?addEventListener\(\s*(['"])([^'"]+)\2/g;
   for (const match of source.matchAll(pattern)) {
-    const key = `${normalize(match[1])}:${match[3]}`;
+    const key = `${normalize(match[1] || 'window')}:${match[3]}`;
     counts[key] = (counts[key] || 0) + 1;
   }
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
@@ -106,13 +209,14 @@ function payloadKeys(source) {
 export function extractContractCategories(source) {
   const literals = stringLiterals(source);
   const selectors = [];
-  const selectorPattern = /(?:querySelector(?:All)?|closest|matches|getElementById|getElementsByClassName|\$\$?)\s*\(\s*(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
-  for (const match of source.matchAll(selectorPattern)) selectors.push(normalize(match[2]));
-
-  const labels = [
-    ...collect(source, /\.textContent\s*=\s*(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g, 2),
-    ...collect(source, /\bplaceholder\s*=\s*(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g, 2)
-  ];
+  const labels = [];
+  for (const token of literalTokens(source)) {
+    const prefix = source.slice(Math.max(0, token.start - 180), token.start);
+    if (/(?:querySelector(?:All)?|closest|matches|getElementById|getElementsByClassName|\$\$?)\s*\(\s*$/.test(prefix)) {
+      selectors.push(token.value);
+    }
+    if (/(?:\.textContent|\bplaceholder)\s*=\s*$/.test(prefix)) labels.push(token.value);
+  }
 
   const shortcutLines = source.split(/\r?\n/)
     .filter(line => /\.(?:key|altKey|ctrlKey|metaKey|shiftKey)\b/.test(line))
@@ -126,12 +230,15 @@ export function extractContractCategories(source) {
   return {
     metadata: parseMetadata(source),
     initGuards: collect(source, /\b(?:window|W)\.(__[A-Za-z0-9_$]+)\b/g),
-    endpoints: uniqueSorted(literals.filter(value => /https?:\/\/|\/api\/|^\/(?:action|status|end)$|container-hierarchy/i.test(value))),
-    storageKeys: uniqueSorted(literals.filter(value => /^(?:__bwu2|aftm_|bwu2|fcsku_|fcr_|moveapp_|sideline)/i.test(value))),
-    selectors: uniqueSorted(selectors),
+    endpoints: uniqueSorted(literals.filter(value => /^(?:https?:\/\/[^/]|\/api\/|\/(?:action|status|end)$)|container-hierarchy/i.test(value))),
+    storageKeys: uniqueSorted(literals.filter(value =>
+      /^(?:__bwu2[_:.-]|aftm_|bwu2:|fcsku_|fcr[_:.-]|moveapp_|sideline[A-Za-z0-9_.:+-])[A-Za-z0-9_.:+-]*$/.test(value) &&
+      !eventNames.includes(value)
+    )),
+    selectors: uniqueSorted(selectors.filter(value => value.length <= MAX_CONTRACT_LITERAL_CHARS)),
     shortcuts: uniqueSorted(shortcutLines),
     events: uniqueSorted(eventNames),
-    labels: uniqueSorted(labels),
+    labels: uniqueSorted(labels.filter(value => value.length <= MAX_CONTRACT_LITERAL_CHARS)),
     payloadShapes: payloadKeys(source),
     functions: functionCounts(source),
     listeners: listenerSignatures(source)
