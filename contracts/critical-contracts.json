@@ -139,7 +139,13 @@
         "const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;",
         "const IDENTIFIER_KEY = /asin|barcode|code|container|customer|destination|fcsku|fnsku|(?:^|_)id(?:$|_)|item|lpn|object|pod|scannable|sku|source/i;",
         "const DETAIL_PATHS = Object.freeze([",
+        "const INVENTORY_PATH = '/results/inventory';",
+        "const INVENTORY_MORE_PATH = '/inventory-more';",
         "const requestBody = captureDetail ? bodyFromRequest(input, init) : undefined;",
+        "const inventoryKind = inventoryPathKind(rawUrl);",
+        "void readBoundedResponseText(inspectionResponse).then(result => {",
+        "inventoryFacts:inspection",
+        "inventory:inventorySummary()",
         "detailedCapture:detailed, detailAllowlist:[...DETAIL_PATHS]",
         "headers:'only response content-type captured'",
         "window.__bwu2LiveEvidence = Object.freeze({"

@@ -26,6 +26,8 @@
   const MAX_DEPTH = 6;
   const MAX_BODY_CHARS = 12000;
   const MAX_RESPONSE_READ_BYTES = 65536;
+  const MAX_INVENTORY_INSPECT_BYTES = 65536;
+  const MAX_INVENTORY_INSPECT_NODES = 500;
   const FLUSH_MS = 300;
   const MUTATION_REPORT_MS = 5000;
   const SENSITIVE_KEY = /auth|authorization|cookie|credential|csrf|jwt|password|secret|session|signature|token|x-amz/i;
@@ -33,8 +35,10 @@
   const CAMEL_IDENTIFIER_KEY = /(?:Id|ID)$/;
   const FINGERPRINT_VALUE = /^<[^<>#]+#[a-z0-9]{7}:\d+>$/;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
-  const SAFE_ROUTE_PART = /^(?:api|action|status|end|container-hierarchy|scan-source-container|scanitem|move-items|close-container|move-container|edititems|fcskuflip|moveitems|v\d{1,2})$/i;
-  const INTERESTING_PATH = /(?:\/api\/|\/action|\/status|\/end|container-hierarchy|edititems|fcskuflip|moveitems|move-container)/i;
+  const SAFE_ROUTE_PART = /^(?:api|action|status|end|results|inventory|inventory-more|container-hierarchy|scan-source-container|scanitem|move-items|close-container|move-container|edititems|fcskuflip|moveitems|v\d{1,2})$/i;
+  const INTERESTING_PATH = /(?:\/api\/|\/action|\/status|\/end|\/results\/inventory|\/inventory-more|container-hierarchy|edititems|fcskuflip|moveitems|move-container)/i;
+  const INVENTORY_PATH = '/results/inventory';
+  const INVENTORY_MORE_PATH = '/inventory-more';
   const DETAIL_PATHS = Object.freeze([
     '/api/scan-source-container',
     '/api/scanitem',
@@ -56,6 +60,7 @@
   let privacyNote;
   let flushTimer = 0;
   let mutationObserver;
+  let inventoryAwaitingMore = false;
   let mutationStarted = performance.now();
   let mutationStats = emptyMutationStats();
   const startedAt = new Date().toISOString();
@@ -179,6 +184,11 @@
     return scrubText(raw);
   }
 
+  function safeContentType(value) {
+    const type = String(value || '').split(';', 1)[0].trim().toLowerCase();
+    return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(type) ? type.slice(0, 100) : '';
+  }
+
   function loadDetailed() {
     try { return sessionStorage.getItem(DETAIL_STORE_KEY) === '1'; } catch { return false; }
   }
@@ -191,6 +201,199 @@
     } catch {
       return false;
     }
+  }
+
+  function inventoryPathKind(value) {
+    try {
+      const path = new URL(String(value ?? ''), location.href).pathname.replace(/\/+$/, '') || '/';
+      if (path === INVENTORY_PATH) return 'inventory';
+      if (path === INVENTORY_MORE_PATH) return 'inventory-more';
+    } catch {}
+    return '';
+  }
+
+  function beginInventoryInspection(kind) {
+    if (kind === 'inventory') {
+      inventoryAwaitingMore = true;
+      return false;
+    }
+    if (kind === 'inventory-more') {
+      const followsInventory = inventoryAwaitingMore;
+      inventoryAwaitingMore = false;
+      return followsInventory;
+    }
+    return false;
+  }
+
+  function boundedInspectionText(value) {
+    const raw = String(value ?? '');
+    const truncated = raw.length > MAX_INVENTORY_INSPECT_BYTES;
+    return {
+      text:truncated ? raw.slice(0, MAX_INVENTORY_INSPECT_BYTES) : raw,
+      truncated,
+      readFailed:false,
+      inspectedCount:Math.min(raw.length, MAX_INVENTORY_INSPECT_BYTES),
+      inspectionUnit:'chars'
+    };
+  }
+
+  async function readBoundedResponseText(response) {
+    if (!response?.body) return { text:'', truncated:false, readFailed:false, inspectedCount:0, inspectionUnit:'bytes' };
+    let reader;
+    try {
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      let inspectedCount = 0;
+      let truncated = false;
+      while (inspectedCount < MAX_INVENTORY_INSPECT_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const remaining = MAX_INVENTORY_INSPECT_BYTES - inspectedCount;
+        const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        text += decoder.decode(chunk, { stream:true });
+        inspectedCount += chunk.byteLength;
+        if (value.byteLength > remaining || inspectedCount === MAX_INVENTORY_INSPECT_BYTES) {
+          truncated = true;
+          try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch {}
+          break;
+        }
+      }
+      text += decoder.decode();
+      return { text, truncated, readFailed:false, inspectedCount, inspectionUnit:'bytes' };
+    } catch {
+      try { void Promise.resolve(reader?.cancel()).catch(() => {}); } catch {}
+      return { text:'', truncated:false, readFailed:true, inspectedCount:0, inspectionUnit:'bytes' };
+    } finally {
+      try { reader?.releaseLock(); } catch {}
+    }
+  }
+
+  function singleSafeFact(values) {
+    const unique = [...new Set(values)];
+    return { value:unique.length === 1 ? unique[0] : null, conflict:unique.length > 1 };
+  }
+
+  function inspectInventoryResponse(text, options = {}) {
+    const raw = String(text ?? '');
+    const quantityValues = [...raw.matchAll(/\bQuantity\s*\(\s*(\d{1,9})\s*\)/gi)]
+      .map(match => Number(match[1]))
+      .filter(Number.isSafeInteger);
+    const rowValues = [];
+    const hasNextValues = [];
+    const continuationValues = [];
+    let inspectionFailure = Boolean(options.readFailed);
+    let nodeLimitReached = false;
+
+    const tableBodies = [...raw.matchAll(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/gi)];
+    if (tableBodies.length) {
+      rowValues.push(tableBodies.reduce((count, match) => count + (match[1].match(/<tr\b/gi)?.length || 0), 0));
+    } else if (/<(?:table|tr)\b/i.test(raw)) {
+      rowValues.push(raw.match(/<tr\b/gi)?.length || 0);
+    }
+
+    for (const tag of raw.match(/<input\b[^>]*>/gi) || []) {
+      if (!/\bname\s*=\s*(['"])continuationToken\1/i.test(tag)) continue;
+      const value = tag.match(/\bvalue\s*=\s*(['"])(.*?)\1/i)?.[2] || '';
+      continuationValues.push(Boolean(value));
+    }
+
+    const looksJson = /json/i.test(options.contentType || '') || /^[\s]*[\[{]/.test(raw);
+    if (looksJson && !options.readFailed) {
+      try {
+        const parsed = JSON.parse(raw);
+        const stack = [{ value:parsed, key:'', depth:0 }];
+        let visited = 0;
+        while (stack.length) {
+          if (++visited > MAX_INVENTORY_INSPECT_NODES) { nodeLimitReached = true; break; }
+          const { value, key, depth } = stack.pop();
+          if (Array.isArray(value)) {
+            if (key === 'rows') rowValues.push(value.length);
+            if (depth >= MAX_DEPTH) { nodeLimitReached = true; continue; }
+            const limit = Math.min(value.length, 100);
+            if (value.length > limit) nodeLimitReached = true;
+            for (let index = limit - 1; index >= 0; index--) stack.push({ value:value[index], key:'', depth:depth + 1 });
+            continue;
+          }
+          if (!value || typeof value !== 'object') continue;
+          const entries = Object.entries(value);
+          const limit = Math.min(entries.length, 100);
+          if (entries.length > limit) nodeLimitReached = true;
+          for (let index = 0; index < limit; index++) {
+            const [childKey, childValue] = entries[index];
+            if (childKey === 'hasNext') {
+              if (typeof childValue === 'boolean') hasNextValues.push(childValue);
+              else inspectionFailure = true;
+            }
+            if (/^continuationToken$/i.test(childKey)) {
+              if (childValue == null || childValue === '') continuationValues.push(false);
+              else if (typeof childValue === 'string') continuationValues.push(true);
+              else inspectionFailure = true;
+            }
+            if (childKey === 'rows' && Array.isArray(childValue)) rowValues.push(childValue.length);
+            if (depth < MAX_DEPTH) stack.push({ value:childValue, key:childKey, depth:depth + 1 });
+            else if (childValue && typeof childValue === 'object') nodeLimitReached = true;
+          }
+        }
+      } catch {
+        inspectionFailure = true;
+      }
+    }
+
+    const quantity = singleSafeFact(quantityValues);
+    const rows = singleSafeFact(rowValues);
+    const hasNext = singleSafeFact(hasNextValues);
+    const continuation = singleSafeFact(continuationValues);
+    inspectionFailure ||= quantity.conflict || rows.conflict || hasNext.conflict || continuation.conflict;
+    const inspectionTruncated = Boolean(options.truncated);
+    const inspectionIncomplete = inspectionTruncated || nodeLimitReached || inspectionFailure ||
+      [quantity.value, rows.value, hasNext.value, continuation.value].some(value => value == null);
+    return {
+      quantityLabel:quantity.value == null ? null : `Quantity (${quantity.value})`,
+      quantity:quantity.value,
+      rowCount:rows.value,
+      hasNext:hasNext.value,
+      continuationPresent:continuation.value,
+      inspectionTruncated,
+      inspectionIncomplete,
+      inspectionFailure,
+      nodeLimitReached,
+      inspectedCount:Number(options.inspectedCount || 0),
+      inspectionUnit:options.inspectionUnit === 'bytes' ? 'bytes' : 'chars'
+    };
+  }
+
+  function inspectInventoryMoreResponse(text, options = {}) {
+    const raw = String(text ?? '');
+    let parseFailure = false;
+    if (!options.readFailed && !options.truncated && /json/i.test(options.contentType || '') && raw.trim()) {
+      try { JSON.parse(raw); } catch { parseFailure = true; }
+    }
+    return {
+      readFailure:Boolean(options.readFailed),
+      parseFailure,
+      inspectionTruncated:Boolean(options.truncated),
+      inspectionIncomplete:Boolean(options.truncated || options.readFailed || parseFailure),
+      inspectedCount:Number(options.inspectedCount || 0),
+      inspectionUnit:options.inspectionUnit === 'bytes' ? 'bytes' : 'chars'
+    };
+  }
+
+  function inventoryNetworkData(base, kind, inspection, followsInventory = false) {
+    if (kind === 'inventory') return { ...base, inventoryFacts:inspection };
+    if (kind !== 'inventory-more') return base;
+    const networkFailure = Boolean(base.error || base.status === 0);
+    const non2xx = base.ok === false && !networkFailure;
+    return {
+      ...base,
+      inventoryFollowUp:{
+        followsInventory:Boolean(followsInventory),
+        failed:Boolean(non2xx || networkFailure || inspection.readFailure || inspection.parseFailure),
+        non2xx,
+        networkFailure,
+        ...inspection
+      }
+    };
   }
 
   function bodySize(body) {
@@ -304,6 +507,8 @@
       const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input?.url || '';
       const method = String(init?.method || input?.method || 'GET').toUpperCase();
       const captureDetail = detailAllowed(rawUrl);
+      const inventoryKind = inventoryPathKind(rawUrl);
+      const followsInventory = beginInventoryInspection(inventoryKind);
       const requestBody = captureDetail ? bodyFromRequest(input, init) : undefined;
       const requestSize = bodySize(init?.body);
       const started = performance.now();
@@ -312,10 +517,32 @@
         const base = {
           transport:'fetch', method, url:sanitizeUrl(rawUrl),
           status:response.status, ok:response.ok, ms:Math.round(performance.now() - started),
-          contentType:response.headers.get('content-type') || '',
+          contentType:safeContentType(response.headers.get('content-type')),
           requestSize,
           responseSize:null
         };
+        if (inventoryKind) {
+          let inspectionResponse;
+          try { inspectionResponse = response.clone(); } catch {}
+          if (!inspectionResponse) {
+            const result = { readFailed:true, truncated:false, inspectedCount:0, inspectionUnit:'bytes' };
+            const inspection = inventoryKind === 'inventory'
+              ? inspectInventoryResponse('', result)
+              : inspectInventoryMoreResponse('', result);
+            const sizedBase = !result.readFailed && !result.truncated
+              ? { ...base, responseSize:{ value:result.inspectedCount, unit:result.inspectionUnit } }
+              : base;
+            add('network', inventoryNetworkData(sizedBase, inventoryKind, inspection, followsInventory));
+            return response;
+          }
+          void readBoundedResponseText(inspectionResponse).then(result => {
+            const inspection = inventoryKind === 'inventory'
+              ? inspectInventoryResponse(result.text, { ...result, contentType:base.contentType })
+              : inspectInventoryMoreResponse(result.text, { ...result, contentType:base.contentType });
+            add('network', inventoryNetworkData(base, inventoryKind, inspection, followsInventory));
+          });
+          return response;
+        }
         if (!captureDetail) {
           add('network', base);
           return response;
@@ -338,10 +565,21 @@
         }
         return response;
       } catch (error) {
-        add('network', attachDetailedBodies({
+        const base = {
           transport:'fetch', method, url:sanitizeUrl(rawUrl), requestSize,
-          error:scrubText(error?.message || error), ms:Math.round(performance.now() - started)
-        }, captureDetail, requestBody));
+          error:inventoryKind ? 'network-failure' : scrubText(error?.message || error),
+          ms:Math.round(performance.now() - started),
+          ...(inventoryKind ? { status:0, ok:false } : {})
+        };
+        if (inventoryKind) {
+          const result = { readFailed:true, truncated:false, inspectedCount:0, inspectionUnit:'bytes' };
+          const inspection = inventoryKind === 'inventory'
+            ? inspectInventoryResponse('', result)
+            : inspectInventoryMoreResponse('', result);
+          add('network', inventoryNetworkData(base, inventoryKind, inspection, followsInventory));
+        } else {
+          add('network', attachDetailedBodies(base, captureDetail, requestBody));
+        }
         throw error;
       }
     };
@@ -361,6 +599,8 @@
     XHR.prototype.send = function(body) {
       const meta = this.__bwu2Evidence || { method:'GET', url:'' };
       const captureDetail = detailAllowed(meta.url);
+      const inventoryKind = inventoryPathKind(meta.url);
+      const followsInventory = beginInventoryInspection(inventoryKind);
       const requestBody = captureDetail ? parseBody(body) : undefined;
       const requestSize = bodySize(body);
       const started = performance.now();
@@ -368,15 +608,20 @@
         let contentType = '';
         let responseSize = null;
         let responseBody;
+        let inventoryRead = null;
         try {
-          contentType = this.getResponseHeader('content-type') || '';
+          contentType = safeContentType(this.getResponseHeader('content-type'));
           if (this.responseType && this.responseType !== 'text') {
             responseSize = bodySize(this.response);
           }
           if (!responseSize && (!this.responseType || this.responseType === 'text')) {
             responseSize = { value:String(this.responseText || '').length, unit:'chars' };
           }
-          if (captureDetail) {
+          if (inventoryKind) {
+            inventoryRead = !this.responseType || this.responseType === 'text'
+              ? boundedInspectionText(this.responseText)
+              : { text:'', truncated:false, readFailed:true, inspectedCount:0, inspectionUnit:'chars' };
+          } else if (captureDetail) {
             const length = responseSize?.value || 0;
             responseBody = responseBodySkip(contentType, length) || (
               this.responseType && this.responseType !== 'text'
@@ -385,14 +630,23 @@
             );
           }
         } catch (error) {
-          if (captureDetail) responseBody = `<response-read-failed:${scrubText(error?.message || error)}>`;
+          if (inventoryKind) inventoryRead = { text:'', truncated:false, readFailed:true, inspectedCount:0, inspectionUnit:'chars' };
+          else if (captureDetail) responseBody = `<response-read-failed:${scrubText(error?.message || error)}>`;
         }
         const base = {
           transport:'xhr', method:meta.method, url:sanitizeUrl(meta.url), requestSize,
           status:this.status, ok:this.status >= 200 && this.status < 300,
           ms:Math.round(performance.now() - started), contentType, responseSize
         };
-        add('network', attachDetailedBodies(base, captureDetail, requestBody, responseBody));
+        if (inventoryKind) {
+          const result = inventoryRead || { text:'', truncated:false, readFailed:true, inspectedCount:0, inspectionUnit:'chars' };
+          const inspection = inventoryKind === 'inventory'
+            ? inspectInventoryResponse(result.text, { ...result, contentType })
+            : inspectInventoryMoreResponse(result.text, { ...result, contentType });
+          add('network', inventoryNetworkData(base, inventoryKind, inspection, followsInventory));
+        } else {
+          add('network', attachDetailedBodies(base, captureDetail, requestBody, responseBody));
+        }
       }, { once:true });
       return originalSend.apply(this, arguments);
     };
@@ -499,6 +753,19 @@
     return signatures;
   }
 
+  function inventorySummary() {
+    const inventoryRows = events.filter(event => event.type === 'network' && event.data?.inventoryFacts);
+    const followUps = events.filter(event => event.type === 'network' && event.data?.inventoryFollowUp);
+    return {
+      requests:inventoryRows.length,
+      followUps:followUps.length,
+      followed:followUps.filter(event => event.data.inventoryFollowUp.followsInventory).length,
+      failures:followUps.filter(event => event.data.inventoryFollowUp.failed).length,
+      followedFailures:followUps.filter(event => event.data.inventoryFollowUp.followsInventory && event.data.inventoryFollowUp.failed).length,
+      incomplete:inventoryRows.filter(event => event.data.inventoryFacts.inspectionIncomplete).length
+    };
+  }
+
   function report() {
     const exportedEvents = events.map(eventForExport);
     return {
@@ -511,7 +778,12 @@
         identifiers:'fingerprinted', networkBodies:detailed ? 'allowlisted opt-in' : 'not captured'
       },
       environment:{ host:location.host, path:new URL(sanitizeUrl(location.href)).pathname, userAgent:navigator.userAgent, viewport:`${innerWidth}x${innerHeight}` },
-      summary:{ events:exportedEvents.length, networks:exportedEvents.filter(event => event.type === 'network').length, requests:networkSummary() },
+      summary:{
+        events:exportedEvents.length,
+        networks:exportedEvents.filter(event => event.type === 'network').length,
+        requests:networkSummary(),
+        inventory:inventorySummary()
+      },
       events:exportedEvents
     };
   }

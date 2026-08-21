@@ -7,7 +7,8 @@ Install `DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js` for the next interna
 - Request headers and sensitive response headers, cookies, credentials, and browser tokens are never collected. Only response `Content-Type` is retained.
 - Known identifier fields and common container/pod values are replaced with deterministic fingerprints. The same value remains correlatable inside one export without exposing the value.
 - Captures stay in memory and same-tab `sessionStorage`. Clear removes the current origin's capture.
-- The default is **METADATA ONLY**: transport, method, sanitized URL, result, timing, safe sizes, duplicate signatures, and errors. No request or response bodies are captured or exported.
+- The default is **METADATA ONLY**: transport, method, sanitized URL, result, timing, safe sizes, duplicate signatures, and errors. No request or response bodies are stored or exported.
+- In metadata-only mode, response text is inspected locally and then discarded only for the exact `/results/inventory` and `/inventory-more` paths. The bounded inspection records `Quantity (N)`, row count, literal `hasNext`, continuation presence (never its value), truncation/incomplete flags, and whether the first following `/inventory-more` failed. Unknown shapes remain `null` and flagged incomplete; raw content never enters events, storage, summaries, clipboard output, downloads, logs, or error text.
 - **Enable detail** is an explicit, same-tab-session opt-in. It captures redacted, size/depth/item-capped bodies only for the listed Sideline, AFT, Dropzone, and Bin workflow endpoints. Disabling detail removes captured bodies from the session. The panel and export always state the current mode and allowlist.
 - The diagnostic observes normal work. It does not send requests, click controls, or alter payloads.
 

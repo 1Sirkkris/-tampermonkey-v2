@@ -73,6 +73,9 @@ test('unified diagnostic redacts sensitive values and fingerprints identifiers',
   assert.equal(lowercasePath.includes('privateemployeevalue'), false);
   assert.match(lowercasePath, /^\/api\/<path:2#/);
   assert.equal(sanitize(sanitized).requestId, sanitized.requestId, 'fingerprints should remain stable when persisted events reload');
+  assert.deepEqual(sanitize({ inventoryFacts:{ continuationPresent:true, hasNext:false, rowCount:0 } }), {
+    inventoryFacts:{ continuationPresent:true, hasNext:false, rowCount:0 }
+  });
 
   const parseBody = compileFunction(source, 'parseBody', {
     sanitize,
@@ -110,6 +113,8 @@ test('unified diagnostic body capture is opt-in, allowlisted, and absent from de
   assert.equal(defaultAllowed('https://example.invalid/api/move-items'), false);
   assert.equal(optedInAllowed('https://example.invalid/api/move-items?mode=view'), true);
   assert.equal(optedInAllowed('https://example.invalid/api/unrelated'), false);
+  assert.equal(DETAIL_PATHS.includes('/results/inventory'), false);
+  assert.equal(DETAIL_PATHS.includes('/inventory-more'), false);
 
   const eventForExport = compileFunction(source, 'eventForExport', { detailed:false, sanitize:value => value });
   const exported = eventForExport({
@@ -117,6 +122,178 @@ test('unified diagnostic body capture is opt-in, allowlisted, and absent from de
     data:{ method:'POST', requestBody:{ secret:'redacted' }, responseBody:{ ok:true }, status:200 }
   });
   assert.deepEqual(exported, { type:'network', data:{ method:'POST', status:200 } });
+});
+
+test('metadata-only inventory inspection exports safe facts and never raw content', async () => {
+  const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  const singleSafeFact = compileFunction(source, 'singleSafeFact');
+  const inspectInventoryResponse = compileFunction(source, 'inspectInventoryResponse', {
+    singleSafeFact,
+    MAX_INVENTORY_INSPECT_NODES:500,
+    MAX_DEPTH:6,
+    JSON,
+    Number
+  });
+  const inventoryNetworkData = compileFunction(source, 'inventoryNetworkData');
+  const rawToken = 'CONTINUATION-PRIVATE-SECRET';
+  const rawIdentifier = 'tsXPRIVATE123';
+  const raw = JSON.stringify({
+    display:'Quantity (3)',
+    rows:[{ containerScannableId:rawIdentifier }, {}, {}],
+    hasNext:true,
+    continuationToken:rawToken,
+    secret:'BODY-PRIVATE-SECRET'
+  });
+  const facts = inspectInventoryResponse(raw, {
+    contentType:'application/json',
+    inspectedCount:raw.length,
+    inspectionUnit:'chars'
+  });
+  assert.deepEqual({
+    quantityLabel:facts.quantityLabel,
+    quantity:facts.quantity,
+    rowCount:facts.rowCount,
+    hasNext:facts.hasNext,
+    continuationPresent:facts.continuationPresent,
+    inspectionFailure:facts.inspectionFailure
+  }, {
+    quantityLabel:'Quantity (3)',
+    quantity:3,
+    rowCount:3,
+    hasNext:true,
+    continuationPresent:true,
+    inspectionFailure:false
+  });
+  const storedEvent = {
+    type:'network',
+    data:inventoryNetworkData({ status:200, ok:true, ms:17 }, 'inventory', facts)
+  };
+  const stored = JSON.stringify(storedEvent);
+  for (const rawValue of [raw, rawToken, rawIdentifier, 'BODY-PRIVATE-SECRET']) {
+    assert.equal(stored.includes(rawValue), false, `persisted raw inventory content: ${rawValue}`);
+  }
+  assert.equal(storedEvent.data.status, 200);
+  assert.equal(storedEvent.data.ms, 17);
+  let persisted = '';
+  const persistNow = compileFunction(source, 'persistNow', {
+    clearTimeout:() => {},
+    flushTimer:0,
+    sessionStorage:{ setItem:(_key, value) => { persisted = value; } },
+    STORE_KEY:'inventory-test',
+    JSON,
+    events:[storedEvent]
+  });
+  persistNow();
+  for (const rawValue of [raw, rawToken, rawIdentifier, 'BODY-PRIVATE-SECRET']) {
+    assert.equal(persisted.includes(rawValue), false, `stored raw inventory content: ${rawValue}`);
+  }
+
+  const htmlToken = 'HTML-CONTINUATION-SECRET';
+  const html = `<div>Quantity (2)</div><table><tbody><tr></tr><tr></tr></tbody></table>` +
+    `<input name="continuationToken" value="${htmlToken}">`;
+  const htmlFacts = inspectInventoryResponse(html, { contentType:'text/html', inspectedCount:html.length });
+  assert.equal(htmlFacts.quantity, 2);
+  assert.equal(htmlFacts.rowCount, 2);
+  assert.equal(htmlFacts.hasNext, null);
+  assert.equal(htmlFacts.continuationPresent, true);
+  assert.equal(JSON.stringify(htmlFacts).includes(htmlToken), false);
+  assert.equal(htmlFacts.inspectionIncomplete, true);
+
+  const noContinuation = inspectInventoryResponse(JSON.stringify({ rows:[], hasNext:false, continuationToken:null }), {
+    contentType:'application/json'
+  });
+  assert.equal(noContinuation.rowCount, 0);
+  assert.equal(noContinuation.hasNext, false);
+  assert.equal(noContinuation.continuationPresent, false);
+  assert.equal(/\bconsole\./.test(source), false);
+});
+
+test('inventory inspection is exact-path bounded and reports malformed or incomplete input', async () => {
+  const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  const location = { href:'https://example.invalid/base' };
+  const inventoryPathKind = compileFunction(source, 'inventoryPathKind', {
+    URL,
+    location,
+    INVENTORY_PATH:'/results/inventory',
+    INVENTORY_MORE_PATH:'/inventory-more'
+  });
+  assert.equal(inventoryPathKind('/results/inventory?view=all'), 'inventory');
+  assert.equal(inventoryPathKind('/inventory-more'), 'inventory-more');
+  assert.equal(inventoryPathKind('/results/inventory/other'), '');
+  assert.equal(inventoryPathKind('/unrelated/inventory-more'), '');
+
+  const boundedInspectionText = compileFunction(source, 'boundedInspectionText', { MAX_INVENTORY_INSPECT_BYTES:65536, Math });
+  const bounded = boundedInspectionText(`Quantity (9)${'x'.repeat(70000)}`);
+  assert.equal(bounded.truncated, true);
+  assert.equal(bounded.text.length, 65536);
+  assert.equal(bounded.inspectedCount, 65536);
+
+  const readBoundedResponseText = compileFunction(source, 'readBoundedResponseText', {
+    MAX_INVENTORY_INSPECT_BYTES:5,
+    TextDecoder
+  });
+  const chunks = [new TextEncoder().encode('abcd'), new TextEncoder().encode('ePRIVATE-SECRET')];
+  let cancelled = false;
+  const streamed = await readBoundedResponseText({
+    body:{
+      getReader:() => ({
+        read:async () => chunks.length ? { done:false, value:chunks.shift() } : { done:true },
+        cancel:async () => { cancelled = true; },
+        releaseLock:() => {}
+      })
+    }
+  });
+  assert.deepEqual({ text:streamed.text, truncated:streamed.truncated, inspectedCount:streamed.inspectedCount }, {
+    text:'abcde', truncated:true, inspectedCount:5
+  });
+  assert.equal(cancelled, true);
+  assert.equal(streamed.text.includes('PRIVATE-SECRET'), false);
+
+  const singleSafeFact = compileFunction(source, 'singleSafeFact');
+  const inspectInventoryResponse = compileFunction(source, 'inspectInventoryResponse', {
+    singleSafeFact,
+    MAX_INVENTORY_INSPECT_NODES:500,
+    MAX_DEPTH:6,
+    JSON,
+    Number
+  });
+  const oversizedFacts = inspectInventoryResponse(bounded.text, { ...bounded, contentType:'text/plain' });
+  assert.equal(oversizedFacts.quantity, 9);
+  assert.equal(oversizedFacts.inspectionTruncated, true);
+  assert.equal(oversizedFacts.inspectionIncomplete, true);
+
+  const malformed = inspectInventoryResponse('{not-json', { contentType:'application/json', inspectedCount:9 });
+  assert.equal(malformed.inspectionFailure, true);
+  assert.equal(malformed.inspectionIncomplete, true);
+  assert.equal(malformed.quantity, null);
+  assert.equal(malformed.rowCount, null);
+});
+
+test('inventory-more correlation and failure flags are safe and explicit', async () => {
+  const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  const beginInventoryInspection = compileFunction(source, 'beginInventoryInspection', { inventoryAwaitingMore:false });
+  assert.equal(beginInventoryInspection('inventory'), false);
+  assert.equal(beginInventoryInspection('inventory-more'), true);
+  assert.equal(beginInventoryInspection('inventory-more'), false);
+
+  const inspectInventoryMoreResponse = compileFunction(source, 'inspectInventoryMoreResponse', { JSON });
+  const inventoryNetworkData = compileFunction(source, 'inventoryNetworkData');
+  const valid = inspectInventoryMoreResponse('{"ok":true}', { contentType:'application/json', inspectedCount:11 });
+  const success = inventoryNetworkData({ status:200, ok:true, ms:12 }, 'inventory-more', valid, true);
+  assert.deepEqual({ follows:success.inventoryFollowUp.followsInventory, failed:success.inventoryFollowUp.failed }, { follows:true, failed:false });
+
+  const malformed = inspectInventoryMoreResponse('PRIVATE BODY {', { contentType:'application/json', inspectedCount:14 });
+  const parseFailed = inventoryNetworkData({ status:200, ok:true, ms:8 }, 'inventory-more', malformed, true);
+  assert.equal(parseFailed.inventoryFollowUp.parseFailure, true);
+  assert.equal(parseFailed.inventoryFollowUp.failed, true);
+  assert.equal(JSON.stringify(parseFailed).includes('PRIVATE BODY'), false);
+
+  const non2xx = inventoryNetworkData({ status:500, ok:false, ms:6 }, 'inventory-more', valid, true);
+  assert.equal(non2xx.inventoryFollowUp.non2xx, true);
+  assert.equal(non2xx.inventoryFollowUp.failed, true);
+  const network = inventoryNetworkData({ status:0, ok:false, error:'network-failure', ms:4 }, 'inventory-more', valid, true);
+  assert.equal(network.inventoryFollowUp.networkFailure, true);
+  assert.equal(network.inventoryFollowUp.failed, true);
 });
 
 test('unified diagnostic text scrubber caps body size', async () => {
@@ -143,6 +320,9 @@ test('unified diagnostic avoids buffering oversized or binary responses', async 
 
 test('unified diagnostic reads no network headers except response content type', async () => {
   const source = await readScript('Diagnostics/DIAG_v0.2.0_Unified_Live_Evidence_Capture.user.js');
+  const safeContentType = compileFunction(source, 'safeContentType');
+  assert.equal(safeContentType('Application/JSON; boundary=PRIVATE-SECRET'), 'application/json');
+  assert.equal(safeContentType('not a type PRIVATE-SECRET'), '');
   const reads = [...source.matchAll(/(?:headers\.get|getResponseHeader)\(\s*(['"])([^'"]+)\1/g)].map(match => match[2]);
   assert.ok(reads.length > 0);
   assert.deepEqual([...new Set(reads)], ['content-type']);
