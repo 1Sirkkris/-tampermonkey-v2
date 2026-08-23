@@ -102,6 +102,29 @@ Logging should maximize useful workflow/backend/performance evidence while exclu
 - Do not manually patch around a bug when the underlying cause can reasonably be fixed.
 - Keep changes scoped and reviewable.
 
+## Version Authority + GitHub Sync
+
+Default rule for normal fleet scripts:
+
+`revise → validate locally/static-contract check → deliver → write current version to GitHub`
+
+- Any newly delivered fleet-script version becomes the current approved version by default.
+- The user does not need to separately confirm that each delivered version is validated/current.
+- Only an explicit user rollback/revert/don't-keep instruction invalidates a newly delivered version.
+- Once a normal fleet-script revision is delivered, update its corresponding GitHub source as part of the same task so Tampermonkey can pull the current version.
+- Do not make the user remember to request source synchronization.
+- Diagnostic/probe/test-only scripts are excluded from automatic promotion unless explicitly promoted into the normal fleet.
+- A `TEST` label in a long-lived fleet script name does not by itself block synchronization; intent matters. Only genuinely experimental/diagnostic candidates stay local.
+- Do not create branches, merge, delete files, force-update refs, or change unrelated repository content under this standing approval.
+- Preserve rollback by keeping normal Git history/version increments.
+- If GitHub synchronization is blocked by environment/tooling, say so explicitly in the completion note rather than silently leaving source stale.
+
+End-of-day reporting should be compact and user-facing:
+
+`Script | Start version | End-of-day version | Revisions today`
+
+Track only scripts touched that day unless the user asks for a full-fleet report.
+
 ## External Contract Protection
 
 Do not change without a proven reason:
@@ -145,4 +168,6 @@ Current pack:
 - `09_LIVE_EVIDENCE_CAPTURE_v0.3.0.txt`
 - `WORK_LAPTOP_INSTALL.txt`
 
-Do not modify work-laptop pack scripts unless the task explicitly requires it.
+This branch doubles as the install/update source for the work-laptop fleet. Normal approved fleet-script revisions should therefore be synchronized here automatically under the Version Authority + GitHub Sync rule above.
+
+Do not promote genuinely experimental/diagnostic candidates into the work-laptop fleet unless explicitly approved.
