@@ -1,0 +1,724 @@
+// ==UserScript==
+// @name         CORE v0.1.0 BWU2 Observability Core
+// @namespace    https://github.com/1Sirkkris
+// @version      0.1.0
+// @description  Lightweight cross-tool observability core. Silent everywhere except tiny FCResearch counter/export/clear control.
+// @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
+// @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
+// @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
+// @include      /^https?:\/\/aft-moveapp-[^\/]+(?:\.nrt)?\.proxy\.amazon\.com\//
+// @run-at       document-start
+// @grant        unsafeWindow
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  const VERSION = '0.1.0';
+  const PREFIX = 'bwu2:observability:v1:';
+  const META_KEY = `${PREFIX}meta`;
+  const PAGE_PREFIX = `${PREFIX}page:`;
+  const COUNT_PREFIX = `${PREFIX}count:`;
+  const MAX_EVENTS = 3000;
+  const WARN_AT = Math.floor(MAX_EVENTS * 0.80);
+  const FLUSH_MS = 250;
+  const COUNT_REFRESH_MS = 350;
+  const MAX_BODY_CHARS = 5000;
+  const MUTATION_REPORT_MS = 5000;
+  const EVENT_LOOP_WARN_MS = 150;
+  const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+  if (W.__BWU2_OBSERVABILITY_CORE_V1__) return;
+  W.__BWU2_OBSERVABILITY_CORE_V1__ = true;
+
+  const SENSITIVE_KEY = /authorization|cookie|credential|csrf|jwt|password|passwd|secret|session.?token|signature|token|x-amz|api.?key/i;
+  const IDENTIFIER_KEY = /asin|barcode|container|destination|fcsku|fnsku|item|lpn|object|pod|scannable|sku|source/i;
+  const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
+  const INTERESTING_PATH = /(?:\/api\/|\/results\/(?:inventory|inventory-more|inventory-history|container-history)|container-hierarchy|edititems|fcskuflip|moveitems|move-container|close-container|scan-source-container|scanitem|sideline|dropzone|print)/i;
+  const FCR_HOST = /(?:fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app)/i;
+
+  const pageId = randomId('p_');
+  let meta = loadMeta();
+  let activeSessionId = meta.sessionId;
+  let pageEvents = [];
+  let pageStoreKey = pageKey(activeSessionId);
+  let pageCountKey = countKey(activeSessionId);
+  let flushTimer = 0;
+  let eventSeq = 0;
+  let lastHref = location.href;
+  let lastCountReadAt = 0;
+  let lastGlobalCount = 0;
+  let full = false;
+  let mutationObserver = null;
+  let mutationStats = emptyMutationStats();
+  let mutationTimer = 0;
+  let uiObserver = null;
+  let uiRoot = null;
+  let uiCount = null;
+  let uiClear = null;
+  let uiTimer = 0;
+
+  function gmGet(key, fallback) {
+    try { return GM_getValue(key, fallback); } catch { return fallback; }
+  }
+  function gmSet(key, value) {
+    try { GM_setValue(key, value); return true; } catch { return false; }
+  }
+  function gmDelete(key) {
+    try { GM_deleteValue(key); } catch {}
+  }
+  function gmKeys() {
+    try { return GM_listValues() || []; } catch { return []; }
+  }
+
+  function randomId(prefix = '') {
+    try {
+      const a = new Uint32Array(2);
+      crypto.getRandomValues(a);
+      return `${prefix}${a[0].toString(36)}${a[1].toString(36)}`;
+    } catch {
+      return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
+    }
+  }
+
+  function defaultMeta() {
+    const now = Date.now();
+    return { sessionId: randomId('s_'), startedAt: now, createdBy: VERSION, resets: 0 };
+  }
+
+  function loadMeta() {
+    try {
+      const raw = gmGet(META_KEY, '');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.sessionId) return parsed;
+    } catch {}
+    const fresh = defaultMeta();
+    gmSet(META_KEY, JSON.stringify(fresh));
+    return fresh;
+  }
+
+  function saveMeta(value) {
+    meta = value;
+    gmSet(META_KEY, JSON.stringify(value));
+  }
+
+  function pageKey(sessionId) { return `${PAGE_PREFIX}${sessionId}:${pageId}`; }
+  function countKey(sessionId) { return `${COUNT_PREFIX}${sessionId}:${pageId}`; }
+
+  function syncSession() {
+    const latest = loadMeta();
+    if (latest.sessionId === activeSessionId) {
+      meta = latest;
+      return false;
+    }
+    clearTimeout(flushTimer);
+    flushTimer = 0;
+    activeSessionId = latest.sessionId;
+    meta = latest;
+    pageEvents = [];
+    eventSeq = 0;
+    pageStoreKey = pageKey(activeSessionId);
+    pageCountKey = countKey(activeSessionId);
+    lastCountReadAt = 0;
+    lastGlobalCount = 0;
+    full = false;
+    gmSet(pageCountKey, 0);
+    return true;
+  }
+
+  function sessionCount(force = false) {
+    syncSession();
+    const now = Date.now();
+    if (!force && now - lastCountReadAt < COUNT_REFRESH_MS) return lastGlobalCount;
+    let total = 0;
+    const prefix = `${COUNT_PREFIX}${activeSessionId}:`;
+    for (const key of gmKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      total += Math.max(0, Number(gmGet(key, 0)) || 0);
+    }
+    lastCountReadAt = now;
+    lastGlobalCount = total;
+    full = total >= MAX_EVENTS;
+    return total;
+  }
+
+  function sessionPageKeys(sessionId = activeSessionId) {
+    const prefix = `${PAGE_PREFIX}${sessionId}:`;
+    return gmKeys().filter(key => key.startsWith(prefix));
+  }
+
+  function clip(value, max = MAX_BODY_CHARS) {
+    const text = String(value ?? '');
+    return text.length > max ? `${text.slice(0, max)}…<truncated:${text.length}>` : text;
+  }
+
+  function hash(value) {
+    let out = 2166136261;
+    for (const char of String(value ?? '')) {
+      out ^= char.charCodeAt(0);
+      out = Math.imul(out, 16777619);
+    }
+    return (out >>> 0).toString(36);
+  }
+
+  function fingerprint(value, kind = 'id') {
+    const text = String(value ?? '');
+    return `<${kind}#${hash(text)}:${text.length}>`;
+  }
+
+  function scrubText(value) {
+    let text = String(value ?? '');
+    text = text
+      .replace(/(["']?(?:authorization|cookie|csrf|jwt|password|secret|session|signature|token)["']?\s*[:=]\s*)["']?[^,"'\s}]+/gi, '$1<redacted>')
+      .replace(/\b(?:ts|cs)x[A-Za-z0-9_-]+\b/gi, match => fingerprint(match, 'container'))
+      .replace(/\bP-\d-(?:[A-Z]\d{3}){2}\b/g, match => fingerprint(match, 'pod'))
+      .replace(/\b(?:B0|X0|ZZ)[A-Z0-9]{8}\b/gi, match => fingerprint(match, 'item'))
+      .replace(/\bLPN[A-Z0-9_-]+\b/gi, match => fingerprint(match, 'lpn'))
+      .replace(/\b\d{8,14}\b/g, match => fingerprint(match, 'numeric-id'))
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, match => fingerprint(match, 'email'));
+    return clip(text);
+  }
+
+  function sanitizeUrl(value) {
+    try {
+      const url = new URL(String(value ?? ''), location.href);
+      url.username = '';
+      url.password = '';
+      for (const [key, raw] of [...url.searchParams.entries()]) {
+        url.searchParams.set(key, SAFE_QUERY_KEY.test(key) ? scrubText(raw) : fingerprint(raw, `query:${key}`));
+      }
+      return url.href;
+    } catch {
+      return scrubText(value);
+    }
+  }
+
+  function sanitize(value, key = '', depth = 0, seen = new WeakSet()) {
+    if (SENSITIVE_KEY.test(key)) return '<redacted>';
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+    if (typeof value === 'bigint') return String(value);
+    if (typeof value === 'string') {
+      if (IDENTIFIER_KEY.test(key)) return fingerprint(value, key || 'id');
+      if (/url|uri|href/i.test(key) || /^https?:\/\//i.test(value)) return sanitizeUrl(value);
+      return scrubText(value);
+    }
+    if (depth >= 6) return `<max-depth:${Object.prototype.toString.call(value).slice(8, -1)}>`;
+    if (typeof value !== 'object') return `<${typeof value}>`;
+    if (seen.has(value)) return '<circular>';
+    seen.add(value);
+    if (Array.isArray(value)) return value.slice(0, 80).map(item => sanitize(item, key, depth + 1, seen));
+    const output = {};
+    let count = 0;
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (++count > 140) { output.__truncated = true; break; }
+      output[childKey] = sanitize(childValue, childKey, depth + 1, seen);
+    }
+    return output;
+  }
+
+  function parseBody(body) {
+    if (body == null) return null;
+    try {
+      if (typeof body === 'string') {
+        try { return sanitize(JSON.parse(body)); } catch {
+          if (body.includes('=')) {
+            try { return sanitize(Object.fromEntries(new URLSearchParams(body).entries())); } catch {}
+          }
+          return scrubText(body);
+        }
+      }
+      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return sanitize(Object.fromEntries(body.entries()));
+      if (typeof FormData !== 'undefined' && body instanceof FormData) return sanitize(Object.fromEntries(body.entries()));
+      if (typeof Blob !== 'undefined' && body instanceof Blob) return `<Blob:${body.type || 'unknown'}:${body.size}>`;
+      if (typeof ArrayBuffer !== 'undefined' && (body instanceof ArrayBuffer || ArrayBuffer.isView(body))) return `<binary:${body.byteLength}>`;
+      return sanitize(body);
+    } catch (error) {
+      return `<body-read-failed:${scrubText(error?.message || error)}>`;
+    }
+  }
+
+  function parseResponseText(text, contentType = '') {
+    const raw = String(text ?? '');
+    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
+      try { return sanitize(JSON.parse(raw)); } catch {}
+    }
+    return scrubText(raw);
+  }
+
+  function isInteresting(rawUrl) {
+    try { return INTERESTING_PATH.test(new URL(String(rawUrl || ''), location.href).pathname); }
+    catch { return INTERESTING_PATH.test(String(rawUrl || '')); }
+  }
+
+  function flushPage() {
+    syncSession();
+    clearTimeout(flushTimer);
+    flushTimer = 0;
+    try {
+      gmSet(pageStoreKey, JSON.stringify({
+        sessionId: activeSessionId,
+        pageId,
+        href: sanitizeUrl(location.href),
+        updatedAt: Date.now(),
+        version: VERSION,
+        events: pageEvents
+      }));
+      gmSet(pageCountKey, pageEvents.length);
+    } catch {}
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flushPage, FLUSH_MS);
+  }
+
+  function add(type, data = {}) {
+    syncSession();
+    if (full || sessionCount() >= MAX_EVENTS) {
+      full = true;
+      renderUi();
+      return false;
+    }
+    pageEvents.push({
+      at: new Date().toISOString(),
+      ts: Date.now(),
+      p: Math.round(performance.now?.() || 0),
+      id: `${pageId}:${++eventSeq}`,
+      pageId,
+      type: String(type || 'event').slice(0, 100),
+      page: sanitizeUrl(location.href),
+      data: sanitize(data)
+    });
+    gmSet(pageCountKey, pageEvents.length);
+    lastGlobalCount++;
+    scheduleFlush();
+    renderUi();
+    return true;
+  }
+
+  function collectSession(sessionId = activeSessionId) {
+    flushPage();
+    const events = [];
+    for (const key of sessionPageKeys(sessionId)) {
+      try {
+        const parsed = JSON.parse(gmGet(key, '') || '{}');
+        if (Array.isArray(parsed.events)) events.push(...parsed.events);
+      } catch {}
+    }
+    events.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+    return events.slice(0, MAX_EVENTS);
+  }
+
+  function exportText(events) {
+    const started = new Date(meta.startedAt || Date.now()).toISOString();
+    const lines = [
+      'BWU2 OBSERVABILITY CORE',
+      `Version: ${VERSION}`,
+      `Session: ${activeSessionId}`,
+      `Started: ${started}`,
+      `Exported: ${new Date().toISOString()}`,
+      `Events: ${events.length}/${MAX_EVENTS}`,
+      '',
+      'EVENTS'
+    ];
+    for (const event of events) lines.push(JSON.stringify(event));
+    return lines.join('\n');
+  }
+
+  function downloadAndReset() {
+    const events = collectSession();
+    const text = exportText(events);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `BWU2_Observability_${stamp}_${events.length}events.txt`;
+    anchor.style.display = 'none';
+    (document.body || document.documentElement).appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    resetSession('download');
+  }
+
+  function resetSession(reason = 'clear') {
+    const oldSession = activeSessionId;
+    clearTimeout(flushTimer);
+    flushTimer = 0;
+    for (const key of gmKeys()) {
+      if (key.startsWith(`${PAGE_PREFIX}${oldSession}:`) || key.startsWith(`${COUNT_PREFIX}${oldSession}:`)) gmDelete(key);
+    }
+    const fresh = defaultMeta();
+    fresh.resets = (Number(meta.resets) || 0) + 1;
+    fresh.previousReason = reason;
+    saveMeta(fresh);
+    activeSessionId = fresh.sessionId;
+    pageEvents = [];
+    eventSeq = 0;
+    pageStoreKey = pageKey(activeSessionId);
+    pageCountKey = countKey(activeSessionId);
+    gmSet(pageCountKey, 0);
+    lastGlobalCount = 0;
+    lastCountReadAt = Date.now();
+    full = false;
+    mutationStats = emptyMutationStats();
+    renderUi(true);
+    add('session.start', { reason });
+  }
+
+  function installFetchTrace() {
+    try {
+      const nativeFetch = W.fetch;
+      if (typeof nativeFetch !== 'function' || nativeFetch.__bwu2ObsV1) return;
+      const wrapped = async function(input, init = {}) {
+        const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input?.url || '';
+        const method = String(init?.method || input?.method || 'GET').toUpperCase();
+        const interesting = isInteresting(rawUrl);
+        const started = performance.now();
+        try {
+          const response = await nativeFetch.apply(this, arguments);
+          const base = {
+            transport: 'fetch', method, url: sanitizeUrl(rawUrl), status: response.status,
+            ok: response.ok, ms: Math.round(performance.now() - started),
+            redirected: !!response.redirected, finalUrl: response.url ? sanitizeUrl(response.url) : null
+          };
+          if (interesting) {
+            base.requestBody = parseBody(init?.body);
+            void response.clone().text().then(text => {
+              add('network', { ...base, responseBody: parseResponseText(text, response.headers.get('content-type') || '') });
+            }).catch(error => add('network', { ...base, responseReadError: scrubText(error?.message || error) }));
+          } else {
+            add('network.meta', base);
+          }
+          return response;
+        } catch (error) {
+          add('network.error', {
+            transport: 'fetch', method, url: sanitizeUrl(rawUrl),
+            requestBody: interesting ? parseBody(init?.body) : null,
+            ms: Math.round(performance.now() - started), error: scrubText(error?.message || error)
+          });
+          throw error;
+        }
+      };
+      try { Object.defineProperty(wrapped, 'name', { value: nativeFetch.name || 'fetch' }); } catch {}
+      wrapped.__bwu2ObsV1 = true;
+      W.fetch = wrapped;
+    } catch (error) {
+      add('core.error', { area: 'fetch-hook', error: scrubText(error?.message || error) });
+    }
+  }
+
+  function installXhrTrace() {
+    try {
+      const XHR = W.XMLHttpRequest;
+      if (!XHR?.prototype || XHR.prototype.__bwu2ObsV1) return;
+      const originalOpen = XHR.prototype.open;
+      const originalSend = XHR.prototype.send;
+      XHR.prototype.open = function(method, url) {
+        this.__bwu2Obs = { method: String(method || 'GET').toUpperCase(), url: String(url || '') };
+        return originalOpen.apply(this, arguments);
+      };
+      XHR.prototype.send = function(body) {
+        const info = this.__bwu2Obs || { method: 'GET', url: '' };
+        const interesting = isInteresting(info.url);
+        const started = performance.now();
+        this.addEventListener('loadend', () => {
+          const base = {
+            transport: 'xhr', method: info.method, url: sanitizeUrl(info.url),
+            status: this.status, ok: this.status >= 200 && this.status < 300,
+            ms: Math.round(performance.now() - started),
+            finalUrl: this.responseURL ? sanitizeUrl(this.responseURL) : null
+          };
+          if (interesting) {
+            base.requestBody = parseBody(body);
+            try {
+              if (!this.responseType || this.responseType === 'text') {
+                base.responseBody = parseResponseText(this.responseText || '', this.getResponseHeader('content-type') || '');
+              } else {
+                base.responseBody = sanitize(this.response);
+              }
+            } catch (error) {
+              base.responseReadError = scrubText(error?.message || error);
+            }
+            add('network', base);
+          } else {
+            add('network.meta', base);
+          }
+        }, { once: true });
+        return originalSend.apply(this, arguments);
+      };
+      XHR.prototype.__bwu2ObsV1 = true;
+    } catch (error) {
+      add('core.error', { area: 'xhr-hook', error: scrubText(error?.message || error) });
+    }
+  }
+
+  function targetInfo(target) {
+    const element = target instanceof Element ? target : target?.parentElement;
+    if (!element || uiRoot?.contains(element)) return null;
+    const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.innerText || element.textContent || '';
+    return {
+      tag: element.tagName?.toLowerCase() || 'unknown',
+      id: scrubText(element.id || ''),
+      role: element.getAttribute('role') || '',
+      type: element.getAttribute('type') || '',
+      name: element.getAttribute('name') || '',
+      label: scrubText(String(label).replace(/\s+/g, ' ').trim().slice(0, 120))
+    };
+  }
+
+  function installActionTrace() {
+    document.addEventListener('click', event => {
+      const info = targetInfo(event.target);
+      if (info) add('ui.click', info);
+    }, true);
+    document.addEventListener('submit', event => {
+      const info = targetInfo(event.target);
+      if (info) add('ui.submit', info);
+    }, true);
+    document.addEventListener('change', event => {
+      const info = targetInfo(event.target);
+      if (info) add('ui.change', info);
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      const info = targetInfo(event.target);
+      if (!info) return;
+      let value = '';
+      try { value = event.target?.value || ''; } catch {}
+      add('ui.enter', { ...info, input: value ? scrubText(value) : '' });
+    }, true);
+  }
+
+  function installRouteTrace() {
+    const wrap = name => {
+      try {
+        const original = W.history?.[name];
+        if (typeof original !== 'function') return;
+        W.history[name] = function() {
+          const before = location.href;
+          const result = original.apply(this, arguments);
+          const after = location.href;
+          if (after !== before) add(`route.${name}`, { from: sanitizeUrl(before), to: sanitizeUrl(after) });
+          lastHref = after;
+          return result;
+        };
+      } catch {}
+    };
+    wrap('pushState');
+    wrap('replaceState');
+    for (const name of ['hashchange', 'popstate', 'pageshow', 'pagehide']) {
+      window.addEventListener(name, () => {
+        const now = location.href;
+        add(`page.${name}`, { from: sanitizeUrl(lastHref), to: sanitizeUrl(now), visibility: document.visibilityState });
+        lastHref = now;
+      }, true);
+    }
+    document.addEventListener('visibilitychange', () => add('page.visibility', { visibility: document.visibilityState }), true);
+  }
+
+  function installErrorTrace() {
+    window.addEventListener('error', event => {
+      add('error', {
+        message: scrubText(event.message || event.error?.message || 'error'),
+        filename: sanitizeUrl(event.filename || ''), line: event.lineno || 0, column: event.colno || 0
+      });
+    }, true);
+    window.addEventListener('unhandledrejection', event => {
+      add('promise.rejection', { reason: scrubText(event.reason?.message || event.reason || 'unhandled rejection') });
+    }, true);
+  }
+
+  function emptyMutationStats() {
+    return { batches: 0, records: 0, added: 0, removed: 0, attributes: 0, text: 0, maxBatch: 0 };
+  }
+
+  function installMutationHealth() {
+    const start = () => {
+      if (!document.documentElement || mutationObserver) return;
+      mutationObserver = new MutationObserver(records => {
+        const filtered = records.filter(record => !uiRoot?.contains(record.target));
+        if (!filtered.length) return;
+        mutationStats.batches++;
+        mutationStats.records += filtered.length;
+        mutationStats.maxBatch = Math.max(mutationStats.maxBatch, filtered.length);
+        for (const record of filtered) {
+          mutationStats.added += record.addedNodes?.length || 0;
+          mutationStats.removed += record.removedNodes?.length || 0;
+          if (record.type === 'attributes') mutationStats.attributes++;
+          if (record.type === 'characterData') mutationStats.text++;
+        }
+      });
+      mutationObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      mutationTimer = setInterval(() => {
+        const snapshot = mutationStats;
+        mutationStats = emptyMutationStats();
+        if (snapshot.records >= 100 || snapshot.maxBatch >= 50) add('health.mutations', snapshot);
+      }, MUTATION_REPORT_MS);
+    };
+    if (document.documentElement) start();
+    else document.addEventListener('DOMContentLoaded', start, { once: true });
+  }
+
+  function installPerformanceHealth() {
+    try {
+      if (typeof PerformanceObserver !== 'undefined') {
+        const observer = new PerformanceObserver(list => {
+          for (const entry of list.getEntries()) {
+            if (entry.duration >= 100) add('health.longtask', { durationMs: Math.round(entry.duration), startMs: Math.round(entry.startTime) });
+          }
+        });
+        observer.observe({ type: 'longtask', buffered: true });
+      }
+    } catch {}
+
+    let expected = performance.now() + 1000;
+    setInterval(() => {
+      const now = performance.now();
+      const lag = now - expected;
+      expected = now + 1000;
+      if (lag >= EVENT_LOOP_WARN_MS) add('health.eventloop', { lagMs: Math.round(lag) });
+    }, 1000);
+  }
+
+  function installScriptBus() {
+    const emit = (type, data = {}) => add(`script.${String(type || 'event').slice(0, 80)}`, data);
+    try { W.BWU2Observe = emit; } catch {}
+    try {
+      if (typeof W.BWU2Trace !== 'function') W.BWU2Trace = emit;
+    } catch {}
+
+    window.addEventListener('message', event => {
+      if (event.source !== window) return;
+      const message = event.data;
+      if (!message || typeof message !== 'object') return;
+      if (message.__BWU2_OBS__ === true || message.__BWU2_TRACE__ === true) {
+        emit(message.type || 'message', message.data || {});
+      }
+    }, true);
+
+    window.addEventListener('bwu2-observability:event', event => {
+      let detail = event.detail;
+      try { if (typeof detail === 'string') detail = JSON.parse(detail); } catch {}
+      if (detail && typeof detail === 'object') emit(detail.type || 'event', detail.data || detail);
+    }, true);
+
+    window.addEventListener('fcr-usage:event', event => {
+      let detail = event.detail;
+      try { if (typeof detail === 'string') detail = JSON.parse(detail); } catch {}
+      if (detail && typeof detail === 'object') add('fcr.usage', detail);
+    }, true);
+  }
+
+  function isFCResearch() {
+    return FCR_HOST.test(location.hostname);
+  }
+
+  function injectUiStyles() {
+    if (document.getElementById('bwu2-observability-style')) return;
+    const style = document.createElement('style');
+    style.id = 'bwu2-observability-style';
+    style.textContent = `
+      #bwu2-observability-inline{display:inline-flex;align-items:center;gap:5px;margin-left:9px;vertical-align:middle;font:700 11px/1.2 Arial,sans-serif;white-space:nowrap;color:#374151}
+      #bwu2-observability-inline button{appearance:none;border:0;background:transparent;padding:1px 3px;margin:0;color:inherit;font:inherit;cursor:pointer;border-radius:3px}
+      #bwu2-observability-inline button:hover{text-decoration:underline;background:rgba(0,0,0,.05)}
+      #bwu2-observability-count{font-variant-numeric:tabular-nums}
+      #bwu2-observability-inline.warn #bwu2-observability-count{animation:bwu2ObsFlash .32s steps(1,end) infinite;background:#ffea00;color:#7f1d1d;box-shadow:0 0 0 1px #dc2626}
+      #bwu2-observability-inline.full #bwu2-observability-count{animation-duration:.16s;background:#ff2d2d;color:#fff;box-shadow:0 0 0 1px #7f1d1d}
+      @keyframes bwu2ObsFlash{0%,49%{opacity:1}50%,100%{opacity:.12}}
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function mountUi() {
+    if (!isFCResearch()) return true;
+    if (!document.documentElement) return false;
+    injectUiStyles();
+    if (document.getElementById('bwu2-observability-inline')) {
+      uiRoot = document.getElementById('bwu2-observability-inline');
+      uiCount = document.getElementById('bwu2-observability-count');
+      uiClear = document.getElementById('bwu2-observability-clear');
+      return true;
+    }
+
+    const logoResearch = document.querySelector('.logo-research');
+    const warehouse = document.querySelector('.warehouse-id');
+    const anchor = warehouse || logoResearch;
+    if (!anchor?.parentElement) return false;
+
+    const host = document.createElement('span');
+    host.id = 'bwu2-observability-inline';
+    host.dataset.fcrToolUi = '1';
+    host.innerHTML = '<button type="button" id="bwu2-observability-count" title="Download current observability log and start a fresh session">OBS 0/3000</button><span aria-hidden="true">·</span><button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
+    anchor.insertAdjacentElement('afterend', host);
+    uiRoot = host;
+    uiCount = host.querySelector('#bwu2-observability-count');
+    uiClear = host.querySelector('#bwu2-observability-clear');
+    uiCount.addEventListener('click', downloadAndReset);
+    uiClear.addEventListener('click', () => resetSession('clear'));
+    renderUi(true);
+    return true;
+  }
+
+  function renderUi(force = false) {
+    if (!isFCResearch()) return;
+    if (!uiRoot?.isConnected && !mountUi()) return;
+    const count = sessionCount(force);
+    uiCount.textContent = `OBS ${Math.min(count, MAX_EVENTS)}/${MAX_EVENTS}`;
+    uiRoot.classList.toggle('warn', count >= WARN_AT && count < MAX_EVENTS);
+    uiRoot.classList.toggle('full', count >= MAX_EVENTS);
+    uiCount.title = count >= MAX_EVENTS
+      ? 'FULL — click to download and start fresh'
+      : count >= WARN_AT
+        ? '80%+ — click to download and start fresh'
+        : 'Click to download current log and start fresh';
+  }
+
+  function bootUi() {
+    if (!isFCResearch()) return;
+    const start = () => {
+      if (mountUi()) return;
+      if (uiObserver) return;
+      uiObserver = new MutationObserver(() => {
+        if (mountUi()) {
+          uiObserver.disconnect();
+          uiObserver = null;
+        }
+      });
+      uiObserver.observe(document.documentElement, { childList: true, subtree: true });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
+    uiTimer = setInterval(() => renderUi(true), 1000);
+  }
+
+  add('page.start', {
+    version: VERSION,
+    host: location.hostname,
+    path: location.pathname,
+    title: document.title || ''
+  });
+
+  installFetchTrace();
+  installXhrTrace();
+  installScriptBus();
+  installRouteTrace();
+  installErrorTrace();
+  installActionTrace();
+  installMutationHealth();
+  installPerformanceHealth();
+  bootUi();
+
+  window.addEventListener('pagehide', () => {
+    flushPage();
+    if (mutationObserver) mutationObserver.disconnect();
+    if (uiObserver) uiObserver.disconnect();
+    if (mutationTimer) clearInterval(mutationTimer);
+    if (uiTimer) clearInterval(uiTimer);
+  }, { once: true });
+})();
