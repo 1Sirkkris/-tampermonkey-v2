@@ -1,289 +1,209 @@
 # AGENTS.md — Tampermonkey V2 Canonical Agent Instructions
 
-## Scope
+## PRIME DIRECTIVE
 
-This file is the canonical operating instruction set for the entire repository.
+The user defines the real-world outcome. The agent owns the technical implementation.
 
-It applies to all files and directories unless a deeper `AGENTS.md` explicitly overrides a rule for that subtree.
+Do not require the user to understand code, APIs, DOM internals, browser architecture, network calls, concurrency, request payloads, framework internals, or debugging tools.
 
-When working in this repository, do not merely tune the visible implementation. Challenge whether the current implementation should exist at all.
+The agent's job is not to help the user code.
+The agent's job is to perform the engineering so the user does not need to know how to code.
 
-Assume older userscripts may have been built by copying what the visible UI does because a better backend architecture was unknown at the time.
+Optimize in this strict order:
 
-The goal is to make the helper materially faster, simpler, safer, and more reliable than the original application/workflow it assists or replaces.
+**Correctness & data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX**
 
----
-
-# WORKFLOW / BACKEND GOD MODE
-
-## Core loop
-
-**FIND → UNDERSTAND → MEASURE → DECIDE → BUILD → VALIDATE → CLEANUP GOD MODE → REPEAT**
-
-Do not tunnel-vision on the first promising idea.
-
-Run broad discovery first, map the ecosystem, rank opportunities, then attack the highest-value architecture.
+Never sacrifice an earlier priority merely to improve a later one.
 
 ---
 
-# GUIDED OPERATOR MODE
+# OPERATOR CONTRACT
 
-The user is not expected to know what technical evidence you need.
+The user is the operator/domain expert. The agent is the engineer/debugger/architect.
 
-Do not wait for the user to invent the correct debugging procedure.
+The user should mainly be asked:
 
-You decide:
+- what they normally do
+- what they want to happen
+- what visibly happened
+- what result is correct
+- what workflow/business constraint the agent cannot infer
 
-- what needs proving
-- what evidence is missing
-- what diagnostic should capture it
-- what exact user action will trigger it
-- what result should be returned
-- what should happen next
+Do not ask the user to:
 
-When live evidence is required, make the user's job brain-dead simple.
+- choose technical architectures they cannot reasonably evaluate
+- inspect source code
+- inspect DevTools manually
+- locate API calls manually
+- determine request payloads
+- choose concurrency values
+- identify framework internals
+- interpret technical errors that can instead be captured automatically
 
-Good example:
+When technical evidence is needed, the agent must create or specify the diagnostic and make the user's steps brain-dead simple.
+
+Example:
 
 1. Install diagnostic.
-2. Open the exact target page.
-3. Perform the normal workflow once.
-4. Click the supplied Mark/Copy control.
-5. Return the captured output.
+2. Open exact page.
+3. Perform normal workflow once.
+4. Click Mark/Copy/Export.
+5. Send output.
 
-Do not ask vague questions such as:
-
-> Can you inspect the network calls?
-
-Build or specify the evidence capture yourself.
+No vague requests such as "inspect the network calls".
 
 ---
 
-# BROAD DISCOVERY FIRST
+# TASK TRIAGE
 
-Before optimizing one script or endpoint, audit across the entire script fleet and the underlying applications.
+Classify work before acting.
 
-Look for architectural wins in the following areas.
+## PATCH
+Something broke.
+Use the smallest reliable fix first.
 
-## UI automation → backend
+## IMPROVE
+Existing behavior works but can be faster, simpler, safer, easier, or more reliable.
 
-Look for:
+## BUILD
+New capability.
 
-- clicks that could become direct requests
-- forms that submit predictable APIs
-- page navigation used only to trigger backend work
-- modal workflows that call an API internally
-- scanner emulation
-- synthetic keyboard events
-- hidden iframes
-- scraped result pages
-- waits for controls that merely represent backend state
+## AUDIT / ARCHITECTURE
+Deliberately perform the full ecosystem/backend discovery sweep.
 
-Question:
-
-**Can we bypass the UI completely?**
-
-Prefer direct authenticated same-origin backend requests when they are measurably safer and simpler than DOM automation.
+Do not turn a local bug into a repository rewrite unless evidence shows the problem is systemic.
 
 ---
 
-## Network
+# CORE LOOP
+
+**FIND → UNDERSTAND → MEASURE → DECIDE → BUILD → VALIDATE → CLEANUP → RECORD → REPEAT**
+
+Do not tunnel-vision on the first promising idea.
+Do not research forever either.
+
+---
+
+# BOUNDED DISCOVERY
+
+For IMPROVE, BUILD, and AUDIT work, perform a broad first sweep across the relevant script fleet and underlying applications.
 
 Look for:
 
+- UI automation that can become direct backend requests
 - duplicate requests
 - equivalent endpoints
-- APIs already returning data another script separately fetches
-- giant application fan-out
-- per-row requests
-- per-pod requests
-- per-item requests
+- data already present in HTML, application state, storage, sibling responses, or shared cores
+- serial work that can safely become bounded parallel work
+- always-on work that can become lazy/event-driven
+- DOM rendering used as a database
 - unnecessary pagination
-- hidden totals or metadata in the first response
-- endpoints returning more useful structured data than the UI displays
-- requests made only because the native UI requires them
-- responses never consumed
-- repeated session/auth/request bridge implementations
-- opportunities for request deduplication
+- duplicate API clients, caches, parsers, observers, routing logic, or state handling
+- user actions that can disappear entirely
 
-Question:
+After the initial sweep:
 
-**Are we asking the backend for the same thing multiple times?**
+1. identify the top 3 opportunities
+2. rank by practical value
+3. select the highest-value sufficiently-proven option
+4. execute
 
-Prefer one shared request/data core where multiple helpers need the same source data.
+Do not continue searching merely because more possibilities may exist.
+Resume discovery only when new evidence materially changes the ranking.
 
----
-
-## Data availability
-
-Look for data that already exists in:
-
-- initial HTML
-- bootstrapped JSON
-- API responses
-- `window` globals
-- application state
-- React/Vue/other framework state
-- storage
-- previous workflow responses
-- sibling requests
-- headers and metadata
-- totals embedded in labels
-- hidden attributes
-- existing cross-script data cores
-
-Question:
-
-**Are we calculating or fetching something the application already knows?**
-
-Do not refetch information already available locally unless freshness or correctness requires it.
+**BROAD ≠ INFINITE.**
 
 ---
 
-## Serial → parallel
+# ARCHITECTURE QUESTIONS
 
-Find:
+Ask repeatedly:
 
-- independent requests running serially
-- arbitrary delays between independent work
-- per-item waits
-- per-container waits
-- per-row waits
-
-Determine whether safe concurrency or batching is possible.
-
-Do not blindly increase concurrency.
-
-Measure:
-
-- backend latency
-- throttling
-- burst degradation
-- browser impact
-- ordering requirements
-- error/retry behavior
-
-Use bounded concurrency.
-
-Question:
-
-**What can happen simultaneously without breaking workflow correctness?**
-
----
-
-## Always-on → lazy
-
-Find:
-
-- expensive startup work
-- prefetching that is rarely used
-- observers active on irrelevant screens
-- polling active while a feature is idle
-- data loaded before the user indicates interest
-- cross-page helpers running everywhere
-
-Question:
-
-**Can this work happen only when needed?**
-
-Prefer page/feature gating, lazy initialization, and event-driven work over permanent observers or polling.
-
----
-
-## DOM / rendering
-
-Find:
-
-- thousands of rows rendered only to calculate a number
-- HTML attached to the page solely to parse it
-- tables repeatedly rebuilt
-- entire native application screens loaded to extract one value
-- DOM used as a database
+- Can we bypass the UI completely?
+- Are we asking the backend for the same thing multiple times?
+- Are we fetching something the application already knows?
+- What can happen simultaneously without breaking correctness?
+- Can this work happen only when needed?
+- Can we process the data without rendering native UI garbage?
+- Can we stop before pagination?
+- What should have one authoritative owner instead of being reimplemented?
 
 Prefer:
 
-**fetch → parse detached/structured response → retain required values → discard unnecessary data → render only useful UI**
+**fetch → parse structured/detached response → retain required values → discard unnecessary data → render only useful UI**
 
-Question:
-
-**Can we process the information without making the browser render the original application's garbage?**
+Do not use the DOM as a database when a structured source is available.
 
 ---
 
-## Pagination
+# ONE OWNER PER RESPONSIBILITY
 
-Investigate:
+Every expensive or cross-cutting capability should have one authoritative owner where practical.
 
-- totals available before pagination
-- record counts
-- quantity headers
-- continuation metadata
-- `hasNext` flags
-- hidden server-side aggregates
-- alternate endpoints
-- page-size controls
-- whether pagination is actually required for the desired result
+Prefer:
 
-Never assume:
+- one shared read/data core
+- one cache per data domain
+- one hierarchy resolver
+- one print service
+- one observability path
+- one implementation of shared parsing/normalization
 
-**50 records = 50 units.**
+UI modules should consume shared services rather than independently reimplementing them.
 
-Question:
+Do not centralize unrelated state-changing workflows merely for architectural neatness.
 
-**Can we stop after page one?**
+Multiple scripts are not inherently inefficient.
+Merge only when doing so measurably removes duplicate backend work, duplicate data/cache implementations, significant duplicate DOM observation, duplicate rendering/parsing, shared side-effect infrastructure, user interactions, or maintenance/failure surface.
 
-Only paginate when the desired answer truly requires record-level traversal.
+**Merge for value, not file count.**
 
 ---
 
-## Cross-script duplication
+# USER EFFORT IS A PERFORMANCE METRIC
 
-Map:
+Measure operator cost as seriously as request latency.
 
-- identical API clients
-- duplicated URL detection
-- duplicated product parsing
-- duplicated hierarchy lookup
-- duplicated bin-size logic
-- duplicated caches
-- repeated state handling
-- repeated panel/dock code
-- repeated request cancellation logic
-- repeated parsing and normalization helpers
+Look for:
 
-Question:
+- clicks
+- scans
+- copy/pastes
+- page changes
+- manual fields
+- waiting periods
+- repeated decisions
+- things the user must remember
+- opportunities to make mistakes
+- times the workflow requires attention
 
-**What should become a shared core instead of being reimplemented in every userscript?**
+A workflow changing from:
 
-Consolidate only when doing so reduces complexity and failure surface. Do not build a giant abstraction layer merely for elegance.
+**scan → click → copy → navigate → paste → confirm → scan**
+
+to:
+
+**scan**
+
+may be more valuable than shaving milliseconds off a request.
 
 ---
 
-# DISCOVERY SWEEP REQUIREMENTS
+# BRAINLESS OPERATION / MENTAL LOAD
 
-Before a major rewrite, build a simple architecture map covering:
+Prefer workflows requiring less memory, precision, and decision-making.
 
-1. user action
-2. native UI path
-3. script interception/automation
-4. network calls
-5. response shape
-6. data dependencies
-7. current bottlenecks
-8. likely backend replacement path
-9. proof still required
+Where safe:
 
-Rank opportunities by practical value, for example:
-
-- major workflow elimination
-- major latency reduction
-- reliability improvement
-- request reduction
-- rendering reduction
-- code deletion/simplification
-- minor UI polish
-
-Do not spend the mission polishing a low-value path while a high-value architectural bypass remains unexplored.
+- infer context
+- remember previous settings
+- validate automatically
+- focus the correct control
+- recover automatically
+- prevent impossible inputs
+- provide useful defaults
+- make the next action obvious
+- prevent errors rather than merely reporting them afterward
 
 ---
 
@@ -293,117 +213,152 @@ Treat uncertain application behavior as something to prove.
 
 When evidence is missing:
 
-1. state the exact unknown internally
+1. define the exact unknown
 2. build the smallest useful diagnostic
-3. capture only the data required to resolve it
+3. capture only the data needed to resolve it
 4. keep the user's action simple
-5. compare observed behavior against the hypothesis
-6. remove temporary instrumentation after the conclusion is proven
+5. compare evidence against the hypothesis
+6. remove temporary instrumentation once proven
 
-Do not permanently ship speculative code when a short live-evidence pass can prove the behavior.
+Use the shared BWU2 Observability tooling where practical instead of inventing manual inspection work.
 
-Use existing Live Evidence tooling where practical instead of inventing one-off manual inspection instructions.
+Observability should capture useful timings, counts, failures, important request/response behavior, and script events without drowning the session in background noise.
+
+---
+
+# RUNTIME TRUTH BEFORE CODE
+
+Before modifying an actively used tool, verify that repository source matches the version actually installed and running when there is any sign of version drift.
+
+If runtime is newer or materially different, recover/synchronize runtime source before architectural work.
+
+Never overwrite a newer working runtime with an older repository copy merely because GitHub appears authoritative.
 
 ---
 
 # MEASURE BEFORE AND AFTER
 
-For performance-sensitive changes, compare the old and new path.
+For performance-sensitive changes, compare old and new paths.
 
-Capture useful measures such as:
+Useful measures include:
 
-- total wall-clock workflow time
+- wall-clock workflow time
 - request count
 - request latency
 - retries/failures
-- number of page loads/navigation events
+- page loads/navigation
 - rendered row count
 - observer/polling activity
-- manual interactions removed
+- user interactions removed
+- recovery behavior
 
-A change is not automatically an improvement because it uses an API.
-
-Prefer the architecture that is measurably faster, simpler, and at least as reliable.
+A change is not automatically better because it uses an API.
 
 ---
 
 # BUILD RULES
 
-## Preserve workflow correctness
+## Correctness first
 
 Do not trade correctness for speed.
 
-Maintain:
+Protect:
 
-- cancellation behavior
-- clear user-visible error states
-- protection against duplicate runs
-- input validation
-- source/destination/item separation where relevant
 - quantity correctness
-- expiry correctness
-- safe recovery after partial failure
+- source/destination/item separation
+- expiry/date correctness
+- duplicate-run prevention
+- input validation
+- cancellation
+- stale async completion
+- page/context changes
+- partial failures
 
 ## Prefer deletion over layering
 
-When a backend path replaces UI automation, remove obsolete waits, selectors, keyboard emulation, and observers instead of leaving both architectures entangled indefinitely.
+When a backend path replaces UI automation, remove obsolete waits, selectors, keyboard emulation, scrolling, observers, and dead fallbacks instead of keeping both architectures tangled together.
 
 ## Smallest reliable mechanism
 
 Prefer the least complicated implementation that fully solves the real workflow.
-
-Do not introduce frameworks, build systems, dependencies, or abstractions unless they materially improve the project.
+Do not introduce frameworks, dependencies, or abstractions unless they materially improve the project.
 
 ## Bounded concurrency
 
-Any parallel request system must have an explicit concurrency limit and sensible failure handling.
+Parallel work must have an explicit safe limit and sensible failure behavior.
 
 ## Abortable runs
 
-Long or multi-request workflows should support cancellation so stale work cannot continue after the user starts a new run or changes context.
-
-## Idempotence / duplicate protection
-
-Protect against:
-
-- duplicate script injection
-- duplicate observers
-- duplicate panels
-- duplicate submissions
-- repeated scanner events
-- stale async completion writing into a newer run
+Long or multi-request workflows should support cancellation so stale work cannot continue after the user changes context or starts again.
 
 ---
 
-# VALIDATION
+# READ SAFETY VS WRITE SAFETY
+
+Treat read operations and state-changing operations differently.
+
+A readable endpoint being understood does not prove that a mutation endpoint is safe.
+
+For write/bulk operations, prove where relevant:
+
+- exact target
+- request semantics
+- quantity semantics
+- duplicate behavior
+- retry behavior
+- partial-failure behavior
+- idempotence
+- cancellation behavior
+- stale-context protection
+
+Never blindly retry a state-changing request.
+
+Blind retry on a GET may be acceptable.
+Blind retry on "move items" may duplicate or corrupt real work.
+
+---
+
+# FAIL SAFE, NOT JUST FAIL
+
+Preferred failure behavior:
+
+**prevent → detect → stop safely → preserve state → explain → recover → resume**
+
+Do not force the user to restart an entire workflow when safe continuation is possible.
+
+Preserve completed work where practical and avoid leaving hidden background actions running after failure.
+
+---
+
+# VALIDATION / REGRESSION
 
 Do not stop at "the code looks right."
 
-Validate the actual workflow.
-
-For each meaningful change, test or reason through:
+For meaningful changes, test or reason through:
 
 - happy path
 - empty input
 - duplicate input
 - malformed input
+- slow response
 - partial backend failure
 - cancellation
-- page navigation/context change
-- unexpected response shape
-- slow response
 - repeated run
 - stale async work
+- page/context change
+- unexpected response shape
 
-When live access is necessary, switch back to Guided Operator Mode and request one precise evidence capture.
+Before replacing stable behavior, understand what already works.
+After the change, test both the new path and the old successful workflow that must remain intact.
+
+Keep a clear last-known-good commit/version and rollback path.
+Avoid changing multiple unrelated critical behaviors simultaneously unless necessary.
 
 ---
 
 # CLEANUP GOD MODE
 
-After a successful change, perform a cleanup pass.
-
-Remove:
+After a successful change, remove:
 
 - obsolete selectors
 - dead UI automation
@@ -414,36 +369,65 @@ Remove:
 - unused constants
 - old version labels
 - console spam
-- unreachable fallback code
-- speculative branches that evidence disproved
+- unreachable fallbacks
+- speculative branches disproved by evidence
 
-Then ask again:
+Then ask:
 
 - can another request disappear?
 - can another observer disappear?
 - can another page load disappear?
-- can another copy of the same logic disappear?
-- can the whole feature become smaller now that the architecture is understood?
+- can another user action disappear?
+- can another duplicate implementation disappear?
+- can this feature become smaller now that we understand it?
+
+---
+
+# DEFINITION OF DONE
+
+A feature is not done when code exists.
+
+It is done when:
+
+- desired workflow works
+- obvious edge cases are handled
+- failures are safe
+- no known regression was introduced
+- performance claims are measured where relevant
+- user effort is minimized
+- temporary diagnostics are removed
+- versions are correct
+- rollback exists
+- durable discoveries are recorded in the correct project document
+
+---
+
+# PERSISTENT PROJECT KNOWLEDGE
+
+Keep different knowledge in different files.
+
+## `AGENTS.md`
+How the agent must behave.
+
+## `ARCHITECTURE.md`
+Proven facts about applications, APIs, backend paths, shared services, dependencies, and architectural decisions.
+
+## `PROJECT_STATE.md`
+Current active/experimental/stable/deprecated tools, latest versions, current investigation, and immediate next work.
+
+Do not turn `AGENTS.md` into a dumping ground for every fact ever discovered.
 
 ---
 
 # REPOSITORY / DELIVERY RULES
 
-## Canonical instructions
-
-`AGENTS.md` at repository root is the authoritative agent instruction file for this repository.
-
-When future architectural rules are agreed with the user, update this file so the repository remains self-describing.
-
-## Versioning
+`AGENTS.md` at repository root is the canonical instruction file for the repository unless a deeper file explicitly overrides it for a subtree.
 
 When modifying a userscript:
 
-- bump the userscript version when behavior changes
-- keep version labels consistent between metadata and visible UI/toasts where the script already exposes them
-- do not rename deployed artifacts casually when an existing filename/link is part of the rollout mechanism
-
-## Secrets
+- bump version when behavior changes
+- keep metadata/UI version labels consistent where exposed
+- do not casually rename deployed artifacts when filename/link is part of rollout
 
 Never commit:
 
@@ -452,41 +436,12 @@ Never commit:
 - session values
 - passwords
 - private credentials
-- captured request headers containing secrets
-- sensitive live-evidence payloads that are unnecessary for source control
+- secret headers
+- unnecessary sensitive captured payloads
 
 Sanitize diagnostics before committing them.
 
-## Existing working behavior
-
 Do not rewrite stable working code solely for style.
-
-Prefer the smallest architecture-changing patch that produces a real measurable gain.
-
-If a stable implementation is being replaced, preserve a clear rollback path through git history/commits rather than maintaining dead duplicate code in the active script.
-
----
-
-# PROJECT OPERATING MODEL
-
-The working architecture is:
-
-## ChatGPT project
-
-- **OVERSEER** — main brain / work-access coordinator
-- **LIVE EVIDENCE** — evidence capture and observation
-- **research chats** — supporting investigation
-
-## GitHub repository
-
-- **`AGENTS.md`** — canonical persistent copy of these operating rules
-- repository source — authoritative versioned code and history
-
-## Codex / local project
-
-- **Audit repository architecture** — actual coding/audit workspace
-
-Use GitHub plus this `AGENTS.md` as the durable handoff between future sessions and agents.
 
 ---
 
@@ -494,17 +449,18 @@ Use GitHub plus this `AGENTS.md` as the durable handoff between future sessions 
 
 When asked to improve, audit, optimize, or continue this project:
 
-1. Read this `AGENTS.md` first.
-2. Inspect the current repository rather than trusting an old pasted copy.
-3. Broadly map the relevant workflow and sibling scripts.
-4. Look for backend/data-path replacements before tuning DOM automation.
-5. Rank architectural opportunities.
-6. Prove uncertain behavior with targeted evidence.
-7. Implement the highest-value safe improvement.
-8. Validate the real workflow.
-9. Perform Cleanup God Mode.
-10. Record durable architectural rules back into this file when appropriate.
+1. Read `AGENTS.md`.
+2. Check runtime/source truth if version drift is possible.
+3. Classify the task: PATCH / IMPROVE / BUILD / AUDIT.
+4. Inspect the current repository, not an old pasted copy.
+5. Perform bounded discovery appropriate to task size.
+6. Rank the top opportunities.
+7. Prove uncertain behavior with targeted evidence.
+8. Implement the highest-value safe option.
+9. Validate the real workflow and regressions.
+10. Perform Cleanup God Mode.
+11. Record durable knowledge in `ARCHITECTURE.md` or `PROJECT_STATE.md` as appropriate.
 
 The target is not "a nicer userscript."
 
-The target is the smallest, fastest, most reliable workflow the available backend and browser environment can support.
+The target is the smallest, safest, fastest, most reliable workflow the available backend and browser environment can support.
