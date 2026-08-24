@@ -22,3 +22,9 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
 
 Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless explicitly told otherwise. Diagnostic/usage-probe variants are kept separate from production/current scripts.
+
+## Temporary diagnostics
+
+| Script | Version | Purpose | Install/update |
+| --- | --- | --- | --- |
+| FCResearch Section Probe | 0.1.0 | Map native section XHR/render timing and run one explicit, reversible Receive History delay test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
