@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name       MAIN  v1.3.0 FNSKU mapping Lookup
-// @version      1.3.0-test
-// @description  Read-only direct FNSKU lookup. Queries NA + EU in background, extracts ASIN, then queries JP ASIN mappings without region page hopping.
+// @name       MAIN  v1.3.1 FNSKU mapping Lookup
+// @version      1.3.1-test
+// @description  Read-only regional FNSKU lookup with HOME merchant/MSKU details, JP fallback and matched JP/AU candidates.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
 // @match        https://fba-fnsku-commingling-console-na.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.0-test';
+  const VERSION = '1.3.1-test';
   const HOSTS = {
     na: 'fba-fnsku-commingling-console-na.aka.amazon.com',
     eu: 'fba-fnsku-commingling-console-eu.aka.amazon.com',
@@ -164,8 +164,36 @@
     return [...new Set(values.filter(Boolean))];
   }
 
+  function uniqueRows(rows) {
+    const seen = new Set();
+    return rows.filter(row => {
+      const key = [
+        row.region,
+        row.merchantId,
+        row.msku,
+        row.fnsku,
+        row.asin,
+        row.condition,
+        row.status,
+      ].map(value => String(value || '').trim().toUpperCase()).join('\u0001');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   function looksLikeLoginHtml(html) {
     return /sign\s*in|sso\/login|is_authenticated/i.test(html) && !/fnsku-table/i.test(html);
+  }
+
+  function hasNextPage(html) {
+    if (!html) return false;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return Array.from(doc.querySelectorAll('a,button,input[type="button"],input[type="submit"]')).some(element => {
+      const label = String(element.textContent || element.value || '').replace(/\s+/g, ' ').trim();
+      const disabled = element.disabled || element.getAttribute('aria-disabled') === 'true' || element.classList.contains('disabled');
+      return !disabled && /^next\s*>?$/i.test(label);
+    });
   }
 
   async function lookupFnsku(region, fnsku) {
@@ -198,8 +226,9 @@
     const usable = exact.length ? exact : rows;
     const fnskus = unique(usable.map(r => r.fnsku));
 
-    debug('JP_RESULT', { asin, rows: usable.length, fnskus });
-    return { region: 'jp', rows: usable, fnskus, elapsedMs: response.elapsedMs };
+    const hasNext = hasNextPage(response.text);
+    debug('JP_RESULT', { asin, rows: usable.length, fnskus, hasNext });
+    return { region: 'jp', rows: usable, fnskus, hasNext, elapsedMs: response.elapsedMs };
   }
 
   function setStatus(html, kind = 'normal') {
@@ -232,34 +261,135 @@
     return `<button type="button" class="fnsku-result-pill" data-copy="${safe}" title="${escapeHtml(title)}">${safe}</button>`;
   }
 
+  function tableValue(value, title) {
+    return value
+      ? resultPill(value, title)
+      : '<span class="fnsku-empty">—</span>';
+  }
+
+  function rowState(row) {
+    return [row.condition, row.status].filter(Boolean).join(' · ') || '—';
+  }
+
+  function homeMappings(regionResults, sourceFnsku, asin = '') {
+    return uniqueRows(regionResults.flatMap(result => result.rows
+      .filter(row => row.fnsku === sourceFnsku && (!asin || row.asin === asin))
+      .map(row => ({ ...row, region: result.region.toUpperCase() }))));
+  }
+
+  function matchCandidate(row, sourceRows) {
+    const merchantId = String(row.merchantId || '').trim().toUpperCase();
+    const msku = String(row.msku || '').trim().toUpperCase();
+    const merchant = !!merchantId && sourceRows.some(source => String(source.merchantId || '').trim().toUpperCase() === merchantId);
+    const sku = !!msku && sourceRows.some(source => String(source.msku || '').trim().toUpperCase() === msku);
+    const both = merchant && sku && sourceRows.some(source =>
+      String(source.merchantId || '').trim().toUpperCase() === merchantId &&
+      String(source.msku || '').trim().toUpperCase() === msku
+    );
+
+    if (both) return { rank: 3, key: 'both', label: 'BOTH' };
+    if (sku) return { rank: 2, key: 'msku', label: 'MSKU' };
+    if (merchant) return { rank: 1, key: 'merchant', label: 'MERCHANT' };
+    return { rank: 0, key: 'none', label: '—' };
+  }
+
+  function statusRank(status) {
+    return /^active$/i.test(String(status || '').trim()) ? 0 : 1;
+  }
+
+  function candidateMappings(rows, sourceRows) {
+    return uniqueRows(rows.map(row => ({ ...row, region: 'JP' })))
+      .map(row => ({ ...row, match: matchCandidate(row, sourceRows) }))
+      .sort((a, b) =>
+        b.match.rank - a.match.rank ||
+        statusRank(a.status) - statusRank(b.status) ||
+        a.merchantId.localeCompare(b.merchantId) ||
+        a.msku.localeCompare(b.msku) ||
+        a.fnsku.localeCompare(b.fnsku)
+      );
+  }
+
+  function mappingTable(rows, { candidate = false } = {}) {
+    if (!rows.length) return '<div class="fnsku-no-rows">No mappings returned.</div>';
+
+    const head = candidate
+      ? '<tr><th>Match</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>'
+      : '<tr><th>Region</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>';
+
+    const body = rows.map(row => {
+      const first = candidate
+        ? `<td><span class="fnsku-match ${escapeHtml(row.match.key)}">${escapeHtml(row.match.label)}</span></td>`
+        : `<td><b>${escapeHtml(row.region || '—')}</b></td>`;
+      const matchClass = candidate && row.match.rank ? ` class="fnsku-match-row rank-${row.match.rank}"` : '';
+
+      return `<tr${matchClass}>` +
+        first +
+        `<td>${tableValue(row.merchantId, 'Copy Merchant ID')}</td>` +
+        `<td>${tableValue(row.msku, 'Copy MSKU')}</td>` +
+        `<td>${tableValue(row.fnsku, 'Copy FNSKU')}</td>` +
+        `<td>${escapeHtml(rowState(row))}</td>` +
+        '</tr>';
+    }).join('');
+
+    return `<div class="fnsku-table-wrap"><table class="fnsku-map-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+  }
+
   function renderSuccess(result) {
-    const { sourceFnsku, sourceRegions, asin, jpFnskus, totalMs } = result;
+    const { sourceFnsku, sourceRegions, asin, sourceMappings, jpMappings, jpHasNext, totalMs } = result;
     const regionText = sourceRegions.join(' + ');
-    const targetHtml = jpFnskus.length
-      ? jpFnskus.map(x => resultPill(x)).join(' ')
-      : '<b>NO JP FNSKU RETURNED</b>';
+    const candidates = candidateMappings(jpMappings, sourceMappings);
+    const likelyCount = candidates.filter(row => row.match.rank > 0).length;
+    const comparison = likelyCount
+      ? `<b>${likelyCount} identifier match${likelyCount === 1 ? '' : 'es'} moved to the top.</b> Verify before using.`
+      : '<b>No exact Merchant ID or MSKU match returned.</b> Review the candidates manually.';
 
     setStatus(
       `<div class="fnsku-line"><span>Source</span>${resultPill(sourceFnsku)}</div>` +
       `<div class="fnsku-line"><span>Found</span><b>${escapeHtml(regionText)}</b></div>` +
       `<div class="fnsku-line"><span>ASIN</span>${resultPill(asin)}</div>` +
-      `<div class="fnsku-line target"><span>JP FNSKU</span><div>${targetHtml}</div></div>` +
-      `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · click barcode to copy</div>`,
-      jpFnskus.length ? 'success' : 'warn'
+      '<div class="fnsku-section-title">HOME mapping</div>' +
+      mappingTable(sourceMappings) +
+      `<div class="fnsku-section-title">JP / AU candidates (${candidates.length})</div>` +
+      `<div class="fnsku-match-note">${comparison}</div>` +
+      mappingTable(candidates, { candidate: true }) +
+      (jpHasNext ? '<div class="fnsku-page-warning"><b>More JP/AU results exist after this batch.</b> No match here is not a final no-match.</div>' : '') +
+      `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · click any ID to copy</div>`,
+      candidates.length ? 'success' : 'warn'
+    );
+  }
+
+  function renderJpHome(result) {
+    const { sourceFnsku, asin, sourceMappings, totalMs } = result;
+    setStatus(
+      `<div class="fnsku-line"><span>Source</span>${resultPill(sourceFnsku)}</div>` +
+      '<div class="fnsku-line"><span>Found</span><b>JP / AU</b></div>' +
+      `<div class="fnsku-line"><span>ASIN</span>${resultPill(asin)}</div>` +
+      '<div class="fnsku-section-title">JP / AU mapping</div>' +
+      mappingTable(sourceMappings) +
+      `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · source is already in the AU region · click any ID to copy</div>`,
+      'success'
     );
   }
 
   function renderAmbiguous(sourceFnsku, regionResults, totalMs) {
-    const chunks = [];
-    for (const r of regionResults) {
-      if (!r.asins.length) continue;
-      chunks.push(`<div class="fnsku-line"><span>${r.region.toUpperCase()}</span><div>${r.asins.map(a => resultPill(a, 'Click ASIN to copy')).join(' ')}</div></div>`);
-    }
+    const rows = uniqueRows(regionResults.flatMap(result => result.rows
+      .filter(row => row.fnsku === sourceFnsku)
+      .map(row => ({ ...row, region: result.region.toUpperCase() }))));
+    const body = rows.map(row => `<tr>` +
+      `<td><b>${escapeHtml(row.region)}</b></td>` +
+      `<td>${tableValue(row.asin, 'Copy ASIN')}</td>` +
+      `<td>${tableValue(row.merchantId, 'Copy Merchant ID')}</td>` +
+      `<td>${tableValue(row.msku, 'Copy MSKU')}</td>` +
+      `<td>${escapeHtml(rowState(row))}</td>` +
+      '</tr>').join('');
+    const table = rows.length
+      ? `<div class="fnsku-table-wrap"><table class="fnsku-map-table"><thead><tr><th>Region</th><th>ASIN</th><th>Merchant ID</th><th>MSKU</th><th>State</th></tr></thead><tbody>${body}</tbody></table></div>`
+      : '<div class="fnsku-no-rows">No mapping details returned.</div>';
 
     setStatus(
       `<b>Different ASINs found — stopped instead of guessing.</b>` +
       `<div class="fnsku-line"><span>Source</span>${resultPill(sourceFnsku)}</div>` +
-      chunks.join('') +
+      table +
       `<div class="fnsku-timing">${Math.round(totalMs)} ms</div>`,
       'warn'
     );
@@ -315,14 +445,54 @@
 
       if (failures.length) debug('REGION_FAILURES', { failures });
 
-      if (!regionResults.length) {
-        throw new Error(`Both NA and EU requests failed. ${failures.join(' | ')}`);
-      }
-
       const found = regionResults.filter(r => r.asins.length);
       if (!found.length) {
-        const extra = failures.length ? `<br><small>${escapeHtml(failures.join(' | '))}</small>` : '';
-        setStatus(`<b>No ASIN found in NA or EU for ${escapeHtml(sourceFnsku)}.</b>${extra}`, 'warn');
+        setStatus(
+          `<b>No mapping found in NA or EU for ${escapeHtml(sourceFnsku)}.</b><br>` +
+          'Checking JP / AU...'
+        );
+
+        let jpSource;
+        try {
+          jpSource = await lookupFnsku('jp', sourceFnsku);
+        } catch (jpError) {
+          const earlier = failures.length ? ` ${failures.join(' | ')} |` : '';
+          throw new Error(`NA/EU returned no usable mapping.${earlier} ${jpError?.message || String(jpError)}`);
+        }
+
+        if (myRun !== state.runId) return;
+
+        if (!jpSource.asins.length) {
+          const extra = failures.length ? `<br><small>${escapeHtml(failures.join(' | '))}</small>` : '';
+          setStatus(`<b>No ASIN found in NA, EU or JP/AU for ${escapeHtml(sourceFnsku)}.</b>${extra}`, 'warn');
+          return;
+        }
+
+        if (jpSource.asins.length !== 1) {
+          renderAmbiguous(sourceFnsku, [jpSource], performance.now() - started);
+          return;
+        }
+
+        const asin = jpSource.asins[0];
+        const sourceMappings = homeMappings([jpSource], sourceFnsku, asin);
+        const totalMs = performance.now() - started;
+        state.lastResult = {
+          mode: 'jp-source',
+          sourceFnsku,
+          sourceRegions: ['JP'],
+          asin,
+          sourceMappings,
+          jpMappings: [],
+          jpFnskus: unique(sourceMappings.map(row => row.fnsku)),
+          totalMs,
+        };
+        debug('RUN_SUCCESS_JP_SOURCE', {
+          sourceFnsku,
+          asin,
+          homeMappings: sourceMappings.length,
+          totalMs,
+        });
+        renderJpHome(state.lastResult);
         return;
       }
 
@@ -344,10 +514,29 @@
       if (myRun !== state.runId) return;
 
       const jpFnskus = jp.fnskus;
+      const sourceMappings = homeMappings(found, sourceFnsku, asin);
       const totalMs = performance.now() - started;
 
-      state.lastResult = { sourceFnsku, sourceRegions, asin, jpFnskus, totalMs };
-      debug('RUN_SUCCESS', state.lastResult);
+      state.lastResult = {
+        sourceFnsku,
+        sourceRegions,
+        asin,
+        sourceMappings,
+        jpMappings: jp.rows,
+        jpFnskus,
+        jpHasNext: jp.hasNext,
+        totalMs,
+      };
+      debug('RUN_SUCCESS', {
+        sourceFnsku,
+        sourceRegions,
+        asin,
+        homeMappings: sourceMappings.length,
+        jpMappings: jp.rows.length,
+        jpFnskus: jpFnskus.length,
+        jpHasNext: jp.hasNext,
+        totalMs,
+      });
       renderSuccess(state.lastResult);
     } catch (err) {
       debug('RUN_ERROR', { message: err?.message || String(err), stack: err?.stack || '' });
@@ -403,7 +592,7 @@
     style.textContent = `
       #fnsku-direct-wrap {
         position: fixed; top: 12px; right: 12px; z-index: 999999;
-        width: 340px; box-sizing: border-box; padding: 12px;
+        width: min(720px, calc(100vw - 24px)); box-sizing: border-box; padding: 12px;
         background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.15);
         border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.16);
         font: 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#111;
@@ -420,7 +609,7 @@
       .fnsku-btn:hover, .fnsku-result-pill:hover { background:#f2f3f4; }
       .fnsku-btn.primary { font-weight:800; flex:1; background:#eef5ff; }
       .fnsku-btn:disabled { opacity:.55; cursor:wait; }
-      #fnsku-direct-status { margin-top:9px; padding:9px; min-height:44px; border-radius:9px; background:#f4f5f6; overflow-wrap:anywhere; }
+      #fnsku-direct-status { margin-top:9px; padding:9px; min-height:44px; max-height:calc(100vh - 235px); overflow:auto; border-radius:9px; background:#f4f5f6; overflow-wrap:anywhere; }
       #fnsku-direct-status[data-kind="success"] { background:#e9f4ff; border:1px solid #8bbce8; }
       #fnsku-direct-status[data-kind="warn"] { background:#fff4d8; border:1px solid #d9a62d; }
       #fnsku-direct-status[data-kind="error"] { background:#ffe8e8; border:1px solid #d88; }
@@ -429,6 +618,25 @@
       .fnsku-line.target { margin-top:8px; padding-top:7px; border-top:1px solid rgba(0,0,0,.12); }
       .fnsku-line.target .fnsku-result-pill { font-weight:900; font-size:14px; }
       .fnsku-result-pill { padding:4px 7px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+      .fnsku-section-title { margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,.14); font-weight:900; font-size:13px; }
+      .fnsku-match-note { margin:5px 0 7px; font-size:11px; }
+      .fnsku-page-warning { margin-top:7px; padding:6px 8px; border:2px solid #8a5a00; border-radius:6px; background:#fff1c2; color:#3d2a00; }
+      .fnsku-table-wrap { overflow:auto; border:1px solid rgba(0,0,0,.14); border-radius:8px; background:#fff; }
+      .fnsku-map-table { width:100%; border-collapse:collapse; table-layout:auto; font-size:11px; }
+      .fnsku-map-table th, .fnsku-map-table td { padding:5px 6px; border-bottom:1px solid #e1e4e8; text-align:left; vertical-align:middle; white-space:nowrap; }
+      .fnsku-map-table th { position:sticky; top:0; z-index:1; background:#e9edf2; font-weight:800; }
+      .fnsku-map-table tr:last-child td { border-bottom:0; }
+      .fnsku-map-table tbody tr:nth-child(even) { background:#f6f8fa; }
+      .fnsku-map-table .fnsku-result-pill { border:0; background:transparent; padding:2px 3px; text-align:left; }
+      .fnsku-map-table .fnsku-result-pill:hover { background:#e6edf5; text-decoration:underline; }
+      .fnsku-match-row { outline:2px solid #2463a8; outline-offset:-2px; font-weight:700; }
+      .fnsku-match-row.rank-3 { background:#dbeafe !important; }
+      .fnsku-match { display:inline-block; min-width:60px; padding:2px 4px; border:1px solid #7b8794; border-radius:4px; text-align:center; font-size:10px; font-weight:900; background:#fff; }
+      .fnsku-match.both { color:#fff; background:#174f86; border-color:#174f86; }
+      .fnsku-match.msku, .fnsku-match.merchant { color:#17324d; background:#dbeafe; border-color:#2463a8; }
+      .fnsku-match.none { color:#68717a; border-color:transparent; background:transparent; }
+      .fnsku-empty, .fnsku-no-rows { opacity:.6; }
+      .fnsku-no-rows { padding:7px; }
       .fnsku-timing { margin-top:7px; font-size:11px; opacity:.6; }
       .fnsku-small { font-size:11px; opacity:.65; margin-top:7px; }
     `;
@@ -452,7 +660,7 @@
         <button class="fnsku-btn" data-go="eu" type="button">Go EU</button>
         <button class="fnsku-btn" data-go="jp" type="button">Go JP</button>
       </div>
-      <div id="fnsku-direct-status">Ready. NA + EU will be queried in background; JP is queried only after one ASIN is found.</div>
+      <div id="fnsku-direct-status">Ready. Checks NA + EU first, then JP/AU automatically when no mapping is found.</div>
       <div class="fnsku-small">TEST build · read-only GET requests · no automatic region hopping</div>
     `;
 
