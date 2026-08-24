@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.3 BWU2 Observability Core
+// @name         CORE v0.1.4 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.3
+// @version      0.1.4
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -37,6 +37,7 @@
   const EVENT_LOOP_WARN_MS = 500;
   const EVENT_LOOP_MIN_GAP_MS = 10000;
   const FCR_NETWORK_QUIET_MS = 1200;
+  const FCR_CORE_QUIET_MS = 1200;
   const SLOW_NETWORK_MS = 1500;
   const VISIBILITY_DEBOUNCE_MS = 750;
   const VIEWPORT_DEBOUNCE_MS = 500;
@@ -49,6 +50,7 @@
 
   const SENSITIVE_KEY = /authorization|cookie|credential|csrf|jwt|password|passwd|secret|session.?token|signature|token|x-amz|api.?key/i;
   const IDENTIFIER_KEY = /asin|barcode|container|correlation.?id|destination|fcsku|fnsku|item|lpn|object|pod|request.?id|scannable|sku|source|trace.?id/i;
+  const SAFE_SOURCE_VALUE = /^(?:cache|network|dedupe|empty|error|remembered|uncached|unknown|other)$/i;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
   const DETAILED_PATH = /(?:\/api\/|edititems|fcskuflip|moveitems|move-container|close-container|scan-source-container|scanitem|sideline|dropzone|print)/i;
   const NOISE_HOST = /(?:^|\.)(?:data\.pendo\.aft\.amazon\.dev|api\.pendo\.aft\.amazon\.dev)$/i;
@@ -87,6 +89,8 @@
   let pollNetworkTimer = 0;
   let pollNetworkStats = new Map();
   const corePending = new Map();
+  let coreSuccessTimer = 0;
+  let coreSuccessStats = new Map();
   let lastRejection = null;
 
   function gmGet(key, fallback) { try { return GM_getValue(key, fallback); } catch { return fallback; } }
@@ -153,6 +157,9 @@
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
     corePending.clear();
+    clearTimeout(coreSuccessTimer);
+    coreSuccessTimer = 0;
+    coreSuccessStats = new Map();
     gmSet(pageCountKey, 0);
     return true;
   }
@@ -239,6 +246,7 @@
     if (typeof value === 'bigint') return String(value);
 
     if (typeof value === 'string') {
+      if (/^source$/i.test(key) && SAFE_SOURCE_VALUE.test(value)) return value.toLowerCase();
       if (IDENTIFIER_KEY.test(key)) return fingerprint(value, key || 'id');
       if (/url|uri|href/i.test(key) || /^https?:\/\//i.test(value)) return sanitizeUrl(value);
       return scrubText(value);
@@ -499,6 +507,7 @@
   }
 
   function collectSession(sessionId = activeSessionId) {
+    flushCoreSuccessSummary();
     flushPage();
     const events = [];
 
@@ -583,6 +592,9 @@
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
     corePending.clear();
+    clearTimeout(coreSuccessTimer);
+    coreSuccessTimer = 0;
+    coreSuccessStats = new Map();
     renderUi(true);
     add('session.start', { reason });
   }
@@ -1039,6 +1051,82 @@
     return out;
   }
 
+  function normalizedCoreSource(data) {
+    const source = String(data?.source || 'unknown').trim().toLowerCase();
+    return SAFE_SOURCE_VALUE.test(source) ? source : 'other';
+  }
+
+  function recordCoreSuccess(pending, message, elapsedMs) {
+    const response = coreResponseSummary(message.data);
+    const source = normalizedCoreSource(message.data);
+    const endpoint = scrubText(response.endpoint || '');
+    const key = JSON.stringify([pending.type, pending.client, pending.group, source, endpoint]);
+    const stat = coreSuccessStats.get(key) || {
+      type: pending.type,
+      client: pending.client,
+      group: pending.group,
+      source,
+      endpoint,
+      count: 0,
+      totalElapsedMs: 0,
+      maxElapsedMs: 0,
+      coreVersion: scrubText(message.version || '')
+    };
+
+    stat.count++;
+    stat.totalElapsedMs += elapsedMs;
+    stat.maxElapsedMs = Math.max(stat.maxElapsedMs, elapsedMs);
+    coreSuccessStats.set(key, stat);
+
+    clearTimeout(coreSuccessTimer);
+    coreSuccessTimer = setTimeout(flushCoreSuccessSummary, FCR_CORE_QUIET_MS);
+  }
+
+  function flushCoreSuccessSummary() {
+    clearTimeout(coreSuccessTimer);
+    coreSuccessTimer = 0;
+    if (!coreSuccessStats.size) return;
+
+    const sources = { cache: 0, network: 0, dedupe: 0, other: 0 };
+    const otherSources = {};
+    let successes = 0;
+    const operations = [...coreSuccessStats.values()].map(stat => {
+      successes += stat.count;
+      if (Object.prototype.hasOwnProperty.call(sources, stat.source) && stat.source !== 'other') {
+        sources[stat.source] += stat.count;
+      } else {
+        sources.other += stat.count;
+        otherSources[stat.source] = (otherSources[stat.source] || 0) + stat.count;
+      }
+
+      const operation = {
+        type: stat.type,
+        client: stat.client,
+        group: stat.group,
+        source: stat.source,
+        count: stat.count,
+        averageElapsedMs: Math.round(stat.totalElapsedMs / stat.count),
+        maxElapsedMs: Math.round(stat.maxElapsedMs),
+        coreVersion: stat.coreVersion
+      };
+      if (stat.endpoint) operation.endpoint = stat.endpoint;
+      return operation;
+    }).sort((a, b) =>
+      a.type.localeCompare(b.type) ||
+      a.client.localeCompare(b.client) ||
+      a.source.localeCompare(b.source) ||
+      a.endpoint?.localeCompare(b.endpoint || '') || 0
+    );
+
+    coreSuccessStats = new Map();
+    add('fcr.core.success.summary', {
+      successes,
+      sources,
+      ...(sources.other ? { otherSources } : {}),
+      operations
+    });
+  }
+
   function installFcrDataCoreTrace() {
     window.addEventListener('fcr-data-core:request', event => {
       const message = parseEventDetail(event.detail);
@@ -1058,16 +1146,25 @@
       if (!pending) return;
       corePending.delete(String(message.id));
       const error = scrubText(message.error || '');
-      add(error === 'fcr-data-core:cancelled' ? 'fcr.core.cancelled' : 'fcr.core.response', {
+      const elapsedMs = Math.round(performance.now() - pending.started);
+      const response = {
         type: pending.type,
         client: pending.client,
         group: pending.group,
         ok: !!message.ok,
-        elapsedMs: Math.round(performance.now() - pending.started),
+        elapsedMs,
         coreVersion: scrubText(message.version || ''),
         error,
         ...coreResponseSummary(message.data)
-      });
+      };
+
+      if (error === 'fcr-data-core:cancelled') {
+        add('fcr.core.cancelled', response);
+      } else if (!message.ok || normalizedCoreSource(message.data) === 'error' || message.data?.complete === false) {
+        add('fcr.core.failure', response);
+      } else {
+        recordCoreSuccess(pending, message, elapsedMs);
+      }
     }, true);
 
     window.addEventListener('fcr-data-core:cancel', event => {
@@ -1266,6 +1363,7 @@
     clearTimeout(pollNetworkTimer);
     flushFcrNetworkSummary();
     flushPollNetworkSummary();
+    flushCoreSuccessSummary();
     flushPage();
     if (mutationObserver) mutationObserver.disconnect();
     if (uiObserver) uiObserver.disconnect();
