@@ -12,8 +12,8 @@ Disable older copies first.
 07 Bin Check Overlay v7.4.1
 08 Dropzone Queue v0.2.17
 09 LIVE EVIDENCE CAPTURE v0.3.0
-10 BWU2 Observability Core v0.1.4
+10 BWU2 Observability Core v0.1.5
 
-Updater-enabled sources: main c14ddf42.
+Updater-enabled sources: main 0bc53e00.
 
 09 is always-on passive capture. Mark can be used BEFORE or AFTER an interesting event. On FCResearch, INV Probe is available for targeted /results/inventory testing.

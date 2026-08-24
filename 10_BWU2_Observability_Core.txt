@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.4 BWU2 Observability Core
+// @name         CORE v0.1.5 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.4
+// @version      0.1.5
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -384,25 +384,31 @@
     const url = parsedUrl(rawUrl);
     const path = url?.pathname || '';
     const key = `${base.method} ${path}`;
-    const stat = fcrNetworkStats.get(key) || { method: base.method, path, count: 0, failures: 0, totalMs: 0, maxMs: 0 };
+    const cancelled = Number(base.status) === 0;
+    const stat = fcrNetworkStats.get(key) || { method: base.method, path, count: 0, failures: 0, cancelled: 0, totalMs: 0, maxMs: 0 };
     stat.count++;
-    if (!base.ok) stat.failures++;
-    stat.totalMs += Number(base.ms || 0);
-    stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
+    if (cancelled) stat.cancelled = (stat.cancelled || 0) + 1;
+    else {
+      if (!base.ok) stat.failures++;
+      stat.totalMs += Number(base.ms || 0);
+      stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
+    }
     fcrNetworkStats.set(key, stat);
 
     clearTimeout(fcrNetworkTimer);
     fcrNetworkTimer = setTimeout(flushFcrNetworkSummary, FCR_NETWORK_QUIET_MS);
 
-    if (Number(base.ms || 0) >= SLOW_NETWORK_MS) {
+    if (cancelled) {
+      add('network.cancelled', { ...base, path, reason: 'status-0' });
+    } else if (Number(base.ms || 0) >= SLOW_NETWORK_MS) {
       add('network.slow', { ...base, path });
     }
 
-    if (!base.ok) {
+    if (!cancelled && !base.ok) {
       add('network.http-error', { ...base, path });
     }
 
-    if (claimFcrShapeSample(base.method, rawUrl)) {
+    if (!cancelled && claimFcrShapeSample(base.method, rawUrl)) {
       add('fcr.response.shape', {
         method: base.method,
         path,
@@ -418,14 +424,19 @@
     clearTimeout(fcrNetworkTimer);
     fcrNetworkTimer = 0;
     if (!fcrNetworkStats.size) return;
-    const endpoints = [...fcrNetworkStats.values()].map(stat => ({
-      method: stat.method,
-      path: stat.path,
-      count: stat.count,
-      failures: stat.failures,
-      averageMs: stat.count ? Math.round(stat.totalMs / stat.count) : 0,
-      maxMs: Math.round(stat.maxMs)
-    })).sort((a, b) => a.path.localeCompare(b.path));
+    const endpoints = [...fcrNetworkStats.values()].map(stat => {
+      const cancelled = stat.cancelled || 0;
+      const completed = Math.max(0, stat.count - cancelled);
+      return {
+        method: stat.method,
+        path: stat.path,
+        count: stat.count,
+        failures: stat.failures,
+        ...(cancelled ? { cancelled } : {}),
+        averageMs: completed ? Math.round(stat.totalMs / completed) : 0,
+        maxMs: Math.round(stat.maxMs)
+      };
+    }).sort((a, b) => a.path.localeCompare(b.path));
     fcrNetworkStats = new Map();
     add('fcr.network.summary', { endpoints });
   }
@@ -652,8 +663,8 @@
           return response;
         } catch (error) {
           if (!noise) {
+            const aborted = isAbortLikeError(error);
             const message = scrubText(error?.message || error);
-            const aborted = error?.name === 'AbortError' || /\babort(?:ed|ing)?\b/i.test(message);
             add(aborted ? 'network.abort' : 'network.error', {
               transport: 'fetch',
               method,
@@ -673,6 +684,12 @@
     } catch (error) {
       add('core.error', { area: 'fetch-hook', error: scrubText(error?.message || error) });
     }
+  }
+
+  function isAbortLikeError(error) {
+    const name = String(error?.name || '').trim().toLowerCase();
+    const message = String(error?.message || error || '');
+    return name === 'aborterror' || Number(error?.code) === 20 || /\b(?:abort|cancel)(?:ed|ing|led|ling)?\b/i.test(message);
   }
 
   function installXhrTrace() {
@@ -710,6 +727,7 @@
             ms: Math.round(performance.now() - started),
             finalUrl: this.responseURL ? sanitizeUrl(this.responseURL) : null
           };
+          const cancelled = Number(base.status) === 0;
 
           if (fcr) {
             let text = '';
@@ -719,6 +737,8 @@
               contentType = this.getResponseHeader('content-type') || '';
             } catch {}
             recordFcrNetwork(base, info.url, body, text, contentType);
+          } else if (cancelled) {
+            add('network.cancelled', { ...base, reason: 'status-0' });
           } else if (detailed) {
             const detail = { ...base, request: summarizeRequestShape(body) };
             try {
@@ -1160,8 +1180,10 @@
 
       if (error === 'fcr-data-core:cancelled') {
         add('fcr.core.cancelled', response);
-      } else if (!message.ok || normalizedCoreSource(message.data) === 'error' || message.data?.complete === false) {
+      } else if (!message.ok || normalizedCoreSource(message.data) === 'error') {
         add('fcr.core.failure', response);
+      } else if (message.data?.complete === false) {
+        add('fcr.core.partial', response);
       } else {
         recordCoreSuccess(pending, message, elapsedMs);
       }
