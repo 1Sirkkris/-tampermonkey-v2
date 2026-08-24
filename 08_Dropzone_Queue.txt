@@ -1,18 +1,20 @@
 // ==UserScript==
-// @name         TEST v0.2.16 Dropzone Selector Queue
+// @name         TEST v0.2.17 Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.2.16
-// @description  TEST: Dropzone Selector with direct sequential MoveContainer API queue. Normal single-container DZ auto-scan remains unchanged.
+// @version      0.2.17
+// @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @match        aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/move-container*
 // @match        aft-moveapp-*.proxy.amazon.com/move-container*
 // @grant        GM_xmlhttpRequest
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const VERSION = '0.2.16';
+  const VERSION = '0.2.17';
 
   const STORAGE_DZ = 'moveapp_dz_selector_type_v021';
   const STORAGE_FLOOR = 'moveapp_dz_selector_floor_v021';
@@ -181,7 +183,8 @@
       const value = original.trim();
       const last = i === lines.length - 1;
 
-      // Keep unfinished scan.
+      // Current unfinished scan/typed line: leave it completely alone until
+      // scanner Enter creates the newline (or RUN finalizes it).
       if (last && !trailingNewline && !finalize) {
         keep.push(original);
         continue;
@@ -228,7 +231,7 @@
     if (!parsed.valid.length) {
       queueState.message = parsed.invalid.length ? 'No dropzone-compatible containers' : 'Queue is empty';
       saveQueueState();
-      renderQueueStatusOnly();
+      renderQueueState();
       return false;
     }
 
@@ -251,7 +254,7 @@
     if (queueState.currentId && !queueItem(queueState.currentId)) queueState.currentId = '';
     queueState.message = 'Completed rows cleared';
     saveQueueState();
-    renderUi();
+    renderQueueState();
   }
 
   function clearQueueAll() {
@@ -260,7 +263,7 @@
     setQueueDraft('');
     saveQueueState();
     traceQueue('MOVECONTAINER_QUEUE_CLEAR', {});
-    renderUi();
+    renderQueueState();
   }
 
   function pauseQueue(reason = 'Paused') {
@@ -274,7 +277,7 @@
       phase: queueState.phase,
       destination: queueState.lockedDz
     });
-    renderUi();
+    renderQueueState();
   }
 
   function markCurrentAttention(reason, pause = false) {
@@ -423,7 +426,9 @@
     try {
       const result = await directMoveRequest(current.id, queueState.lockedDz);
 
-      // In-flight success still counts.
+      // API confirmed the move. Even if user hit PAUSE while the request was
+      // in-flight, this completed row is safe to mark done; we simply do not
+      // advance until RUN is pressed again.
       current.status = 'done';
       current.error = '';
       queueState.currentId = '';
@@ -442,7 +447,9 @@
       const status = Number(error?.status || 0);
       const reason = error?.message || 'Move failed';
 
-      // System failure pauses queue.
+      // Item-specific 4xx errors can be skipped so one bad tote does not kill
+      // a long queue. Auth/rate-limit/server/network failures pause the queue
+      // so we do not machine-gun the same systemic failure through every tote.
       const fatal =
         status === 0 ||
         status === 401 ||
@@ -488,7 +495,8 @@
         return;
       }
 
-      // Prevent accidental rerun.
+      // The active list below now owns these IDs. Clearing the raw input makes
+      // accidental duplicate re-runs much harder.
       setQueueDraft('');
       const textarea = document.getElementById('moveapp-queue-input');
       if (textarea) textarea.value = '';
@@ -519,7 +527,8 @@
     setTimeout(runQueueDirect, 0);
   }
 
-  // Never resubmit uncertain move after reload.
+  // A refresh while a move is mid-flight is deliberately NOT auto-resubmitted.
+  // The list survives, but the uncertain active row is marked for attention.
   function recoverQueueAfterReload() {
     if (!queueState.running) return;
     const current = queueItem();
@@ -644,6 +653,8 @@
   function isDestinationStep() {
     return /scan destination container/i.test(pageText());
   }
+
+
 
   function visible(el) {
     if (!el) return false;
@@ -780,6 +791,7 @@
     }
 
     wasDestinationStep = false;
+
   }
 
   function colorForFloor(floor) {
@@ -825,34 +837,239 @@
     const qPause = root.querySelector('#moveapp-queue-pause');
     const qClearDone = root.querySelector('#moveapp-queue-clear-done');
     const qClearAll = root.querySelector('#moveapp-queue-clear-all');
+    const qSummary = root.querySelector('#moveapp-queue-summary');
+    const qMessage = root.querySelector('#moveapp-queue-message');
+    const qList = root.querySelector('#moveapp-queue-list');
+    const qLock = root.querySelector('#moveapp-queue-lock');
+    if (!qInput || !qInputToggle || !qRun || !qPause || !qClearDone || !qClearAll || !qSummary || !qMessage || !qList || !qLock) return;
+
+    const inputEnabled = queueInputEnabled();
+    const draft = getQueueDraft();
+    if (qInput.value !== draft && document.activeElement !== qInput) qInput.value = draft;
+    qInput.readOnly = !inputEnabled || queueState.running || queueRequestActive;
+    qInput.style.opacity = qInput.readOnly ? '.55' : '1';
+    qInput.style.cursor = qInput.readOnly ? 'not-allowed' : 'text';
+    qInputToggle.textContent = inputEnabled ? 'INPUT ON' : 'INPUT OFF';
+    qInputToggle.style.background = inputEnabled ? '#2e7d32' : '#8b3030';
+
+    const counts = queueCounts();
+    qLock.textContent = queueState.lockedDz
+      ? `${queueState.running || queueRequestActive ? 'API →' : 'Last:'} ${queueState.lockedDz}`
+      : `Selected: ${selectedDropzone() || 'NONE'}`;
+    qSummary.textContent =
+      `Total ${counts.total} | Queued ${counts.queued} | Done ${counts.done}` +
+      (counts.attention ? ` | Attention ${counts.attention}` : '');
+    qMessage.textContent = queueState.message || '';
+
+    qRun.textContent = queueState.running ? 'RUNNING' : (queueRequestActive ? 'FINISHING' : 'RUN');
+    qRun.disabled = queueState.running || queueRequestActive;
+    qRun.style.opacity = qRun.disabled ? '.45' : '1';
+    qPause.disabled = !queueState.running;
+    qPause.style.opacity = queueState.running ? '1' : '.45';
+
+    const clearDisabled = queueState.running || queueRequestActive;
+    qClearDone.disabled = clearDisabled;
+    qClearAll.disabled = clearDisabled;
+    qClearDone.style.opacity = clearDisabled ? '.45' : '1';
+    qClearAll.style.opacity = clearDisabled ? '.45' : '1';
+
+    qList.replaceChildren();
+    const statusMeta = {
+      queued: { symbol: '•', bg: '#262626', fg: '#e5e5e5' },
+      active: { symbol: '→', bg: '#17354f', fg: '#d8efff' },
+      done: { symbol: '✓', bg: '#173d24', fg: '#d8ffe1' },
+      attention: { symbol: '!', bg: '#5a2020', fg: '#ffd8d8' }
+    };
+
+    for (const item of queueState.items) {
+      const meta = statusMeta[item.status] || statusMeta.queued;
+      const row = document.createElement('div');
+      row.style.cssText =
+        `display:flex;align-items:center;gap:6px;padding:4px 5px;margin:2px 0;border-radius:4px;background:${meta.bg};color:${meta.fg};font:11px Consolas,monospace;`;
+      const symbol = document.createElement('span');
+      symbol.textContent = meta.symbol;
+      symbol.style.cssText = 'width:12px;font-weight:900;text-align:center;';
+      const id = document.createElement('span');
+      id.textContent = item.id;
+      id.style.cssText = 'font-weight:800;flex:0 0 auto;';
+      const detail = document.createElement('span');
+      detail.textContent = item.error || item.status;
+      detail.title = item.error || item.status;
+      detail.style.cssText = 'opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+      row.append(symbol, id, detail);
+      qList.appendChild(row);
+    }
+
+    if (!queueState.items.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'Queue empty';
+      empty.style.cssText = 'text-align:center;color:#777;padding:8px;font-style:italic;';
+      qList.appendChild(empty);
+    }
+
+    renderUnableBox();
+  }
+
+  function renderUi() {
+    let root = document.getElementById('moveapp-dz-selector');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'moveapp-dz-selector';
+      document.documentElement.appendChild(root);
+    }
+
+    const dzType = getDzType();
+    const floor = getFloor();
+    const dz = selectedDropzone();
+    const isPrime = dzType === 'PRIME';
+    const hasFloor = !!floor;
+    const enabled = isEnabled();
+    const current = dz || 'SELECT DZ';
+    const needsSelection = !dz && !isPrime;
+    const queueSelectionLocked = queueState.running || queueRequestActive || !!queueState.currentId;
+
+    root.style.cssText = [
+      'position:fixed',
+      'right:10px',
+      'bottom:10px',
+      'z-index:999999',
+      'width:360px',
+      'background:rgba(28,28,28,.94)',
+      'color:white',
+      'border:1px solid rgba(255,255,255,.22)',
+      'border-radius:10px',
+      'box-shadow:0 3px 14px rgba(0,0,0,.35)',
+      'padding:9px',
+      'font:12px Arial,sans-serif',
+      'display:block'
+    ].join(';');
+
+    root.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-weight:900;">DZ Auto v${VERSION}</span>
+          <button id="moveapp-dz-enable-btn" style="
+            border:0;
+            border-radius:5px;
+            padding:3px 7px;
+            font:700 10px Arial,sans-serif;
+            cursor:pointer;
+            color:white;
+            background:${enabled ? '#2e7d32' : '#b53131'};
+          ">${enabled ? 'ON' : 'OFF'}</button>
+        </div>
+        <div style="font-weight:900;color:${needsSelection ? '#ffb3b3' : '#bfffcf'};">${current}</div>
+      </div>
+
+      <div id="moveapp-dz-error" style="display:none;background:#b53131;color:white;font-weight:900;text-align:center;border-radius:7px;padding:6px;margin-bottom:7px;"></div>
+
+      <div id="moveapp-prime-wrap" style="margin-bottom:6px;"></div>
+
+      <div style="font-weight:800;margin:3px 0 4px;color:#d9d9d9;">Floor</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:7px;" id="moveapp-floor-buttons"></div>
+
+      <div style="font-weight:800;margin:3px 0 4px;color:#d9d9d9;">Dropzone</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;" id="moveapp-dz-buttons"></div>
+
+      <div style="border-top:1px solid rgba(255,255,255,.18);margin-top:9px;padding-top:8px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:5px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="font-weight:900;">Container Queue <span style="color:#86d9ff;font-size:10px;">API</span></div>
+            <button id="moveapp-queue-input-toggle" type="button" style="border:0;border-radius:5px;padding:3px 7px;color:#fff;font:800 10px Arial,sans-serif;cursor:pointer;"></button>
+          </div>
+          <div id="moveapp-queue-lock" style="font:800 10px Arial,sans-serif;color:#c9bfff;text-align:right;"></div>
+        </div>
+
+        <textarea id="moveapp-queue-input" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="Scan/paste tsX / csX containers"
+          style="width:100%;resize:vertical;min-height:48px;max-height:110px;background:#101010;color:#fff;border:1px solid #666;border-radius:6px;padding:6px;font:12px Consolas,monospace;outline:none;"></textarea>
+
+        <div id="moveapp-queue-unable" style="display:none;margin-top:5px;padding:6px 7px;border:1px solid #d9534f;border-left:5px solid #d9534f;border-radius:5px;background:#421b1b;color:#ffdada;"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:5px;">
+          <button id="moveapp-queue-run" style="border:0;border-radius:6px;padding:7px;background:#2e7d32;color:#fff;font-weight:900;cursor:pointer;">RUN</button>
+          <button id="moveapp-queue-pause" style="border:0;border-radius:6px;padding:7px;background:#a05b20;color:#fff;font-weight:900;cursor:pointer;">PAUSE</button>
+        </div>
+
+        <div id="moveapp-queue-summary" style="margin-top:6px;font:11px Consolas,monospace;color:#d9d9d9;"></div>
+        <div id="moveapp-queue-message" style="margin-top:4px;font-weight:800;color:#cfe8ff;min-height:15px;"></div>
+        <div id="moveapp-queue-list" style="margin-top:5px;max-height:155px;overflow:auto;background:#111;border-radius:6px;padding:4px;"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:5px;">
+          <button id="moveapp-queue-clear-done" style="border:0;border-radius:6px;padding:6px;background:#444;color:#fff;font-weight:800;cursor:pointer;">CLEAR DONE</button>
+          <button id="moveapp-queue-clear-all" style="border:0;border-radius:6px;padding:6px;background:#6b3030;color:#fff;font-weight:800;cursor:pointer;">CLEAR ALL</button>
+        </div>
+      </div>
+
+    `;
+
+    root.querySelector('#moveapp-dz-enable-btn').addEventListener('click', () => setEnabled(!enabled));
+
+    const primeWrap = root.querySelector('#moveapp-prime-wrap');
+    const prime = mkBtn('PRIME  •  dz-P-PRIME', isPrime, '#6b55c9', queueSelectionLocked);
+    prime.style.width = '100%';
+    prime.addEventListener('click', () => setDzType('PRIME'));
+    primeWrap.appendChild(prime);
+
+    const floorWrap = root.querySelector('#moveapp-floor-buttons');
+    for (const f of FLOORS) {
+      const btn = mkBtn(f, f === floor && !isPrime, colorForFloor(f), queueSelectionLocked);
+      btn.addEventListener('click', () => setFloor(f));
+      floorWrap.appendChild(btn);
+    }
+
+    const dzWrap = root.querySelector('#moveapp-dz-buttons');
+
+    if (isPrime) {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:6px;font-style:italic;';
+      placeholder.textContent = 'PRIME selected (no DZ needed)';
+      dzWrap.appendChild(placeholder);
+    } else if (!hasFloor) {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:6px;font-style:italic;';
+      placeholder.textContent = 'Select a floor first';
+      dzWrap.appendChild(placeholder);
+    } else {
+      const dzList = activeDzTypes();
+      for (const item of dzList) {
+        const isActive = item.key === dzType;
+        const btn = mkBtn(item.label, isActive, floor === 'P1' ? '#7a5b9e' : '#4c7ed9', queueSelectionLocked);
+        btn.title = item.key;
+        btn.addEventListener('click', () => setDzType(item.key));
+        dzWrap.appendChild(btn);
+      }
+    }
+
+    const qInput = root.querySelector('#moveapp-queue-input');
+    const qInputToggle = root.querySelector('#moveapp-queue-input-toggle');
+    const qRun = root.querySelector('#moveapp-queue-run');
+    const qPause = root.querySelector('#moveapp-queue-pause');
+    const qClearDone = root.querySelector('#moveapp-queue-clear-done');
+    const qClearAll = root.querySelector('#moveapp-queue-clear-all');
 
     qInput.value = getQueueDraft();
     qInputToggle.addEventListener('click', () => setQueueInputEnabled(!queueInputEnabled()));
 
-    // No auto-focus. Block MoveApp hotkeys only inside queue box.
     for (const eventType of ['keydown', 'keypress', 'keyup']) {
-      qInput.addEventListener(eventType, e => {
+      qInput.addEventListener(eventType, event => {
         if (!queueInputEnabled() || qInput.readOnly) return;
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
       });
     }
 
-    // Keep textarea node stable while scanning.
     qInput.addEventListener('input', () => {
       if (!queueInputEnabled() || qInput.readOnly) return;
       setQueueDraft(qInput.value);
       sanitizeQueueTextarea(qInput, false);
     });
-
-    qInput.addEventListener('blur', () => {
-      setQueueDraft(qInput.value);
-    });
+    qInput.addEventListener('blur', () => setQueueDraft(qInput.value));
 
     qRun.addEventListener('click', startQueue);
     qPause.addEventListener('click', () => pauseQueue('Paused by user'));
     qClearDone.addEventListener('click', clearQueueDone);
     qClearAll.addEventListener('click', clearQueueAll);
+
     renderQueueState();
   }
 
@@ -874,16 +1091,22 @@
     }, 60);
   };
 
-  new MutationObserver(scheduleTick).observe(document.documentElement, {
+  const moveObserver = new MutationObserver(scheduleTick);
+  moveObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
     characterData: true
   });
 
+  const fallbackTick = setInterval(tick, 1000);
   window.addEventListener('pageshow', scheduleTick);
   document.addEventListener('DOMContentLoaded', scheduleTick, { once: true });
+  window.addEventListener('pagehide', () => {
+    moveObserver.disconnect();
+    clearTimeout(tickTimer);
+    clearInterval(fallbackTick);
+  }, { once: true });
 
-  setInterval(tick, 1000);
   scheduleTick();
 
 })();

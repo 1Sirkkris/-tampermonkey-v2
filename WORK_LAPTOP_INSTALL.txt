@@ -1,16 +1,19 @@
 WORK LAPTOP PACK
 
-Install these 9 scripts in Tampermonkey and enable all 9.
+Install these 10 scripts in Tampermonkey and enable all 10.
 Disable older copies first.
 
-01 Sideline
-02 AFT Edit-SKU-Move
-03 FCR Data Core
-04 FCResearch Master
-05 FC-Lite
-06 Stow Andons v5.5.1 — source main edbd0166
-07 Bin Check Overlay
-08 Dropzone Queue
-09 LIVE EVIDENCE CAPTURE
+01 Sideline v0.2.2
+02 AFT Edit-SKU-Move v0.9.8
+03 FCR Data Core v0.2.9
+04 FCResearch Master v0.1.10
+05 FC-Lite v0.1.29 — unchanged; pending updated runtime source
+06 Stow Andons v5.5.1
+07 Bin Check Overlay v7.4.1
+08 Dropzone Queue v0.2.17
+09 LIVE EVIDENCE CAPTURE v0.3.0
+10 BWU2 Observability Core v0.1.2
+
+Updater-enabled sources: main f4ae75c0. FC-Lite is excluded from that source commit.
 
 09 is always-on passive capture. Mark can be used BEFORE or AFTER an interesting event. On FCResearch, INV Probe is available for targeted /results/inventory testing.

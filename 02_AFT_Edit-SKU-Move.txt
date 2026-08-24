@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.9.4 AFT Edit/SKU/Move master
+// @name         MAIN v0.9.8 AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.4
+// @version      0.9.8
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -9,17 +9,19 @@
 // @run-at       document-start
 // @noframes
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
   if (window.top !== window.self) return; // Move qty iframe
-  if (window.__AFT_MASTER_V094__) return;
-  window.__AFT_MASTER_V094__ = true;
+  if (window.__AFT_MASTER_V098__) return;
+  window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.4';
+  const VERSION = '0.9.8';
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -27,6 +29,14 @@
   const debounce = (fn, ms = 180) => { let timer = 0; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); }; };
   const norm = v => String(v ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const low = v => norm(v).toLowerCase();
+
+  function traceAft(type, data = {}) {
+    try {
+      const payload = { version: VERSION, ...data };
+      if (typeof window.BWU2Trace === 'function') window.BWU2Trace(type, payload);
+      else window.postMessage({ __BWU2_TRACE__: true, type, data: payload }, '*');
+    } catch {}
+  }
 
   const EDIT_STATE_TESTS = [
     ['location', ['scan location', 'scan container', 'input location', 'enter location', 'enter container']],
@@ -151,35 +161,65 @@
       const requireComplete = opts.complete === true;
       let polls = 0;
 
+      const report = (outcome, state = '') => {
+        traceAft('AFT_STATUS_WAIT', {
+          label,
+          outcome,
+          state,
+          polls,
+          ms: Math.round(performance.now() - started),
+          requireComplete
+        });
+      };
+
       while (performance.now() - started < timeout) {
-        if (!opts.ignoreStop && stopped()) throw new Error('Stopped by user');
+        if (!opts.ignoreStop && stopped()) {
+          report('stopped');
+          throw new Error('Stopped by user');
+        }
 
         const res = await post('/status', id(objectId), `${label} status`);
         let data;
         try { data = await res.json(); }
-        catch { throw new Error(`${label}: invalid /status JSON`); }
+        catch {
+          report('invalid-json');
+          throw new Error(`${label}: invalid /status JSON`);
+        }
 
         const state = String(data?.status || '').toUpperCase();
         polls++;
 
         if (requireComplete) {
           if (state === 'COMPLETE') {
+            report('complete', state);
             return { state };
           }
           if (state === 'READY') {
+            report('unexpected-ready', state);
             throw new Error(`${label}: additional input required`);
           }
         } else if (state === 'READY') {
+          report('ready', state);
           return { state };
         }
 
-        if (state === 'ERRORED') throw new Error(`${label}: backend ERRORED`);
-        if (state !== 'PROCESSING') throw new Error(`${label}: status ${state || 'blank'}`);
+        if (state === 'ERRORED') {
+          report('errored', state);
+          throw new Error(`${label}: backend ERRORED`);
+        }
+        if (state !== 'PROCESSING') {
+          report('unexpected-status', state);
+          throw new Error(`${label}: status ${state || 'blank'}`);
+        }
 
+        // Keep the proven timing unchanged. Old traces show /action returns an empty body,
+        // so /status is the authoritative readiness signal; v0.9.8 measures script-owned
+        // polling before we consider reducing it.
         const delay = opts.pollMs ?? Math.min(300, 60 + polls * 35);
         await sleep(delay);
       }
 
+      report('timeout');
       throw new Error(`${label}: status timeout`);
     };
 
@@ -346,6 +386,8 @@
     stopRequested: false,
 
     tracker: null,
+    eachEndedObjectIds: new Set(),
+    eachActiveObjectId: null,
 
     keys: {
       sku: 'aftm_sku_entry',
@@ -382,10 +424,6 @@
 
     fetchState(label) {
       return EditApi.page(label, text => this.classify(text));
-    },
-
-    currentDocumentState() {
-      return liveState(text => this.classify(text));
     },
 
     async snapshot(expectedObjectId, label) {
@@ -1263,64 +1301,40 @@
       await this.directRun(() => this.runEachQueue(items, meta));
     },
 
-    currentContainerMatches(target) {
-      const wanted = low(target);
-      return !!wanted && low(nativeText()).includes(wanted);
+    async closeEachObject(objectId, label = 'Close Each workflow') {
+      if (!objectId) return;
+      try {
+        await EditApi.end(objectId);
+        this.eachEndedObjectIds.add(objectId);
+      } finally {
+        if (this.eachActiveObjectId === objectId) this.eachActiveObjectId = null;
+      }
     },
 
     async acquireEachObject(oldObjectId = null, targetLocation = '') {
       let last = null;
-      let avoidObjectId = oldObjectId;
 
-      try {
-        const domState = this.currentDocumentState();
-        const domObject = currentObjectId();
-
-        if (
-          domObject &&
-          (!avoidObjectId || domObject !== avoidObjectId) &&
-          (domState === 'location' || domState === 'item')
-        ) {
-          const contextOk =
-            domState === 'location' ||
-            this.currentContainerMatches(targetLocation);
-
-          if (contextOk) {
-            try {
-              const ready = await EditApi.wait(domObject, 'Each DOM start');
-
-              if (ready.state === 'READY') {
-                return {
-                  objectId: domObject,
-                  state: domState,
-                  startState: domState
-                };
-              }
-            } catch {}
-          }
-        }
-      } catch {}
-
-      for (let attempt = 1; attempt <= 10; attempt++) {
+      // Server state owns Each task identity. Visible DOM can stay stale after /end.
+      for (let attempt = 1; attempt <= 12; attempt++) {
         if (this.stopRequested) throw new Error('Stopped by user');
 
         const snap = await this.fetchState(`Each start ${attempt}`);
         last = snap;
 
         if (!snap.objectId) {
-          await sleep(40);
+          await sleep(attempt <= 3 ? 40 : 80);
           continue;
         }
 
-        if (avoidObjectId && snap.objectId === avoidObjectId) {
-          await sleep(40);
+        if (
+          snap.objectId === oldObjectId ||
+          this.eachEndedObjectIds.has(snap.objectId)
+        ) {
+          await sleep(attempt <= 3 ? 40 : 80);
           continue;
         }
 
-        const ready = await EditApi.wait(
-          snap.objectId,
-          `Each start ${attempt}`
-        );
+        const ready = await EditApi.wait(snap.objectId, `Each start ${attempt}`);
 
         if (ready.state !== 'READY') {
           await sleep(40);
@@ -1328,19 +1342,13 @@
         }
 
         if (snap.state === 'location') {
-          return {
-            ...snap,
-            startState: 'location'
-          };
+          return { ...snap, startState: 'location' };
         }
 
         if (snap.state === 'item') {
           const target = low(targetLocation);
           if (target && low(snap.text).includes(target)) {
-            return {
-              ...snap,
-              startState: 'item'
-            };
+            return { ...snap, startState: 'item' };
           }
 
           throw new Error(
@@ -1416,38 +1424,93 @@
       let done = 0, oldObjectId = null;
       let session = { objectId: null, location: '', open: false };
 
-      for (let i = 0; i < items.length; i++) {
-        if (this.stopRequested) throw new Error('Stopped by user');
-        const item = items[i];
-        let startState = 'location';
+      try {
+        for (let i = 0; i < items.length; i++) {
+          if (this.stopRequested) throw new Error('Stopped by user');
 
-        if (session.open && low(session.location) === low(item.location)) {
-          startState = 'item';
-        } else {
-          if (session.open && session.objectId) {
-            this.status(`${done}/${items.length} Change container`);
-            await EditApi.end(session.objectId);
-            oldObjectId = session.objectId;
+          const item = items[i];
+          let startState = 'location';
+
+          if (session.open && low(session.location) === low(item.location)) {
+            startState = 'item';
+          } else {
+            if (session.open && session.objectId) {
+              this.status(`${done}/${items.length} Change container`);
+              await this.closeEachObject(session.objectId);
+              oldObjectId = session.objectId;
+            }
+
+            const fresh = await this.acquireEachObject(oldObjectId, item.location);
+            session = {
+              objectId: fresh.objectId,
+              location: item.location,
+              open: false
+            };
+            this.eachActiveObjectId = fresh.objectId;
+            startState = fresh.startState;
           }
-          const fresh = await this.acquireEachObject(oldObjectId, item.location);
-          session = { objectId: fresh.objectId, location: item.location, open: false };
-          startState = fresh.startState;
+
+          const result = await this.runEachOne(
+            session.objectId,
+            item,
+            meta,
+            i + 1,
+            items.length,
+            startState
+          );
+
+          session = {
+            objectId: result.objectId,
+            location: result.location,
+            open: result.workflowOpen
+          };
+
+          // COMPLETE tasks must never be reused on a later RUN.
+          if (!result.workflowOpen && result.objectId) {
+            this.eachEndedObjectIds.add(result.objectId);
+            if (this.eachActiveObjectId === result.objectId) {
+              this.eachActiveObjectId = null;
+            }
+          }
+
+          done++;
+          const avg = (performance.now() - started) / done;
+          this.status(
+            `${done}/${items.length} done • last ${(result.elapsed / 1000).toFixed(2)}s • ` +
+            `avg ${(avg / 1000).toFixed(2)}s`
+          );
         }
 
-        const result = await this.runEachOne(session.objectId, item, meta, i + 1, items.length, startState);
-        session = { objectId: result.objectId, location: result.location, open: result.workflowOpen };
-        done++;
-        const avg = (performance.now() - started) / done;
-        this.status(`${done}/${items.length} done • last ${(result.elapsed / 1000).toFixed(2)}s • avg ${(avg / 1000).toFixed(2)}s`);
-      }
+        if (session.open && session.objectId) {
+          this.status('Closing workflow');
+          await this.closeEachObject(session.objectId);
+        }
 
-      if (session.open && session.objectId) {
-        this.status('Closing workflow');
-        await EditApi.end(session.objectId);
+        const total = performance.now() - started;
+        this.status(
+          `DONE ✓ ${done}/${items.length} • avg ${(total / done / 1000).toFixed(2)}s`
+        );
+      } catch (error) {
+        const active = this.eachActiveObjectId || session.objectId;
+
+        if (active && !this.eachEndedObjectIds.has(active)) {
+          try {
+            await this.closeEachObject(active, 'Recover Each workflow');
+          } catch {
+            this.eachEndedObjectIds.add(active);
+            this.eachActiveObjectId = null;
+            throw new Error(
+              `${String(error?.message || error)} • Each recovery failed; refresh page before retry`
+            );
+          }
+        }
+
+        throw error;
+      } finally {
+        this.eachActiveObjectId = null;
       }
-      const total = performance.now() - started;
-      this.status(`DONE ✓ ${done}/${items.length} • avg ${(total / done / 1000).toFixed(2)}s`);
     },
+
 
     parseExpirationRows() {
       if (!this.panel) return [];
@@ -1722,11 +1785,10 @@
     updateModeNote() {
       if (!this.modeNoteEl) return;
       const mode = this.detectMode();
-      const text =
+      this.modeNoteEl.textContent =
         mode === 'multi' ? 'Multi • native QualityTools API' :
         mode === 'each' ? 'Each • native QualityTools API' :
         'Waiting for native Multi / Each mode…';
-      if (this.modeNoteEl.textContent !== text) this.modeNoteEl.textContent = text;
     },
 
     status(text) {
@@ -2513,22 +2575,22 @@
       route();
     },
 
-    currentLabel(editPage = Edit.match(), movePage = MoveItems.match(), editOn = this.enabled('edit'), moveOn = this.enabled('move')) {
-      if (editPage) {
-        if (!editOn) return 'AFT • EDIT OFF';
+    currentLabel() {
+      if (Edit.match()) {
+        if (!this.enabled('edit')) return 'AFT • EDIT OFF';
         const mode = Edit.mode ? Edit.mode.toUpperCase() : 'EDIT';
         return `AFT • ${mode}`;
       }
 
-      if (movePage) {
-        return moveOn ? 'AFT • MOVE' : 'AFT • MOVE OFF';
+      if (MoveItems.match()) {
+        return this.enabled('move') ? 'AFT • MOVE' : 'AFT • MOVE OFF';
       }
 
       return 'AFT';
     },
 
-    render(relevant = this.relevantPage()) {
-      if (!document.body || this.panel?.isConnected || !relevant) return;
+    render() {
+      if (!document.body || this.panel?.isConnected || !this.relevantPage()) return;
 
       const panel = document.createElement('section');
       panel.id = 'aftm-control';
@@ -2569,47 +2631,37 @@
 
     },
 
-    paint(editPage = Edit.match(), movePage = MoveItems.match()) {
+    paint() {
       const panel = this.panel;
       if (!panel?.isConnected) return;
 
       const editOn = this.enabled('edit');
       const moveOn = this.enabled('move');
-      const editActive = editPage && editOn && Edit.active;
-      const moveActive = movePage && moveOn && MoveItems.active;
-      const title = this.currentLabel(editPage, movePage, editOn, moveOn);
-      const editState = editOn ? '1' : '0';
-      const moveState = moveOn ? '1' : '0';
-      const editActiveState = editActive ? '1' : '0';
-      const moveActiveState = moveActive ? '1' : '0';
-      const editText = `EditItems  ${editOn ? 'ON' : 'OFF'}${editActive ? ' • ACTIVE' : ''}`;
-      const moveText = `MoveItems  ${moveOn ? 'ON' : 'OFF'}${moveActive ? ' • ACTIVE' : ''}`;
-      const note = editPage
-        ? `Page: EditItems${Edit.mode ? ` / ${Edit.mode.toUpperCase()}` : ''}`
-        : movePage ? 'Page: MoveItems / Native' : '';
+      const editActive = Edit.match() && editOn && Edit.active;
+      const moveActive = MoveItems.match() && moveOn && MoveItems.active;
 
-      if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
-      if (this.editBtn.dataset.on !== editState) this.editBtn.dataset.on = editState;
-      if (this.moveBtn.dataset.on !== moveState) this.moveBtn.dataset.on = moveState;
-      if (this.editBtn.dataset.active !== editActiveState) this.editBtn.dataset.active = editActiveState;
-      if (this.moveBtn.dataset.active !== moveActiveState) this.moveBtn.dataset.active = moveActiveState;
-      if (this.editBtn.textContent !== editText) this.editBtn.textContent = editText;
-      if (this.moveBtn.textContent !== moveText) this.moveBtn.textContent = moveText;
-      if (this.noteEl.textContent !== note) this.noteEl.textContent = note;
+      this.titleEl.textContent = this.currentLabel();
+      this.editBtn.dataset.on = editOn ? '1' : '0';
+      this.moveBtn.dataset.on = moveOn ? '1' : '0';
+      this.editBtn.dataset.active = editActive ? '1' : '0';
+      this.moveBtn.dataset.active = moveActive ? '1' : '0';
+      this.editBtn.textContent = `EditItems  ${editOn ? 'ON' : 'OFF'}${editActive ? ' • ACTIVE' : ''}`;
+      this.moveBtn.textContent = `MoveItems  ${moveOn ? 'ON' : 'OFF'}${moveActive ? ' • ACTIVE' : ''}`;
+      this.noteEl.textContent = Edit.match()
+        ? `Page: EditItems${Edit.mode ? ` / ${Edit.mode.toUpperCase()}` : ''}`
+        : MoveItems.match() ? 'Page: MoveItems / Native' : '';
     },
 
     refresh() {
-      const editPage = Edit.match();
-      const movePage = MoveItems.match();
-      if (!editPage && !movePage) {
+      if (!this.relevantPage()) {
         this.panel?.remove();
         this.panel = null;
         this.editBtn = this.moveBtn = this.titleEl = this.noteEl = null;
         return;
       }
 
-      this.render(true);
-      this.paint(editPage, movePage);
+      this.render();
+      this.paint();
     }
   };
 

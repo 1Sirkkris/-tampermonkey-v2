@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         MAIN v0.2.1 Sideline API Move TEST
+// @name         MAIN v0.2.2 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.1
+// @version      0.2.2
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js
 // ==/UserScript==
 
 (() => {
@@ -13,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.1';
+  const VERSION = '0.2.2';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -2645,7 +2647,33 @@
     setTimeout(() => lSrc.focus(), 0);
   }
 
-  function installContainerAdvance(input, next) {
+  function setLazyInputCollapsed(collapsed, { focusItems = false } = {}) {
+    lazy.inputCollapsed = !!collapsed;
+    if (!lazy.inputCollapsed) clearLazyCollapsedScanBuffer();
+    renderLazy();
+
+    if (focusItems && !lazy.inputCollapsed) {
+      setTimeout(() => lItems.focus(), 0);
+    }
+  }
+
+  let lazySourceRevealTimer = 0;
+  function revealLazyItemsForSource() {
+    clearTimeout(lazySourceRevealTimer);
+    lazySourceRevealTimer = 0;
+
+    if (lazy.running || !validContainer(lSrc.value)) return false;
+    setLazyInputCollapsed(false);
+    return true;
+  }
+
+  function scheduleLazySourceReveal() {
+    clearTimeout(lazySourceRevealTimer);
+    if (!validContainer(lSrc.value)) return;
+    lazySourceRevealTimer = setTimeout(revealLazyItemsForSource, 90);
+  }
+
+  function installContainerAdvance(input, next, { revealItems = false } = {}) {
     input.addEventListener('input', () => {
       if (!partialContainer(input.value)) {
         input.value = '';
@@ -2659,6 +2687,7 @@
         if (ok) lazy.error = '';
       }
       refreshItems();
+      if (revealItems) scheduleLazySourceReveal();
     });
 
     input.addEventListener('keydown', e => {
@@ -2675,6 +2704,7 @@
       }
       lazy.error = '';
       input.classList.add('good');
+      if (revealItems) revealLazyItemsForSource();
       setTimeout(() => next.focus(), 0);
       renderLazy();
     });
@@ -2684,6 +2714,7 @@
         lazy.error = '';
         input.classList.add('good');
         input.classList.remove('bad');
+        if (revealItems) revealLazyItemsForSource();
         next.focus();
       } else {
         lazy.error = 'Container must start with csX or tsX.';
@@ -2695,7 +2726,7 @@
     }, 0));
   }
 
-  installContainerAdvance(lSrc, lDest);
+  installContainerAdvance(lSrc, lDest, { revealItems: true });
   installContainerAdvance(lDest, lItems);
 
   let itemRefreshTimer = 0;
@@ -3906,12 +3937,13 @@
   }
 
   lazyPanel.onclick = e => {
-    const a = e.target.dataset.a;
+    const actionTarget = e.target.closest?.('[data-a]');
+    if (!actionTarget || !lazyPanel.contains(actionTarget)) return;
+    const a = actionTarget.dataset.a;
     if (!a) return;
 
     if (a === 'toggle-items') {
-      lazy.inputCollapsed = !lazy.inputCollapsed;
-      renderLazy();
+      setLazyInputCollapsed(!lazy.inputCollapsed, { focusItems: lazy.inputCollapsed });
       return;
     }
 
@@ -3984,7 +4016,7 @@
         lazy.note = `resumed with new destination ${lazy.dest}`;
         lDest.classList.remove('bad');
         lDest.classList.add('good');
-        e.target.textContent = 'Pause';
+        actionTarget.textContent = 'Pause';
         stopDamageAttention();
         setLazyRunningIndicator(true);
         renderLazy();
@@ -3992,7 +4024,7 @@
       }
 
       lazy.paused = !lazy.paused;
-      e.target.textContent = lazy.paused ? 'Resume' : 'Pause';
+      actionTarget.textContent = lazy.paused ? 'Resume' : 'Pause';
       lazy.note = lazy.paused ? 'paused' : 'resumed';
       if (!lazy.paused) setLazyRunningIndicator(true);
       renderLazy();

@@ -8,9 +8,9 @@
 // @connect      localhost
 // @version      5.5.1
 // @description  TEST: Dual-surface FCResearch/FC-Lite helper with duplicate-FNSKU/FCSKU conflict alerts.
-// @updateURL    https://github.com/1Sirkkris/-tampermonkey-v2/raw/refs/heads/main/Stow_Andons_Helper.user.js
-// @downloadURL  https://github.com/1Sirkkris/-tampermonkey-v2/raw/refs/heads/main/Stow_Andons_Helper.user.js
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
 // ==/UserScript==
 
 (() => {

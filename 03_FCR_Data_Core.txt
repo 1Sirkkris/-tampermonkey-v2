@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.2.3 FCR Data Core
+// @name         TEST v0.2.9 FCR Data Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.3
+// @version      0.2.9
 // @description  Shared modular FCResearch data engine: product, inventory, history, Hazmat, bin-size, cache and request dedupe.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -11,17 +11,20 @@
 // @grant        GM_setValue
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @connect      pandash.amazon.com
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  if (window.__fcrDataCore_v023test) return;
-  window.__fcrDataCore_v023test = true;
+  if (window.__fcrDataCore_v029test) return;
+  window.__fcrDataCore_v029test = true;
 
-  const VERSION = '0.2.3';
+  const VERSION = '0.2.9';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
+  const CANCEL_EVENT = 'fcr-data-core:cancel';
   const READY_EVENT = 'fcr-data-core:ready';
   const USAGE_EVENT = 'fcr-usage:event';
   const USAGE_KEY = 'fcr-usage-v1';
@@ -35,12 +38,34 @@
   const REQUEST_TIMEOUT_MS = 15000;
   const SIDELINE_API = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
   const MARKETPLACE = 'AU';
+  const SECTION_ENDPOINTS = new Set([
+    'product',
+    'inventory',
+    'inventory-history',
+    'container-history',
+    'purchase-order-item',
+    'purchase-order',
+    'receive-history',
+    'shipment',
+    'container-hierarchy',
+    'employee',
+    'carton-general-info',
+    'carton-contents',
+    'sscc-info',
+    'carton-ambiguities',
+    'vision-tunnel',
+    'problems',
+    'problem',
+    'event',
+    'authenticity-item'
+  ]);
 
   const productMemory = new Map();
   const binMemory = new Map();
   const historyMemory = new Map();
   const hazMemory = new Map();
   const inFlight = new Map();
+  const requestGroupControllers = new Map();
   const stats = {
     startedAt: Date.now(),
     productNetwork: 0,
@@ -52,11 +77,58 @@
     hazCacheHits: 0,
     binNetwork: 0,
     binCacheHits: 0,
+    sectionNetwork: 0,
     dedupeHits: 0
   };
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
+
+
+  function requestGroupKey(client, group) {
+    const safeClient = clean(client);
+    const safeGroup = clean(group);
+    return safeClient && safeGroup ? `${safeClient}:${safeGroup}` : '';
+  }
+
+  function registerGroupController(context, controller) {
+    const key = requestGroupKey(context?.client, context?.group);
+    if (!key || !controller) return '';
+    let controllers = requestGroupControllers.get(key);
+    if (!controllers) {
+      controllers = new Set();
+      requestGroupControllers.set(key, controllers);
+    }
+    controllers.add(controller);
+    return key;
+  }
+
+  function unregisterGroupController(key, controller) {
+    if (!key || !controller) return;
+    const controllers = requestGroupControllers.get(key);
+    if (!controllers) return;
+    controllers.delete(controller);
+    if (!controllers.size) requestGroupControllers.delete(key);
+  }
+
+  function cancelRequestGroup(client, group) {
+    const key = requestGroupKey(client, group);
+    const controllers = key ? requestGroupControllers.get(key) : null;
+    if (!controllers?.size) return 0;
+    const list = [...controllers];
+    requestGroupControllers.delete(key);
+    for (const controller of list) {
+      try { controller.abort('fcr-data-core:cancelled'); } catch { try { controller.abort(); } catch {} }
+    }
+    return list.length;
+  }
+
+  function toFcrDate(value) {
+    const text = clean(value);
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+    return /^\d{2}\/\d{2}\/\d{4}$/.test(text) ? text : '';
+  }
 
 
   let usage = loadUsage();
@@ -253,20 +325,12 @@
 
   function parseProductHtml(html) {
     const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-    let table = doc.querySelector('.a-box-group .a-keyvalue');
-    if (!table) {
-      for (const candidate of doc.querySelectorAll('table')) {
-        for (const th of candidate.querySelectorAll('th')) {
-          const label = clean(th.textContent).toLowerCase();
-          if (label === 'asin' || label === 'isbn' || label === 'fnsku') {
-            table = candidate;
-            break;
-          }
-        }
-        if (table) break;
-      }
-    }
-    if (!table) table = doc.querySelector('.a-keyvalue');
+    const table = doc.querySelector('.a-box-group .a-keyvalue')
+      || [...doc.querySelectorAll('table')].find(t => {
+        const labels = [...t.querySelectorAll('th')].map(th => clean(th.textContent).toLowerCase());
+        return labels.includes('asin') || labels.includes('isbn') || labels.includes('fnsku');
+      })
+      || doc.querySelector('.a-keyvalue');
 
     if (!table) return null;
     const data = {};
@@ -303,9 +367,12 @@
     return `${location.origin}/${encodeURIComponent(fc)}/results`;
   }
 
-  async function fcrPost(endpoint, searchValue) {
-    const search = clean(searchValue);
-    const key = `fcr:${endpoint}:${upper(search)}`;
+  async function fcrPostForm(endpoint, fields, identity = '', context = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields || {})) params.set(key, String(value ?? ''));
+    const dedupeId = identity || params.toString();
+    const scope = requestGroupKey(context?.client, context?.group);
+    const key = `fcr:${endpoint}:${dedupeId}${scope ? `:scope:${scope}` : ''}`;
 
     if (inFlight.has(key)) {
       stats.dedupeHits++;
@@ -315,7 +382,9 @@
     const work = (async () => {
       const started = performance.now();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const groupKey = registerGroupController(context, controller);
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; controller.abort('fcr-data-core:timeout'); }, REQUEST_TIMEOUT_MS);
       try {
         const response = await fetch(`${apiBase()}/${endpoint}`, {
           method: 'POST',
@@ -326,7 +395,7 @@
             'Accept': 'text/html, */*; q=0.01',
             'X-Requested-With': 'XMLHttpRequest'
           },
-          body: new URLSearchParams({ s: search }).toString(),
+          body: params.toString(),
           signal: controller.signal
         });
         const text = await response.text();
@@ -335,10 +404,11 @@
         recordUsage(`network.${endpoint}`, ms);
         return { text, ms, status: response.status };
       } catch (error) {
-        if (error?.name === 'AbortError') throw new Error(`${endpoint}: timed out`);
+        if (error?.name === 'AbortError') throw new Error(`${endpoint}: ${timedOut ? 'timed out' : 'cancelled'}`);
         throw error;
       } finally {
         clearTimeout(timer);
+        unregisterGroupController(groupKey, controller);
       }
     })();
 
@@ -348,6 +418,11 @@
     } finally {
       if (inFlight.get(key) === work) inFlight.delete(key);
     }
+  }
+
+  function fcrPost(endpoint, searchValue, context = {}) {
+    const search = clean(searchValue);
+    return fcrPostForm(endpoint, { s: search }, upper(search), context);
   }
 
   function parseHtml(html) {
@@ -396,6 +471,209 @@
     return rows;
   }
 
+  function paginationToken(doc) {
+    const raw = clean(doc?.querySelector('.pagination-token')?.textContent || '');
+    if (!raw || /^(?:true|false|null|done)$/i.test(raw)) return '';
+    return /^(?:\{|\[)/.test(raw) ? raw : '';
+  }
+
+  function inventoryQuantityTotal(doc) {
+    const header = doc?.querySelector('#inventory-quantity');
+    const match = clean(header?.textContent || '').match(/\(([\d,]+)\)/);
+    return match ? Number(match[1].replace(/,/g, '')) : null;
+  }
+
+  function inventoryRowsFromPage(doc, expectedCells = 0) {
+    const table = doc?.querySelector('#table-inventory') || doc?.querySelector('table');
+    if (!table) return [];
+    const candidates = [...table.querySelectorAll('tbody tr')];
+    const rows = candidates.length ? candidates : [...table.querySelectorAll('tr')].filter(row => !row.closest('thead'));
+    return rows.filter(row => !expectedCells || row.cells.length >= expectedCells);
+  }
+
+  function inventoryHistoryPage(html, expectedCells = 0) {
+    const raw = String(html || '');
+    const doc = parseHtml(raw);
+    let rows = [...doc.querySelectorAll('#table-inventory-history tbody tr')];
+    if (!rows.length) rows = [...doc.querySelectorAll('tbody tr')];
+
+    let fallbackDoc = null;
+    if (!rows.length && /<tr\b/i.test(raw)) {
+      fallbackDoc = parseHtml(`<table><tbody>${raw}</tbody></table>`);
+      rows = [...fallbackDoc.querySelectorAll('tbody tr')];
+    }
+
+    rows = rows.filter(row => !expectedCells || row.cells.length >= expectedCells);
+    return { doc, fallbackDoc, rows, token: paginationToken(doc) || paginationToken(fallbackDoc) };
+  }
+
+  async function fetchFullInventoryHistory(searchValue, startValue, endValue, allowPartial = true, context = {}) {
+    const search = clean(searchValue);
+    const startDate = toFcrDate(startValue);
+    const endDate = toFcrDate(endValue);
+    if (!startDate || !endDate) throw new Error('Inventory History requires both valid dates');
+
+    const started = performance.now();
+    const first = await fcrPostForm('inventory-history', {
+      s: search,
+      startSearchDateString: startDate,
+      endSearchDateString: endDate,
+      dateStringFormat: 'MM/dd/yyyy'
+    }, `${upper(search)}|${startDate}|${endDate}`, context);
+
+    const doc = parseHtml(first.text);
+    const table = doc.querySelector('#table-inventory-history');
+    if (!table) throw new Error('Inventory History table not returned');
+
+    const tbody = table.tBodies?.[0] || table.appendChild(doc.createElement('tbody'));
+    const expectedCells = table.tHead?.rows?.[0]?.cells?.length || 0;
+    const seenTokens = new Set();
+    let token = paginationToken(doc);
+    let pages = 1;
+    let complete = true;
+    let warning = '';
+
+    while (token) {
+      if (seenTokens.has(token)) {
+        complete = false;
+        warning = 'inventory-history pagination repeated token';
+        break;
+      }
+      if (pages >= 200) {
+        complete = false;
+        warning = 'inventory-history pagination safety limit reached';
+        break;
+      }
+      seenTokens.add(token);
+
+      try {
+        const more = await fcrPostForm('inventory-history-more', { token }, `token:${token}`, context);
+        pages++;
+        const page = inventoryHistoryPage(more.text, expectedCells);
+        if (!page.rows.length && page.token) {
+          complete = false;
+          warning = 'inventory-history pagination returned no usable rows';
+          break;
+        }
+        for (const row of page.rows) tbody.appendChild(doc.importNode(row, true));
+        token = page.token;
+      } catch (error) {
+        complete = false;
+        warning = clean(error?.message || error || 'inventory-history pagination failed');
+        if (!allowPartial) throw new Error(`Inventory History incomplete: ${warning}`);
+        break;
+      }
+    }
+
+    doc.querySelectorAll('.pagination-token').forEach(node => node.remove());
+    return {
+      html: doc.body.innerHTML,
+      pages,
+      records: [...tbody.rows].length,
+      complete,
+      warning,
+      ms: Math.round(performance.now() - started)
+    };
+  }
+
+  async function fetchFullInventory(searchValue, allowPartial = false, context = {}) {
+    const search = clean(searchValue);
+    const started = performance.now();
+    const first = await fcrPost('inventory', search, context);
+    const doc = parseHtml(first.text);
+    const table = doc.querySelector('#table-inventory');
+    if (!table) throw new Error('Inventory table not returned');
+
+    const tbody = table.tBodies?.[0] || table.appendChild(doc.createElement('tbody'));
+    const expectedCells = table.tHead?.rows?.[0]?.cells?.length || 0;
+    const seenTokens = new Set();
+    let token = paginationToken(doc);
+    let pages = 1;
+    let complete = true;
+    let warning = '';
+    let totalMs = first.ms;
+
+    while (token) {
+      if (seenTokens.has(token)) {
+        complete = false;
+        warning = 'inventory pagination repeated token';
+        break;
+      }
+      if (pages >= 200) {
+        complete = false;
+        warning = 'inventory pagination safety limit reached';
+        break;
+      }
+      seenTokens.add(token);
+      try {
+        const more = await fcrPostForm('inventory-more', { token }, `token:${token}`, context);
+        totalMs += more.ms;
+        pages++;
+        const moreDoc = parseHtml(more.text);
+        for (const row of inventoryRowsFromPage(moreDoc, expectedCells)) tbody.appendChild(doc.importNode(row, true));
+        token = paginationToken(moreDoc);
+      } catch (error) {
+        complete = false;
+        warning = clean(error?.message || error || 'inventory pagination failed');
+        if (!allowPartial) throw new Error(`Inventory incomplete: ${warning}`);
+        break;
+      }
+    }
+
+    const parsedRows = parseInventoryHtml(doc.documentElement.outerHTML);
+    const totalQuantity = parsedRows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    const headerTotal = inventoryQuantityTotal(doc);
+    const qtyHeader = doc.querySelector('#inventory-quantity');
+    if (qtyHeader && complete) qtyHeader.textContent = `Quantity (${headerTotal ?? totalQuantity})`;
+    doc.querySelectorAll('.pagination-token').forEach(node => node.remove());
+
+    return {
+      rows: parsedRows,
+      html: doc.body.innerHTML,
+      pages,
+      records: parsedRows.length,
+      totalQuantity: complete ? (headerTotal ?? totalQuantity) : null,
+      partialQuantity: totalQuantity,
+      complete,
+      warning,
+      ms: Math.round(performance.now() - started),
+      networkMs: totalMs
+    };
+  }
+
+
+  async function fetchInventoryPreview(searchValue, context = {}) {
+    const search = clean(searchValue);
+    if (!search) throw new Error('Inventory search value required');
+    const started = performance.now();
+    const first = await fcrPost('inventory', search, context);
+    const doc = parseHtml(first.text);
+    const table = doc.querySelector('#table-inventory');
+    if (!table) throw new Error('Inventory table not returned');
+
+    const rows = parseInventoryHtml(doc.documentElement.outerHTML);
+    const partialQuantity = rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    const hasMore = Boolean(paginationToken(doc));
+    const headerTotal = inventoryQuantityTotal(doc);
+    const qtyHeader = doc.querySelector('#inventory-quantity');
+    if (qtyHeader && !hasMore) qtyHeader.textContent = `Quantity (${headerTotal ?? partialQuantity})`;
+    doc.querySelectorAll('.pagination-token').forEach(node => node.remove());
+
+    return {
+      rows,
+      html: doc.body.innerHTML,
+      pages: 1,
+      records: rows.length,
+      totalQuantity: hasMore ? null : (headerTotal ?? partialQuantity),
+      partialQuantity,
+      complete: !hasMore,
+      preview: hasMore,
+      warning: hasMore ? 'Loading remaining inventory pages' : '',
+      ms: Math.round(performance.now() - started),
+      networkMs: first.ms
+    };
+  }
+
   function parseHistoryHtml(html) {
     const doc = parseHtml(html);
     const table = doc.querySelector('#table-inventory-history');
@@ -409,17 +687,20 @@
     return { rows, madcat };
   }
 
-  async function fetchInventory(container) {
+  async function fetchInventory(container, context = {}) {
     const search = clean(container);
     if (!search) return { rows: [], source: 'empty', ms: 0 };
 
-    // Never cache tote inventory
+    // Never cache tote inventory; incomplete inventory is unsafe for scan decisions.
     stats.inventoryNetwork++;
-    const response = await fcrPost('inventory', search);
+    const result = await fetchFullInventory(search, false, context);
     return {
-      rows: parseInventoryHtml(response.text),
+      rows: result.rows,
       source: 'network',
-      ms: response.ms
+      ms: result.ms,
+      pages: result.pages,
+      totalQuantity: result.totalQuantity,
+      complete: true
     };
   }
 
@@ -427,10 +708,7 @@
     const key = upper(code);
     if (!key) return null;
     const memory = historyMemory.get(key);
-    if (memory) {
-      if (Date.now() - memory.ts < HISTORY_TTL) return memory.value;
-      historyMemory.delete(key);
-    }
+    if (memory && Date.now() - memory.ts < HISTORY_TTL) return memory.value;
 
     const stored = readStored('history', key, HISTORY_TTL);
     if (stored) {
@@ -587,7 +865,7 @@
     }
   }
 
-  async function fetchProduct(code, required = []) {
+  async function fetchProduct(code, required = [], context = {}) {
     const search = clean(code);
     if (!search) return { product: null, source: 'empty' };
     const cached = getCachedProduct(search);
@@ -595,14 +873,15 @@
       stats.productCacheHits++;
       return { product: cached, source: 'cache' };
     }
-    const key = `product:${upper(search)}`;
+    const scope = requestGroupKey(context?.client, context?.group);
+    const key = `product:${upper(search)}${scope ? `:scope:${scope}` : ''}`;
     if (inFlight.has(key)) {
       stats.dedupeHits++;
       return { product: await inFlight.get(key), source: 'dedupe' };
     }
     const work = (async () => {
       stats.productNetwork++;
-      const response = await fcrPost('product', search);
+      const response = await fcrPost('product', search, context);
       const parsed = parseProductHtml(response.text);
       return parsed ? saveProductForKey(search, parsed) : null;
     })();
@@ -634,14 +913,7 @@
   function saveBin(container, item, size, aliases = []) {
     const value = clean(size);
     if (!value) return '';
-    const normalizedAliases = new Set();
-    const itemCode = upper(item);
-    if (itemCode) normalizedAliases.add(itemCode);
-    for (const alias of aliases) {
-      const code = upper(alias);
-      if (code) normalizedAliases.add(code);
-    }
-    for (const alias of normalizedAliases) {
+    for (const alias of [...new Set([item, ...aliases].map(upper).filter(Boolean))]) {
       const key = binKey(container, alias);
       binMemory.set(key, { ts: Date.now(), value });
       writeStored('bin', key, value);
@@ -705,14 +977,14 @@
       const payload = JSON.parse(response.responseText || '{}');
       const items = Array.isArray(payload.items) ? payload.items : [];
       const wanted = upper(code);
-      const exact = items.find(entry =>
-        upper(entry?.scannableId) === wanted
-        || upper(entry?.value) === wanted
-        || upper(entry?.scannedBarcode) === wanted
-        || upper(entry?.skuDetail?.fnSku) === wanted
-        || upper(entry?.skuDetail?.asin) === wanted
-        || upper(entry?.skuDetail?.fcSku) === wanted
-      );
+      const exact = items.find(entry => [
+        entry?.scannableId,
+        entry?.value,
+        entry?.scannedBarcode,
+        entry?.skuDetail?.fnSku,
+        entry?.skuDetail?.asin,
+        entry?.skuDetail?.fcSku
+      ].map(upper).includes(wanted));
       const result = exact || items.find(entry => entry?.binDescription) || items[0];
       const size = clean(result?.binDescription || '');
       if (size) {
@@ -739,6 +1011,57 @@
     }
   }
 
+
+  async function fetchSection(endpoint, code, options = {}, context = {}) {
+    const name = clean(endpoint).toLowerCase();
+    const search = clean(code);
+    if (!SECTION_ENDPOINTS.has(name)) throw new Error(`Unsupported FCResearch section: ${name || 'blank'}`);
+    if (!search) throw new Error('Section search value required');
+    stats.sectionNetwork++;
+
+    if (name === 'inventory') {
+      const result = await fetchFullInventory(search, true, context);
+      return {
+        endpoint: name,
+        html: result.html,
+        status: 200,
+        ms: result.ms,
+        source: 'network',
+        pages: result.pages,
+        records: result.records,
+        totalQuantity: result.totalQuantity,
+        partialQuantity: result.partialQuantity,
+        complete: result.complete,
+        warning: result.warning
+      };
+    }
+
+    if (name === 'inventory-history' && (options.startDate || options.endDate)) {
+      const result = await fetchFullInventoryHistory(search, options.startDate, options.endDate, true, context);
+      return {
+        endpoint: name,
+        html: result.html,
+        status: 200,
+        ms: result.ms,
+        source: 'network',
+        pages: result.pages,
+        records: result.records,
+        complete: result.complete,
+        warning: result.warning
+      };
+    }
+
+    const result = await fcrPost(name, search, context);
+    return {
+      endpoint: name,
+      html: result.text,
+      status: result.status,
+      ms: result.ms,
+      source: 'network',
+      complete: true
+    };
+  }
+
   function respond(id, ok, data = null, error = '') {
     window.dispatchEvent(new CustomEvent(RESPONSE_EVENT, {
       detail: JSON.stringify({ id, ok, data, error, version: VERSION })
@@ -746,7 +1069,8 @@
   }
 
   async function handleRequest(message) {
-    const { id, type, payload = {}, client = 'unknown' } = message || {};
+    const { id, type, payload = {}, client = 'unknown', group = '' } = message || {};
+    const context = { client, group: clean(group) };
     if (!id || !type) return;
     const tracked = !['ping', 'stats', 'usageStats', 'usageReset', 'rememberProduct', 'rememberBinSize'].includes(type);
     if (tracked) {
@@ -755,11 +1079,13 @@
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'history', 'hazmat', 'binSize'], stats: { ...stats } };
-      else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code);
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
+      else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
-      else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : []);
+      else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
+      else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
       else if (type === 'rememberProduct') {
         const currentSearch = clean(new URLSearchParams(location.search).get('s'));
         const requestedKey = clean(payload.code || currentSearch);
@@ -796,6 +1122,15 @@
     try {
       const message = JSON.parse(String(event.detail || ''));
       handleRequest(message);
+    } catch {}
+  });
+
+
+  window.addEventListener(CANCEL_EVENT, event => {
+    try {
+      const message = JSON.parse(String(event.detail || ''));
+      const cancelled = cancelRequestGroup(message?.client, message?.group);
+      if (cancelled) recordUsage(`client.${clean(message?.client) || 'unknown'}.cancelled`, 0, cancelled);
     } catch {}
   });
 
