@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         DIAG v0.1.0 FCResearch Section Probe
+// @name         DIAG v0.2.0 FCResearch Section Probe
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.0
-// @description  Temporary passive FCResearch section/request mapper with one explicit, reversible Receive History delay test.
+// @version      0.2.0
+// @description  Temporary FCResearch section/request mapper with one explicit, reversible Product request suppression test.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
@@ -14,17 +14,17 @@
 (() => {
   'use strict';
 
-  if (window.__BWU2_FCR_SECTION_PROBE_V010__) return;
-  window.__BWU2_FCR_SECTION_PROBE_V010__ = true;
+  if (window.__BWU2_FCR_SECTION_PROBE_V020__) return;
+  window.__BWU2_FCR_SECTION_PROBE_V020__ = true;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
   const PREFIX = 'bwu2:fcr-section-probe:v1:';
   const EVENTS_KEY = `${PREFIX}events`;
-  const ARM_KEY = `${PREFIX}delay-arm`;
+  const ARM_KEY = `${PREFIX}block-arm`;
+  const LEGACY_ARM_KEY = `${PREFIX}delay-arm`;
   const PHASE_KEY = `${PREFIX}phase`;
   const MAX_EVENTS = 500;
-  const DELAY_ENDPOINT = 'receive-history';
-  const DELAY_MS = 6000;
+  const BLOCK_ENDPOINT = 'product';
   const PAGE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const PAGE_STARTED_AT = Date.now();
   const XHR_INFO = Symbol('bwu2FcrSectionProbe');
@@ -96,7 +96,7 @@
 
   function armState() {
     const arm = readJson(ARM_KEY, null);
-    return arm?.armed === true && arm.endpoint === DELAY_ENDPOINT ? arm : null;
+    return arm?.armed === true && arm.endpoint === BLOCK_ENDPOINT ? arm : null;
   }
 
   function setArm(armed) {
@@ -104,15 +104,16 @@
       mountedSections.clear();
       writeJson(ARM_KEY, {
         armed: true,
-        endpoint: DELAY_ENDPOINT,
-        delayMs: DELAY_MS,
+        endpoint: BLOCK_ENDPOINT,
+        mode: 'suppress-once',
         armedAt: new Date().toISOString()
       });
-      setPhase('delay-test');
-      add('test.armed', { endpoint: DELAY_ENDPOINT, delayMs: DELAY_MS });
+      try { sessionStorage.removeItem(LEGACY_ARM_KEY); } catch {}
+      setPhase('block-test');
+      add('test.armed', { endpoint: BLOCK_ENDPOINT, mode: 'suppress-once' });
     } else {
       try { sessionStorage.removeItem(ARM_KEY); } catch {}
-      add('test.disarmed', { endpoint: DELAY_ENDPOINT });
+      add('test.disarmed', { endpoint: BLOCK_ENDPOINT });
     }
     renderUi();
   }
@@ -147,6 +148,7 @@
     try {
       sessionStorage.removeItem(EVENTS_KEY);
       sessionStorage.removeItem(ARM_KEY);
+      sessionStorage.removeItem(LEGACY_ARM_KEY);
     } catch {}
     setPhase('baseline');
     add('capture.cleared', {});
@@ -211,8 +213,8 @@
         method: String(method || 'GET').toUpperCase(),
         transport: 'xhr',
         startedAt: 0,
-        delayTimer: 0,
-        sent: false
+        sent: false,
+        blocked: false
       } : null;
       return originalOpen.apply(this, arguments);
     };
@@ -248,64 +250,49 @@
           status: Number(xhr.status || 0),
           ok: xhr.status >= 200 && xhr.status < 300,
           ms,
-          delayed: info.delayed === true,
+          blocked: info.blocked === true,
           responseChars: text.length,
           contentType: clean(contentType).split(';')[0].slice(0, 80)
         });
         scheduleDocumentScan();
       }, { once: true });
 
-      const release = () => {
-        info.delayTimer = 0;
-        if (info.cancelledBeforeSend) return;
-        info.sent = true;
-        if (info.delayed) add('delay.release', {
-          requestId: info.id,
-          endpoint: info.endpoint,
-          transport: info.transport,
-          delayMs: DELAY_MS
-        });
-        try {
-          return originalSend.apply(xhr, sendArgs);
-        } catch (error) {
-          add('request.throw', {
-            requestId: info.id,
-            endpoint: info.endpoint,
-            transport: info.transport,
-            error: clean(error?.name || 'Error').slice(0, 80)
-          });
-          if (!info.delayed) throw error;
-          return undefined;
-        }
-      };
-
       if (consumeArm(info.endpoint)) {
-        info.delayed = true;
-        add('delay.start', {
+        info.blocked = true;
+        add('block.prevented', {
           requestId: info.id,
           endpoint: info.endpoint,
-          transport: info.transport,
-          delayMs: DELAY_MS
+          transport: info.transport
         });
-        info.delayTimer = window.setTimeout(release, DELAY_MS);
-        renderUi(`Delaying Receive History ${DELAY_MS / 1000}s…`);
+        window.setTimeout(() => add('block.checkpoint', {
+          endpoint: info.endpoint,
+          mounted: [...mountedSections].sort()
+        }), 2500);
+        renderUi('Product blocked • inspect, COPY, refresh');
         return undefined;
       }
 
-      return release();
+      info.sent = true;
+      try {
+        return originalSend.apply(xhr, sendArgs);
+      } catch (error) {
+        add('request.throw', {
+          requestId: info.id,
+          endpoint: info.endpoint,
+          transport: info.transport,
+          error: clean(error?.name || 'Error').slice(0, 80)
+        });
+        throw error;
+      }
     };
 
     XHR.prototype.abort = function() {
       const info = this[XHR_INFO];
-      if (info?.delayTimer && !info.sent) {
-        clearTimeout(info.delayTimer);
-        info.delayTimer = 0;
-        info.cancelledBeforeSend = true;
-        add('delay.cancelled', {
+      if (info?.blocked && !info.sent) {
+        add('block.native-abort', {
           requestId: info.id,
           endpoint: info.endpoint,
-          transport: info.transport,
-          reason: 'native-abort-before-release'
+          transport: info.transport
         });
       }
       return originalAbort.apply(this, arguments);
@@ -407,13 +394,14 @@
     const summaries = {};
     for (const event of events) {
       const key = event.phase || 'unknown';
-      const summary = summaries[key] ||= { requests: {}, mounted: [], delays: [] };
+      const summary = summaries[key] ||= { requests: {}, mounted: [], interventions: [] };
       if (event.type === 'request.end') {
         const stat = summary.requests[event.endpoint] ||= {
           count: 0,
           ok: 0,
           failed: 0,
           delayed: 0,
+          blocked: 0,
           totalMs: 0,
           maxMs: 0,
           transports: []
@@ -422,13 +410,14 @@
         if (event.ok) stat.ok++;
         else stat.failed++;
         if (event.delayed) stat.delayed++;
+        if (event.blocked) stat.blocked++;
         stat.totalMs += Number(event.ms || 0);
         stat.maxMs = Math.max(stat.maxMs, Number(event.ms || 0));
         if (event.transport && !stat.transports.includes(event.transport)) stat.transports.push(event.transport);
       } else if (event.type === 'dom.mount' && !summary.mounted.includes(event.endpoint)) {
         summary.mounted.push(event.endpoint);
-      } else if (event.type.startsWith('delay.')) {
-        summary.delays.push({ type: event.type, endpoint: event.endpoint, at: event.at });
+      } else if (event.type.startsWith('delay.') || event.type.startsWith('block.')) {
+        summary.interventions.push({ type: event.type, endpoint: event.endpoint, at: event.at });
       }
     }
 
@@ -448,7 +437,7 @@
       `BWU2 FCResearch Section Probe v${VERSION}`,
       `Exported: ${new Date().toISOString()}`,
       `Events: ${events.length}`,
-      `Test target: ${DELAY_ENDPOINT} (${DELAY_MS}ms one-shot delay; never blocked)`,
+      `Test target: ${BLOCK_ENDPOINT} (one-shot request suppression; arm auto-consumed)`,
       'Privacy: search/profile values and response bodies are excluded.',
       '',
       'SUMMARY',
@@ -485,12 +474,12 @@
   function renderUi(message = '') {
     if (!uiRoot) return;
     const arm = armState();
-    uiArm.textContent = arm ? 'DISARM' : 'ARM RECEIVE +6s';
+    uiArm.textContent = arm ? 'DISARM' : 'ARM BLOCK PRODUCT';
     uiArm.dataset.armed = arm ? '1' : '0';
     uiCount.textContent = `${events.length}`;
     uiStatus.textContent = message || (arm
       ? 'Armed • refresh this result'
-      : phase() === 'delay-test' ? 'Delay test recorded' : 'Passive baseline');
+      : phase() === 'block-test' ? 'Block test recorded • refresh restores normal' : 'Passive baseline');
   }
 
   function mountUi() {
