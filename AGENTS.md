@@ -1,466 +1,297 @@
-# AGENTS.md — Tampermonkey V2 Canonical Agent Instructions
+# AGENTS.md — Tampermonkey V2 Canonical Agent Rules
 
-## PRIME DIRECTIVE
+## AUTHORITY
+
+Repository: `1Sirkkris/-tampermonkey-v2`
+
+- `main` is the canonical source branch.
+- This root `AGENTS.md` on `main` is the single canonical coding rulebook.
+- `work-laptop-pack` is a deployment artifact, not a competing source or instruction branch.
+- Do not create or maintain branch-specific instruction variants.
 
 The user defines the real-world outcome. The agent owns the technical implementation.
 
-Do not require the user to understand code, APIs, DOM internals, browser architecture, network calls, concurrency, request payloads, framework internals, or debugging tools.
+The user is the Amazon FC workflow/domain expert and is not expected to speak in coder language. Interpret short, rough, misspelled, or informal requests using the surrounding workflow and evidence. Do not nitpick terminology when the intended outcome is clear.
 
-The agent's job is not to help the user code.
-The agent's job is to perform the engineering so the user does not need to know how to code.
+Do not require the user to understand code, APIs, DOM internals, request payloads, browser architecture, concurrency, frameworks, Git, or debugging tools.
 
 Optimize in this strict order:
 
-**Correctness & data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX**
+**Correctness/data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX**
 
 Never sacrifice an earlier priority merely to improve a later one.
 
----
+## USER / AGENT CONTRACT
 
-# OPERATOR CONTRACT
-
-The user is the operator/domain expert. The agent is the engineer/debugger/architect.
-
-The user should mainly be asked:
+Ask the user only for information they can reasonably provide:
 
 - what they normally do
 - what they want to happen
 - what visibly happened
 - what result is correct
-- what workflow/business constraint the agent cannot infer
+- a business/workflow constraint that cannot be inferred
 
 Do not ask the user to:
 
-- choose technical architectures they cannot reasonably evaluate
-- inspect source code
-- inspect DevTools manually
-- locate API calls manually
-- determine request payloads
-- choose concurrency values
-- identify framework internals
-- interpret technical errors that can instead be captured automatically
+- choose technical architecture
+- inspect or patch code
+- use DevTools manually
+- find endpoints or payloads
+- select concurrency limits
+- interpret raw technical errors
+- carry code or prompts between chats when tools can do it
 
-When technical evidence is needed, the agent must create or specify the diagnostic and make the user's steps brain-dead simple.
+Make technical decisions yourself. Ask one short question only when the answer materially changes correctness, safety, destructive scope, or intended behaviour.
 
-Example:
+When user action is unavoidable, provide the smallest complete numbered steps using exact visible labels.
 
-1. Install diagnostic.
-2. Open exact page.
-3. Perform normal workflow once.
-4. Click Mark/Copy/Export.
-5. Send output.
+## INTENT ROUTER
 
-No vague requests such as "inspect the network calls".
+Interpret the user's verb as authorization scope.
 
----
+### Review / diagnose / explain / plan / assess
 
-# TASK TRIAGE
+- Inspect and report only.
+- Read-only GitHub and diagnostic checks are allowed.
+- Do not edit, commit, push, deploy, or start a new task unless asked.
 
-Classify work before acting.
+### Fix / change / build / improve / optimize / update / continue
 
-## PATCH
-Something broke.
-Use the smallest reliable fix first.
+- Complete the in-scope engineering end to end.
+- Inspect the canonical repo and applicable rules.
+- Edit the real source, version it, validate it, inspect the diff, commit it, push it, and deliver through GitHub.
+- A code-change request is standing authorization for the normal scoped commit and push. Do not ask separately whether to commit or push.
+- Do not stop at a local file or paste a replacement script into chat as the normal delivery.
 
-## IMPROVE
-Existing behavior works but can be faster, simpler, safer, easier, or more reliable.
+### Approval still required
 
-## BUILD
-New capability.
+Ask before:
 
-## AUDIT / ARCHITECTURE
-Deliberately perform the full ecosystem/backend discovery sweep.
+- deleting scripts, branches, releases, or material data
+- force-pushing or rewriting history
+- changing repository visibility, settings, access, or secrets
+- adding production dependencies or credentials
+- modifying unrelated tools or expanding scope materially
+- promoting an unvalidated experimental/diagnostic candidate into the deployed fleet
+- creating a new Work Mode task/chat
 
-Do not turn a local bug into a repository rewrite unless evidence shows the problem is systemic.
+## STARTUP / SOURCE TRUTH
 
----
+Before any Tampermonkey coding, review, diagnosis, or architecture work:
 
-# CORE LOOP
+1. Fetch and follow this `AGENTS.md` from `main`.
+2. Inspect the current canonical repository source and relevant history/diff.
+3. Treat Project uploads, pasted scripts, exports, logs, and screenshots as evidence/input, not automatically as the source of truth.
+4. If the installed/runtime script appears newer or materially different, reconcile it into the repository before changing it. Never overwrite a newer working runtime with stale GitHub code.
+5. If the canonical repo or this rulebook cannot be accessed, stop before changing code and report `ENVIRONMENT BLOCKED`.
 
-**FIND → UNDERSTAND → MEASURE → DECIDE → BUILD → VALIDATE → CLEANUP → RECORD → REPEAT**
+Never wait for the user to say "use agent prompt."
 
-Do not tunnel-vision on the first promising idea.
-Do not research forever either.
+## TASK MODES
 
----
+### PATCH
 
-# BOUNDED DISCOVERY
+Something broke. Reproduce or establish the failure, then use the smallest reliable root-cause fix. Preserve all unrelated behaviour.
 
-For IMPROVE, BUILD, and AUDIT work, perform a broad first sweep across the relevant script fleet and underlying applications.
+### IMPROVE
 
-Look for:
+Existing behaviour works but can be faster, safer, simpler, more reliable, or easier. Prove the main waste before changing architecture.
 
-- UI automation that can become direct backend requests
-- duplicate requests
-- equivalent endpoints
+### BUILD
+
+Add a new capability using the smallest mechanism that satisfies the real workflow.
+
+### AUDIT / ARCHITECTURE
+
+Map the relevant ecosystem first. Rank opportunities by impact, evidence, effort, and regression risk. Do not tunnel-vision on the first API or rewrite the fleet without proof.
+
+Core loop:
+
+**Find → Understand → Measure → Decide → Build → Validate → Clean up → Deliver**
+
+## BOUNDED DISCOVERY
+
+For IMPROVE, BUILD, and AUDIT work, inspect the relevant scripts/pages/services for:
+
+- UI automation replaceable by an authorized direct request
+- duplicate/in-flight-equivalent requests
 - data already present in HTML, application state, storage, sibling responses, or shared cores
-- serial work that can safely become bounded parallel work
-- always-on work that can become lazy/event-driven
-- DOM rendering used as a database
-- unnecessary pagination
-- duplicate API clients, caches, parsers, observers, routing logic, or state handling
-- user actions that can disappear entirely
+- serial work that can safely use bounded concurrency or batching
+- repeated navigation/page loads
+- DOM scraping/rendering that can disappear
+- always-on polling, observers, timers, or listeners that can become lazy/event-driven
+- duplicated clients, caches, parsers, routing, normalization, or state ownership
+- opportunities to remove user actions or whole obsolete subsystems
 
-After the initial sweep:
+After the first sweep:
 
-1. identify the top 3 opportunities
-2. rank by practical value
-3. select the highest-value sufficiently-proven option
-4. execute
+1. identify the top three practical opportunities
+2. select the highest-value sufficiently proven option
+3. implement and validate it
 
-Do not continue searching merely because more possibilities may exist.
-Resume discovery only when new evidence materially changes the ranking.
+Resume discovery only when new evidence changes the ranking. Broad does not mean infinite.
 
-**BROAD ≠ INFINITE.**
+Prefer one authoritative owner per shared responsibility where it removes real duplication. Merge scripts only for measured value, not file count or architectural neatness.
 
----
+## ENGINEERING CONTRACT
 
-# ARCHITECTURE QUESTIONS
+Protect external and workflow contracts unless change is required and justified:
 
-Ask repeatedly:
-
-- Can we bypass the UI completely?
-- Are we asking the backend for the same thing multiple times?
-- Are we fetching something the application already knows?
-- What can happen simultaneously without breaking correctness?
-- Can this work happen only when needed?
-- Can we process the data without rendering native UI garbage?
-- Can we stop before pagination?
-- What should have one authoritative owner instead of being reimplemented?
-
-Prefer:
-
-**fetch → parse structured/detached response → retain required values → discard unnecessary data → render only useful UI**
-
-Do not use the DOM as a database when a structured source is available.
-
----
-
-# ONE OWNER PER RESPONSIBILITY
-
-Every expensive or cross-cutting capability should have one authoritative owner where practical.
-
-Prefer:
-
-- one shared read/data core
-- one cache per data domain
-- one hierarchy resolver
-- one print service
-- one observability path
-- one implementation of shared parsing/normalization
-
-UI modules should consume shared services rather than independently reimplementing them.
-
-Do not centralize unrelated state-changing workflows merely for architectural neatness.
-
-Multiple scripts are not inherently inefficient.
-Merge only when doing so measurably removes duplicate backend work, duplicate data/cache implementations, significant duplicate DOM observation, duplicate rendering/parsing, shared side-effect infrastructure, user interactions, or maintenance/failure surface.
-
-**Merge for value, not file count.**
-
----
-
-# USER EFFORT IS A PERFORMANCE METRIC
-
-Measure operator cost as seriously as request latency.
-
-Look for:
-
-- clicks
-- scans
-- copy/pastes
-- page changes
-- manual fields
-- waiting periods
-- repeated decisions
-- things the user must remember
-- opportunities to make mistakes
-- times the workflow requires attention
-
-A workflow changing from:
-
-**scan → click → copy → navigate → paste → confirm → scan**
-
-to:
-
-**scan**
-
-may be more valuable than shaving milliseconds off a request.
-
----
-
-# BRAINLESS OPERATION / MENTAL LOAD
-
-Prefer workflows requiring less memory, precision, and decision-making.
-
-Where safe:
-
-- infer context
-- remember previous settings
-- validate automatically
-- focus the correct control
-- recover automatically
-- prevent impossible inputs
-- provide useful defaults
-- make the next action obvious
-- prevent errors rather than merely reporting them afterward
-
----
-
-# EVIDENCE BEFORE ASSUMPTION
-
-Treat uncertain application behavior as something to prove.
-
-When evidence is missing:
-
-1. define the exact unknown
-2. build the smallest useful diagnostic
-3. capture only the data needed to resolve it
-4. keep the user's action simple
-5. compare evidence against the hypothesis
-6. remove temporary instrumentation once proven
-
-Use the shared BWU2 Observability tooling where practical instead of inventing manual inspection work.
-
-Observability should capture useful timings, counts, failures, important request/response behavior, and script events without drowning the session in background noise.
-
----
-
-# RUNTIME TRUTH BEFORE CODE
-
-Before modifying an actively used tool, verify that repository source matches the version actually installed and running when there is any sign of version drift.
-
-If runtime is newer or materially different, recover/synchronize runtime source before architectural work.
-
-Never overwrite a newer working runtime with an older repository copy merely because GitHub appears authoritative.
-
----
-
-# MEASURE BEFORE AND AFTER
-
-For performance-sensitive changes, compare old and new paths.
-
-Useful measures include:
-
-- wall-clock workflow time
-- request count
-- request latency
-- retries/failures
-- page loads/navigation
-- rendered row count
-- observer/polling activity
-- user interactions removed
-- recovery behavior
-
-A change is not automatically better because it uses an API.
-
----
-
-# BUILD RULES
-
-## Correctness first
-
-Do not trade correctness for speed.
-
-Protect:
-
-- quantity correctness
+- userscript name, filename, version, `@match`/`@include`, `@updateURL`, and `@downloadURL`
+- endpoints, methods, payloads, quantities, and ordering
+- storage/cache keys and persisted preferences
+- selectors, labels, IDs/classes, shortcuts, and focus behaviour
 - source/destination/item separation
-- expiry/date correctness
-- duplicate-run prevention
-- input validation
-- cancellation
-- stale async completion
-- page/context changes
-- partial failures
+- expiry/date semantics
+- cancellation, recovery, and partial-completion behaviour
 
-## Prefer deletion over layering
+For affected code, check:
 
-When a backend path replaces UI automation, remove obsolete waits, selectors, keyboard emulation, scrolling, observers, and dead fallbacks instead of keeping both architectures tangled together.
+- duplicate initialization
+- SPA/page/route changes
+- missing or replaced DOM
+- stale asynchronous completion
+- repeated actions and races
+- malformed/changed responses
+- timeouts, retries, cancellation, and partial failure
+- invalid/expired storage and caches
+- Firefox, Chrome, Tampermonkey, userscript/page world, CSP, iframes, and `GM_*` behaviour where relevant
 
-## Smallest reliable mechanism
+Runtime rules:
 
-Prefer the least complicated implementation that fully solves the real workflow.
-Do not introduce frameworks, dependencies, or abstractions unless they materially improve the project.
+- Use initialization guards.
+- Give observers, timers, listeners, and patches a clear owner, narrow scope, duplicate protection, and cleanup.
+- When inactive, prefer zero requests, zero polling, and zero repeated full-page scans where practical.
+- Deduplicate identical in-flight reads and share results.
+- Validate required response fields before consuming them.
+- Use bounded concurrency and abortable long/multi-request runs.
+- Never blindly retry state-changing requests.
+- Treat external strings as hostile; prefer safe text rendering and avoid unsafe evaluation.
+- Remove superseded UI automation, waits, observers, selectors, fallbacks, diagnostics, and debug output after the replacement is proven.
 
-## Bounded concurrency
+For every affected workflow, verify:
 
-Parallel work must have an explicit safe limit and sensible failure behavior.
+**Trigger → Action → Result**
 
-## Abortable runs
+## PERFORMANCE CONTRACT
 
-Long or multi-request workflows should support cancellation so stale work cannot continue after the user changes context or starts again.
+Performance means the complete real workflow finishes sooner without increasing mistakes, backend risk, page freezing, or recovery cost.
 
----
+Profile or prove the main bottleneck first. Do not micro-optimize cold code.
 
-# READ SAFETY VS WRITE SAFETY
+Where measurable, compare the same workflow before and after using:
 
-Treat read operations and state-changing operations differently.
+- total workflow time
+- requests and retries
+- user clicks/scans/copy-pastes/page changes
+- repeated DOM scans and rendered work
+- observer/timer activity
+- browser long tasks
+- failures and recovery behaviour
 
-A readable endpoint being understood does not prove that a mutation endpoint is safe.
+Use repeated runs and a median when practical. Never invent numbers or claim speed from code appearance alone.
 
-For write/bulk operations, prove where relevant:
+If improvement is real but cannot be safely measured, say so plainly.
 
-- exact target
-- request semantics
-- quantity semantics
-- duplicate behavior
-- retry behavior
-- partial-failure behavior
-- idempotence
-- cancellation behavior
-- stale-context protection
+## LIVE EVIDENCE
 
-Never blindly retry a state-changing request.
+Use live evidence when static review cannot prove real-site behaviour, private API contracts, session behaviour, dynamic DOM, races, response shapes, or performance.
 
-Blind retry on a GET may be acceptable.
-Blind retry on "move items" may duplicate or corrupt real work.
+1. State the exact claim or unknown.
+2. Create the smallest safe diagnostic using existing BWU2 Observability tooling where practical.
+3. Commit/push the diagnostic through GitHub; do not make the user manually patch code.
+4. Give exact minimal operator steps.
+5. Capture only what resolves the question.
+6. Separate confirmed, inferred, and unknown.
+7. Implement only what evidence supports.
+8. Retest and remove temporary instrumentation.
 
----
+Never capture or commit credentials, cookies, tokens, secret headers, or unnecessary identifiers/payloads.
 
-# FAIL SAFE, NOT JUST FAIL
+If live validation is still required, report exactly: `Regression: Live validation needed.`
 
-Preferred failure behavior:
+## VERSIONING, GITHUB, AND DELIVERY
 
-**prevent → detect → stop safely → preserve state → explain → recover → resume**
+For every behaviour-changing userscript revision:
 
-Do not force the user to restart an entire workflow when safe continuation is possible.
+- bump `@version`
+- keep exposed UI/toast version labels consistent
+- preserve deployed filenames and update URLs unless an intentional migration is required
+- validate the affected workflow as far as the environment allows
+- inspect the final diff for unrelated changes and secrets
+- commit with a scoped message and push to `main`
+- update any existing version manifest/README entry affected by the change
 
-Preserve completed work where practical and avoid leaving hidden background actions running after failure.
+Stable fleet delivery:
 
----
+- Synchronize the exact validated version to `work-laptop-pack` when that script is part of the deployed work-laptop fleet.
+- Preserve the pack filename and Tampermonkey update path.
+- Record the source commit/version so rollback remains possible.
+- After pushing, tell the user only the exact Tampermonkey action required, normally `Tampermonkey → Utilities → Check for userscript updates`.
 
-# VALIDATION / REGRESSION
+Experimental/diagnostic delivery:
 
-Do not stop at "the code looks right."
+- Keep genuinely unvalidated candidates out of deployed update paths and out of `work-laptop-pack`.
+- Store them in the repository using the existing test/diagnostic convention so GitHub remains the source of truth.
+- Provide a GitHub install/update path and the exact live-validation steps.
+- Promote only after evidence supports it.
+- A long-lived script containing `TEST` in its name is not automatically experimental; deployment intent and current fleet status control.
 
-For meaningful changes, test or reason through:
+Never make the normal user workflow:
 
-- happy path
-- empty input
-- duplicate input
-- malformed input
-- slow response
-- partial backend failure
-- cancellation
-- repeated run
-- stale async work
-- page/context change
-- unexpected response shape
+- manually edit code
+- copy/paste a full replacement script from chat
+- choose between competing source copies
+- remember to ask for GitHub synchronization
 
-Before replacing stable behavior, understand what already works.
-After the change, test both the new path and the old successful workflow that must remain intact.
+If GitHub write/sync is blocked, do not silently leave a local-only revision. Report `ENVIRONMENT BLOCKED` and state the single missing capability.
 
-Keep a clear last-known-good commit/version and rollback path.
-Avoid changing multiple unrelated critical behaviors simultaneously unless necessary.
+## WORK-LAPTOP PACK
 
----
+`work-laptop-pack` is the stable deployment branch.
 
-# CLEANUP GOD MODE
+- No speculative changes.
+- Only synchronize deliberately selected, validated fleet versions.
+- Keep exact deployed filenames/update paths and a rollback commit.
+- Confirm the pack points to the intended source revision.
+- Do not use the branch as an independent coding source or keep a competing `AGENTS.md` there.
 
-After a successful change, remove:
+## HANDOFFS
 
-- obsolete selectors
-- dead UI automation
-- superseded endpoints
-- duplicate helpers
-- temporary diagnostics
-- stale comments
-- unused constants
-- old version labels
-- console spam
-- unreachable fallbacks
-- speculative branches disproved by evidence
+The current capable chat owns the task end to end. Do not bounce work between Overseer, Research, Live Evidence, and repo coding merely because those labels exist.
 
-Then ask:
+Use another chat only when its environment provides evidence or repository access the current chat genuinely lacks.
 
-- can another request disappear?
-- can another observer disappear?
-- can another page load disappear?
-- can another user action disappear?
-- can another duplicate implementation disappear?
-- can this feature become smaller now that we understand it?
+Never create or send to Work Mode automatically. Before any handoff say exactly:
 
----
+`REQUESTING TO SEND TO WORK MODE - WILL CREATE NEW CHAT`
 
-# DEFINITION OF DONE
+Then wait for approval. Do not create duplicate tasks. Give one complete copy-paste handoff only when a handoff is unavoidable.
 
-A feature is not done when code exists.
+## FINAL PASS / DONE
 
-It is done when:
+Before completion:
 
-- desired workflow works
-- obvious edge cases are handled
-- failures are safe
-- no known regression was introduced
-- performance claims are measured where relevant
-- user effort is minimized
-- temporary diagnostics are removed
-- versions are correct
-- rollback exists
-- durable discoveries are recorded in the correct project document
+- review changed and directly affected areas
+- run relevant syntax/tests/checks
+- inspect the final diff
+- remove newly obsolete code and diagnostics
+- confirm version metadata and deployment paths
+- verify the GitHub commit/push and pack sync when applicable
+- preserve rollback
 
----
+Stop when the goal is complete, remaining work is low-value/out of scope, live evidence is required, approval is required, or the environment blocks progress.
 
-# PERSISTENT PROJECT KNOWLEDGE
+Keep the user-facing completion brutally short and in plain language:
 
-Keep different knowledge in different files.
+- `Changed:` what is different
+- `Proof:` what was checked
+- `Risk:` only material remaining risk
+- `Next:` one exact user action, or `None`
 
-## `AGENTS.md`
-How the agent must behave.
+Finish with exactly one:
 
-## `ARCHITECTURE.md`
-Proven facts about applications, APIs, backend paths, shared services, dependencies, and architectural decisions.
-
-## `PROJECT_STATE.md`
-Current active/experimental/stable/deprecated tools, latest versions, current investigation, and immediate next work.
-
-Do not turn `AGENTS.md` into a dumping ground for every fact ever discovered.
-
----
-
-# REPOSITORY / DELIVERY RULES
-
-`AGENTS.md` at repository root is the canonical instruction file for the repository unless a deeper file explicitly overrides it for a subtree.
-
-When modifying a userscript:
-
-- bump version when behavior changes
-- keep metadata/UI version labels consistent where exposed
-- do not casually rename deployed artifacts when filename/link is part of rollout
-
-Never commit:
-
-- auth tokens
-- cookies
-- session values
-- passwords
-- private credentials
-- secret headers
-- unnecessary sensitive captured payloads
-
-Sanitize diagnostics before committing them.
-
-Do not rewrite stable working code solely for style.
-
----
-
-# DEFAULT MISSION BEHAVIOR
-
-When asked to improve, audit, optimize, or continue this project:
-
-1. Read `AGENTS.md`.
-2. Check runtime/source truth if version drift is possible.
-3. Classify the task: PATCH / IMPROVE / BUILD / AUDIT.
-4. Inspect the current repository, not an old pasted copy.
-5. Perform bounded discovery appropriate to task size.
-6. Rank the top opportunities.
-7. Prove uncertain behavior with targeted evidence.
-8. Implement the highest-value safe option.
-9. Validate the real workflow and regressions.
-10. Perform Cleanup God Mode.
-11. Record durable knowledge in `ARCHITECTURE.md` or `PROJECT_STATE.md` as appropriate.
-
-The target is not "a nicer userscript."
-
-The target is the smallest, safest, fastest, most reliable workflow the available backend and browser environment can support.
+- `OFFLINE WORK COMPLETE`
+- `LIVE EVIDENCE REQUIRED`
+- `USER DECISION REQUIRED`
+- `ENVIRONMENT BLOCKED`
