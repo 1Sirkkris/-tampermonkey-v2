@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         Unbind Hierarchy Queue v1.0.1
+// @name:en      Unbind Hierarchy Queue v1.0.1
 // @namespace    BWU2
 // @version      1.0.1
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
@@ -16,6 +17,9 @@
   if (window.__bwu2UnbindHierarchyQueue) return;
   window.__bwu2UnbindHierarchyQueue = true;
 
+  // Keep the base @name above permanently fixed: Tampermonkey uses it with
+  // @namespace as the update identity. Display versions belong here,
+  // @version, @name:en, and the UI only.
   const VERSION = '1.0.1';
   const WAREHOUSE_ID = 'BWU2';
   const API_VALIDATE = '/validateContainer';
