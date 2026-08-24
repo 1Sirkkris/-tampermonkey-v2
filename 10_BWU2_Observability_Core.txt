@@ -1,13 +1,15 @@
 // ==UserScript==
-// @name         CORE v0.1.2 BWU2 Observability Core
+// @name         CORE v0.1.3 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.2
+// @version      0.1.3
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @include      /^https?:\/\/aft-moveapp-[^\/]+(?:\.nrt)?\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/t\.corp\.amazon\.com\//
+// @include      /^https?:\/\/aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com\//
+// @include      /^https?:\/\/fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com\//
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_getValue
@@ -21,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -34,16 +36,23 @@
   const MUTATION_REPORT_MS = 10000;
   const EVENT_LOOP_WARN_MS = 500;
   const EVENT_LOOP_MIN_GAP_MS = 10000;
+  const FCR_NETWORK_QUIET_MS = 1200;
+  const SLOW_NETWORK_MS = 1500;
+  const VISIBILITY_DEBOUNCE_MS = 750;
+  const VIEWPORT_DEBOUNCE_MS = 500;
+  const POLL_NETWORK_QUIET_MS = 1200;
+  const SAMPLE_PREFIX = `${PREFIX}sample:`;
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   if (W.__BWU2_OBSERVABILITY_CORE_V1__) return;
   W.__BWU2_OBSERVABILITY_CORE_V1__ = true;
 
   const SENSITIVE_KEY = /authorization|cookie|credential|csrf|jwt|password|passwd|secret|session.?token|signature|token|x-amz|api.?key/i;
-  const IDENTIFIER_KEY = /asin|barcode|container|destination|fcsku|fnsku|item|lpn|object|pod|scannable|sku|source/i;
+  const IDENTIFIER_KEY = /asin|barcode|container|correlation.?id|destination|fcsku|fnsku|item|lpn|object|pod|request.?id|scannable|sku|source|trace.?id/i;
   const SAFE_QUERY_KEY = /^(?:action|mode|page|sort|state|tab|type|view)$/i;
-  const INTERESTING_PATH = /(?:\/api\/|\/results\/(?:inventory|inventory-more|inventory-history|container-history)|container-hierarchy|edititems|fcskuflip|moveitems|move-container|close-container|scan-source-container|scanitem|sideline|dropzone|print)/i;
-  const NOISE_HOST = /(?:^|\.)data\.pendo\.aft\.amazon\.dev$/i;
+  const DETAILED_PATH = /(?:\/api\/|edititems|fcskuflip|moveitems|move-container|close-container|scan-source-container|scanitem|sideline|dropzone|print)/i;
+  const NOISE_HOST = /(?:^|\.)(?:data\.pendo\.aft\.amazon\.dev|api\.pendo\.aft\.amazon\.dev)$/i;
+  const NOISE_PATH = /(?:^|\/)logger(?:$|[/?#])/i;
   const FCR_HOST = /(?:fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app)/i;
   const SIM_HOST = /^t\.corp\.amazon\.com$/i;
 
@@ -68,6 +77,17 @@
   let uiClear = null;
   let uiTimer = 0;
   let lastEventLoopLogAt = 0;
+  let visibilityTimer = 0;
+  let viewportTimer = 0;
+  let lastViewport = '';
+  let performanceObserver = null;
+  let eventLoopTimer = 0;
+  let fcrNetworkTimer = 0;
+  let fcrNetworkStats = new Map();
+  let pollNetworkTimer = 0;
+  let pollNetworkStats = new Map();
+  const corePending = new Map();
+  let lastRejection = null;
 
   function gmGet(key, fallback) { try { return GM_getValue(key, fallback); } catch { return fallback; } }
   function gmSet(key, value) { try { GM_setValue(key, value); return true; } catch { return false; } }
@@ -126,6 +146,13 @@
     lastGlobalCount = 0;
     full = false;
     mutationStats = emptyMutationStats();
+    fcrNetworkStats = new Map();
+    clearTimeout(fcrNetworkTimer);
+    fcrNetworkTimer = 0;
+    pollNetworkStats = new Map();
+    clearTimeout(pollNetworkTimer);
+    pollNetworkTimer = 0;
+    corePending.clear();
     gmSet(pageCountKey, 0);
     return true;
   }
@@ -184,11 +211,19 @@
     return clip(text);
   }
 
+  function sanitizePath(value) {
+    return String(value ?? '').split('/').map(segment => {
+      if (/^P\d{8,14}$/i.test(segment)) return fingerprint(segment, 'ticket');
+      return scrubText(segment);
+    }).join('/');
+  }
+
   function sanitizeUrl(value) {
     try {
       const url = new URL(String(value ?? ''), location.href);
       url.username = '';
       url.password = '';
+      url.pathname = sanitizePath(url.pathname);
       for (const [key, raw] of [...url.searchParams.entries()]) {
         url.searchParams.set(key, SAFE_QUERY_KEY.test(key) ? scrubText(raw) : fingerprint(raw, `query:${key}`));
       }
@@ -229,35 +264,6 @@
     return output;
   }
 
-  function parseBody(body) {
-    if (body == null) return null;
-    try {
-      if (typeof body === 'string') {
-        try { return sanitize(JSON.parse(body)); } catch {
-          if (body.includes('=')) {
-            try { return sanitize(Object.fromEntries(new URLSearchParams(body).entries())); } catch {}
-          }
-          return scrubText(body);
-        }
-      }
-      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return sanitize(Object.fromEntries(body.entries()));
-      if (typeof FormData !== 'undefined' && body instanceof FormData) return sanitize(Object.fromEntries(body.entries()));
-      if (typeof Blob !== 'undefined' && body instanceof Blob) return `<Blob:${body.type || 'unknown'}:${body.size}>`;
-      if (typeof ArrayBuffer !== 'undefined' && (body instanceof ArrayBuffer || ArrayBuffer.isView(body))) return `<binary:${body.byteLength}>`;
-      return sanitize(body);
-    } catch (error) {
-      return `<body-read-failed:${scrubText(error?.message || error)}>`;
-    }
-  }
-
-  function parseResponseText(text, contentType = '') {
-    const raw = String(text ?? '');
-    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
-      try { return sanitize(JSON.parse(raw)); } catch {}
-    }
-    return scrubText(raw);
-  }
-
   function parsedUrl(rawUrl) {
     try { return new URL(String(rawUrl || ''), location.href); }
     catch { return null; }
@@ -265,13 +271,184 @@
 
   function isNoise(rawUrl) {
     const url = parsedUrl(rawUrl);
-    return !!url && NOISE_HOST.test(url.hostname);
+    return !!url && (NOISE_HOST.test(url.hostname) || NOISE_PATH.test(url.pathname));
   }
 
-  function isInteresting(rawUrl) {
+  function isPollNetwork(rawUrl) {
     const url = parsedUrl(rawUrl);
-    if (url) return INTERESTING_PATH.test(url.pathname);
-    return INTERESTING_PATH.test(String(rawUrl || ''));
+    return !!url && /\/status$/i.test(url.pathname);
+  }
+
+  function isFcrNetwork(rawUrl) {
+    const url = parsedUrl(rawUrl);
+    return !!url && FCR_HOST.test(url.hostname) && /\/results\//i.test(url.pathname);
+  }
+
+  function isDetailedApi(rawUrl) {
+    const url = parsedUrl(rawUrl);
+    if (SIM_HOST.test(location.hostname)) return false;
+    if (url && FCR_HOST.test(url.hostname)) return false;
+    if (url) return DETAILED_PATH.test(url.pathname);
+    return DETAILED_PATH.test(String(rawUrl || ''));
+  }
+
+  function endpointKey(method, rawUrl) {
+    const url = parsedUrl(rawUrl);
+    return `${String(method || 'GET').toUpperCase()} ${url?.hostname || ''}${url?.pathname || String(rawUrl || '')}`;
+  }
+
+  function claimFcrShapeSample(method, rawUrl) {
+    syncSession();
+    const key = `${SAMPLE_PREFIX}${activeSessionId}:${hash(endpointKey(method, rawUrl))}`;
+    if (gmGet(key, false)) return false;
+    gmSet(key, true);
+    return true;
+  }
+
+  function classifySearchValue(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return 'empty';
+    if (/^(?:ts|cs)x[A-Za-z0-9_-]+$/i.test(text)) return 'container';
+    if (/^(?:B0|X0|ZZ)[A-Z0-9]{8}$/i.test(text)) return 'item';
+    if (/^P-\d-(?:[A-Z]\d{3}){2}$/i.test(text)) return 'pod';
+    if (/^\d{8,14}$/.test(text)) return 'numeric';
+    return 'text';
+  }
+
+  function summarizeRequestShape(body) {
+    let value = body;
+    try {
+      if (typeof body === 'string') {
+        try { value = JSON.parse(body); }
+        catch { value = Object.fromEntries(new URLSearchParams(body).entries()); }
+      } else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        value = Object.fromEntries(body.entries());
+      } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        value = Object.fromEntries(body.entries());
+      }
+    } catch {}
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: typeof value };
+    const keys = Object.keys(value).slice(0, 30);
+    const out = { kind: 'object', keys };
+    if (Object.prototype.hasOwnProperty.call(value, 's')) out.searchKind = classifySearchValue(value.s);
+    return out;
+  }
+
+  function summarizeFcrResponse(text, contentType = '') {
+    const raw = String(text ?? '');
+    const base = { chars: raw.length };
+
+    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return { ...base, kind: 'json-array', length: parsed.length };
+        return { ...base, kind: 'json-object', keys: Object.keys(parsed || {}).slice(0, 30) };
+      } catch {}
+    }
+
+    try {
+      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      const sectionTitles = [...doc.querySelectorAll('.section-title')]
+        .map(node => scrubText(String(node.textContent || '').replace(/\s+/g, ' ').trim()))
+        .filter(Boolean)
+        .slice(0, 8);
+      const tables = [...doc.querySelectorAll('table')].slice(0, 8).map(table => ({
+        id: scrubText(table.id || ''),
+        headers: [...table.querySelectorAll('thead th')].map(th => scrubText(String(th.textContent || '').replace(/\s+/g, ' ').trim())).filter(Boolean).slice(0, 24),
+        rows: table.querySelectorAll('tbody tr').length
+      }));
+      const pagination = [...doc.querySelectorAll('.pagination-token')];
+      return {
+        ...base,
+        kind: 'html',
+        sectionTitles,
+        tables,
+        paginationPresent: pagination.length > 0,
+        paginationHasMore: pagination.some(node => /true/i.test(String(node.textContent || '').trim()))
+      };
+    } catch {
+      return { ...base, kind: 'text' };
+    }
+  }
+
+  function recordFcrNetwork(base, rawUrl, body, responseText = '', contentType = '') {
+    const url = parsedUrl(rawUrl);
+    const path = url?.pathname || '';
+    const key = `${base.method} ${path}`;
+    const stat = fcrNetworkStats.get(key) || { method: base.method, path, count: 0, failures: 0, totalMs: 0, maxMs: 0 };
+    stat.count++;
+    if (!base.ok) stat.failures++;
+    stat.totalMs += Number(base.ms || 0);
+    stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
+    fcrNetworkStats.set(key, stat);
+
+    clearTimeout(fcrNetworkTimer);
+    fcrNetworkTimer = setTimeout(flushFcrNetworkSummary, FCR_NETWORK_QUIET_MS);
+
+    if (Number(base.ms || 0) >= SLOW_NETWORK_MS) {
+      add('network.slow', { ...base, path });
+    }
+
+    if (!base.ok) {
+      add('network.http-error', { ...base, path });
+    }
+
+    if (claimFcrShapeSample(base.method, rawUrl)) {
+      add('fcr.response.shape', {
+        method: base.method,
+        path,
+        status: base.status,
+        ms: base.ms,
+        request: summarizeRequestShape(body),
+        response: summarizeFcrResponse(responseText, contentType)
+      });
+    }
+  }
+
+  function flushFcrNetworkSummary() {
+    clearTimeout(fcrNetworkTimer);
+    fcrNetworkTimer = 0;
+    if (!fcrNetworkStats.size) return;
+    const endpoints = [...fcrNetworkStats.values()].map(stat => ({
+      method: stat.method,
+      path: stat.path,
+      count: stat.count,
+      failures: stat.failures,
+      averageMs: stat.count ? Math.round(stat.totalMs / stat.count) : 0,
+      maxMs: Math.round(stat.maxMs)
+    })).sort((a, b) => a.path.localeCompare(b.path));
+    fcrNetworkStats = new Map();
+    add('fcr.network.summary', { endpoints });
+  }
+
+  function recordPollNetwork(base, rawUrl) {
+    const url = parsedUrl(rawUrl);
+    const key = `${base.method} ${url?.hostname || ''}${url?.pathname || ''}`;
+    const stat = pollNetworkStats.get(key) || {
+      method: base.method, host: url?.hostname || '', path: url?.pathname || '',
+      count: 0, failures: 0, totalMs: 0, maxMs: 0
+    };
+    stat.count++;
+    if (!base.ok) stat.failures++;
+    stat.totalMs += Number(base.ms || 0);
+    stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
+    pollNetworkStats.set(key, stat);
+    clearTimeout(pollNetworkTimer);
+    pollNetworkTimer = setTimeout(flushPollNetworkSummary, POLL_NETWORK_QUIET_MS);
+  }
+
+  function flushPollNetworkSummary() {
+    clearTimeout(pollNetworkTimer);
+    pollNetworkTimer = 0;
+    if (!pollNetworkStats.size) return;
+    const endpoints = [...pollNetworkStats.values()].map(stat => ({
+      method: stat.method, host: stat.host, path: stat.path, count: stat.count,
+      failures: stat.failures, averageMs: stat.count ? Math.round(stat.totalMs / stat.count) : 0,
+      maxMs: Math.round(stat.maxMs)
+    }));
+    pollNetworkStats = new Map();
+    add('network.poll.summary', { endpoints });
   }
 
   function flushPage() {
@@ -316,10 +493,8 @@
       data: sanitize(data)
     });
 
-    gmSet(pageCountKey, pageEvents.length);
     lastGlobalCount++;
     scheduleFlush();
-    renderUi();
     return true;
   }
 
@@ -379,7 +554,11 @@
     flushTimer = 0;
 
     for (const key of gmKeys()) {
-      if (key.startsWith(`${PAGE_PREFIX}${oldSession}:`) || key.startsWith(`${COUNT_PREFIX}${oldSession}:`)) gmDelete(key);
+      if (
+        key.startsWith(`${PAGE_PREFIX}${oldSession}:`) ||
+        key.startsWith(`${COUNT_PREFIX}${oldSession}:`) ||
+        key.startsWith(`${SAMPLE_PREFIX}${oldSession}:`)
+      ) gmDelete(key);
     }
 
     const fresh = defaultMeta();
@@ -397,6 +576,13 @@
     lastCountReadAt = Date.now();
     full = false;
     mutationStats = emptyMutationStats();
+    fcrNetworkStats = new Map();
+    clearTimeout(fcrNetworkTimer);
+    fcrNetworkTimer = 0;
+    pollNetworkStats = new Map();
+    clearTimeout(pollNetworkTimer);
+    pollNetworkTimer = 0;
+    corePending.clear();
     renderUi(true);
     add('session.start', { reason });
   }
@@ -410,12 +596,12 @@
         const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input?.url || '';
         const method = String(init?.method || input?.method || 'GET').toUpperCase();
         const noise = isNoise(rawUrl);
-        const interesting = !noise && isInteresting(rawUrl);
+        const fcr = !noise && isFcrNetwork(rawUrl);
+        const detailed = !noise && !fcr && isDetailedApi(rawUrl);
         const started = performance.now();
 
         try {
           const response = await nativeFetch.apply(this, arguments);
-
           if (noise) return response;
 
           const base = {
@@ -429,31 +615,40 @@
             finalUrl: response.url ? sanitizeUrl(response.url) : null
           };
 
-          if (interesting) {
-            base.requestBody = parseBody(init?.body);
+          if (fcr) {
             void response.clone().text()
-              .then(text => add('network', {
+              .then(text => recordFcrNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
+              .catch(() => recordFcrNetwork(base, rawUrl, init?.body));
+          } else if (detailed) {
+            void response.clone().text()
+              .then(text => add('network.detail', {
                 ...base,
-                responseBody: parseResponseText(text, response.headers.get('content-type') || '')
+                request: summarizeRequestShape(init?.body),
+                response: summarizeFcrResponse(text, response.headers.get('content-type') || '')
               }))
-              .catch(error => add('network', {
+              .catch(error => add('network.detail', {
                 ...base,
+                request: summarizeRequestShape(init?.body),
                 responseReadError: scrubText(error?.message || error)
               }));
-          } else if (!SIM_HOST.test(location.hostname)) {
+          } else if (isPollNetwork(rawUrl)) {
+            recordPollNetwork(base, rawUrl);
+          } else {
             add('network.meta', base);
           }
 
           return response;
         } catch (error) {
           if (!noise) {
-            add('network.error', {
+            const message = scrubText(error?.message || error);
+            const aborted = error?.name === 'AbortError' || /\babort(?:ed|ing)?\b/i.test(message);
+            add(aborted ? 'network.abort' : 'network.error', {
               transport: 'fetch',
               method,
               url: sanitizeUrl(rawUrl),
-              requestBody: interesting ? parseBody(init?.body) : null,
+              request: aborted ? null : (detailed ? summarizeRequestShape(init?.body) : null),
               ms: Math.round(performance.now() - started),
-              error: scrubText(error?.message || error)
+              error: message
             });
           }
           throw error;
@@ -487,10 +682,10 @@
       XHR.prototype.send = function(body) {
         const info = this.__bwu2Obs || { method: 'GET', url: '' };
         const noise = isNoise(info.url);
-
         if (noise) return originalSend.apply(this, arguments);
 
-        const interesting = isInteresting(info.url);
+        const fcr = isFcrNetwork(info.url);
+        const detailed = !fcr && isDetailedApi(info.url);
         const started = performance.now();
 
         this.addEventListener('loadend', () => {
@@ -504,22 +699,32 @@
             finalUrl: this.responseURL ? sanitizeUrl(this.responseURL) : null
           };
 
-          if (interesting) {
-            base.requestBody = parseBody(body);
+          if (fcr) {
+            let text = '';
+            let contentType = '';
+            try {
+              if (!this.responseType || this.responseType === 'text') text = this.responseText || '';
+              contentType = this.getResponseHeader('content-type') || '';
+            } catch {}
+            recordFcrNetwork(base, info.url, body, text, contentType);
+          } else if (detailed) {
+            const detail = { ...base, request: summarizeRequestShape(body) };
             try {
               if (!this.responseType || this.responseType === 'text') {
-                base.responseBody = parseResponseText(
+                detail.response = summarizeFcrResponse(
                   this.responseText || '',
                   this.getResponseHeader('content-type') || ''
                 );
               } else {
-                base.responseBody = sanitize(this.response);
+                detail.response = { kind: this.responseType || 'non-text' };
               }
             } catch (error) {
-              base.responseReadError = scrubText(error?.message || error);
+              detail.responseReadError = scrubText(error?.message || error);
             }
-            add('network', base);
-          } else if (!SIM_HOST.test(location.hostname)) {
+            add('network.detail', detail);
+          } else if (isPollNetwork(info.url)) {
+            recordPollNetwork(base, info.url);
+          } else {
             add('network.meta', base);
           }
         }, { once: true });
@@ -550,35 +755,56 @@
       role: element.getAttribute('role') || '',
       type: element.getAttribute('type') || '',
       name: element.getAttribute('name') || '',
-      label: scrubText(String(label).replace(/\s+/g, ' ').trim().slice(0, 120))
+      label: scrubText(String(label).replace(/\s+/g, ' ').trim().slice(0, 100))
     };
+  }
+
+  function shouldLogClick(target) {
+    const element = target instanceof Element ? target : target?.parentElement;
+    if (!element) return false;
+    const tag = element.tagName?.toLowerCase() || '';
+    const type = String(element.getAttribute?.('type') || '').toLowerCase();
+    if (tag === 'textarea') return false;
+    if (tag === 'input' && ['text', 'search', 'date', 'datetime-local', 'number', 'email', 'password', 'submit', 'reset', 'file', ''].includes(type)) return false;
+    return true;
+  }
+
+  function shouldLogChange(target) {
+    const element = target instanceof Element ? target : target?.parentElement;
+    if (!element) return false;
+    const tag = element.tagName?.toLowerCase() || '';
+    const type = String(element.getAttribute?.('type') || '').toLowerCase();
+    return tag === 'select' || (tag === 'input' && ['checkbox', 'radio'].includes(type));
   }
 
   function installActionTrace() {
     document.addEventListener('click', event => {
+      if (!event.isTrusted || !shouldLogClick(event.target)) return;
       const info = targetInfo(event.target);
       if (info) add('ui.click', info);
     }, true);
 
     document.addEventListener('submit', event => {
+      if (!event.isTrusted) return;
       const info = targetInfo(event.target);
       if (info) add('ui.submit', info);
     }, true);
 
     document.addEventListener('change', event => {
+      if (!event.isTrusted || !shouldLogChange(event.target)) return;
       const info = targetInfo(event.target);
       if (info) add('ui.change', info);
     }, true);
 
     document.addEventListener('keydown', event => {
-      if (event.key !== 'Enter') return;
+      if (!event.isTrusted || event.key !== 'Enter') return;
       const info = targetInfo(event.target);
       if (!info) return;
 
       let value = '';
       try { value = event.target?.value || ''; } catch {}
 
-      add('ui.enter', { ...info, input: value ? scrubText(value) : '' });
+      add('ui.enter', { ...info, inputKind: classifySearchValue(value), inputLength: String(value || '').length });
     }, true);
   }
 
@@ -607,7 +833,7 @@
     wrap('pushState');
     wrap('replaceState');
 
-    for (const name of ['hashchange', 'popstate', 'pageshow', 'pagehide']) {
+    for (const name of ['hashchange', 'popstate', 'pagehide']) {
       window.addEventListener(name, () => {
         const now = location.href;
         add(`page.${name}`, {
@@ -619,9 +845,40 @@
       }, true);
     }
 
-    document.addEventListener('visibilitychange', () => {
-      add('page.visibility', { visibility: document.visibilityState });
+    window.addEventListener('pageshow', event => {
+      if (!event.persisted) return;
+      const now = location.href;
+      add('page.pageshow', {
+        from: sanitizeUrl(lastHref),
+        to: sanitizeUrl(now),
+        visibility: document.visibilityState,
+        persisted: true
+      });
+      lastHref = now;
     }, true);
+
+    document.addEventListener('visibilitychange', () => {
+      clearTimeout(visibilityTimer);
+      const visibility = document.visibilityState;
+      visibilityTimer = setTimeout(() => {
+        visibilityTimer = 0;
+        if (document.visibilityState === visibility) add('page.visibility', { visibility });
+      }, VISIBILITY_DEBOUNCE_MS);
+    }, true);
+  }
+
+  function recordRejection(reason) {
+    const text = scrubText(reason || 'unhandled rejection');
+    const now = Date.now();
+    if (lastRejection && lastRejection.reason === text && now - lastRejection.ts <= 1000 && lastRejection.event?.data) {
+      lastRejection.ts = now;
+      lastRejection.event.data.count = (Number(lastRejection.event.data.count) || 1) + 1;
+      lastRejection.event.data.lastAt = new Date(now).toISOString();
+      scheduleFlush();
+      return;
+    }
+    add('promise.rejection', { reason: text, count: 1 });
+    lastRejection = { reason: text, ts: now, event: pageEvents[pageEvents.length - 1] || null };
   }
 
   function installErrorTrace() {
@@ -635,14 +892,36 @@
     }, true);
 
     window.addEventListener('unhandledrejection', event => {
-      add('promise.rejection', {
-        reason: scrubText(event.reason?.message || event.reason || 'unhandled rejection')
-      });
+      recordRejection(event.reason?.message || event.reason || 'unhandled rejection');
     }, true);
   }
 
   function emptyMutationStats() {
-    return { batches: 0, records: 0, added: 0, removed: 0, attributes: 0, text: 0, maxBatch: 0 };
+    return {
+      batches: 0, records: 0, added: 0, removed: 0, attributes: 0, text: 0, maxBatch: 0,
+      attributeNames: Object.create(null), targets: Object.create(null)
+    };
+  }
+
+  function bumpCount(bucket, key) {
+    const name = scrubText(String(key || 'unknown').slice(0, 100));
+    bucket[name] = (Number(bucket[name]) || 0) + 1;
+  }
+
+  function mutationTargetKey(target) {
+    const element = target instanceof Element ? target : target?.parentElement;
+    if (!element) return 'unknown';
+    if (element.closest?.('#fcratc-root')) return '#fcratc-root';
+    if (element.closest?.('[data-fcr-tool-ui="1"]')) return '[data-fcr-tool-ui]';
+    const table = element.closest?.('table[id]');
+    if (table?.id) return `table#${table.id}`;
+    const identified = element.closest?.('[id]');
+    if (identified?.id) return `${identified.tagName?.toLowerCase() || 'element'}#${identified.id}`;
+    return element.tagName?.toLowerCase() || 'unknown';
+  }
+
+  function topCounts(bucket, limit = 6) {
+    return Object.entries(bucket || {}).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, count]) => ({ name, count }));
   }
 
   function installMutationHealth() {
@@ -662,7 +941,11 @@
         for (const record of filtered) {
           mutationStats.added += record.addedNodes?.length || 0;
           mutationStats.removed += record.removedNodes?.length || 0;
-          if (record.type === 'attributes') mutationStats.attributes++;
+          bumpCount(mutationStats.targets, mutationTargetKey(record.target));
+          if (record.type === 'attributes') {
+            mutationStats.attributes++;
+            bumpCount(mutationStats.attributeNames, record.attributeName || 'unknown');
+          }
           if (record.type === 'characterData') mutationStats.text++;
         }
       });
@@ -685,7 +968,12 @@
           snapshot.maxBatch >= 150 ||
           snapshot.added + snapshot.removed >= 300
         ) {
-          add('health.mutations', snapshot);
+          const { attributeNames, targets, ...totals } = snapshot;
+          add('health.mutations', {
+            ...totals,
+            topAttributes: topCounts(attributeNames),
+            topTargets: topCounts(targets)
+          });
         }
       }, MUTATION_REPORT_MS);
     };
@@ -697,7 +985,7 @@
   function installPerformanceHealth() {
     try {
       if (typeof PerformanceObserver !== 'undefined') {
-        const observer = new PerformanceObserver(list => {
+        performanceObserver = new PerformanceObserver(list => {
           if (document.visibilityState !== 'visible') return;
 
           for (const entry of list.getEntries()) {
@@ -710,13 +998,13 @@
           }
         });
 
-        observer.observe({ type: 'longtask', buffered: true });
+        performanceObserver.observe({ type: 'longtask', buffered: true });
       }
     } catch {}
 
     let expected = performance.now() + 1000;
 
-    setInterval(() => {
+    eventLoopTimer = setInterval(() => {
       const now = performance.now();
       const lag = now - expected;
       expected = now + 1000;
@@ -730,6 +1018,63 @@
       lastEventLoopLogAt = wallNow;
       add('health.eventloop', { lagMs: Math.round(lag) });
     }, 1000);
+  }
+
+  function trackedCoreType(type) {
+    return !['ping', 'stats', 'usageStats', 'usageReset', 'rememberProduct', 'rememberBinSize'].includes(String(type || ''));
+  }
+
+  function parseEventDetail(detail) {
+    let value = detail;
+    try { if (typeof value === 'string') value = JSON.parse(value); } catch { return null; }
+    return value && typeof value === 'object' ? value : null;
+  }
+
+  function coreResponseSummary(data) {
+    if (!data || typeof data !== 'object') return {};
+    const out = {};
+    for (const key of ['source', 'endpoint', 'pages', 'records', 'totalQuantity', 'partialQuantity', 'complete', 'warning', 'status', 'ms']) {
+      if (data[key] !== undefined && data[key] !== null && data[key] !== '') out[key] = data[key];
+    }
+    return out;
+  }
+
+  function installFcrDataCoreTrace() {
+    window.addEventListener('fcr-data-core:request', event => {
+      const message = parseEventDetail(event.detail);
+      if (!message?.id || !trackedCoreType(message.type)) return;
+      corePending.set(String(message.id), {
+        type: String(message.type || ''),
+        client: scrubText(message.client || 'unknown'),
+        group: scrubText(message.group || ''),
+        started: performance.now()
+      });
+    }, true);
+
+    window.addEventListener('fcr-data-core:response', event => {
+      const message = parseEventDetail(event.detail);
+      if (!message?.id) return;
+      const pending = corePending.get(String(message.id));
+      if (!pending) return;
+      corePending.delete(String(message.id));
+      const error = scrubText(message.error || '');
+      add(error === 'fcr-data-core:cancelled' ? 'fcr.core.cancelled' : 'fcr.core.response', {
+        type: pending.type,
+        client: pending.client,
+        group: pending.group,
+        ok: !!message.ok,
+        elapsedMs: Math.round(performance.now() - pending.started),
+        coreVersion: scrubText(message.version || ''),
+        error,
+        ...coreResponseSummary(message.data)
+      });
+    }, true);
+
+    window.addEventListener('fcr-data-core:cancel', event => {
+      const message = parseEventDetail(event.detail);
+      if (!message) return;
+      add('fcr.core.cancel', { client: scrubText(message.client || 'unknown'), group: scrubText(message.group || '') });
+    }, true);
   }
 
   function installScriptBus() {
@@ -760,7 +1105,32 @@
     window.addEventListener('fcr-usage:event', event => {
       let detail = event.detail;
       try { if (typeof detail === 'string') detail = JSON.parse(detail); } catch {}
-      if (detail && typeof detail === 'object') add('fcr.usage', detail);
+      if (!detail || typeof detail !== 'object') return;
+      if (['master.open', 'stow.open'].includes(String(detail.key || ''))) return;
+      add('fcr.usage', detail);
+    }, true);
+  }
+
+  function viewportSnapshot() {
+    return {
+      width: Math.max(0, Math.round(window.innerWidth || 0)),
+      height: Math.max(0, Math.round(window.innerHeight || 0)),
+      dpr: Number((window.devicePixelRatio || 1).toFixed(2))
+    };
+  }
+
+  function installViewportTrace() {
+    lastViewport = JSON.stringify(viewportSnapshot());
+    window.addEventListener('resize', () => {
+      clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(() => {
+        viewportTimer = 0;
+        const snapshot = viewportSnapshot();
+        const key = JSON.stringify(snapshot);
+        if (key === lastViewport) return;
+        lastViewport = key;
+        add('page.viewport', snapshot);
+      }, VIEWPORT_DEBOUNCE_MS);
     }, true);
   }
 
@@ -872,25 +1242,36 @@
   add('page.start', {
     version: VERSION,
     host: location.hostname,
-    path: location.pathname,
-    title: document.title || ''
+    path: sanitizePath(location.pathname),
+    title: document.title || '',
+    viewport: viewportSnapshot()
   });
 
   installFetchTrace();
   installXhrTrace();
   installScriptBus();
+  installFcrDataCoreTrace();
   installRouteTrace();
   installErrorTrace();
   installActionTrace();
+  installViewportTrace();
   installMutationHealth();
   installPerformanceHealth();
   bootUi();
 
   window.addEventListener('pagehide', () => {
+    clearTimeout(visibilityTimer);
+    clearTimeout(viewportTimer);
+    clearTimeout(fcrNetworkTimer);
+    clearTimeout(pollNetworkTimer);
+    flushFcrNetworkSummary();
+    flushPollNetworkSummary();
     flushPage();
     if (mutationObserver) mutationObserver.disconnect();
     if (uiObserver) uiObserver.disconnect();
+    if (performanceObserver) performanceObserver.disconnect();
     if (mutationTimer) clearInterval(mutationTimer);
+    if (eventLoopTimer) clearInterval(eventLoopTimer);
     if (uiTimer) clearInterval(uiTimer);
   }, { once: true });
 })();
