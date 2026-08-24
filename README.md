@@ -1,18 +1,25 @@
 # Tampermonkey V2
 
-Private API-era working set. Older public repo is archive only.
+Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` repository is archive-only.
 
-## Current preferred versions
+## Current fleet
 
-- Sideline — MAIN v0.2.1 Sideline API Move TEST
-- Bin Overlay — TEST v7.3.6 Bin check Overlay
-- Stow Andons — [TEST v5.5.1 FCSKU Conflict Alert](./Stow_Andons_Helper.user.js)
-- FC-Lite — TEST v0.1.29
-- FCR Data Core — TEST v0.2.3
-- FCResearch Master — TEST v0.1.10
-- Dropzone Selector Queue — TEST v0.2.16
-- BWU2 Super Tracer — TEST v0.1.5
-- AFT Edit/SKU/Move master — MAIN v0.9.4
-- Sideline Close Container Capture — DIAG v0.1.0
+| Script | Version | Install/update |
+| --- | --- | --- |
+| Carton PrEditor | 7.2 | [Open](./Carton_PrEditor.user.js) |
+| SIM Markdown Toolbar | 5.1.0 | [Open](./SIM_Markdown_Toolbar.user.js) |
+| FNSKU Mapping Lookup | 1.3.0-test | [Open](./FNSKU_Mapping_Lookup.user.js) |
+| Sideline API Move | 0.2.2 | [Open](./Sideline_API_Move.user.js) |
+| AFT Edit/SKU/Move | 0.9.8 | [Open](./AFT_Edit_SKU_Move.user.js) |
+| FCR Data Core | 0.2.9 | [Open](./FCR_Data_Core.user.js) |
+| FCResearch Master | 0.1.10 | [Open](./FCResearch_Master.user.js) |
+| Stow Andons Helper | 5.5.1 | [Open](./Stow_Andons_Helper.user.js) |
+| Bin Check Overlay | 7.4.1 | [Open](./Bin_Check_Overlay.user.js) |
+| Dropzone Selector Queue | 0.2.17 | [Open](./Dropzone_Selector_Queue.user.js) |
+| BWU2 Observability Core | 0.1.2 | [Open](./BWU2_Observability_Core.user.js) |
 
-Rule: when duplicate uploads exist, prefer the highest script version unless explicitly told otherwise. Diagnostic/usage-probe variants are kept separate from production/current scripts.
+Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
+
+FC-Lite is intentionally excluded from the stable updater set pending the next runtime revision.
+
+Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless explicitly told otherwise. Diagnostic/usage-probe variants are kept separate from production/current scripts.
