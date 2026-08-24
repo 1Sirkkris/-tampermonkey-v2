@@ -6,7 +6,6 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 
 | Script | Version | Install/update |
 | --- | --- | --- |
-| Calm Code | 1.3.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
 | Carton PrEditor | 7.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
 | SIM Markdown Toolbar | 5.1.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.3.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
@@ -28,4 +27,4 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 
 | Script | Version | Purpose | Install/update |
 | --- | --- | --- | --- |
-| FCResearch Section Probe | 0.1.0 | Map native section XHR/render timing and run one explicit, reversible Receive History delay test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
+| FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
