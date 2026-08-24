@@ -1,32 +1,68 @@
 // ==UserScript==
-// @name        TEST v0.1.29 FC-Lite
+// @name        TEST v0.1.49 FC-Lite
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.29
+// @version      0.1.49
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  if (window.__fcrLite_v0129test) return;
-  window.__fcrLite_v0129test = true;
+  if (window.__fcrLite_v0149test) return;
+  window.__fcrLite_v0149test = true;
 
-  const STANDALONE_HASH = '#fcr-tote-checker';
-  const STANDALONE = location.hash.startsWith(STANDALONE_HASH);
+  const TOTE_HASH = '#fcr-tote-checker';
+  const SECTIONS_HASH = '#fcr-lite';
+  const NATIVE_HASH = '#fcr-native';
+  const RESULTS_PAGE = /\/results(?:\/|$)/i.test(location.pathname);
+  const TOTE_MODE = location.hash.startsWith(TOTE_HASH);
+  const SECTIONS_MODE = location.hash.startsWith(SECTIONS_HASH);
 
-  // Stop native FCResearch fan-out
+  // Native FCResearch remains the default. FC-Lite is entered only through its explicit hashes
+  // (normally the hidden Dimensions launcher) so normal ASIN/FNSKU links keep native behaviour.
+  const STANDALONE = TOTE_MODE || SECTIONS_MODE;
+
+  // Stop native FCResearch fan-out before its normal sections start loading.
   if (STANDALONE) {
     try { window.stop(); } catch {}
     window.__FCR_TOTE_STANDALONE = true;
     document.documentElement.dataset.fcratcStandalone = '1';
+    document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.29';
+  const VERSION = '0.1.49';
+
+  const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
+  const SECTION_CONCURRENCY = 5;
+  const SECTION_DEFS = [
+    ['product', 'Product'],
+    ['inventory', 'Inventory'],
+    ['inventory-history', 'Inventory History'],
+    ['container-history', 'Container history'],
+    ['purchase-order-item', 'Purchase Order Items'],
+    ['purchase-order', 'Purchase Order'],
+    ['receive-history', 'Receive History'],
+    ['shipment', 'Shipment'],
+    ['container-hierarchy', 'Container Details'],
+    ['employee', 'Employee'],
+    ['carton-general-info', 'Carton General Information'],
+    ['carton-contents', 'Carton Contents'],
+    ['sscc-info', 'SSCC Information'],
+    ['carton-ambiguities', 'Items in Multiple Cartons'],
+    ['vision-tunnel', 'Vision Tunnel'],
+    ['problems', 'Problems'],
+    ['problem', 'Problem'],
+    ['event', 'Events'],
+    ['authenticity-item', 'Authenticity Item']
+  ].map(([endpoint, label]) => ({ endpoint, label }));
+  const SECTION_DEFAULTS = new Set(['product', 'inventory']);
 
   const STATE_WAIT = 'WAIT_CONTAINER';
   const STATE_SCAN = 'SCANNING';
@@ -44,12 +80,10 @@
   let containerLoading = false;
   let inventoryLoadSerial = 0;
   let sessionSerial = 0;
-  let systemAnnotationSerial = 0;
   const pendingScans = [];
   let systemInventoryRows = [];
 
   const scanAliases = new Map();
-  const rescanTimers = new WeakMap();
 
   let root;
   let scanInput;
@@ -64,7 +98,6 @@
   let systemRecheckButton;
   let hoverCard;
   let hoverSerial = 0;
-  let flashTimer = 0;
   let liteContainerText;
   let systemSussyBadge;
 
@@ -72,27 +105,89 @@
   const upper = value => clean(value).toUpperCase();
   const isContainer = value => /^(?:TSX|CSX)[A-Z0-9]+$/i.test(clean(value));
 
+  function localIsoDate(date) {
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function historyDateBounds() {
+    const max = new Date();
+    max.setHours(0, 0, 0, 0);
+    const min = new Date(max);
+    min.setDate(min.getDate() - 180);
+    return { min: localIsoDate(min), max: localIsoDate(max) };
+  }
+
   function standaloneUrl() {
     const url = new URL(location.href);
     url.search = '';
-    url.hash = STANDALONE_HASH;
+    url.hash = TOTE_HASH;
     return url.href;
   }
 
-  function openStandaloneTab() {
-    const tab = window.open(standaloneUrl(), '_blank');
-    if (tab) {
-      try { tab.opener = null; } catch {}
-    } else if (statusText) {
-      setStatus('Pop-up blocked — allow pop-ups for FCResearch', 'error');
+  function sectionsUrl(searchValue = '') {
+    const url = new URL(location.href);
+    const wanted = clean(searchValue || new URLSearchParams(location.search).get('s'));
+    url.search = '';
+    if (wanted) url.searchParams.set('s', wanted);
+    url.hash = SECTIONS_HASH;
+    return url.href;
+  }
+
+  function forceStandaloneMode(url) {
+    const next = String(url || '');
+    if (!next) return;
+    try {
+      history.replaceState(null, '', next);
+      location.reload();
+    } catch {
+      location.href = next;
     }
   }
 
-  function fullFCResearchUrl(containerValue = container) {
+  function openSectionsMode(searchValue = '') {
+    forceStandaloneMode(sectionsUrl(searchValue));
+  }
+
+  function openToteMode() {
+    forceStandaloneMode(standaloneUrl());
+  }
+
+  function loadSectionPrefs() {
+    const prefs = Object.fromEntries(SECTION_DEFS.map(def => [def.endpoint, SECTION_DEFAULTS.has(def.endpoint)]));
+    try {
+      const saved = JSON.parse(localStorage.getItem(SECTION_PREFS_KEY) || '{}');
+      for (const def of SECTION_DEFS) {
+        if (typeof saved?.[def.endpoint] === 'boolean') prefs[def.endpoint] = saved[def.endpoint];
+      }
+    } catch {}
+    return prefs;
+  }
+
+  function saveSectionPrefs(prefs) {
+    try { localStorage.setItem(SECTION_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+  }
+
+  async function mapLimit(items, limit, worker) {
+    let next = 0;
+    const results = new Array(items.length);
+    async function run() {
+      while (true) {
+        const index = next++;
+        if (index >= items.length) return;
+        results[index] = await worker(items[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+    return results;
+  }
+
+  function fullFCResearchUrl(containerValue = container || new URLSearchParams(location.search).get('s')) {
     const fc = warehouseId();
     const url = new URL(`${location.origin}/${encodeURIComponent(fc || 'BWU2')}/results`);
     const wanted = clean(containerValue);
     if (wanted) url.searchParams.set('s', wanted);
+    url.hash = NATIVE_HASH;
     return url.href;
   }
 
@@ -114,8 +209,9 @@
       body = document.createElement('body');
       document.documentElement.appendChild(body);
     }
-    document.title = `FC-Lite • ${warehouseId() || 'FCResearch'}`;
+    document.title = `${SECTIONS_MODE ? 'FC-Lite Sections' : 'FC-Lite Tote Audit'} • ${warehouseId() || 'FCResearch'}`;
     body.replaceChildren();
+    document.documentElement.style.visibility = '';
   }
 
 
@@ -157,6 +253,7 @@
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
+  const CORE_CANCEL_EVENT = 'fcr-data-core:cancel';
   const CORE_TIMEOUT_MS = 17000;
   const corePending = new Map();
 
@@ -171,7 +268,7 @@
     else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
   });
 
-  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS) {
+  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS, group = '') {
     const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -180,9 +277,17 @@
       }, timeout);
       corePending.set(id, { resolve, reject, timer });
       window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
-        detail: JSON.stringify({ id, type, payload, client: 'fclite' })
+        detail: JSON.stringify({ id, type, payload, client: 'fclite', group: clean(group) })
       }));
     });
+  }
+
+  function cancelCoreGroup(group) {
+    const value = clean(group);
+    if (!value) return;
+    window.dispatchEvent(new CustomEvent(CORE_CANCEL_EVENT, {
+      detail: JSON.stringify({ client: 'fclite', group: value })
+    }));
   }
 
 
@@ -207,7 +312,7 @@
       badge.textContent = 'CORE MISSING';
       badge.classList.add('bad');
       badge.classList.remove('ok');
-      badge.title = 'Install/enable TEST v0.2.3 FCR Data Core';
+      badge.title = 'Install/enable FCR Data Core';
     }
   }
 
@@ -415,7 +520,6 @@
   function clearSession(keepStatus = false) {
     sessionSerial++;
     inventoryLoadSerial++;
-    systemAnnotationSerial++;
     containerLoading = false;
     container = '';
     containerRows = [];
@@ -442,7 +546,6 @@
     const wanted = clean(value);
     if (!wanted) return;
     const serial = ++inventoryLoadSerial;
-    const annotationSerial = ++systemAnnotationSerial;
     let loadedOk = false;
     containerLoading = true;
     container = wanted;
@@ -464,7 +567,7 @@
       renderSystemInventory(rows);
 
       annotateSystemHazmat(false).catch(() => {});
-      annotateSystemSussy(annotationSerial).catch(() => {});
+      annotateSystemSussy().catch(() => {});
 
       loadedOk = true;
       setStatus(`✓ ${wanted} ready — ${rows.length} row${rows.length === 1 ? '' : 's'} • keep scanning`, 'success');
@@ -532,11 +635,7 @@
     row.classList.remove('rescan');
     void row.offsetWidth;
     row.classList.add('rescan');
-    clearTimeout(rescanTimers.get(row));
-    rescanTimers.set(row, setTimeout(() => {
-      row?.classList.remove('rescan');
-      rescanTimers.delete(row);
-    }, 420));
+    setTimeout(() => row?.classList.remove('rescan'), 420);
 
     const resultState = row.dataset.resultState || 'pending';
     if (resultState === 'found') {
@@ -835,8 +934,8 @@
   }
 
 
-  async function annotateSystemSussy(serial) {
-    if (serial !== systemAnnotationSerial || !systemTbody || !systemInventoryRows.length) return;
+  async function annotateSystemSussy() {
+    if (!systemTbody || !systemInventoryRows.length) return;
     const domRows = [...systemTbody.querySelectorAll('tr[data-system-row]')];
     const groups = new Map();
     let total = 0;
@@ -860,7 +959,6 @@
     await runWithConcurrency([...groups.entries()], 6, async ([code, indexes]) => {
       try {
         const result = await coreRequest('product', { code, require: ['dimensions'] });
-        if (serial !== systemAnnotationSerial) return;
         const flagged = result?.product?.suspicious === true;
         for (const index of indexes) {
           const tr = domRows[index];
@@ -872,13 +970,12 @@
           checked++;
         }
       } catch {
-        if (serial !== systemAnnotationSerial) return;
         checked += indexes.length;
       }
-      if (serial === systemAnnotationSerial && systemSussyBadge) systemSussyBadge.textContent = `DIMS ${sussy}/${checked}`;
+      if (systemSussyBadge) systemSussyBadge.textContent = `DIMS ${sussy}/${checked}`;
     });
 
-    if (serial !== systemAnnotationSerial || !systemSussyBadge) return;
+    if (!systemSussyBadge) return;
     systemSussyBadge.classList.remove('loading');
     systemSussyBadge.classList.toggle('clear', sussy === 0);
     systemSussyBadge.textContent = sussy ? `SUSSY DIMS ${sussy}/${total}` : `DIMS CLEAR ${total}/${total}`;
@@ -902,14 +999,10 @@
   }
 
   function flash(kind) {
-    clearTimeout(flashTimer);
     root.classList.remove('flash-found', 'flash-missing', 'flash-error');
     void root.offsetWidth;
     root.classList.add(`flash-${kind}`);
-    flashTimer = setTimeout(() => {
-      root?.classList.remove(`flash-${kind}`);
-      flashTimer = 0;
-    }, 650);
+    setTimeout(() => root?.classList.remove(`flash-${kind}`), 650);
   }
 
   function injectStyles() {
@@ -931,11 +1024,14 @@
       #fcratc-root.fcratc-standalone .fcratc-litebar {
         display:flex;
         align-items:center;
-        gap:10px;
+        gap:8px;
         width:100%;
-        min-height:48px;
+        min-height:50px;
         margin:0 0 10px 0;
         padding:6px 8px;
+        position:sticky;
+        top:0;
+        z-index:1000;
         border:2px solid #1e3a5f;
         border-radius:8px;
         background:#0f2744;
@@ -947,7 +1043,7 @@
         padding:0 4px;
         background:transparent;
         color:#fff;
-        font:900 22px Arial,Helvetica,sans-serif;
+        font:900 24px Arial,Helvetica,sans-serif;
         letter-spacing:.4px;
         cursor:pointer;
       }
@@ -956,7 +1052,7 @@
         padding-left:9px;
         border-left:1px solid rgba(255,255,255,.35);
         color:#b9c9dc;
-        font-size:12px;
+        font-size:13px;
         font-weight:900;
         letter-spacing:.5px;
       }
@@ -970,28 +1066,29 @@
         font-weight:900;
       }
       .fcratc-core-status {
-        margin-left:auto;
+        margin-left:0;
         padding:4px 7px;
         border-radius:999px;
         background:#5b6778;
         color:#fff;
-        font-size:10px;
+        font-size:11.5px;
         font-weight:900;
         white-space:nowrap;
       }
+      .fcratc-lite-container + .fcratc-core-status { margin-left:auto; }
       .fcratc-core-status.ok { background:#166534; }
       .fcratc-core-status.bad { background:#991b1b; }
-      .fcratc-copy-stats { height:31px; padding:0 10px; border:1px solid #a8bdd5; border-radius:6px; background:#e8f1fb; color:#163a63; font-size:11px; font-weight:900; cursor:pointer; }
+      .fcratc-copy-stats { height:33px; padding:0 10px; border:1px solid #a8bdd5; border-radius:6px; background:#e8f1fb; color:#163a63; font-size:12.5px; font-weight:900; cursor:pointer; }
       .fcratc-copy-stats:hover { background:#d8e8f8; }
       .fcratc-full-fcr {
         margin-left:0;
-        height:31px;
+        height:33px;
         padding:0 11px;
         border:1px solid #a8bdd5;
         border-radius:6px;
         background:#fff;
         color:#163a63;
-        font-size:11px;
+        font-size:12.5px;
         font-weight:900;
         cursor:pointer;
       }
@@ -1002,13 +1099,21 @@
         margin:0!important;
         background:#e9eef5!important;
       }
-      html[data-fcratc-standalone="1"] body > *:not(#fcratc-root) { display:none!important; }
+      html[data-fcratc-standalone="1"] body > *:not(#fcratc-root):not([data-fcr-tool-ui="1"]) { display:none!important; }
       #fcratc-root.fcratc-standalone {
+        --fcrlite-bar-height:62px;
         width:100%;
-        max-width:none;
+        max-width:100vw;
+        box-sizing:border-box;
+        overflow-x:hidden;
         margin:0;
         padding:12px;
-        z-index:2147483646;
+        /* FC-Lite is the page layer, not a modal. Keep tool overlays above it. */
+        z-index:10;
+        color:#172536;
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+        font-size:14px;
+        line-height:1.35;
       }
       #fcratc-root.fcratc-standalone #fcratc-panel { width:100%; max-width:none; }
       #fcratc-root.fcratc-standalone .fcratc-min { display:none; }
@@ -1501,6 +1606,185 @@
       html[data-fcratc-standalone="1"] .fcratc-hover-info span { font-size:10.5px; }
       html[data-fcratc-standalone="1"] .fcratc-hover-info strong { font-size:13px; padding:4px 6px; }
 
+
+      .fcratc-sections-open,.fcratc-tote-open,.fcratc-tote-toggle {
+        height:33px;padding:0 10px;border:1px solid #a8bdd5;border-radius:6px;
+        background:#e8f1fb;color:#163a63;font-size:12.5px;font-weight:900;cursor:pointer;
+      }
+      .fcratc-sections-open:hover,.fcratc-tote-open:hover,.fcratc-tote-toggle:hover { background:#d8e8f8; }
+      @keyframes fcrlite-audit-pulse {
+        0%,100% { box-shadow:0 0 0 0 rgba(34,197,94,.12); }
+        50% { box-shadow:0 0 0 4px rgba(34,197,94,.22); }
+      }
+      .fcratc-tote-toggle.active {
+        border-color:#22a447;background:#e7f7ec;color:#14532d;
+        animation:fcrlite-audit-pulse 1.8s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion:reduce) { .fcratc-tote-toggle.active { animation:none; } }
+
+      #fcrlite-sections-app { width:100%; }
+      #fcrlite-search {
+        flex:1 1 520px;min-width:280px;height:34px;border:1px solid #94a3b8;border-radius:5px;
+        padding:0 10px;font-size:15px;font-weight:800;outline:none;
+      }
+      .fcrlite-go,.fcrlite-toggle-btn {
+        height:34px;border:1px solid #94a3b8;border-radius:5px;padding:0 12px;
+        background:#fff;color:#172033;font-size:12.5px;font-weight:900;cursor:pointer;white-space:nowrap;
+      }
+      .fcrlite-go:disabled { opacity:.55;cursor:wait; }
+      .fcrlite-toggle-btn { background:#dbeafe; }
+      .fcrlite-status { color:#dbeafe;font-size:12px;font-weight:800;white-space:nowrap; }
+      .fcrlite-toggles {
+        display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 10px;
+        margin-top:7px;padding:9px;border:1px solid #a8bdd5;border-radius:7px;background:#fff;
+      }
+      .fcrlite-toggles[hidden] { display:none; }
+      .fcrlite-toggle {
+        display:flex;align-items:center;gap:7px;min-height:28px;padding:3px 6px;
+        border-radius:5px;font-size:13.5px;font-weight:700;cursor:pointer;
+      }
+      .fcrlite-toggle:hover { background:#eef5fc; }
+      .fcrlite-toggle input { width:16px;height:16px;accent-color:#0f5fbf; }
+      .fcrlite-results { display:grid;gap:10px;margin-top:8px; }
+      .fcrlite-card {
+        overflow:visible;border:1px solid #c7d0da;border-radius:5px;background:#fff;
+        box-shadow:0 1px 2px rgba(15,23,42,.05);
+      }
+      .fcrlite-card-head {
+        display:flex;align-items:center;gap:8px;min-height:33px;padding:5px 10px;background:#dce6f0;
+        border-bottom:1px solid #b8c6d5;color:#10243a;font-size:15px;font-weight:900;letter-spacing:.01em;
+      }
+      .fcrlite-card-head .meta { margin-left:auto;color:#52606d;font-size:11.5px;font-weight:700; }
+      .fcrlite-card.partial { border-color:#d97706; }
+      .fcrlite-card.partial .fcrlite-card-head { background:#fff7ed; }
+      .fcrlite-card-body { overflow-x:auto;overflow-y:visible;max-height:none;padding:8px;color:#172536;font-size:13.5px; }
+      .fcrlite-card.loading .fcrlite-card-body { color:#64748b;font-weight:800; }
+      .fcrlite-card.error .fcrlite-card-body { color:#991b1b;font-weight:800; }
+      .fcrlite-card-body table { width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.34; }
+      .fcrlite-card-body th,.fcrlite-card-body td {
+        padding:6px 8px;border:0;border-right:1px solid #e0e6ec;border-bottom:1px solid #c9d3dd;text-align:left;vertical-align:top;white-space:nowrap;
+      }
+      .fcrlite-card-body th {
+        background:#d7e1eb;color:#10243a;border-right:1px solid #c3ced8;border-bottom:2px solid #aebdca;font-weight:900;
+      }
+      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:nth-child(even) > td {
+        background:#e7eff7;
+      }
+      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:hover > td {
+        background:#d7e8f6;
+      }
+      .fcrlite-card-body a { color:#005ea8;text-decoration:none; }
+      .fcrlite-card-body a:hover { text-decoration:underline; }
+      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody td { transition:background-color .08s linear; }
+      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:nth-child(odd) > td { background:#fff; }
+      .fcrlite-card[data-endpoint="inventory"] .fcrlite-card-body tbody tr:nth-child(even) > td,
+      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:nth-child(even) > td { background:#e2edf7; }
+      .fcrlite-card[data-endpoint="inventory"] .fcrlite-card-body tbody tr:hover > td,
+      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:hover > td { background:#cfe3f4; }
+      .fcrlite-card-body img { max-width:170px;max-height:230px;object-fit:contain; }
+      .fcrlite-card-body .section-title { font-size:17px;font-weight:900; }
+      .fcrlite-card-body .help,.fcrlite-card-body .filters-popover,.fcrlite-card-body .a-popover-preload,
+      .fcrlite-card-body script,.fcrlite-card-body style { display:none!important; }
+      .fcrlite-card[data-endpoint="product"] .fcrlite-card-body,.fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body { overflow:visible; }
+      .fcrlite-card[data-endpoint="product"] .a-box-group,.fcrlite-card[data-endpoint="product"] .a-box,
+      .fcrlite-card[data-endpoint="product"] .a-box-inner { margin:0!important;padding-top:0!important;padding-bottom:0!important; }
+      .fcrlite-card[data-endpoint="product"] .fcrlite-card-body { padding:10px 14px; }
+      .fcrlite-card[data-endpoint="product"] table { width:min(100%,1280px)!important;min-width:760px;max-width:1280px; }
+      .fcrlite-card[data-endpoint="product"] td,.fcrlite-card[data-endpoint="product"] th { white-space:normal; }
+      .fcrlite-card[data-endpoint="product"] img { max-width:375px;max-height:450px; }
+      .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row {
+        display:flex!important;align-items:flex-start;gap:18px;max-width:1500px;min-width:0;
+      }
+      .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span4 {
+        flex:0 0 395px!important;width:395px!important;min-width:320px;max-width:395px;
+      }
+      .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span7 {
+        flex:1 1 auto!important;width:auto!important;min-width:0;max-width:1085px;
+      }
+      .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span7 > table {
+        width:100%!important;min-width:0!important;max-width:none!important;
+      }
+      .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span4 img {
+        display:block;margin:0 auto;max-width:375px;max-height:450px;
+      }
+      @media (max-width:1180px) {
+        .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span4 {
+          flex-basis:300px!important;width:300px!important;min-width:240px;max-width:300px;
+        }
+        .fcrlite-card.fcrlite-product-single .a-box.a-last > .a-box-inner > .a-row > .a-span4 img {
+          max-width:285px;max-height:360px;
+        }
+      }
+      .fcrlite-native-tools { display:flex;align-items:center;gap:8px;min-height:32px;padding:4px 8px;border-bottom:1px solid #d5dde6;background:#f7f9fb; }
+      .fcrlite-native-info { padding:4px 8px;color:#52606d;font-size:11px;font-weight:700; }
+      .fcrlite-inventory-search { margin-left:auto;display:flex;align-items:center;gap:6px; }
+      .fcrlite-inventory-search::before { content:'⌕';color:#334155;font-size:17px;font-weight:900;line-height:1; }
+      .fcrlite-inventory-filter { width:245px;height:29px;padding:0 9px;border:1px solid #8f9ead;border-radius:6px;background:#fff;color:#172536;font:700 12.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;outline:none; }
+      .fcrlite-inventory-filter:focus { border-color:#4f83b7;box-shadow:0 0 0 2px rgba(79,131,183,.14); }
+      .fcrlite-card[data-endpoint="inventory"] > .fcrlite-card-head .meta { margin-left:0; }
+      .fcrlite-inventory-summary { display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-left:8px; }
+      .fcrlite-summary-chip { display:inline-flex;align-items:center;height:23px;padding:0 8px;border:1px solid #b7c5d2;border-radius:10px;background:#eef4f9;color:#20364d;font:800 11.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;white-space:nowrap; }
+      .fcrlite-sortable { cursor:pointer;user-select:none; }
+      .fcrlite-sortable:hover { background:#e9eff5!important; }
+      .fcrlite-sortable[data-fcrlite-sort="asc"]::after { content:' ▲';font-size:9px;color:#315d87; }
+      .fcrlite-sortable[data-fcrlite-sort="desc"]::after { content:' ▼';font-size:9px;color:#315d87; }
+      .fcrlite-card[data-endpoint="inventory"] > .fcrlite-card-head {
+        position:sticky;top:var(--fcrlite-bar-height);z-index:32;
+      }
+      .fcrlite-inventory-sticky-shell {
+        position:sticky;top:0;z-index:31;height:0;overflow:visible;pointer-events:none;
+      }
+      .fcrlite-inventory-sticky-inner {
+        display:none;overflow:hidden;background:#d7e1eb;border-bottom:1px solid #aebdca;
+        box-shadow:0 2px 4px rgba(15,23,42,.10);pointer-events:auto;
+      }
+      .fcrlite-inventory-sticky-shell.active .fcrlite-inventory-sticky-inner { display:block; }
+      .fcrlite-inventory-sticky-table {
+        width:max-content!important;min-width:100%;border-collapse:collapse;table-layout:fixed;
+        margin:0!important;font-size:13.5px;line-height:1.34;background:#d7e1eb;
+      }
+      .fcrlite-inventory-sticky-table th {
+        padding:6px 8px;border:0;border-right:1px solid #c3ced8;border-bottom:2px solid #aebdca;background:#d7e1eb;color:#10243a;
+        text-align:left;vertical-align:top;white-space:nowrap;font-weight:900;
+      }
+      .fcrlite-id-map { display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 8px;padding:6px 9px;border:1px solid #c7d0d9;border-radius:5px;background:#f2f6fa;color:#1f2937;font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+      .fcrlite-id-map .label { color:#526273;font-weight:800; }
+      .fcrlite-id-map .value { color:#0b4f8a;font-weight:900; }
+      .fcrlite-id-map .sep { color:#9aa7b5;font-weight:900; }
+      .fcrlite-multi-product { width:100%!important;min-width:1080px!important;max-width:none!important;table-layout:auto; }
+      .fcrlite-multi-product .fcrlite-thumb-head { width:92px;min-width:92px; }
+      .fcrlite-multi-product .fcrlite-qty-head { width:88px;min-width:88px;text-align:center; }
+      .fcrlite-multi-product .fcrlite-thumb-cell { width:92px;min-width:92px;height:92px;text-align:center;vertical-align:middle;background:#fff; }
+      .fcrlite-multi-product .fcrlite-thumb-cell img { width:82px;height:82px;max-width:82px!important;max-height:82px!important;object-fit:contain; }
+      .fcrlite-multi-product .fcrlite-thumb-placeholder { display:inline-flex;width:82px;height:82px;align-items:center;justify-content:center;color:#7b8794;font-size:10px;font-weight:800;background:#f7f9fb;border:1px solid #dde3ea;border-radius:4px; }
+      .fcrlite-multi-product .fcrlite-asin-total { text-align:center;font-size:15px;font-weight:900;white-space:nowrap; }
+      .fcrlite-multi-product tbody tr { min-height:94px; }
+      .fcrlite-card[data-endpoint="inventory-history"] > .fcrlite-card-head {
+        position:sticky;top:var(--fcrlite-bar-height);z-index:30;
+      }
+      .fcrlite-history-tools {
+        position:sticky;top:calc(var(--fcrlite-bar-height) + 39px);z-index:29;
+        display:flex;align-items:center;gap:9px;min-height:52px;padding:7px 10px;
+        background:#f3f5f7;border:1px solid #cbd5df;border-radius:4px;
+        box-shadow:0 1px 2px rgba(15,23,42,.05);
+      }
+      .fcrlite-history-title { margin-right:8px;font-size:17px;font-weight:900;white-space:nowrap; }
+      .fcrlite-history-tools label { display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:800;white-space:nowrap; }
+      .fcrlite-history-tools input[type="date"] {
+        height:34px;padding:0 8px;border:1px solid #9ca3af;border-radius:5px;background:#fff;
+        color:#111827;font:800 13px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;cursor:pointer;
+      }
+      .fcrlite-history-search {
+        height:34px;padding:0 12px;border:1px solid #9ca3af;border-radius:5px;background:#fff;
+        color:#111827;font-size:12.5px;font-weight:900;cursor:pointer;
+      }
+      .fcrlite-history-search:disabled { opacity:.55;cursor:wait; }
+      .fcrlite-history-note { color:#52606d;font-size:11.5px;font-weight:700;white-space:nowrap; }
+      .fcrlite-card[data-endpoint="inventory-history"] #table-inventory-history thead th {
+        position:sticky;top:calc(var(--fcrlite-bar-height) + 91px);z-index:28;background:#d7e1eb;
+        border-color:#aebdca;
+      }
+      .fcrlite-empty { padding:18px;text-align:center;color:#64748b;font-weight:800; }
       @media (max-width:900px) {
         #fcratc-root { width:100%; }
         .fcratc-status { display:none; }
@@ -1522,11 +1806,909 @@
       if (!cell.closest('[data-section-type="product"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      openStandaloneTab();
+      const search = clean(new URLSearchParams(location.search).get('s'));
+      openSectionsMode(search);
     }, true);
   }
 
-  function buildUi() {
+
+  function cleanSectionMarkup(endpoint, html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    doc.querySelectorAll('script,style,.help,.filters-popover,.a-popover-preload').forEach(node => node.remove());
+    const titleBox = doc.querySelector('.a-box-group > .a-box.a-first.a-box-title');
+    if (titleBox) titleBox.remove();
+    return doc.body.innerHTML.trim();
+  }
+
+  function installInventoryHistoryControls(card, selectedStart, selectedEnd, onSearch) {
+    const body = card?.querySelector('.fcrlite-card-body');
+    if (!body) return;
+    body.querySelector('.fcrlite-history-tools')?.remove();
+
+    const bounds = historyDateBounds();
+    const controls = document.createElement('div');
+    controls.className = 'fcrlite-history-tools';
+    controls.innerHTML = `
+      <span class="fcrlite-history-title">Inventory History</span>
+      <label>Start <input class="fcrlite-history-start" type="date" min="${esc(bounds.min)}" max="${esc(bounds.max)}"></label>
+      <label>End <input class="fcrlite-history-end" type="date" min="${esc(bounds.min)}" max="${esc(bounds.max)}"></label>
+      <button type="button" class="fcrlite-history-search">SEARCH</button>
+      <span class="fcrlite-history-note">Max 6 months</span>
+    `;
+    body.prepend(controls);
+
+    const start = controls.querySelector('.fcrlite-history-start');
+    const end = controls.querySelector('.fcrlite-history-end');
+    const searchButton = controls.querySelector('.fcrlite-history-search');
+    const note = controls.querySelector('.fcrlite-history-note');
+    start.value = selectedStart || '';
+    end.value = selectedEnd || '';
+
+    const syncBounds = () => {
+      start.max = end.value || bounds.max;
+      end.min = start.value || bounds.min;
+    };
+    syncBounds();
+    start.addEventListener('change', syncBounds);
+    end.addEventListener('change', syncBounds);
+
+    searchButton.addEventListener('click', async () => {
+      const startDate = start.value;
+      const endDate = end.value;
+      if (!!startDate !== !!endDate) {
+        note.textContent = 'Pick both dates';
+        return;
+      }
+      if (startDate && (startDate < bounds.min || endDate > bounds.max || startDate > endDate)) {
+        note.textContent = 'Invalid range';
+        return;
+      }
+      searchButton.disabled = true;
+      note.textContent = startDate ? 'Loading range…' : 'Loading default…';
+      try {
+        await onSearch(startDate, endDate);
+      } finally {
+        if (searchButton.isConnected) searchButton.disabled = false;
+      }
+    });
+  }
+
+  const PRODUCT_SINGLE_ALWAYS = new Set([
+    'asin', 'fnsku', 'fcsku', 'title', 'vendor code', 'weight', 'dimensions',
+    'list price', 'expiration date', 'pack quantity', 'sortable', 'conveyable'
+  ]);
+  const PRODUCT_SINGLE_IDENTIFIER_DETAIL = new Set(['provenance value', 'provenance iog']);
+  const PRODUCT_MULTI_KEEP = new Set([
+    'asin', 'fnsku', 'fcsku', 'title', 'vendor code', 'expiration date',
+    'dimensions', 'weight', 'list price', 'sortable', 'conveyable'
+  ]);
+
+  function normaliseProductHeader(value) {
+    return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  function warehouseFromPath() {
+    const match = location.pathname.match(/^\/([^/]+)\/results(?:\/|$)/i);
+    return clean(match?.[1] || '').toUpperCase();
+  }
+
+  function firstTableWithHeaders(body, required = []) {
+    for (const table of body?.querySelectorAll?.('table') || []) {
+      const headRow = table.tHead?.rows?.[0] || [...table.rows].find(row => row.querySelector('th'));
+      if (!headRow) continue;
+      const headers = [...headRow.cells].map(cell => normaliseProductHeader(cell.textContent));
+      if (required.every(label => headers.includes(label))) return { table, headRow, headers };
+    }
+    return null;
+  }
+
+  function trimVerticalProductTable(table) {
+    const labels = [...table.querySelectorAll('tr')]
+      .map(row => normaliseProductHeader(row.cells?.[0]?.textContent || ''))
+      .filter(Boolean);
+    const scopeRow = [...table.querySelectorAll('tr')].find(
+      row => normaliseProductHeader(row.cells?.[0]?.textContent || '') === 'fcsku scope'
+    );
+    const scopeValue = clean(scopeRow?.cells?.[1]?.textContent || '').toUpperCase();
+    const identifierDetail =
+      labels.includes('fnsku') ||
+      labels.includes('fcsku') ||
+      scopeValue === 'FNSKU' ||
+      scopeValue === 'LOT';
+
+    for (const row of [...table.querySelectorAll('tr')]) {
+      const cells = [...row.children].filter(cell => /^(?:TD|TH)$/.test(cell.tagName));
+      if (cells.length < 2) continue;
+      const label = normaliseProductHeader(cells[0].textContent);
+      const keep =
+        PRODUCT_SINGLE_ALWAYS.has(label) ||
+        (identifierDetail && PRODUCT_SINGLE_IDENTIFIER_DETAIL.has(label));
+      if (!keep) row.remove();
+    }
+  }
+
+  function productAsinFromRow(row, asinIndex) {
+    if (!row || asinIndex < 0) return '';
+    return clean(row.cells?.[asinIndex]?.textContent || '').match(/\b[A-Z0-9]{10}\b/i)?.[0]?.toUpperCase() || '';
+  }
+
+  function prepareMultiAsinProductTable(table, headRow, headers) {
+    if (table.dataset.fcrliteMultiReady === '1') return true;
+    const asinIndex = headers.indexOf('asin');
+    if (asinIndex < 0) return false;
+
+    const keepIndexes = headers
+      .map((label, index) => PRODUCT_MULTI_KEEP.has(label) ? index : -1)
+      .filter(index => index >= 0);
+    if (!keepIndexes.length) return false;
+
+    for (const row of [...table.rows]) {
+      for (let index = row.cells.length - 1; index >= 0; index--) {
+        if (!keepIndexes.includes(index)) row.deleteCell(index);
+      }
+    }
+
+    const keptHeaders = keepIndexes.map(index => headers[index]);
+    const keptAsinIndex = keptHeaders.indexOf('asin');
+
+    const imageHead = document.createElement('th');
+    imageHead.className = 'fcrlite-thumb-head';
+    imageHead.textContent = 'Image';
+    headRow.insertBefore(imageHead, headRow.cells[0] || null);
+
+    const qtyHead = document.createElement('th');
+    qtyHead.className = 'fcrlite-qty-head';
+    qtyHead.textContent = 'Total Qty';
+    headRow.appendChild(qtyHead);
+
+    const bodyRows = table.tBodies?.[0] ? [...table.tBodies[0].rows] : [...table.rows].filter(row => row !== headRow);
+    for (const row of bodyRows) {
+      const asin = productAsinFromRow(row, keptAsinIndex);
+      const imageCell = row.insertCell(0);
+      imageCell.className = 'fcrlite-thumb-cell';
+      if (asin) {
+        imageCell.dataset.fcrliteImageAsin = asin;
+        imageCell.innerHTML = '<span class="fcrlite-thumb-placeholder">IMAGE…</span>';
+      } else {
+        imageCell.innerHTML = '<span class="fcrlite-thumb-placeholder">—</span>';
+      }
+
+      const qtyCell = row.insertCell(-1);
+      qtyCell.className = 'fcrlite-asin-total';
+      if (asin) qtyCell.dataset.fcrliteQtyAsin = asin;
+      qtyCell.textContent = '—';
+    }
+
+    table.classList.add('fcrlite-multi-product');
+    table.dataset.fcrliteMultiReady = '1';
+    return true;
+  }
+
+  function shapeProductSection(card) {
+    const body = card?.querySelector('.fcrlite-card-body');
+    if (!body) return { multi: false, asins: [] };
+
+    const horizontal = firstTableWithHeaders(body, ['asin', 'fnsku', 'fcsku', 'title']);
+    card.classList.remove('fcrlite-product-single');
+    if (horizontal && (horizontal.table.tBodies?.[0]?.rows?.length || 0) > 1) {
+      const multi = prepareMultiAsinProductTable(horizontal.table, horizontal.headRow, horizontal.headers);
+      const asins = [...horizontal.table.querySelectorAll('[data-fcrlite-image-asin]')]
+        .map(cell => clean(cell.dataset.fcrliteImageAsin).toUpperCase()).filter(Boolean);
+      return { multi, asins: [...new Set(asins)] };
+    }
+
+    const keyValue = body.querySelector('.a-keyvalue') || [...body.querySelectorAll('table')].find(table => {
+      return [...table.querySelectorAll('tr')].some(row => normaliseProductHeader(row.cells?.[0]?.textContent) === 'asin');
+    });
+    if (keyValue) {
+      trimVerticalProductTable(keyValue);
+      card.classList.add('fcrlite-product-single');
+    }
+    return { multi: false, asins: [] };
+  }
+
+  function productIdentifierSets(card) {
+    const body = card?.querySelector?.('.fcrlite-card-body');
+    const asins = new Set();
+    const fnskus = new Set();
+    if (!body) return { asins: [], fnskus: [] };
+
+    const horizontal = firstTableWithHeaders(body, ['asin', 'fnsku']);
+    if (horizontal) {
+      const asinIndex = horizontal.headers.indexOf('asin');
+      const fnskuIndex = horizontal.headers.indexOf('fnsku');
+      for (const row of horizontal.table.tBodies?.[0]?.rows || []) {
+        const asin = clean(row.cells?.[asinIndex]?.textContent || '').match(/\b[A-Z0-9]{10}\b/i)?.[0]?.toUpperCase() || '';
+        const fnsku = fnskuIndex >= 0 ? clean(row.cells?.[fnskuIndex]?.textContent || '').match(/\b[A-Z0-9]{10}\b/i)?.[0]?.toUpperCase() || '' : '';
+        if (asin) asins.add(asin);
+        if (fnsku) fnskus.add(fnsku);
+      }
+    } else {
+      for (const row of body.querySelectorAll('tr')) {
+        const label = normaliseProductHeader(row.cells?.[0]?.textContent || '');
+        const value = clean(row.cells?.[1]?.textContent || '').match(/\b[A-Z0-9]{10}\b/i)?.[0]?.toUpperCase() || '';
+        if (!value) continue;
+        if (label === 'asin') asins.add(value);
+        if (label === 'fnsku') fnskus.add(value);
+      }
+    }
+    return { asins: [...asins], fnskus: [...fnskus] };
+  }
+
+  function renderIdentifierRelationship(card, rawInput) {
+    const body = card?.querySelector?.('.fcrlite-card-body');
+    if (!body) return;
+    body.querySelector('.fcrlite-id-map')?.remove();
+    const raw = String(rawInput ?? '').trim();
+    const { asins, fnskus } = productIdentifierSets(card);
+    if (!raw && !asins.length && !fnskus.length) return;
+
+    const map = document.createElement('div');
+    map.className = 'fcrlite-id-map';
+    const add = (label, values) => {
+      if (!values?.length) return;
+      if (map.childElementCount) {
+        const sep = document.createElement('span');
+        sep.className = 'sep';
+        sep.textContent = '→';
+        map.appendChild(sep);
+      }
+      const labelNode = document.createElement('span');
+      labelNode.className = 'label';
+      labelNode.textContent = label;
+      const valueNode = document.createElement('span');
+      valueNode.className = 'value';
+      valueNode.textContent = values.join(', ');
+      map.append(labelNode, valueNode);
+    };
+
+    if (raw) add('INPUT', [raw]);
+    const sameSets = asins.length === fnskus.length && asins.length > 0 && asins.every(value => fnskus.includes(value));
+    if (sameSets) add('ASIN/FNSKU', asins);
+    else {
+      add(asins.length > 1 ? 'ASINS' : 'ASIN', asins);
+      add(fnskus.length > 1 ? 'FNSKUS' : 'FNSKU', fnskus);
+    }
+    body.prepend(map);
+  }
+
+  async function loadMultiAsinImages(card, asins, requestGroup = '') {
+    if (!card?.isConnected || !asins?.length) return;
+    await mapLimit(asins, 3, async asin => {
+      if (!card.isConnected) return;
+      let img = '';
+      try {
+        const result = await coreRequest('product', { code: asin, require: ['img'] }, 30000, requestGroup);
+        img = clean(result?.product?.img || '');
+      } catch {}
+      if (!card.isConnected) return;
+      for (const cell of card.querySelectorAll(`[data-fcrlite-image-asin="${CSS.escape(asin)}"]`)) {
+        cell.innerHTML = img
+          ? `<img src="${esc(img)}" alt="${esc(asin)}">`
+          : '<span class="fcrlite-thumb-placeholder">NO IMAGE</span>';
+      }
+    });
+  }
+
+  function inventoryTotalsByAsin(resultsRoot) {
+    const table = resultsRoot?.querySelector?.('#table-inventory');
+    if (!table) return null;
+    const headRow = table.tHead?.rows?.[0] || [...table.rows].find(row => row.querySelector('th'));
+    if (!headRow) return null;
+    const headers = [...headRow.cells].map(cell => normaliseProductHeader(cell.textContent).replace(/\s*\(.*\)$/, ''));
+    const asinIndex = headers.indexOf('asin');
+    const qtyIndex = headers.findIndex(value => value === 'quantity' || value.startsWith('quantity '));
+    if (asinIndex < 0 || qtyIndex < 0) return null;
+    const totals = new Map();
+    for (const row of table.tBodies?.[0]?.rows || []) {
+      const asin = clean(row.cells?.[asinIndex]?.textContent || '').match(/\b[A-Z0-9]{10}\b/i)?.[0]?.toUpperCase() || '';
+      if (!asin) continue;
+      const qty = Number(clean(row.cells?.[qtyIndex]?.textContent || '').replace(/[^\d.-]/g, '')) || 0;
+      totals.set(asin, (totals.get(asin) || 0) + qty);
+    }
+    return totals;
+  }
+
+  function refreshMultiAsinTotals(resultsRoot) {
+    const totals = inventoryTotalsByAsin(resultsRoot);
+    if (!totals) return;
+    const inventoryCard = resultsRoot.querySelector('[data-endpoint="inventory"]');
+    const partial = inventoryCard?.classList.contains('partial') === true;
+    for (const cell of resultsRoot.querySelectorAll('[data-fcrlite-qty-asin]')) {
+      const asin = clean(cell.dataset.fcrliteQtyAsin).toUpperCase();
+      if (!totals.has(asin)) {
+        cell.textContent = '0';
+        continue;
+      }
+      const total = totals.get(asin);
+      cell.textContent = partial ? `${total}+` : String(total);
+      cell.title = partial ? 'Partial inventory result' : `Total inventory quantity for ${asin}`;
+    }
+  }
+
+  function inventoryColumnIndexes(table) {
+    const headRow = table?.tHead?.rows?.[0] || [...(table?.rows || [])].find(row => row.querySelector('th'));
+    const headers = headRow ? [...headRow.cells].map(cell => normaliseProductHeader(cell.textContent).replace(/\s*\(.*\)$/, '')) : [];
+    const find = name => headers.findIndex(value => value === name || value.startsWith(`${name} `));
+    return { headRow, headers, qty: find('quantity'), disposition: find('disposition') };
+  }
+
+  function renderInventorySummary(card, data = {}) {
+    const head = card?.querySelector?.('.fcrlite-card-head');
+    const table = card?.querySelector?.('#table-inventory');
+    if (!head || !table) return;
+    const { qty, disposition } = inventoryColumnIndexes(table);
+    const rows = [...(table.tBodies?.[0]?.rows || [])];
+    const totals = new Map();
+    for (const row of rows) {
+      if (disposition >= 0) {
+        const value = clean(row.cells?.[disposition]?.textContent || '').toUpperCase() || 'UNKNOWN';
+        const amount = qty >= 0 ? Number(clean(row.cells?.[qty]?.textContent || '').replace(/[^\d.-]/g, '')) || 0 : 1;
+        totals.set(value, (totals.get(value) || 0) + amount);
+      }
+    }
+
+    let wrap = head.querySelector('.fcrlite-inventory-summary');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'fcrlite-inventory-summary';
+      const search = head.querySelector('.fcrlite-inventory-search');
+      if (search) head.insertBefore(wrap, search);
+      else head.appendChild(wrap);
+    }
+    const partial = data?.preview === true || data?.complete === false;
+    const suffix = partial ? '+' : '';
+    const chips = [];
+    for (const [name, amount] of totals.entries()) {
+      chips.push(`<span class="fcrlite-summary-chip">${esc(name)} ${amount}${suffix}</span>`);
+    }
+    wrap.innerHTML = chips.join('');
+  }
+
+  function inventorySortValue(cell, numeric = false) {
+    const text = clean(cell?.textContent || '');
+    if (!numeric) return text.toLowerCase();
+    const value = Number(text.replace(/[^\d.-]/g, ''));
+    return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+  }
+
+  function applyInventorySort(card) {
+    const state = card?._fcrliteInventorySort;
+    const table = card?.querySelector?.('#table-inventory');
+    if (!state || !table?.tBodies?.[0]) return;
+    const { headRow, headers } = inventoryColumnIndexes(table);
+    if (!headRow || state.index < 0 || state.index >= headers.length) return;
+    const numeric = headers[state.index] === 'quantity' || headers[state.index].startsWith('quantity ');
+    const rows = [...table.tBodies[0].rows];
+    rows.sort((a, b) => {
+      const av = inventorySortValue(a.cells?.[state.index], numeric);
+      const bv = inventorySortValue(b.cells?.[state.index], numeric);
+      let result = numeric ? av - bv : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      if (state.direction === 'desc') result *= -1;
+      return result;
+    });
+    for (const row of rows) table.tBodies[0].appendChild(row);
+    for (const th of headRow.cells) delete th.dataset.fcrliteSort;
+    headRow.cells[state.index].dataset.fcrliteSort = state.direction;
+    applyInventoryLiveFilter(card);
+  }
+
+  function installInventorySorting(card) {
+    const table = card?.querySelector?.('#table-inventory');
+    if (!table) return;
+    const { headRow } = inventoryColumnIndexes(table);
+    if (!headRow) return;
+    [...headRow.cells].forEach((th, index) => {
+      th.classList.add('fcrlite-sortable');
+      th.title = 'Click to sort';
+      th.addEventListener('click', () => {
+        const current = card._fcrliteInventorySort;
+        card._fcrliteInventorySort = current?.index === index
+          ? { index, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+          : { index, direction: 'asc' };
+        applyInventorySort(card);
+      });
+    });
+    if (card._fcrliteInventorySort) applyInventorySort(card);
+  }
+
+  function installStickyInventoryHeader(card) {
+    card?._fcrliteStickyHeaderCleanup?.();
+    if (!card) return;
+
+    const body = card.querySelector('.fcrlite-card-body');
+    const table = body?.querySelector('#table-inventory');
+    const headRow = table?.tHead?.rows?.[0];
+    const cardHead = card.querySelector(':scope > .fcrlite-card-head');
+    if (!body || !table || !headRow || !cardHead) return;
+
+    card.querySelector(':scope > .fcrlite-inventory-sticky-shell')?.remove();
+    const shell = document.createElement('div');
+    shell.className = 'fcrlite-inventory-sticky-shell';
+    shell.setAttribute('aria-hidden', 'true');
+    const inner = document.createElement('div');
+    inner.className = 'fcrlite-inventory-sticky-inner';
+    const cloneTable = document.createElement('table');
+    cloneTable.className = 'fcrlite-inventory-sticky-table';
+    const cloneHead = table.tHead.cloneNode(true);
+    cloneTable.appendChild(cloneHead);
+    inner.appendChild(cloneTable);
+    shell.appendChild(inner);
+    cardHead.insertAdjacentElement('afterend', shell);
+
+    let frame = 0;
+    const cloneCells = () => [...(cloneHead.rows?.[0]?.cells || [])];
+    const originalCells = () => [...(headRow.cells || [])];
+    const setStyle = (element, property, value) => {
+      if (element.style[property] !== value) element.style[property] = value;
+    };
+    const setClassName = (element, value) => {
+      if (element.className !== value) element.className = value;
+    };
+    const setTitle = (element, value) => {
+      if (element.title !== value) element.title = value;
+    };
+
+    const syncGeometryAndState = () => {
+      frame = 0;
+      if (!card.isConnected || !table.isConnected) return;
+      const originals = originalCells();
+      const clones = cloneCells();
+      if (!originals.length || originals.length !== clones.length) return;
+
+      const width = Math.max(table.scrollWidth || 0, table.getBoundingClientRect().width || 0);
+      setStyle(cloneTable, 'width', `${Math.ceil(width)}px`);
+      clones.forEach((clone, index) => {
+        const original = originals[index];
+        const cellWidth = `${Math.ceil(Math.max(1, original.getBoundingClientRect().width || original.offsetWidth || 0))}px`;
+        setStyle(clone, 'width', cellWidth);
+        setStyle(clone, 'minWidth', cellWidth);
+        setStyle(clone, 'maxWidth', cellWidth);
+        setClassName(clone, original.className);
+        setTitle(clone, original.title || '');
+        const sort = original.dataset.fcrliteSort;
+        if (sort) {
+          if (clone.dataset.fcrliteSort !== sort) clone.dataset.fcrliteSort = sort;
+        } else if (clone.dataset.fcrliteSort !== undefined) {
+          delete clone.dataset.fcrliteSort;
+        }
+      });
+
+      setStyle(cloneTable, 'transform', `translateX(${-Math.round(body.scrollLeft || 0)}px)`);
+      const bodyRect = body.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const bodyStyle = getComputedStyle(body);
+      const padLeft = parseFloat(bodyStyle.paddingLeft) || 0;
+      const padRight = parseFloat(bodyStyle.paddingRight) || 0;
+      setStyle(inner, 'marginLeft', `${Math.round(bodyRect.left - cardRect.left + padLeft)}px`);
+      setStyle(inner, 'width', `${Math.max(0, Math.floor(body.clientWidth - padLeft - padRight))}px`);
+
+      const rootStyle = getComputedStyle(root || document.documentElement);
+      const barTop = parseFloat(rootStyle.getPropertyValue('--fcrlite-bar-height')) || 0;
+      const sectionHeadHeight = Math.ceil(cardHead.getBoundingClientRect().height || 0);
+      const stickyTop = Math.max(0, barTop + sectionHeadHeight);
+      setStyle(shell, 'top', `${stickyTop}px`);
+
+      const originalHeadRect = table.tHead.getBoundingClientRect();
+      const stickyHeight = Math.ceil(inner.getBoundingClientRect().height || originalHeadRect.height || 0);
+      const shouldShow = originalHeadRect.top < stickyTop && cardRect.bottom > stickyTop + stickyHeight;
+      if (shell.classList.contains('active') !== shouldShow) shell.classList.toggle('active', shouldShow);
+    };
+
+    const scheduleSync = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(syncGeometryAndState);
+    };
+
+    cloneCells().forEach((clone, index) => {
+      clone.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const original = originalCells()[index];
+        if (!original) return;
+        original.click();
+        requestAnimationFrame(scheduleSync);
+      });
+    });
+
+    body.addEventListener('scroll', scheduleSync, { passive: true });
+    window.addEventListener('scroll', scheduleSync, { passive: true });
+    window.addEventListener('resize', scheduleSync, { passive: true });
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleSync) : null;
+    resizeObserver?.observe(body);
+    resizeObserver?.observe(table);
+    resizeObserver?.observe(cardHead);
+
+    card._fcrliteStickyHeaderCleanup = () => {
+      if (frame) cancelAnimationFrame(frame);
+      body.removeEventListener('scroll', scheduleSync);
+      window.removeEventListener('scroll', scheduleSync);
+      window.removeEventListener('resize', scheduleSync);
+      resizeObserver?.disconnect();
+      shell.remove();
+      delete card._fcrliteStickyHeaderCleanup;
+    };
+
+    scheduleSync();
+  }
+
+  function inventoryFilterTerms(value) {
+    return clean(value).toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
+  function applyInventoryLiveFilter(card) {
+    const table = card?.querySelector?.('#table-inventory');
+    const input = card?.querySelector?.('.fcrlite-inventory-filter');
+    if (!table || !input) return;
+
+    const terms = inventoryFilterTerms(input.value);
+    const rows = [...(table.tBodies?.[0]?.rows || [])];
+    const { headRow, qty } = inventoryColumnIndexes(table);
+    let visible = 0;
+    let visibleUnits = 0;
+
+    for (const row of rows) {
+      const text = clean(row.textContent).toLowerCase();
+      const match = !terms.length || terms.every(term => text.includes(term));
+      row.hidden = !match;
+
+      if (match) {
+        visible++;
+        if (qty >= 0) {
+          visibleUnits += Number(clean(row.cells?.[qty]?.textContent || '').replace(/[^\d.-]/g, '')) || 0;
+        }
+      }
+    }
+
+    // Match native FCResearch behaviour: Quantity(...) reflects only the
+    // currently visible rows. This is the single canonical quantity display.
+    if (headRow && qty >= 0 && headRow.cells?.[qty]) {
+      headRow.cells[qty].textContent = `Quantity (${visibleUnits})`;
+
+      const stickyQty = card.querySelector(
+        `.fcrlite-inventory-sticky-table thead tr th:nth-child(${qty + 1})`
+      );
+      if (stickyQty) stickyQty.textContent = `Quantity (${visibleUnits})`;
+    }
+
+    const info = card.querySelector('#table-inventory_info');
+    if (!info) return;
+
+    const total = rows.length;
+    if (!total) {
+      info.textContent = 'Showing 0 to 0 of 0 entries';
+    } else if (!terms.length) {
+      info.textContent = `Showing 1 to ${total} of ${total} entries`;
+    } else if (!visible) {
+      info.textContent = `Showing 0 to 0 of 0 entries (filtered from ${total} total entries)`;
+    } else {
+      info.textContent = `Showing 1 to ${visible} of ${visible} entries (filtered from ${total} total entries)`;
+    }
+  }
+
+  function installInventoryLiveSearch(card) {
+    const head = card?.querySelector?.('.fcrlite-card-head');
+    if (!head) return;
+    let input = head.querySelector('.fcrlite-inventory-filter');
+    if (!input) {
+      const wrap = document.createElement('label');
+      wrap.className = 'fcrlite-inventory-search';
+      wrap.title = 'Live inventory filter. Space-separated terms are ANDed; partial matches are allowed.';
+      input = document.createElement('input');
+      input.className = 'fcrlite-inventory-filter';
+      input.type = 'search';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.placeholder = 'Search inventory…';
+      input.setAttribute('aria-label', 'Search inventory rows');
+      input.addEventListener('input', () => applyInventoryLiveFilter(card));
+      wrap.appendChild(input);
+      const meta = head.querySelector('.meta');
+      if (meta) head.insertBefore(wrap, meta);
+      else head.appendChild(wrap);
+    }
+    applyInventoryLiveFilter(card);
+  }
+
+  function installNativeCompatibility(def, card, data) {
+    if (!card) return;
+    card.dataset.sectionType = def.endpoint;
+
+    if (def.endpoint !== 'inventory') return;
+    installInventoryLiveSearch(card);
+    renderInventorySummary(card, data);
+    installInventorySorting(card);
+    installStickyInventoryHeader(card);
+    if (data?.preview === true) return;
+    const body = card.querySelector('.fcrlite-card-body');
+    const table = body?.querySelector('#table-inventory');
+    if (!body || !table) return;
+
+    let nav = body.querySelector('#inventory-nav');
+    if (!nav) {
+      nav = document.createElement('div');
+      nav.id = 'inventory-nav';
+      nav.className = 'fcrlite-native-tools';
+      body.prepend(nav);
+    }
+
+    let info = body.querySelector('#table-inventory_info');
+    if (!info) {
+      info = document.createElement('div');
+      info.id = 'table-inventory_info';
+      info.className = 'fcrlite-native-info';
+      table.insertAdjacentElement('afterend', info);
+    }
+    const records = Number(data?.records);
+    if (Number.isFinite(records)) info.textContent = records ? `Showing 1 to ${records} of ${records} entries` : 'Showing 0 to 0 of 0 entries';
+    applyInventoryLiveFilter(card);
+  }
+
+  function sectionMeta(def, data) {
+    const ms = `${Number(data?.ms) || 0}ms`;
+    if (def.endpoint === 'inventory-history' && Number.isFinite(Number(data?.records))) {
+      const records = Number(data.records);
+      const pages = Number(data?.pages);
+      const bits = [`${records} rows`];
+      if (Number.isFinite(pages) && pages > 0) bits.push(`${pages} page${pages === 1 ? '' : 's'}`);
+      bits.push(ms);
+      return `${data?.complete === false ? 'PARTIAL • ' : ''}${bits.join(' • ')}`;
+    }
+    if (def.endpoint !== 'inventory') return ms;
+    const pages = Number(data?.pages);
+    const bits = [];
+    if (Number.isFinite(pages) && pages > 0) bits.push(`${pages} page${pages === 1 ? '' : 's'}`);
+    bits.push(ms);
+    const prefix = data?.preview === true ? 'LOADING MORE • ' : (data?.complete === false ? 'PARTIAL • ' : '');
+    return `${prefix}${bits.join(' • ')}`;
+  }
+
+  function buildSectionsUi() {
+    injectStyles();
+    const prefs = loadSectionPrefs();
+    let runSerial = 0;
+    let activeSearchGroup = '';
+
+    root = document.createElement('div');
+    root.id = 'fcratc-root';
+    root.dataset.fcrToolUi = '1';
+    root.classList.add('fcratc-standalone');
+    root.innerHTML = `
+      <span class="warehouse-id" hidden>${esc(warehouseFromPath())}</span>
+      <div class="fcratc-litebar">
+        <button type="button" class="fcratc-lite-brand" title="Return to full FCResearch">FC-LITE</button>
+        <span class="fcratc-lite-sub">BWU2 SECTIONS</span>
+        <input id="fcrlite-search" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search ASIN / FNSKU / container / PO / etc">
+        <button type="button" class="fcrlite-go">SEARCH</button>
+        <button type="button" class="fcrlite-toggle-btn">SECTIONS</button>
+        <span class="fcrlite-status"></span>
+        <span class="fcratc-core-status" title="Shared FCR Data Core status">CORE …</span>
+        <button type="button" class="fcratc-tote-toggle" title="Enable Tote Audit scanner">TOTE AUDIT</button>
+        <button type="button" class="fcratc-full-fcr">FULL FCRESEARCH ↗</button>
+      </div>
+      <div id="fcrlite-sections-app">
+        <div class="fcrlite-toggles" hidden></div>
+        <div class="fcrlite-results"><div class="fcrlite-empty">Search to load enabled sections</div></div>
+      </div>
+    `;
+    document.body.prepend(root);
+
+    const litebar = root.querySelector('.fcratc-litebar');
+    const syncStickyOffsets = () => {
+      const height = Math.ceil(litebar?.getBoundingClientRect().height || 52) + 8;
+      root.style.setProperty('--fcrlite-bar-height', `${height}px`);
+    };
+    syncStickyOffsets();
+    if (typeof ResizeObserver === 'function' && litebar) new ResizeObserver(syncStickyOffsets).observe(litebar);
+
+    const searchInput = root.querySelector('#fcrlite-search');
+    const goButton = root.querySelector('.fcrlite-go');
+    const toggleButton = root.querySelector('.fcrlite-toggle-btn');
+    const togglePanel = root.querySelector('.fcrlite-toggles');
+    const status = root.querySelector('.fcrlite-status');
+    const results = root.querySelector('.fcrlite-results');
+
+    function enabledDefs() {
+      return SECTION_DEFS.filter(def => prefs[def.endpoint] === true);
+    }
+
+    function updateToggleButton() {
+      toggleButton.textContent = `SECTIONS ${enabledDefs().length}/${SECTION_DEFS.length}`;
+    }
+
+    togglePanel.innerHTML = SECTION_DEFS.map(def => `
+      <label class="fcrlite-toggle">
+        <input type="checkbox" data-endpoint="${esc(def.endpoint)}" ${prefs[def.endpoint] ? 'checked' : ''}>
+        <span>${esc(def.label)}</span>
+      </label>
+    `).join('');
+    updateToggleButton();
+
+    togglePanel.addEventListener('change', event => {
+      const input = event.target instanceof HTMLInputElement ? event.target : null;
+      const endpoint = input?.dataset?.endpoint;
+      if (!endpoint || !SECTION_DEFS.some(def => def.endpoint === endpoint)) return;
+      prefs[endpoint] = input.checked;
+      saveSectionPrefs(prefs);
+      updateToggleButton();
+      status.textContent = 'saved • search again';
+    });
+
+    toggleButton.addEventListener('click', () => {
+      togglePanel.hidden = !togglePanel.hidden;
+    });
+
+    root.querySelector('.fcratc-lite-brand').addEventListener('click', returnToFullFCResearch);
+    root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
+    root.querySelector('.fcratc-tote-toggle').addEventListener('click', openToteMode);
+
+    function renderSectionCard(def, card, data, search, rawInput, serial, requestGroup, range = {}) {
+      if (serial !== runSerial || !card) return;
+      card.classList.remove('loading', 'error', 'partial', 'loading-more');
+      if (data?.complete === false) card.classList.add('partial');
+      if (data?.preview === true) card.classList.add('loading-more');
+      const html = cleanSectionMarkup(def.endpoint, data?.html || '');
+      card.querySelector('.fcrlite-card-body').innerHTML = html || '<div class="fcrlite-empty">No data returned</div>';
+      card.querySelector('.meta').textContent = sectionMeta(def, data);
+      if (data?.complete === false && data?.warning) card.querySelector('.meta').title = clean(data.warning);
+      installNativeCompatibility(def, card, data);
+      if (def.endpoint === 'product') {
+        const shaped = shapeProductSection(card);
+        renderIdentifierRelationship(card, rawInput);
+        if (shaped.multi) loadMultiAsinImages(card, shaped.asins, requestGroup);
+      }
+      refreshMultiAsinTotals(results);
+      if (def.endpoint === 'inventory-history') {
+        installInventoryHistoryControls(card, range.startDate || '', range.endDate || '', async (startDate, endDate) => {
+          await reloadInventoryHistory(card, search, serial, requestGroup, startDate, endDate);
+        });
+      }
+    }
+
+    async function reloadInventoryHistory(card, search, serial, requestGroup, startDate, endDate) {
+      if (serial !== runSerial || !card?.isConnected) return;
+      const def = SECTION_DEFS.find(item => item.endpoint === 'inventory-history');
+      if (!def) return;
+      card.classList.add('loading');
+      card.querySelector('.meta').textContent = 'loading…';
+      try {
+        const data = await coreRequest('section', {
+          endpoint: 'inventory-history',
+          code: search,
+          startDate,
+          endDate
+        }, 180000, requestGroup);
+        renderSectionCard(def, card, data, search, search, serial, requestGroup, { startDate, endDate });
+      } catch (error) {
+        if (serial !== runSerial) return;
+        card.classList.remove('loading');
+        card.classList.add('error');
+        card.querySelector('.meta').textContent = 'failed';
+        const note = card.querySelector('.fcrlite-history-note');
+        if (note) note.textContent = clean(error?.message || error || 'Request failed');
+      }
+    }
+
+    async function runSearch({ historyMode = 'push' } = {}) {
+      const rawInput = String(searchInput.value ?? '').trim();
+      const search = clean(rawInput);
+      const defs = enabledDefs();
+      if (!search) {
+        status.textContent = 'enter search';
+        searchInput.focus();
+        return;
+      }
+      if (!defs.length) {
+        status.textContent = 'enable ≥1 section';
+        togglePanel.hidden = false;
+        return;
+      }
+
+      if (activeSearchGroup) cancelCoreGroup(activeSearchGroup);
+      const serial = ++runSerial;
+      const requestGroup = `sections:${serial}`;
+      activeSearchGroup = requestGroup;
+      status.textContent = `loading ${defs.length}…`;
+      results.innerHTML = defs.map(def => `
+        <section class="fcrlite-card loading" data-endpoint="${esc(def.endpoint)}" data-section-type="${esc(def.endpoint)}">
+          <div class="fcrlite-card-head"><span>${esc(def.label)}</span><span class="meta">loading…</span></div>
+          <div class="fcrlite-card-body">Loading…</div>
+        </section>
+      `).join('');
+
+      const url = new URL(location.href);
+      url.searchParams.set('s', search);
+      if (historyMode === 'push') {
+        const currentSearch = clean(new URLSearchParams(location.search).get('s'));
+        if (currentSearch !== search) history.pushState({ fcrLiteSearch: search }, '', url.href);
+      } else if (historyMode === 'replace') {
+        history.replaceState({ fcrLiteSearch: search }, '', url.href);
+      }
+
+      let done = 0;
+      await mapLimit(defs, SECTION_CONCURRENCY, async def => {
+        if (serial !== runSerial) return;
+        try {
+          const timeout = def.endpoint === 'inventory' ? 180000 : 30000;
+          const card = results.querySelector(`[data-endpoint="${CSS.escape(def.endpoint)}"]`);
+          if (!card) return;
+
+          if (def.endpoint === 'inventory') {
+            const previewPromise = coreRequest('inventoryPreview', { code: search }, 30000, requestGroup).catch(() => null);
+            // Attach the full-request rejection handler immediately. A superseding search can
+            // cancel this request while we're still awaiting preview; delaying the handler until
+            // after preview allowed the browser to report a transient unhandled rejection.
+            const fullPromise = coreRequest('section', { endpoint: def.endpoint, code: search }, timeout, requestGroup)
+              .then(data => ({ ok: true, data }), error => ({ ok: false, error }));
+            const preview = await previewPromise;
+            if (serial !== runSerial) return;
+            if (preview?.html && preview?.preview === true) renderSectionCard(def, card, preview, search, rawInput, serial, requestGroup);
+            const full = await fullPromise;
+            if (serial !== runSerial) return;
+            if (!full.ok) throw full.error;
+            renderSectionCard(def, card, full.data, search, rawInput, serial, requestGroup);
+          } else {
+            const data = await coreRequest('section', { endpoint: def.endpoint, code: search }, timeout, requestGroup);
+            if (serial !== runSerial) return;
+            renderSectionCard(def, card, data, search, rawInput, serial, requestGroup);
+          }
+        } catch (error) {
+          if (serial !== runSerial) return;
+          const card = results.querySelector(`[data-endpoint="${CSS.escape(def.endpoint)}"]`);
+          if (!card) return;
+          card.classList.remove('loading');
+          card.classList.add('error');
+          card.querySelector('.fcrlite-card-body').textContent = clean(error?.message || error || 'Request failed');
+          card.querySelector('.meta').textContent = 'failed';
+        } finally {
+          if (serial === runSerial) {
+            done++;
+            status.textContent = `${done}/${defs.length}`;
+          }
+        }
+      });
+      if (serial === runSerial) {
+        status.textContent = `done • ${defs.length} section${defs.length === 1 ? '' : 's'}`;
+        searchInput.focus();
+        searchInput.select();
+      }
+    }
+
+    goButton.addEventListener('click', runSearch);
+    searchInput.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      runSearch();
+    });
+
+    window.addEventListener('popstate', () => {
+      if (!location.hash.startsWith(SECTIONS_HASH)) return;
+      const restored = clean(new URLSearchParams(location.search).get('s'));
+      if (!restored) {
+        if (activeSearchGroup) cancelCoreGroup(activeSearchGroup);
+        activeSearchGroup = '';
+        runSerial++;
+        searchInput.value = '';
+        results.innerHTML = '';
+        status.textContent = 'enter search';
+        searchInput.focus();
+        return;
+      }
+      searchInput.value = restored;
+      runSearch({ historyMode: 'none' });
+    });
+
+    updateCoreStatus();
+    const initial = clean(new URLSearchParams(location.search).get('s'));
+    if (initial) {
+      searchInput.value = initial;
+      runSearch({ historyMode: 'none' });
+    } else {
+      searchInput.focus();
+    }
+  }
+
+  function buildToteUi() {
     injectStyles();
 
     root = document.createElement('div');
@@ -1537,7 +2719,9 @@
         <button type="button" class="fcratc-lite-brand" title="Return to full FCResearch for this container">FC-LITE</button>
         <span class="fcratc-lite-sub">BWU2 TOTE AUDIT</span>
         <span class="fcratc-lite-container">NO CONTAINER</span>
-        <span class="fcratc-core-status" title="Shared FCR Data Core status">CORE …</span><button type="button" class="fcratc-copy-stats" title="Copy temporary local usage stats">COPY STATS</button>
+        <span class="fcratc-core-status" title="Shared FCR Data Core status">CORE …</span>
+        <button type="button" class="fcratc-tote-toggle active" title="Tote Audit active — click to return to FC-Lite sections">TOTE AUDIT ON</button>
+        <button type="button" class="fcratc-copy-stats" title="Copy temporary local usage stats">COPY STATS</button>
         <button type="button" class="fcratc-full-fcr" title="Open this container in normal FCResearch">FULL FCRESEARCH ↗</button>
       </div>
       <div id="fcratc-panel">
@@ -1591,26 +2775,18 @@
     root.querySelector('.reset').addEventListener('click', () => clearSession());
     root.querySelector('.fcratc-lite-brand').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
-    const copyStatsButton = root.querySelector('.fcratc-copy-stats');
-    const copyStatsLabel = copyStatsButton.textContent;
-    let copyStatsRun = 0;
-    let copyStatsRestoreTimer = 0;
-    copyStatsButton.addEventListener('click', async event => {
+    root.querySelector('.fcratc-tote-toggle').addEventListener('click', () => openSectionsMode(container));
+    root.querySelector('.fcratc-copy-stats').addEventListener('click', async event => {
       const button = event.currentTarget;
-      const run = ++copyStatsRun;
-      clearTimeout(copyStatsRestoreTimer);
+      const old = button.textContent;
       try {
         const result = await coreRequest('usageStats', {});
         await navigator.clipboard.writeText(result?.text || 'No usage stats');
-        if (run !== copyStatsRun) return;
         button.textContent = 'COPIED ✓';
       } catch {
-        if (run !== copyStatsRun) return;
         button.textContent = 'COPY FAILED';
       }
-      copyStatsRestoreTimer = setTimeout(() => {
-        if (button.isConnected && run === copyStatsRun) button.textContent = copyStatsLabel;
-      }, 1200);
+      setTimeout(() => { if (button.isConnected) button.textContent = old; }, 1200);
     });
     stateBadge.addEventListener('click', focusScanner);
     updateCoreStatus();
@@ -1623,12 +2799,14 @@
 
   }
 
-  if (!/\/results(?:\/|$)/i.test(location.pathname)) return;
+  if (!RESULTS_PAGE) return;
   if (!STANDALONE) {
+    injectStyles();
     installDimensionsLauncher();
     return;
   }
 
   ensureStandaloneDocument();
-  buildUi();
+  if (SECTIONS_MODE) buildSectionsUi();
+  else buildToteUi();
 })();
