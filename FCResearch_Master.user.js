@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.14 FCResearch Master — Saved Section Toggles
+// @name         TEST v0.1.15 FCResearch Master — Saved Section Toggles
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.14
+// @version      0.1.15
 // @description  TEST: Clean FCResearch Master using shared FCR Data Core with saved inline native section request controls.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.14';
+  const VERSION = '0.1.15';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -29,6 +29,7 @@
   const SIDELINE_CONTAINER_TIME_KEY = 'fcr_sideline_container_saved_at';
   const SIDELINE_CONTAINER_MAX_AGE = 24 * 60 * 60 * 1000;
   const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
+  const SECTION_LOAD_PREF_KEY_PREFIX = 'fcrm_native_section_load_v2.';
   const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
   const SECTION_LOAD_TOGGLE_ATTR = 'data-fcrm-section-toggle';
   const SECTION_LOAD_ROW_ATTR = 'data-fcrm-section-row';
@@ -85,18 +86,23 @@
 
   function loadSectionLoadPrefs() {
     const prefs = Object.fromEntries(SECTION_DEFS.map(def => [def.endpoint, true]));
+    let legacy = null;
     try {
-      let saved = GM_getValue(SECTION_LOAD_PREFS_KEY, null);
-      if (typeof saved === 'string') saved = JSON.parse(saved);
-      for (const def of SECTION_DEFS) {
-        if (typeof saved?.[def.endpoint] === 'boolean') prefs[def.endpoint] = saved[def.endpoint];
-      }
+      legacy = GM_getValue(SECTION_LOAD_PREFS_KEY, null);
+      if (typeof legacy === 'string') legacy = JSON.parse(legacy);
     } catch {}
+    for (const def of SECTION_DEFS) {
+      let saved = null;
+      try { saved = GM_getValue(`${SECTION_LOAD_PREF_KEY_PREFIX}${def.endpoint}`, null); } catch {}
+      if (typeof saved === 'boolean') prefs[def.endpoint] = saved;
+      else if (typeof legacy?.[def.endpoint] === 'boolean') prefs[def.endpoint] = legacy[def.endpoint];
+    }
     return prefs;
   }
 
-  function saveSectionLoadPrefs(prefs = sectionLoadPrefs) {
-    try { GM_setValue(SECTION_LOAD_PREFS_KEY, { ...prefs }); } catch {}
+  function saveSectionLoadPref(endpoint, enabled) {
+    if (!SECTION_ENDPOINTS.has(endpoint)) return;
+    try { GM_setValue(`${SECTION_LOAD_PREF_KEY_PREFIX}${endpoint}`, enabled !== false); } catch {}
   }
 
   function sectionLoadEnabled(endpoint) {
@@ -388,9 +394,11 @@
         button.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
-          sectionLoadDraft[def.endpoint] = sectionLoadDraft[def.endpoint] === false;
-          saveSectionLoadPrefs(sectionLoadDraft);
+          const enabled = sectionLoadDraft[def.endpoint] === false;
+          sectionLoadDraft[def.endpoint] = enabled;
+          saveSectionLoadPref(def.endpoint, enabled);
           renderSectionLoadControls();
+          button.blur();
         });
         row.appendChild(button);
       }
