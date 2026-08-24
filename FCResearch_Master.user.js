@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name         TEST v0.1.11 FCResearch Master CLEAN TEST
+// @name         TEST v0.1.12 FCResearch Master — Section Load Controls
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.11
-// @description  TEST: Clean FCResearch Master using shared FCR Data Core.
+// @version      0.1.12
+// @description  TEST: Clean FCResearch Master using shared FCR Data Core with saved native section request controls.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // ==/UserScript==
@@ -18,7 +19,8 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.11';
+  const VERSION = '0.1.12';
+  const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
   const UI_SELECTOR = `[${UI_ATTR}]`;
@@ -26,6 +28,32 @@
   const SIDELINE_CONTAINER_KEY = 'fcr_sideline_container';
   const SIDELINE_CONTAINER_TIME_KEY = 'fcr_sideline_container_saved_at';
   const SIDELINE_CONTAINER_MAX_AGE = 24 * 60 * 60 * 1000;
+  const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
+  const SECTION_LOAD_UI_ID = 'fcrm-section-load-controls';
+  const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
+  const SECTION_LOAD_XHR = new WeakMap();
+  const SECTION_DEFS = [
+    ['product', 'Product'],
+    ['inventory', 'Inventory'],
+    ['inventory-history', 'Inventory History'],
+    ['container-history', 'Container History'],
+    ['purchase-order-item', 'Purchase Order Items'],
+    ['purchase-order', 'Purchase Order'],
+    ['receive-history', 'Receive History'],
+    ['shipment', 'Shipment'],
+    ['container-hierarchy', 'Container Details'],
+    ['employee', 'Employee'],
+    ['carton-general-info', 'Carton General Information'],
+    ['carton-contents', 'Carton Contents'],
+    ['sscc-info', 'SSCC Information'],
+    ['carton-ambiguities', 'Items in Multiple Cartons'],
+    ['vision-tunnel', 'Vision Tunnel'],
+    ['problems', 'Problems'],
+    ['problem', 'Problem'],
+    ['event', 'Events'],
+    ['authenticity-item', 'Authenticity Item']
+  ].map(([endpoint, label]) => ({ endpoint, label }));
+  const SECTION_ENDPOINTS = new Set(SECTION_DEFS.map(def => def.endpoint));
 
   const LEVEL_COLORS = [
     'rgb(153,153,153)',
@@ -47,6 +75,81 @@
   };
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const norm = value => clean(value).toLowerCase();
+
+  function nativeSectionMode() {
+    return /\/results(?:\/|$)/i.test(location.pathname)
+      && !location.hash.startsWith('#fcr-lite')
+      && !location.hash.startsWith('#fcr-tote-checker');
+  }
+
+  function loadSectionLoadPrefs() {
+    const prefs = Object.fromEntries(SECTION_DEFS.map(def => [def.endpoint, true]));
+    try {
+      let saved = GM_getValue(SECTION_LOAD_PREFS_KEY, null);
+      if (typeof saved === 'string') saved = JSON.parse(saved);
+      for (const def of SECTION_DEFS) {
+        if (typeof saved?.[def.endpoint] === 'boolean') prefs[def.endpoint] = saved[def.endpoint];
+      }
+    } catch {}
+    return prefs;
+  }
+
+  function saveSectionLoadPrefs() {
+    try { GM_setValue(SECTION_LOAD_PREFS_KEY, { ...sectionLoadPrefs }); } catch {}
+  }
+
+  function sectionLoadEnabled(endpoint) {
+    return sectionLoadPrefs[endpoint] !== false;
+  }
+
+  function sectionEndpointFromUrl(rawUrl) {
+    let url;
+    try { url = new URL(String(rawUrl || ''), location.href); } catch { return ''; }
+    const host = url.hostname.toLowerCase();
+    if (!host.includes('fcresearch') && host !== 'qifcr.fe.aftx.amazonoperations.app') return '';
+    const match = url.pathname.match(/\/results\/([^/?#]+)/i);
+    if (!match) return '';
+    const endpoint = clean(decodeURIComponent(match[1])).toLowerCase();
+    return SECTION_ENDPOINTS.has(endpoint) ? endpoint : '';
+  }
+
+  function installNativeSectionBlocker() {
+    const XHR = PAGE_WINDOW.XMLHttpRequest;
+    if (!XHR?.prototype || XHR.prototype.__fcrmNativeSectionBlockerV1) return;
+    const originalOpen = XHR.prototype.open;
+    const originalSend = XHR.prototype.send;
+
+    XHR.prototype.open = function(method, url) {
+      const endpoint = sectionEndpointFromUrl(url);
+      SECTION_LOAD_XHR.set(this, endpoint ? {
+        endpoint,
+        method: String(method || 'GET').toUpperCase()
+      } : null);
+      return originalOpen.apply(this, arguments);
+    };
+
+    XHR.prototype.send = function() {
+      const info = SECTION_LOAD_XHR.get(this);
+      if (info && nativeSectionMode() && !sectionLoadEnabled(info.endpoint)) {
+        usage(`section.blocked.${info.endpoint}`);
+        try {
+          window.dispatchEvent(new CustomEvent('fcrm:section-blocked', {
+            detail: JSON.stringify({ endpoint: info.endpoint, method: info.method })
+          }));
+        } catch {}
+        return undefined;
+      }
+      return originalSend.apply(this, arguments);
+    };
+
+    Object.defineProperty(XHR.prototype, '__fcrmNativeSectionBlockerV1', {
+      value: true,
+      configurable: true
+    });
+  }
+
+  let sectionLoadPrefs = loadSectionLoadPrefs();
+  installNativeSectionBlocker();
 
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
@@ -175,10 +278,144 @@
       .fcrm-prop-false { background:#a73225!important; }
       #fcrlite-sections-app .fcrm-prop-true { background:#e2f2e4!important; color:#14532d!important; box-shadow:inset 4px 0 #2f7d32; }
       #fcrlite-sections-app .fcrm-prop-false { background:#f7e2de!important; color:#7f1d1d!important; box-shadow:inset 4px 0 #a73225; }
+      #${SECTION_LOAD_UI_ID} { display:inline-flex; align-items:center; margin-left:8px; font:700 11px/1.2 Arial,sans-serif; }
+      #${SECTION_LOAD_UI_ID}.fcrm-section-fixed { position:fixed; top:104px; right:12px; z-index:2147483645; margin:0; }
+      #${SECTION_LOAD_UI_ID} button { border:1px solid #64748b; border-radius:5px; padding:4px 7px; background:#f1f5f9; color:#0f172a; font:700 11px/1.2 Arial,sans-serif; cursor:pointer; }
+      #${SECTION_LOAD_UI_ID} button:hover { background:#e2e8f0; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-open { white-space:nowrap; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-panel { position:fixed; z-index:2147483646; width:min(410px,calc(100vw - 24px)); max-height:calc(100vh - 24px); overflow:auto; padding:10px; border:1px solid #475569; border-radius:8px; background:#f8fafc; color:#0f172a; box-shadow:0 8px 28px rgba(15,23,42,.35); }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:3px; font-size:13px; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-hint { margin-bottom:8px; color:#475569; font-weight:500; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-choice { display:flex; align-items:center; gap:6px; min-width:0; padding:3px 2px; font-weight:600; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-choice input { width:15px; height:15px; margin:0; flex:0 0 auto; accent-color:#1d4ed8; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-choice span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-actions { display:flex; align-items:center; gap:7px; margin-top:10px; padding-top:8px; border-top:1px solid #cbd5e1; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-count { flex:1; text-align:center; color:#334155; }
+      #${SECTION_LOAD_UI_ID} .fcrm-section-apply { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+      @media (max-width:700px) { #${SECTION_LOAD_UI_ID} .fcrm-section-list { grid-template-columns:1fr; } }
       [${UI_ATTR}], [${UI_ATTR}] * { -webkit-user-select:none!important; -moz-user-select:none!important; user-select:none!important; }
       [${UI_ATTR}]::selection, [${UI_ATTR}] *::selection { background:transparent!important; color:inherit!important; }
     `;
     document.documentElement.appendChild(style);
+  }
+
+  function syncNativeSectionVisibility() {
+    const html = document.documentElement;
+    if (!html) return;
+    if (nativeSectionMode()) html.dataset.fcrmNativeSections = '1';
+    else delete html.dataset.fcrmNativeSections;
+
+    let style = document.getElementById(SECTION_LOAD_STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = SECTION_LOAD_STYLE_ID;
+      document.documentElement.appendChild(style);
+    }
+    const disabled = SECTION_DEFS.filter(def => !sectionLoadEnabled(def.endpoint));
+    style.textContent = disabled.map(def =>
+      `html[data-fcrm-native-sections="1"] [data-section-type="${def.endpoint}"]{display:none!important;}`
+    ).join('\n');
+  }
+
+  function sectionLoadCount() {
+    return SECTION_DEFS.reduce((count, def) => count + (sectionLoadEnabled(def.endpoint) ? 1 : 0), 0);
+  }
+
+  function findNativeSettingsHost() {
+    const candidates = $$('a,button').filter(element => norm(element.textContent || element.value || '') === 'settings');
+    const rightSide = candidates.find(element => {
+      try {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.left > window.innerWidth * 0.60;
+      } catch { return false; }
+    });
+    return (rightSide || candidates[0])?.parentElement || null;
+  }
+
+  function renderSectionLoadCounts(root) {
+    if (!root) return;
+    const count = sectionLoadCount();
+    const open = $('.fcrm-section-open', root);
+    const label = $('.fcrm-section-count', root);
+    if (open) open.textContent = `LOAD ${count}/${SECTION_DEFS.length}`;
+    if (label) label.textContent = `${count} enabled`;
+  }
+
+  function positionSectionLoadPanel(root) {
+    const open = $('.fcrm-section-open', root);
+    const panel = $('.fcrm-section-panel', root);
+    if (!open || !panel) return;
+    let rect;
+    try { rect = open.getBoundingClientRect(); } catch { rect = { bottom: 104, right: window.innerWidth - 12 }; }
+    panel.style.top = `${Math.max(8, Math.min(window.innerHeight - 80, Number(rect.bottom || 104) + 6))}px`;
+    panel.style.right = `${Math.max(8, window.innerWidth - Number(rect.right || window.innerWidth - 12))}px`;
+  }
+
+  function buildSectionLoadControls() {
+    const root = markUi(document.createElement('span'));
+    root.id = SECTION_LOAD_UI_ID;
+    root.innerHTML = `
+      <button type="button" class="fcrm-section-open" title="Choose which native FCResearch sections may request data"></button>
+      <div class="fcrm-section-panel" hidden>
+        <div class="fcrm-section-head"><strong>SECTION LOAD</strong><button type="button" class="fcrm-section-close" aria-label="Close">×</button></div>
+        <div class="fcrm-section-hint">Untick = no request after Apply/refresh.</div>
+        <div class="fcrm-section-list">
+          ${SECTION_DEFS.map(def => `<label class="fcrm-section-choice" title="${escapeHtml(def.endpoint)}"><input type="checkbox" data-endpoint="${escapeHtml(def.endpoint)}" ${sectionLoadEnabled(def.endpoint) ? 'checked' : ''}><span>${escapeHtml(def.label)}</span></label>`).join('')}
+        </div>
+        <div class="fcrm-section-actions">
+          <button type="button" class="fcrm-section-all">ALL ON</button>
+          <span class="fcrm-section-count"></span>
+          <button type="button" class="fcrm-section-apply">APPLY + REFRESH</button>
+        </div>
+      </div>
+    `;
+
+    const panel = $('.fcrm-section-panel', root);
+    $('.fcrm-section-open', root)?.addEventListener('click', () => {
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) positionSectionLoadPanel(root);
+    });
+    $('.fcrm-section-close', root)?.addEventListener('click', () => { panel.hidden = true; });
+    $('.fcrm-section-list', root)?.addEventListener('change', event => {
+      const input = event.target?.closest?.('input[data-endpoint]');
+      const endpoint = input?.dataset?.endpoint;
+      if (!endpoint || !SECTION_ENDPOINTS.has(endpoint)) return;
+      sectionLoadPrefs[endpoint] = Boolean(input.checked);
+      saveSectionLoadPrefs();
+      syncNativeSectionVisibility();
+      renderSectionLoadCounts(root);
+    });
+    $('.fcrm-section-all', root)?.addEventListener('click', () => {
+      for (const def of SECTION_DEFS) sectionLoadPrefs[def.endpoint] = true;
+      $$('.fcrm-section-list input[data-endpoint]', root).forEach(input => { input.checked = true; });
+      saveSectionLoadPrefs();
+      syncNativeSectionVisibility();
+      renderSectionLoadCounts(root);
+    });
+    $('.fcrm-section-apply', root)?.addEventListener('click', () => location.reload());
+    renderSectionLoadCounts(root);
+    return root;
+  }
+
+  function ensureSectionLoadControls() {
+    syncNativeSectionVisibility();
+    let root = document.getElementById(SECTION_LOAD_UI_ID);
+    if (!nativeSectionMode()) {
+      root?.remove();
+      return;
+    }
+    if (!document.body) return;
+    if (!root) root = buildSectionLoadControls();
+    const host = findNativeSettingsHost();
+    if (host) {
+      root.classList.remove('fcrm-section-fixed');
+      if (root.parentElement !== host) host.appendChild(root);
+    } else {
+      root.classList.add('fcrm-section-fixed');
+      if (root.parentElement !== document.body) document.body.appendChild(root);
+    }
+    renderSectionLoadCounts(root);
   }
 
   function poIntFrom(cell) {
@@ -410,6 +647,10 @@
     const host = badgeHost(panel);
     if (!host) return null;
     let badge = $('.fc-madcat-badge', host);
+    if (!sectionLoadEnabled('inventory-history')) {
+      badge?.remove();
+      return null;
+    }
     if (!badge) {
       badge = markUi(document.createElement('span'));
       badge.className = 'fc-madcat-badge fcrm-madcat-loading';
@@ -436,6 +677,10 @@
   }
 
   function updateMadcat(panel) {
+    if (!sectionLoadEnabled('inventory-history')) {
+      $('.fc-madcat-badge', badgeHost(panel))?.remove();
+      return;
+    }
     const badge = ensureMadcatBadge(panel);
     if (!badge) return;
     const container = findInventoryHistoryContainer();
@@ -883,6 +1128,7 @@
     if (refreshBusy) { refreshPending = true; return; }
     refreshBusy = true;
     try {
+      ensureSectionLoadControls();
       const jobs = [];
       const panel = readProductPanel();
       if (panel) {
@@ -966,10 +1212,19 @@
     window.addEventListener('popstate', scheduleRefresh, true);
   }
 
-  injectStyles();
-  installCopyCleaner();
-  installAltPrint();
-  startObserver();
-  usage('open');
-  refreshPage();
+  let masterStarted = false;
+  function startMaster() {
+    if (masterStarted || !document.documentElement || !document.body) return;
+    masterStarted = true;
+    injectStyles();
+    installCopyCleaner();
+    installAltPrint();
+    startObserver();
+    ensureSectionLoadControls();
+    usage('open');
+    refreshPage();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startMaster, { once: true });
+  else startMaster();
 })();
