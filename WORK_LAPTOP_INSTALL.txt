@@ -8,7 +8,7 @@ Disable older copies first.
 03 FCR Data Core
 04 FCResearch Master
 05 FC-Lite
-06 Stow Andons v5.5.1 — source main 3aa97d27
+06 Stow Andons v5.5.1 — source main edbd0166
 07 Bin Check Overlay
 08 Dropzone Queue
 09 LIVE EVIDENCE CAPTURE
