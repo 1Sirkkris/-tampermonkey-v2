@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.13 FCResearch Master — Inline Section Toggles
+// @name         TEST v0.1.14 FCResearch Master — Saved Section Toggles
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.13
+// @version      0.1.14
 // @description  TEST: Clean FCResearch Master using shared FCR Data Core with saved inline native section request controls.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.13';
+  const VERSION = '0.1.14';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -29,7 +29,6 @@
   const SIDELINE_CONTAINER_TIME_KEY = 'fcr_sideline_container_saved_at';
   const SIDELINE_CONTAINER_MAX_AGE = 24 * 60 * 60 * 1000;
   const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
-  const SECTION_LOAD_UI_ID = 'fcrm-section-load-controls';
   const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
   const SECTION_LOAD_TOGGLE_ATTR = 'data-fcrm-section-toggle';
   const SECTION_LOAD_ROW_ATTR = 'data-fcrm-section-row';
@@ -281,13 +280,6 @@
       .fcrm-prop-false { background:#a73225!important; }
       #fcrlite-sections-app .fcrm-prop-true { background:#e2f2e4!important; color:#14532d!important; box-shadow:inset 4px 0 #2f7d32; }
       #fcrlite-sections-app .fcrm-prop-false { background:#f7e2de!important; color:#7f1d1d!important; box-shadow:inset 4px 0 #a73225; }
-      #${SECTION_LOAD_UI_ID} { display:flex; align-items:center; gap:4px; margin:3px 6px 7px 14px; font:700 10px/1.2 Arial,sans-serif; }
-      #${SECTION_LOAD_UI_ID}.fcrm-section-fixed { position:fixed; top:104px; right:12px; z-index:2147483645; margin:0; padding:5px; border:1px solid #64748b; border-radius:6px; background:#f8fafc; box-shadow:0 4px 14px rgba(15,23,42,.25); }
-      #${SECTION_LOAD_UI_ID} button { min-width:28px; border:1px solid #64748b; border-radius:4px; padding:3px 5px; background:#f1f5f9; color:#0f172a; font:700 10px/1.2 Arial,sans-serif; cursor:pointer; }
-      #${SECTION_LOAD_UI_ID} button:hover { background:#e2e8f0; }
-      #${SECTION_LOAD_UI_ID} .fcrm-section-count { min-width:34px; text-align:center; color:#334155; }
-      #${SECTION_LOAD_UI_ID} .fcrm-section-apply { background:#e2e8f0; }
-      #${SECTION_LOAD_UI_ID} .fcrm-section-apply.fcrm-section-pending { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
       [${SECTION_LOAD_ROW_ATTR}] { position:relative!important; padding-right:29px!important; min-height:20px; }
       [${SECTION_LOAD_TOGGLE_ATTR}] { position:absolute; top:50%; right:4px; z-index:3; width:20px; min-width:20px; height:18px; padding:0; transform:translateY(-50%); border:1px solid #64748b; border-radius:4px; background:#e5e7eb; color:#111827; font:800 11px/16px Arial,sans-serif; text-align:center; cursor:pointer; }
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
@@ -314,10 +306,6 @@
     style.textContent = disabled.map(def =>
       `html[data-fcrm-native-sections="1"] [data-section-type="${def.endpoint}"]{display:none!important;}`
     ).join('\n');
-  }
-
-  function sectionLoadCount(prefs = sectionLoadPrefs) {
-    return SECTION_DEFS.reduce((count, def) => count + (prefs[def.endpoint] !== false ? 1 : 0), 0);
   }
 
   function visibleRect(element) {
@@ -372,50 +360,16 @@
     return row;
   }
 
-  function sectionDraftChanged() {
-    return SECTION_DEFS.some(def => sectionLoadDraft[def.endpoint] !== sectionLoadPrefs[def.endpoint]);
-  }
-
-  function renderSectionLoadControls(root = document.getElementById(SECTION_LOAD_UI_ID)) {
-    const count = sectionLoadCount(sectionLoadDraft);
-    const label = $('.fcrm-section-count', root);
-    const apply = $('.fcrm-section-apply', root);
-    if (label) label.textContent = `${count}/${SECTION_DEFS.length}`;
-    if (apply) apply.classList.toggle('fcrm-section-pending', sectionDraftChanged());
+  function renderSectionLoadControls() {
     $$(`[${SECTION_LOAD_TOGGLE_ATTR}]`).forEach(button => {
       const endpoint = button.dataset.endpoint;
       if (!SECTION_ENDPOINTS.has(endpoint)) return;
       const enabled = sectionLoadDraft[endpoint] !== false;
       button.textContent = enabled ? '✓' : '×';
       button.setAttribute('aria-pressed', String(enabled));
-      button.title = `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — press APPLY to refresh`;
+      button.title = `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — saved; refresh FCResearch to apply`;
       button.setAttribute('aria-label', button.title);
     });
-  }
-
-  function setAllSectionDrafts(enabled) {
-    for (const def of SECTION_DEFS) sectionLoadDraft[def.endpoint] = enabled;
-    renderSectionLoadControls();
-  }
-
-  function buildSectionLoadControls() {
-    const root = markUi(document.createElement('span'));
-    root.id = SECTION_LOAD_UI_ID;
-    root.innerHTML = `
-      <span class="fcrm-section-count"></span>
-      <button type="button" class="fcrm-section-all-on" title="Enable every section">ON</button>
-      <button type="button" class="fcrm-section-all-off" title="Disable every section">OFF</button>
-      <button type="button" class="fcrm-section-apply" title="Save section choices and refresh">APPLY</button>
-    `;
-    $('.fcrm-section-all-on', root)?.addEventListener('click', () => setAllSectionDrafts(true));
-    $('.fcrm-section-all-off', root)?.addEventListener('click', () => setAllSectionDrafts(false));
-    $('.fcrm-section-apply', root)?.addEventListener('click', () => {
-      sectionLoadPrefs = { ...sectionLoadDraft };
-      saveSectionLoadPrefs(sectionLoadPrefs);
-      location.reload();
-    });
-    renderSectionLoadControls(root);
-    return root;
   }
 
   function ensureInlineSectionToggles(host) {
@@ -435,6 +389,7 @@
           event.preventDefault();
           event.stopPropagation();
           sectionLoadDraft[def.endpoint] = sectionLoadDraft[def.endpoint] === false;
+          saveSectionLoadPrefs(sectionLoadDraft);
           renderSectionLoadControls();
         });
         row.appendChild(button);
@@ -444,27 +399,16 @@
 
   function ensureSectionLoadControls() {
     syncNativeSectionVisibility();
-    let root = document.getElementById(SECTION_LOAD_UI_ID);
     if (!nativeSectionMode()) {
-      root?.remove();
       $$(`[${SECTION_LOAD_TOGGLE_ATTR}]`).forEach(button => button.remove());
+      $$(`[${SECTION_LOAD_ROW_ATTR}]`).forEach(row => row.removeAttribute(SECTION_LOAD_ROW_ATTR));
       return;
     }
     if (!document.body) return;
-    if (!root) root = buildSectionLoadControls();
     const heading = findNativeSectionsHeading();
     const host = findNativeSectionsHost(heading);
-    if (heading && host) {
-      root.classList.remove('fcrm-section-fixed');
-      let headingRow = heading;
-      while (headingRow.parentElement && headingRow.parentElement !== host && norm(headingRow.parentElement.textContent) === 'sections') headingRow = headingRow.parentElement;
-      if (root.previousElementSibling !== headingRow) headingRow.insertAdjacentElement('afterend', root);
-      ensureInlineSectionToggles(host);
-    } else {
-      root.classList.add('fcrm-section-fixed');
-      if (root.parentElement !== document.body) document.body.appendChild(root);
-    }
-    renderSectionLoadControls(root);
+    if (heading && host) ensureInlineSectionToggles(host);
+    renderSectionLoadControls();
   }
 
   function poIntFrom(cell) {
