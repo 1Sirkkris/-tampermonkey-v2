@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.10 FCResearch Master CLEAN TEST
+// @name         TEST v0.1.11 FCResearch Master CLEAN TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.10
+// @version      0.1.11
 // @description  TEST: Clean FCResearch Master using shared FCR Data Core.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -18,7 +18,8 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.11';
+  const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
   const UI_SELECTOR = `[${UI_ATTR}]`;
   const MAX_PARALLEL = 8;
@@ -172,6 +173,8 @@
       .fcrm-prop-label { background:#3f5973!important; color:#fff!important; }
       .fcrm-prop-true { background:#359933!important; }
       .fcrm-prop-false { background:#a73225!important; }
+      #fcrlite-sections-app .fcrm-prop-true { background:#e2f2e4!important; color:#14532d!important; box-shadow:inset 4px 0 #2f7d32; }
+      #fcrlite-sections-app .fcrm-prop-false { background:#f7e2de!important; color:#7f1d1d!important; box-shadow:inset 4px 0 #a73225; }
       [${UI_ATTR}], [${UI_ATTR}] * { -webkit-user-select:none!important; -moz-user-select:none!important; user-select:none!important; }
       [${UI_ATTR}]::selection, [${UI_ATTR}] *::selection { background:transparent!important; color:inherit!important; }
     `;
@@ -924,8 +927,22 @@
 
   const scheduleRefresh = debounce(refreshPage, 120);
 
+  function fcrLiteMutationNeedsRefresh(record) {
+    const target = record.target instanceof Element ? record.target : record.target?.parentElement;
+    if (!target?.closest?.('#fcrlite-sections-app')) return false;
+    if (!record.addedNodes.length && !record.removedNodes.length) return true;
+    for (const nodes of [record.addedNodes, record.removedNodes]) {
+      for (const node of nodes) {
+        const element = node instanceof Element ? node : node.parentElement;
+        if (element && !element.closest?.(UI_SELECTOR)) return true;
+      }
+    }
+    return false;
+  }
+
   function mutationNeedsRefresh(records) {
     for (const record of records) {
+      if (fcrLiteMutationNeedsRefresh(record)) return true;
       const target = record.target instanceof Element ? record.target : record.target?.parentElement;
       if (target?.closest?.('[data-fcr-tool-ui="1"]')) continue;
       if (!record.addedNodes.length && !record.removedNodes.length) return true;
@@ -944,6 +961,7 @@
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
     document.addEventListener('click', event => { if (event.target instanceof Element && event.target.closest('#table-inventory thead th')) setTimeout(scheduleRefresh, 150); }, true);
+    window.addEventListener(FCRLITE_SECTION_RENDERED_EVENT, scheduleRefresh, true);
     window.addEventListener('hashchange', scheduleRefresh, true);
     window.addEventListener('popstate', scheduleRefresh, true);
   }
