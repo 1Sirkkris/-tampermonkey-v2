@@ -49,11 +49,17 @@ When user action is unavoidable, provide the smallest complete numbered steps us
 
 Interpret the user's verb as authorization scope.
 
-### Review / diagnose / explain / plan / assess
+### Review / explain / plan / assess
 
 - Inspect and report only.
 - Read-only GitHub and diagnostic checks are allowed.
 - Do not edit, commit, push, deploy, or start a new task unless asked.
+
+### Diagnose / investigate
+
+- Inspect and establish the cause.
+- If static evidence is insufficient, create and push the smallest non-production diagnostic needed to finish the diagnosis.
+- Do not change or promote production behaviour unless the user also asked to fix/change it.
 
 ### Fix / change / build / improve / optimize / update / continue
 
@@ -73,6 +79,7 @@ Ask before:
 - adding production dependencies or credentials
 - modifying unrelated tools or expanding scope materially
 - promoting an unvalidated experimental/diagnostic candidate into the deployed fleet
+- creating a new branch outside the existing source/deployment workflow
 - creating a new Work Mode task/chat
 
 ## STARTUP / SOURCE TRUTH
@@ -288,6 +295,12 @@ Keep the user-facing completion brutally short and in plain language:
 - `Proof:` what was checked
 - `Risk:` only material remaining risk
 - `Next:` one exact user action, or `None`
+
+For an end-of-day report when requested, use only:
+
+`Script | Start version | End-of-day version | Revisions today`
+
+Include touched scripts only unless the user asks for the full fleet.
 
 Finish with exactly one:
 
