@@ -6,7 +6,7 @@ Private API-era working set. Older public repo is archive only.
 
 - Sideline — MAIN v0.2.1 Sideline API Move TEST
 - Bin Overlay — TEST v7.3.6 Bin check Overlay
-- Stow Andons Safe Trim — TEST v5.4.10
+- Stow Andons — [TEST v5.5.1 FCSKU Conflict Alert](./Stow_Andons_Helper.user.js)
 - FC-Lite — TEST v0.1.29
 - FCR Data Core — TEST v0.2.3
 - FCResearch Master — TEST v0.1.10
