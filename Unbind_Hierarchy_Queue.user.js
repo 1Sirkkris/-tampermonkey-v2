@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Unbind Hierarchy Queue v1.0.0
+// @name         Unbind Hierarchy Queue v1.0.1
 // @namespace    BWU2
-// @version      1.0.0
+// @version      1.0.1
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -16,7 +16,7 @@
   if (window.__bwu2UnbindHierarchyQueue) return;
   window.__bwu2UnbindHierarchyQueue = true;
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const WAREHOUSE_ID = 'BWU2';
   const API_VALIDATE = '/validateContainer';
   const API_SUMMARY = '/getTransshipmentBindingSummary';
@@ -624,6 +624,23 @@
     return button;
   }
 
+  function isolateTextField(field, onEnter) {
+    const blockNativeHotkeys = event => {
+      // The native Unbind page treats printable keys as global menu shortcuts
+      // (notably T = TextBox and S = Sign Out). Scanner input belongs only to
+      // our focused field and must never bubble into those handlers.
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      if (event.type !== 'keydown' || event.key !== 'Enter' || event.shiftKey) return;
+      if (typeof onEnter === 'function') onEnter(event);
+    };
+
+    field.addEventListener('keydown', blockNativeHotkeys);
+    field.addEventListener('keypress', blockNativeHotkeys);
+    field.addEventListener('keyup', blockNativeHotkeys);
+  }
+
   function renderItems() {
     if (!ui.items) return;
     ui.items.replaceChildren();
@@ -719,6 +736,12 @@
     ui.login.value = discoverLogin();
     ui.login.style.cssText = 'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;font:12px Consolas,monospace';
     ui.login.addEventListener('change', () => { saveLogin(); render(); });
+    isolateTextField(ui.login, event => {
+      event.preventDefault();
+      saveLogin();
+      ui.draft?.focus();
+      render();
+    });
     loginRow.append(ui.login, element('strong', WAREHOUSE_ID,
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
     ));
@@ -730,8 +753,15 @@
     ui.draft.spellcheck = false;
     ui.draft.style.cssText = 'box-sizing:border-box;width:100%;resize:vertical;padding:7px;border:2px solid #64748b;border-radius:6px;font:13px Consolas,monospace';
     ui.draft.addEventListener('input', () => saveDraft(ui.draft.value));
-    ui.draft.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || event.shiftKey) return;
+    isolateTextField(ui.draft, event => {
+      // Paused: Enter remains a normal textarea newline so the operator can
+      // scan a whole batch before pressing ARM ENDLESS.
+      // Armed: scanner Enter submits the current line immediately and the
+      // queue continues in native Endless style.
+      if (!state.running) {
+        setTimeout(() => saveDraft(ui.draft?.value || ''), 0);
+        return;
+      }
       event.preventDefault();
       addDraftToQueue();
     });
