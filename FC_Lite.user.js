@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.49 FC-Lite
+// @name        TEST v0.1.50 FC-Lite
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.49
+// @version      0.1.50
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -15,8 +15,8 @@
 (() => {
   'use strict';
 
-  if (window.__fcrLite_v0149test) return;
-  window.__fcrLite_v0149test = true;
+  if (window.__fcrLite_v0150test) return;
+  window.__fcrLite_v0150test = true;
 
   const TOTE_HASH = '#fcr-tote-checker';
   const SECTIONS_HASH = '#fcr-lite';
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.49';
+  const VERSION = '0.1.50';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
   const SECTION_CONCURRENCY = 5;
@@ -1024,14 +1024,18 @@
       #fcratc-root.fcratc-standalone .fcratc-litebar {
         display:flex;
         align-items:center;
-        gap:8px;
+        flex-wrap:wrap;
+        gap:6px;
         width:100%;
+        min-width:0;
         min-height:50px;
         margin:0 0 10px 0;
         padding:6px 8px;
+        box-sizing:border-box;
         position:sticky;
         top:0;
         z-index:1000;
+        overflow:hidden;
         border:2px solid #1e3a5f;
         border-radius:8px;
         background:#0f2744;
@@ -1624,8 +1628,29 @@
 
       #fcrlite-sections-app { width:100%; }
       #fcrlite-search {
-        flex:1 1 520px;min-width:280px;height:34px;border:1px solid #94a3b8;border-radius:5px;
+        flex:1 1 320px;min-width:160px;height:34px;border:1px solid #94a3b8;border-radius:5px;
         padding:0 10px;font-size:15px;font-weight:800;outline:none;
+      }
+      #fcratc-root.fcratc-standalone .fcratc-litebar > * { flex-shrink:0; }
+      #fcratc-root.fcratc-standalone .fcratc-litebar > #fcrlite-search { flex-shrink:1; }
+      @media (max-width:1500px) {
+        #fcratc-root.fcratc-standalone .fcratc-litebar { gap:5px; }
+        .fcratc-lite-sub { display:none; }
+        .fcratc-lite-brand { font-size:20px; }
+        .fcrlite-go,.fcrlite-toggle-btn,.fcratc-tote-toggle,.fcratc-full-fcr { padding-left:8px;padding-right:8px; }
+        .fcrlite-status { max-width:145px;overflow:hidden;text-overflow:ellipsis; }
+      }
+      @media (max-width:1080px) {
+        #fcratc-root.fcratc-standalone .fcratc-litebar { align-items:stretch; }
+        #fcrlite-search { order:20;flex:1 1 calc(100% - 88px);min-width:0; }
+        .fcrlite-go { order:21;flex:0 0 82px; }
+        .fcrlite-status { max-width:110px; }
+      }
+      @media (max-width:760px) {
+        .fcrlite-status { display:none; }
+        .fcratc-lite-brand { font-size:18px; }
+        .fcratc-core-status { font-size:10.5px;padding:4px 6px; }
+        .fcrlite-go,.fcrlite-toggle-btn,.fcratc-tote-toggle,.fcratc-full-fcr { font-size:11px;padding-left:6px;padding-right:6px; }
       }
       .fcrlite-go,.fcrlite-toggle-btn {
         height:34px;border:1px solid #94a3b8;border-radius:5px;padding:0 12px;
@@ -1685,7 +1710,27 @@
       .fcrlite-card-body .section-title { font-size:17px;font-weight:900; }
       .fcrlite-card-body .help,.fcrlite-card-body .filters-popover,.fcrlite-card-body .a-popover-preload,
       .fcrlite-card-body script,.fcrlite-card-body style { display:none!important; }
-      .fcrlite-card[data-endpoint="product"] .fcrlite-card-body,.fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body { overflow:visible; }
+      .fcrlite-card[data-endpoint="product"] .fcrlite-card-body { overflow-x:auto;overflow-y:visible; }
+      .fcrlite-card[data-endpoint="inventory"] .fcrlite-card-body,
+      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body {
+        overflow:auto;
+        max-height:min(72vh,780px);
+        overscroll-behavior:contain;
+        scrollbar-gutter:stable;
+      }
+      .fcrlite-card[data-endpoint="inventory"] #table-inventory,
+      .fcrlite-card[data-endpoint="inventory-history"] table {
+        width:max-content!important;
+        min-width:100%!important;
+      }
+      .fcrlite-card[data-endpoint="inventory"] #table-inventory th#inventory-title,
+      .fcrlite-card[data-endpoint="inventory"] #table-inventory td:last-child {
+        width:360px;
+        max-width:360px;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
       .fcrlite-card[data-endpoint="product"] .a-box-group,.fcrlite-card[data-endpoint="product"] .a-box,
       .fcrlite-card[data-endpoint="product"] .a-box-inner { margin:0!important;padding-top:0!important;padding-bottom:0!important; }
       .fcrlite-card[data-endpoint="product"] .fcrlite-card-body { padding:10px 14px; }
