@@ -6,6 +6,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 
 | Script | Version | Install/update |
 | --- | --- | --- |
+| Calm Code | 1.3.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
 | Carton PrEditor | 7.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
 | SIM Markdown Toolbar | 5.1.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.3.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
