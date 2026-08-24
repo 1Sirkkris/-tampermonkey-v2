@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         DIAG v0.1.0 Unbind Hierarchy Capture
+// @name         DIAG v0.2.0 Unbind Hierarchy Backend Capture
 // @namespace    BWU2
-// @version      0.1.0
-// @description  Passive, redacted capture of Unbind Hierarchy controls, state changes, and backend request metadata.
+// @version      0.2.0
+// @description  Passive capture of Unbind Hierarchy controls plus recursively redacted backend request/response schemas.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
 // @run-at       document-start
@@ -16,8 +16,13 @@
   if (window.__bwu2UnbindCapture) return;
   window.__bwu2UnbindCapture = true;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
   const MAX_EVENTS = 160;
+  const TARGET_PATHS = new Set([
+    '/validateContainer',
+    '/getTransshipmentBindingSummary',
+    '/unbindContainer'
+  ]);
   const PANEL_ATTRIBUTE = 'data-bwu2-unbind-capture';
   const startedAt = performance.now();
   const events = [];
@@ -49,6 +54,90 @@
     } catch (_) {
       return '[unparsed-url]';
     }
+  }
+
+  function interesting(rawUrl) {
+    return TARGET_PATHS.has(safePath(rawUrl).split('#')[0]);
+  }
+
+  function sensitiveKey(key) {
+    return /(?:auth|cookie|credential|csrf|key|pass|secret|session|signature|token)/i.test(String(key || ''));
+  }
+
+  function sanitizeData(value, key = '', depth = 0) {
+    if (sensitiveKey(key)) return '[REDACTED]';
+    if (depth > 7) return '[MAX_DEPTH]';
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+
+    if (typeof value === 'string') {
+      return redact(value, 500);
+    }
+
+    if (Array.isArray(value)) {
+      const kept = value.slice(0, 40).map(item => sanitizeData(item, key, depth + 1));
+      if (value.length > kept.length) kept.push(`[${value.length - kept.length} MORE]`);
+      return kept;
+    }
+
+    if (value instanceof File) {
+      return { file: '[NOT_CAPTURED]', type: redact(value.type, 80), size: value.size };
+    }
+
+    if (typeof value === 'object') {
+      const output = {};
+      const entries = Object.entries(value).slice(0, 80);
+      for (const [childKey, childValue] of entries) {
+        output[redact(childKey, 100)] = sanitizeData(childValue, childKey, depth + 1);
+      }
+      if (Object.keys(value).length > entries.length) output.__truncatedKeys = true;
+      return output;
+    }
+
+    return redact(value, 160);
+  }
+
+  function parseCapturedBody(body) {
+    if (body == null) return null;
+
+    if (body instanceof URLSearchParams) {
+      return { encoding: 'form', data: sanitizeData(Object.fromEntries(body.entries())) };
+    }
+
+    if (body instanceof FormData) {
+      return { encoding: 'multipart-form', data: sanitizeData(Object.fromEntries(body.entries())) };
+    }
+
+    if (typeof body === 'string') {
+      const trimmed = body.trim();
+      if (!trimmed) return { encoding: 'text', data: '' };
+      try {
+        return { encoding: 'json', data: sanitizeData(JSON.parse(trimmed)) };
+      } catch (_) {}
+
+      if (trimmed.includes('=')) {
+        try {
+          return {
+            encoding: 'form',
+            data: sanitizeData(Object.fromEntries(new URLSearchParams(trimmed).entries()))
+          };
+        } catch (_) {}
+      }
+
+      return { encoding: 'text', data: sanitizeData(trimmed) };
+    }
+
+    if (body instanceof Blob) {
+      return { encoding: 'blob', data: { type: redact(body.type, 80), size: body.size } };
+    }
+
+    return { encoding: body?.constructor?.name || typeof body, data: '[NOT_CAPTURED]' };
+  }
+
+  function parseResponseText(text) {
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) return null;
+    try { return { encoding: 'json', data: sanitizeData(JSON.parse(trimmed)) }; }
+    catch (_) { return { encoding: 'text', data: sanitizeData(trimmed) }; }
   }
 
   function isOwnNode(node) {
@@ -149,7 +238,8 @@
   function exportText() {
     return [
       `BWU2 UNBIND HIERARCHY CAPTURE v${VERSION}`,
-      'Privacy: no field values, request/response bodies, headers, tokens, or credentials are captured.',
+      'Privacy: container IDs, tokens, credentials, sensitive-key values, and headers are redacted/not captured.',
+      'Backend bodies are included only as capped, recursively redacted JSON/form/text.',
       `Page: ${safePath(location.href)}`,
       `Events: ${events.length}`,
       '',
@@ -160,7 +250,7 @@
   function render() {
     if (!outputNode) return;
     outputNode.textContent = exportText();
-    statusNode.textContent = `${events.length} events — perform one normal unbind, then Copy`;
+    statusNode.textContent = `${events.length} events — perform one Endless Mode unbind, then Copy`;
   }
 
   async function copyOutput(button) {
@@ -269,23 +359,45 @@
 
     window.fetch = async function(input, init) {
       const url = typeof input === 'string' ? input : input?.url || '';
+      if (!interesting(url)) return realFetch.apply(this, arguments);
       const method = clean(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
-      const request = { transport: 'fetch', method, path: safePath(url), bodiesCaptured: false };
+      const request = {
+        transport: 'fetch',
+        method,
+        path: safePath(url),
+        requestBody: parseCapturedBody(init?.body),
+        headersCaptured: false
+      };
       const requestStarted = performance.now();
       add('net.request', request);
       try {
         const response = await realFetch.apply(this, arguments);
-        add('net.response', {
-          ...request,
-          status: response.status,
-          ok: response.ok,
-          durationMs: Math.round(performance.now() - requestStarted)
+        response.clone().text().then(text => {
+          add('net.response', {
+            transport: request.transport,
+            method: request.method,
+            path: request.path,
+            status: response.status,
+            ok: response.ok,
+            durationMs: Math.round(performance.now() - requestStarted),
+            responseBody: parseResponseText(text),
+            headersCaptured: false
+          });
+        }).catch(error => {
+          add('net.response-read-error', {
+            transport: request.transport,
+            method: request.method,
+            path: request.path,
+            error: redact(error?.message || error, 120)
+          });
         });
         scheduleSnapshot('after-fetch');
         return response;
       } catch (error) {
         add('net.error', {
-          ...request,
+          transport: request.transport,
+          method: request.method,
+          path: request.path,
           error: redact(error?.message || error, 120),
           durationMs: Math.round(performance.now() - requestStarted)
         });
@@ -301,27 +413,37 @@
     const realSend = XHR.prototype.send;
 
     XHR.prototype.open = function(method, url) {
-      this.__bwu2UnbindRequest = {
-        transport: 'xhr',
-        method: clean(method || 'GET').toUpperCase(),
-        path: safePath(url),
-        bodiesCaptured: false
-      };
+      this.__bwu2UnbindRequest = interesting(url)
+        ? {
+            transport: 'xhr',
+            method: clean(method || 'GET').toUpperCase(),
+            path: safePath(url),
+            headersCaptured: false
+          }
+        : null;
       return realOpen.apply(this, arguments);
     };
 
-    XHR.prototype.send = function() {
-      const request = this.__bwu2UnbindRequest || {
-        transport: 'xhr', method: 'UNKNOWN', path: '[unknown]', bodiesCaptured: false
-      };
+    XHR.prototype.send = function(body) {
+      const request = this.__bwu2UnbindRequest;
+      if (!request) return realSend.apply(this, arguments);
+
+      request.requestBody = parseCapturedBody(body);
       const requestStarted = performance.now();
       add('net.request', request);
       this.addEventListener('loadend', () => {
+        let responseBody = null;
+        try { responseBody = parseResponseText(this.responseText); }
+        catch (error) { responseBody = { error: redact(error?.message || error, 120) }; }
         add('net.response', {
-          ...request,
+          transport: request.transport,
+          method: request.method,
+          path: request.path,
           status: this.status,
           ok: this.status >= 200 && this.status < 300,
-          durationMs: Math.round(performance.now() - requestStarted)
+          durationMs: Math.round(performance.now() - requestStarted),
+          responseBody,
+          headersCaptured: false
         });
         scheduleSnapshot('after-xhr');
       }, { once: true });
