@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.19 FCResearch Master — Hide Disabled Spinners
+// @name         TEST v0.1.20 FCResearch Master — Hide Disabled Spinners
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.19
+// @version      0.1.20
 // @description  TEST: Saved section controls with native loading rings hidden only for disabled sections.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.19';
+  const VERSION = '0.1.20';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -375,7 +375,10 @@
       [${SECTION_LOAD_ROW_ATTR}] { position:relative!important; padding-right:29px!important; min-height:20px; }
       [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] :is([role="progressbar"],svg,[class*="spinner" i],[class*="loader" i]):not([${UI_ATTR}]) { display:none!important; animation:none!important; }
       [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"]::before,
-      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] *::before { content:none!important; display:none!important; animation:none!important; }
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"]::after,
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] *:not([${UI_ATTR}])::before,
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] *:not([${UI_ATTR}])::after { content:none!important; display:none!important; animation:none!important; }
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] *:not([${UI_ATTR}]) { background-image:none!important; animation:none!important; }
       [${SECTION_LOAD_TOGGLE_ATTR}] { position:absolute; top:50%; right:4px; z-index:3; width:20px; min-width:20px; height:18px; padding:0; transform:translateY(-50%); border:1px solid #64748b; border-radius:4px; background:#e5e7eb; color:#111827; font:800 11px/16px Arial,sans-serif; text-align:center; cursor:pointer; }
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
       [${SECTION_LOAD_TOGGLE_ATTR}][data-save-state="error"] { border-color:#b91c1c!important; background:#fee2e2!important; color:#991b1b!important; }
