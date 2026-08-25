@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.2 Sideline API Move TEST
+// @name         MAIN v0.2.3 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.2
+// @version      0.2.3
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.2';
+  const VERSION = '0.2.3';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -98,7 +98,7 @@
     return payload;
   }
 
-  const helperSelector = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast';
+  const helperSelector = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast,#sh-lazy-running-indicator,#sh-move-corner';
   const shared = { owner:'', scrubBusy:false, queueBusy:false, expiryBusy:false };
 
   // Native
@@ -571,6 +571,13 @@
 #sh-lazy-running-indicator .sh-lazy-spinner{position:absolute;left:50%;top:46%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;border:5px solid rgba(255,255,255,.48);border-top-color:#146eb4;border-right-color:#146eb4;box-shadow:0 2px 10px rgba(0,0,0,.22);animation:shLazySpin .72s linear infinite}
 @keyframes shLazySpin{to{transform:rotate(360deg)}}
 @keyframes shLazyPulse{0%,100%{box-shadow:inset 0 0 0 4px rgba(20,110,180,.28)}50%{box-shadow:inset 0 0 0 5px rgba(20,110,180,.48)}}
+#sh-move-corner{position:fixed;right:3px;bottom:3px;z-index:2147483647;width:68px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #146eb4;border-radius:8px;background:#eff6ff;color:#0f3d73;box-shadow:0 2px 9px #0005;font:900 10px Arial,sans-serif;letter-spacing:.3px;pointer-events:none}
+#sh-move-corner .sh-move-wheel{width:14px;height:14px;box-sizing:border-box;border:3px solid #bfdbfe;border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;animation:shMoveCornerSpin .7s linear infinite}
+#sh-move-corner .sh-move-mark{font:1000 18px/1 Arial,sans-serif}
+#sh-move-corner.waiting{border-color:#f59e0b;background:#fff7ed;color:#9a3412}
+#sh-move-corner.done{border-color:#16a34a;background:#f0fdf4;color:#166534}
+#sh-move-corner.check{border-color:#dc2626;background:#fff1f2;color:#991b1b}
+@keyframes shMoveCornerSpin{to{transform:rotate(360deg)}}
 #sh-og-expiry{position:fixed;inset:0;z-index:2147483647;background:rgba(31,41,55,.35);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;pointer-events:none}
 #sh-og-expiry .og-wrap{position:absolute;left:50%;top:38px;transform:translateX(-50%);width:920px;max-width:calc(100vw - 24px);background:#4b5563;border:7px solid #4b5563;border-radius:14px;box-shadow:0 12px 30px rgba(0,0,0,.38);pointer-events:auto}
 #sh-og-expiry .og-id{background:#fff;padding:10px 12px;border-radius:7px 7px 0 0;font-size:16px;font-weight:900;text-align:center;color:#111827}
@@ -586,6 +593,82 @@
 #sh-og-expiry .og-footer{margin-top:7px}.og-footer button{width:100%;height:48px!important;background:#7c3aed!important;color:#fff!important;border-color:#6d28d9!important;font-size:15px!important}.og-footer .production-confirm{background:#146eb4!important;border-color:#0f5c99!important}
 `;
   document.documentElement.appendChild(style);
+
+  const moveCorner = { mode:'', state:'idle', holdUntil:0, timer:0 };
+
+  function renderMoveCorner() {
+    let root = $('#sh-move-corner');
+
+    if (moveCorner.state === 'idle') {
+      root?.remove();
+      return;
+    }
+
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'sh-move-corner';
+      document.body.appendChild(root);
+    }
+
+    root.className = moveCorner.state;
+    if (moveCorner.state === 'active') {
+      root.innerHTML = `<span class="sh-move-wheel"></span><b>${moveCorner.mode.toUpperCase()}</b>`;
+      return;
+    }
+
+    const mark = moveCorner.state === 'waiting' ? '!' : moveCorner.state === 'done' ? '✓' : '×';
+    const label = moveCorner.state === 'waiting'
+      ? moveCorner.mode.toUpperCase()
+      : moveCorner.state === 'done' ? 'DONE' : 'CHECK';
+    root.innerHTML = `<span class="sh-move-mark">${mark}</span><b>${label}</b>`;
+  }
+
+  function setMoveCorner(mode, state) {
+    const now = Date.now();
+    if (state === 'idle' && moveCorner.mode && moveCorner.mode !== mode && moveCorner.state !== 'idle') {
+      return;
+    }
+    if (
+      state === 'idle' &&
+      moveCorner.mode === mode &&
+      (moveCorner.state === 'done' || moveCorner.state === 'check') &&
+      moveCorner.holdUntil > now
+    ) return;
+
+    if (state === 'active' || state === 'waiting') {
+      moveCorner.holdUntil = 0;
+      if (moveCorner.timer) clearTimeout(moveCorner.timer);
+      moveCorner.timer = 0;
+    }
+
+    moveCorner.mode = mode;
+    moveCorner.state = state;
+    renderMoveCorner();
+  }
+
+  function finishMoveCorner(mode, ok=true) {
+    if (moveCorner.timer) clearTimeout(moveCorner.timer);
+    moveCorner.mode = mode;
+    moveCorner.state = ok ? 'done' : 'check';
+    moveCorner.holdUntil = Date.now() + 5000;
+    renderMoveCorner();
+    moveCorner.timer = setTimeout(() => {
+      if (moveCorner.mode !== mode || moveCorner.holdUntil > Date.now()) return;
+      moveCorner.timer = 0;
+      moveCorner.state = 'idle';
+      renderMoveCorner();
+    }, 5050);
+  }
+
+  function clearMoveCorner(mode) {
+    if (moveCorner.mode !== mode) return;
+    if (moveCorner.timer) clearTimeout(moveCorner.timer);
+    moveCorner.timer = 0;
+    moveCorner.mode = '';
+    moveCorner.state = 'idle';
+    moveCorner.holdUntil = 0;
+    renderMoveCorner();
+  }
 
   const feature = { queue:false, scrub:false, qty:false, lazy:false, live:false };
   const panels = {};
@@ -1439,11 +1522,25 @@
       }).join('');
     }
 
+    const liveWorking = !!(
+      live.running &&
+      (live.processing || live.current || live.queue.length)
+    );
+    const liveWaiting = !!(
+      live.running &&
+      (
+        live.issue ||
+        (!liveWorking && (live.activeDateItem || live.datePending.length))
+      )
+    );
+    setMoveCorner('live', liveWaiting ? 'waiting' : liveWorking ? 'active' : 'idle');
+
     requestPanelLayout();
   }
 
   function resetLive(note='reset') {
     cancelLiveRun();
+    clearMoveCorner('live');
     live.dateResolve?.(null);
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
@@ -1486,6 +1583,7 @@
 
   function stopLive() {
     cancelLiveRun();
+    clearMoveCorner('live');
     live.dateResolve?.(null);
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
@@ -1736,6 +1834,7 @@
     live.error = '';
     live.note = 'moved — ready for next scan';
     renderLive();
+    if (!live.queue.length && !live.datePending.length) finishMoveCorner('live', true);
   }
 
   function skipLiveCurrent() {
@@ -2525,6 +2624,12 @@
 
     setSummaryHtml(summaryHtml);
     renderLazyProgress();
+
+    const lazyWaiting = !!(
+      lazy.running &&
+      (lazy.paused || lazy.predicant || lazy.damagePaused || lazy.dateResolve)
+    );
+    setMoveCorner('lazy', lazyWaiting ? 'waiting' : lazy.running ? 'active' : 'idle');
     requestPanelLayout();
   }
 
@@ -2610,6 +2715,7 @@
 
   function resetLazy(note='reset') {
     cancelLazyRun();
+    clearMoveCorner('lazy');
     lazyProgressShape = '';
     lazy.running = false;
     lazy.paused = false;
@@ -3310,6 +3416,8 @@
         resolve(value);
       };
 
+      if (owner === lazy) setMoveCorner('lazy', 'waiting');
+
       function makePanel(name,strong,cls,buttons) {
         return `<section class="og-panel"><div class="og-head"><span>${name}</span><strong>${strong || '—'}</strong></div><div class="og-grid ${cls}">${buttons}</div></section>`;
       }
@@ -3899,6 +4007,7 @@
       lazy.error = '';
       lazy.note = `complete | moved ${movedUnits} qty to ${lazy.dest}`;
       finishLazyRun(run);
+      finishMoveCorner('lazy', false);
       renderLazy();
       return;
     }
@@ -3907,12 +4016,14 @@
     if (lClear.checked && !clearOk) {
       lazy.note = 'complete';
       finishLazyRun(run);
+      finishMoveCorner('lazy', false);
       renderLazy();
       return;
     }
 
     lazy.note = 'complete';
     finishLazyRun(run);
+    finishMoveCorner('lazy', true);
     renderLazy();
 
     const finalNote = lazy.note;
@@ -4032,6 +4143,7 @@
 
     if (a === 'stop') {
       cancelLazyRun();
+      clearMoveCorner('lazy');
       lazy.running = false;
       lazy.paused = false;
       lazy.predicant = false;
