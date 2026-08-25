@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.1.17 FCResearch Master — Inventory Rescue
+// @name         TEST v0.1.18 FCResearch Master — Quiet OFF Sections
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.17
-// @description  TEST: Clean FCResearch Master with saved section controls and one-click FC-Lite inventory recovery.
+// @version      0.1.18
+// @description  TEST: Saved section controls with quiet OFF states and clearly labelled FC-Lite inventory recovery.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.17';
+  const VERSION = '0.1.18';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -181,7 +181,7 @@
     panel.id = 'fcrm-inventory-rescue';
     panel.innerHTML = `
       <span>Amazon inventory failed${endpoint === 'inventory-more' ? ' on page 2' : ''}.</span>
-      <button type="button" data-action="rescue">RETRY INVENTORY</button>
+      <button type="button" data-action="rescue" title="Open FC-Lite and retry only the read-only inventory pages">OPEN FCL RETRY</button>
       <button type="button" data-action="close" aria-label="Dismiss">×</button>
     `;
     panel.querySelector('[data-action="rescue"]').addEventListener('click', openInventoryRescue);
@@ -373,6 +373,9 @@
       #fcrlite-sections-app .fcrm-prop-true { background:#e2f2e4!important; color:#14532d!important; box-shadow:inset 4px 0 #2f7d32; }
       #fcrlite-sections-app .fcrm-prop-false { background:#f7e2de!important; color:#7f1d1d!important; box-shadow:inset 4px 0 #a73225; }
       [${SECTION_LOAD_ROW_ATTR}] { position:relative!important; padding-right:29px!important; min-height:20px; }
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] { padding-right:63px!important; }
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"]::after { content:'OFF'; position:absolute; top:50%; right:31px; z-index:3; transform:translateY(-50%); padding:1px 4px; border:1px solid #94a3b8; border-radius:4px; background:#f1f5f9; color:#475569; font:900 9px/13px Arial,sans-serif; letter-spacing:.2px; }
+      [${SECTION_LOAD_ROW_ATTR}][data-fcrm-section-enabled="false"] :is([role="progressbar"],svg,[class*="spinner" i],[class*="loader" i]):not([${UI_ATTR}]) { display:none!important; animation:none!important; }
       [${SECTION_LOAD_TOGGLE_ATTR}] { position:absolute; top:50%; right:4px; z-index:3; width:20px; min-width:20px; height:18px; padding:0; transform:translateY(-50%); border:1px solid #64748b; border-radius:4px; background:#e5e7eb; color:#111827; font:800 11px/16px Arial,sans-serif; text-align:center; cursor:pointer; }
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
       [${SECTION_LOAD_TOGGLE_ATTR}][data-save-state="error"] { border-color:#b91c1c!important; background:#fee2e2!important; color:#991b1b!important; }
@@ -466,6 +469,8 @@
       button.textContent = saveError ? '!' : enabled ? '✓' : '×';
       button.setAttribute('aria-pressed', String(enabled));
       button.dataset.saveState = saveError ? 'error' : 'saved';
+      const row = button.closest(`[${SECTION_LOAD_ROW_ATTR}]`);
+      if (row) row.dataset.fcrmSectionEnabled = String(enabled);
       button.title = saveError
         ? `${button.dataset.label}: SAVE FAILED — selection unchanged`
         : `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — saved; refresh FCResearch to apply`;
