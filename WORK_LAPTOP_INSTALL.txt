@@ -14,6 +14,6 @@ Disable older copies first.
 10 BWU2 Observability Core v0.1.5
 11 Calm Code v1.3.0
 
-Updater-enabled sources: main 1e23a2a6.
+Updater-enabled sources: main c32ea5a.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.
