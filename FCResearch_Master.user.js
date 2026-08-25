@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.15 FCResearch Master — Saved Section Toggles
+// @name         TEST v0.1.16 FCResearch Master — Saved Section Toggles
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.15
+// @version      0.1.16
 // @description  TEST: Clean FCResearch Master using shared FCR Data Core with saved inline native section request controls.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.15';
+  const VERSION = '0.1.16';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -30,6 +30,7 @@
   const SIDELINE_CONTAINER_MAX_AGE = 24 * 60 * 60 * 1000;
   const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
   const SECTION_LOAD_PREF_KEY_PREFIX = 'fcrm_native_section_load_v2.';
+  const SECTION_LOAD_RECORD_KEY_PREFIX = 'fcrm_native_section_load_v3.';
   const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
   const SECTION_LOAD_TOGGLE_ATTR = 'data-fcrm-section-toggle';
   const SECTION_LOAD_ROW_ATTR = 'data-fcrm-section-row';
@@ -92,17 +93,54 @@
       if (typeof legacy === 'string') legacy = JSON.parse(legacy);
     } catch {}
     for (const def of SECTION_DEFS) {
+      const recordKey = `${SECTION_LOAD_RECORD_KEY_PREFIX}${def.endpoint}`;
+      let localRecord = null;
+      let gmRecord = null;
       let saved = null;
+      try { localRecord = parseSectionLoadRecord(localStorage.getItem(recordKey)); } catch {}
+      try { gmRecord = parseSectionLoadRecord(GM_getValue(recordKey, null)); } catch {}
+      const record = !localRecord ? gmRecord
+        : !gmRecord ? localRecord
+          : localRecord.savedAt >= gmRecord.savedAt ? localRecord : gmRecord;
       try { saved = GM_getValue(`${SECTION_LOAD_PREF_KEY_PREFIX}${def.endpoint}`, null); } catch {}
-      if (typeof saved === 'boolean') prefs[def.endpoint] = saved;
+      if (record) prefs[def.endpoint] = record.enabled;
+      else if (typeof saved === 'boolean') prefs[def.endpoint] = saved;
       else if (typeof legacy?.[def.endpoint] === 'boolean') prefs[def.endpoint] = legacy[def.endpoint];
     }
     return prefs;
   }
 
+  function parseSectionLoadRecord(value) {
+    if (typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { return null; }
+    }
+    if (!value || typeof value !== 'object' || typeof value.enabled !== 'boolean') return null;
+    return {
+      enabled: value.enabled,
+      savedAt: Number.isFinite(Number(value.savedAt)) ? Number(value.savedAt) : 0
+    };
+  }
+
+  let sectionLoadSaveStamp = Date.now();
+
   function saveSectionLoadPref(endpoint, enabled) {
-    if (!SECTION_ENDPOINTS.has(endpoint)) return;
-    try { GM_setValue(`${SECTION_LOAD_PREF_KEY_PREFIX}${endpoint}`, enabled !== false); } catch {}
+    if (!SECTION_ENDPOINTS.has(endpoint)) return false;
+    sectionLoadSaveStamp = Math.max(Date.now(), sectionLoadSaveStamp + 1);
+    const key = `${SECTION_LOAD_RECORD_KEY_PREFIX}${endpoint}`;
+    const record = { enabled: enabled !== false, savedAt: sectionLoadSaveStamp };
+    let localSaved = false;
+    let gmSaved = false;
+    try {
+      localStorage.setItem(key, JSON.stringify(record));
+      const stored = parseSectionLoadRecord(localStorage.getItem(key));
+      localSaved = stored?.enabled === record.enabled && stored.savedAt === record.savedAt;
+    } catch {}
+    try {
+      GM_setValue(key, record);
+      const stored = parseSectionLoadRecord(GM_getValue(key, null));
+      gmSaved = stored?.enabled === record.enabled && stored.savedAt === record.savedAt;
+    } catch {}
+    return localSaved || gmSaved;
   }
 
   function sectionLoadEnabled(endpoint) {
@@ -157,7 +195,18 @@
 
   let sectionLoadPrefs = loadSectionLoadPrefs();
   let sectionLoadDraft = { ...sectionLoadPrefs };
+  const sectionLoadSaveStatus = Object.create(null);
   installNativeSectionBlocker();
+
+  window.addEventListener('storage', event => {
+    if (!event.key?.startsWith(SECTION_LOAD_RECORD_KEY_PREFIX)) return;
+    const endpoint = event.key.slice(SECTION_LOAD_RECORD_KEY_PREFIX.length);
+    const record = parseSectionLoadRecord(event.newValue);
+    if (!SECTION_ENDPOINTS.has(endpoint) || !record) return;
+    sectionLoadDraft[endpoint] = record.enabled;
+    sectionLoadSaveStatus[endpoint] = 'saved';
+    renderSectionLoadControls();
+  });
 
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
@@ -289,6 +338,7 @@
       [${SECTION_LOAD_ROW_ATTR}] { position:relative!important; padding-right:29px!important; min-height:20px; }
       [${SECTION_LOAD_TOGGLE_ATTR}] { position:absolute; top:50%; right:4px; z-index:3; width:20px; min-width:20px; height:18px; padding:0; transform:translateY(-50%); border:1px solid #64748b; border-radius:4px; background:#e5e7eb; color:#111827; font:800 11px/16px Arial,sans-serif; text-align:center; cursor:pointer; }
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
+      [${SECTION_LOAD_TOGGLE_ATTR}][data-save-state="error"] { border-color:#b91c1c!important; background:#fee2e2!important; color:#991b1b!important; }
       [${SECTION_LOAD_TOGGLE_ATTR}]:hover { filter:brightness(.95); }
       [${UI_ATTR}], [${UI_ATTR}] * { -webkit-user-select:none!important; -moz-user-select:none!important; user-select:none!important; }
       [${UI_ATTR}]::selection, [${UI_ATTR}] *::selection { background:transparent!important; color:inherit!important; }
@@ -371,9 +421,13 @@
       const endpoint = button.dataset.endpoint;
       if (!SECTION_ENDPOINTS.has(endpoint)) return;
       const enabled = sectionLoadDraft[endpoint] !== false;
-      button.textContent = enabled ? '✓' : '×';
+      const saveError = sectionLoadSaveStatus[endpoint] === 'error';
+      button.textContent = saveError ? '!' : enabled ? '✓' : '×';
       button.setAttribute('aria-pressed', String(enabled));
-      button.title = `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — saved; refresh FCResearch to apply`;
+      button.dataset.saveState = saveError ? 'error' : 'saved';
+      button.title = saveError
+        ? `${button.dataset.label}: SAVE FAILED — selection unchanged`
+        : `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — saved; refresh FCResearch to apply`;
       button.setAttribute('aria-label', button.title);
     });
   }
@@ -394,9 +448,11 @@
         button.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
+          const previous = sectionLoadDraft[def.endpoint] !== false;
           const enabled = sectionLoadDraft[def.endpoint] === false;
-          sectionLoadDraft[def.endpoint] = enabled;
-          saveSectionLoadPref(def.endpoint, enabled);
+          const saved = saveSectionLoadPref(def.endpoint, enabled);
+          sectionLoadDraft[def.endpoint] = saved ? enabled : previous;
+          sectionLoadSaveStatus[def.endpoint] = saved ? 'saved' : 'error';
           renderSectionLoadControls();
           button.blur();
         });
