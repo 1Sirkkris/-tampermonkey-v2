@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Unbind Hierarchy Queue v1.0.1
-// @name:en      Unbind Hierarchy Queue v1.0.2
+// @name:en      Unbind Hierarchy Queue v1.0.3
 // @namespace    BWU2
-// @version      1.0.2
+// @version      1.0.3
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -20,7 +20,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.3';
   const WAREHOUSE_ID = 'BWU2';
   const API_VALIDATE = '/validateContainer';
   const API_SUMMARY = '/getTransshipmentBindingSummary';
@@ -34,15 +34,12 @@
   const DRAFT_KEY = 'bwu2.unbindQueue.draft.v1';
   const LOCK_KEY = 'bwu2.unbindQueue.lock.v1';
   const MINIMIZED_KEY = 'bwu2.unbindQueue.minimized.v1';
-  const START_CONFIRM_MS = 5000;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const LOGIN_PATTERN = /^[a-z][a-z0-9-]{2,31}$/i;
   const CONTAINER_PATTERN = /^tsX[A-Za-z0-9]+$/i;
 
   let processing = false;
   let lockTimer = 0;
-  let startConfirmTimer = 0;
-  let startConfirmUntil = 0;
   let positionFrame = 0;
   let lastAnchorTop = 10;
   let minimized = loadMinimized();
@@ -363,8 +360,24 @@
       let data = raw;
       try { data = raw ? JSON.parse(raw) : null; } catch (_) {}
       const ms = Math.round(performance.now() - started);
+      const contentType = clean(response.headers.get('content-type')).toLowerCase();
+      const stringResponse = typeof data === 'string';
+      const responseSignal = clean(stringResponse ? data.slice(0, 2000) : (JSON.stringify(data) || '').slice(0, 2000));
+      const sessionExpired = [401, 403, 419].includes(response.status)
+        || response.redirected
+        || contentType.includes('text/html')
+        || /(?:csrf|token|session).{0,40}(?:expired|invalid|missing)/i.test(responseSignal)
+        || (stringResponse && /(?:sign[ -]?in|login)\b/i.test(responseSignal));
 
-      trace('UNBIND_API_RESPONSE', { path, phase, status: response.status, ms });
+      trace('UNBIND_API_RESPONSE', { path, phase, status: response.status, ms, sessionExpired });
+
+      if (sessionExpired) {
+        throw new RequestError('SESSION EXPIRED — refresh page, then press START', {
+          status: response.status,
+          phase,
+          sessionExpired: true
+        });
+      }
 
       if (!response.ok) {
         throw new RequestError(`HTTP ${response.status}`, {
@@ -431,10 +444,26 @@
 
   function shouldPause(error) {
     const status = Number(error?.status || 0);
-    return error?.phase === 'unbind' || status === 0 || status === 401 || status === 403 || status === 429 || status >= 500;
+    return !!error?.sessionExpired || error?.phase === 'unbind' || status === 0 || status === 401 || status === 403 || status === 429 || status >= 500;
   }
 
   function markAttention(item, error) {
+    if (error?.sessionExpired) {
+      item.status = 'queued';
+      item.phase = '';
+      item.error = '';
+      item.ms = 0;
+      state.currentId = '';
+      state.phase = 'idle';
+      state.running = false;
+      state.message = 'SESSION EXPIRED — queue preserved; refresh page, then press START';
+      releaseLock();
+      saveState();
+      render();
+      trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase: clean(error.phase) });
+      return;
+    }
+
     item.status = 'attention';
     item.phase = clean(error?.phase || state.phase);
     item.error = clean(error?.message || 'Needs attention');
@@ -545,33 +574,8 @@
     if (state.running) setTimeout(runQueue, NEXT_GAP_MS);
   }
 
-  function resetStartConfirmation({ renderNow = true } = {}) {
-    clearTimeout(startConfirmTimer);
-    startConfirmTimer = 0;
-    startConfirmUntil = 0;
-    if (renderNow) render();
-  }
-
   function startQueue() {
     if (state.running || processing) return;
-
-    if (Date.now() > startConfirmUntil) {
-      startConfirmUntil = Date.now() + START_CONFIRM_MS;
-      state.message = 'Click CONFIRM START to run Endless mode';
-      saveState();
-      render();
-      clearTimeout(startConfirmTimer);
-      startConfirmTimer = setTimeout(() => {
-        if (Date.now() < startConfirmUntil) return;
-        resetStartConfirmation({ renderNow: false });
-        state.message = 'Start confirmation expired';
-        saveState();
-        render();
-      }, START_CONFIRM_MS + 50);
-      return;
-    }
-
-    resetStartConfirmation({ renderNow: false });
     const login = saveLogin();
     if (!login) {
       state.message = 'Enter your employee login first';
@@ -581,6 +585,8 @@
       return;
     }
 
+    state.items = state.items.filter(item => item.status !== 'done');
+    state.invalid = [];
     addDraftToQueue();
     if (!acquireLock()) {
       state.message = 'Another tab already owns the Unbind queue';
@@ -616,7 +622,6 @@
       render();
       return;
     }
-    if (state.items.length && !window.confirm('Clear the entire Unbind queue and history?')) return;
     const wasRunning = state.running;
     state.running = false;
     releaseLock();
@@ -624,7 +629,6 @@
     saveState();
     if (ui.draft) ui.draft.value = '';
     saveDraft('');
-    resetStartConfirmation({ renderNow: false });
     trace('UNBIND_QUEUE_CLEAR', { wasRunning });
     render();
   }
@@ -633,9 +637,6 @@
     if (state.running || processing) return;
     const attention = state.items.filter(item => item.status === 'attention');
     if (!attention.length) return;
-    if (!window.confirm(
-      `Requeue ${attention.length} attention row(s)?\n\nVerify they still require unbinding first. An earlier unbind may have succeeded.`
-    )) return;
     for (const item of attention) {
       item.status = 'queued';
       item.phase = '';
@@ -834,9 +835,7 @@
     ui.status.textContent = state.message;
     ui.counts.textContent =
       `${summary.queued} queued  •  ${summary.active} active  •  ${summary.done} done  •  ${summary.attention} attention`;
-    ui.start.textContent = state.running
-      ? 'RUNNING'
-      : Date.now() <= startConfirmUntil ? 'CONFIRM START' : 'START';
+    ui.start.textContent = state.running ? 'RUNNING' : 'START';
     ui.start.disabled = state.running || processing;
     ui.start.style.opacity = ui.start.disabled ? '0.55' : '1';
     ui.pause.disabled = !state.running;
@@ -938,7 +937,7 @@
     ui.draft.addEventListener('input', () => saveDraft(ui.draft.value));
     isolateTextField(ui.draft, event => {
       // Paused: Enter remains a normal textarea newline so the operator can
-      // scan a whole batch before pressing START twice.
+      // scan a whole batch before pressing START once.
       // Running: scanner Enter submits the current line immediately and the
       // queue continues in native Endless style.
       if (!state.running) {
@@ -973,14 +972,6 @@
     body.append(loginRow, ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
     ui.panel.append(header, body);
     document.body.append(ui.panel, ui.mini);
-
-    document.addEventListener('pointerdown', event => {
-      if (!startConfirmUntil || event.target === ui.start || ui.start.contains(event.target)) return;
-      resetStartConfirmation({ renderNow: false });
-      state.message = 'Start confirmation cancelled';
-      saveState();
-      render();
-    }, true);
 
     const observer = new MutationObserver(records => {
       const nativeChange = records.some(record =>
