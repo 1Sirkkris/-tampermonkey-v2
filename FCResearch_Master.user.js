@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.1.16 FCResearch Master — Saved Section Toggles
+// @name         TEST v0.1.17 FCResearch Master — Inventory Rescue
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.16
-// @description  TEST: Clean FCResearch Master using shared FCR Data Core with saved inline native section request controls.
+// @version      0.1.17
+// @description  TEST: Clean FCResearch Master with saved section controls and one-click FC-Lite inventory recovery.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.16';
+  const VERSION = '0.1.17';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -155,7 +155,39 @@
     const match = url.pathname.match(/\/results\/([^/?#]+)/i);
     if (!match) return '';
     const endpoint = clean(decodeURIComponent(match[1])).toLowerCase();
-    return SECTION_ENDPOINTS.has(endpoint) ? endpoint : '';
+    return endpoint === 'inventory-more' || SECTION_ENDPOINTS.has(endpoint) ? endpoint : '';
+  }
+
+  function currentSearchValue() {
+    return clean(new URLSearchParams(location.search).get('s') || $('#search')?.value || '');
+  }
+
+  function openInventoryRescue() {
+    const search = currentSearchValue();
+    const url = new URL(location.href);
+    url.search = '';
+    if (search) url.searchParams.set('s', search);
+    url.hash = '#fcr-lite';
+    history.replaceState(null, '', url.href);
+    location.reload();
+  }
+
+  function showInventoryRescue(endpoint) {
+    if (!nativeSectionMode() || document.getElementById('fcrm-inventory-rescue')) return;
+    const mount = document.body || document.documentElement;
+    if (!mount) return;
+
+    const panel = markUi(document.createElement('div'));
+    panel.id = 'fcrm-inventory-rescue';
+    panel.innerHTML = `
+      <span>Amazon inventory failed${endpoint === 'inventory-more' ? ' on page 2' : ''}.</span>
+      <button type="button" data-action="rescue">RETRY INVENTORY</button>
+      <button type="button" data-action="close" aria-label="Dismiss">×</button>
+    `;
+    panel.querySelector('[data-action="rescue"]').addEventListener('click', openInventoryRescue);
+    panel.querySelector('[data-action="close"]').addEventListener('click', () => panel.remove());
+    mount.appendChild(panel);
+    usage(`inventory.rescue.offered.${endpoint}`);
   }
 
   function installNativeSectionBlocker() {
@@ -183,6 +215,11 @@
           }));
         } catch {}
         return undefined;
+      }
+      if (info && (info.endpoint === 'inventory' || info.endpoint === 'inventory-more')) {
+        this.addEventListener('loadend', () => {
+          if (this.status >= 500 && this.status < 600) showInventoryRescue(info.endpoint);
+        }, { once: true });
       }
       return originalSend.apply(this, arguments);
     };
@@ -340,6 +377,10 @@
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
       [${SECTION_LOAD_TOGGLE_ATTR}][data-save-state="error"] { border-color:#b91c1c!important; background:#fee2e2!important; color:#991b1b!important; }
       [${SECTION_LOAD_TOGGLE_ATTR}]:hover { filter:brightness(.95); }
+      #fcrm-inventory-rescue { position:fixed; right:14px; bottom:14px; z-index:2147483646; display:flex; align-items:center; gap:8px; padding:8px 9px 8px 12px; border:1px solid #a16207; border-radius:8px; background:#fffbeb; color:#713f12; box-shadow:0 5px 18px rgba(0,0,0,.22); font:800 12px/1.25 Arial,sans-serif; }
+      #fcrm-inventory-rescue button { min-height:27px; padding:4px 8px; border:1px solid #92400e; border-radius:5px; background:#fff; color:#78350f; cursor:pointer; font:900 11px Arial,sans-serif; }
+      #fcrm-inventory-rescue [data-action="rescue"] { background:#f59e0b; color:#111827; }
+      #fcrm-inventory-rescue [data-action="close"] { min-width:27px; padding:3px; font-size:16px; line-height:1; }
       [${UI_ATTR}], [${UI_ATTR}] * { -webkit-user-select:none!important; -moz-user-select:none!important; user-select:none!important; }
       [${UI_ATTR}]::selection, [${UI_ATTR}] *::selection { background:transparent!important; color:inherit!important; }
     `;
