@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Unbind Hierarchy Queue v1.0.1
-// @name:en      Unbind Hierarchy Queue v1.0.1
+// @name:en      Unbind Hierarchy Queue v1.0.2
 // @namespace    BWU2
-// @version      1.0.1
+// @version      1.0.2
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -20,7 +20,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const WAREHOUSE_ID = 'BWU2';
   const API_VALIDATE = '/validateContainer';
   const API_SUMMARY = '/getTransshipmentBindingSummary';
@@ -33,12 +33,19 @@
   const LOGIN_KEY = 'bwu2.unbindQueue.employeeLogin.v1';
   const DRAFT_KEY = 'bwu2.unbindQueue.draft.v1';
   const LOCK_KEY = 'bwu2.unbindQueue.lock.v1';
+  const MINIMIZED_KEY = 'bwu2.unbindQueue.minimized.v1';
+  const START_CONFIRM_MS = 5000;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const LOGIN_PATTERN = /^[a-z][a-z0-9-]{2,31}$/i;
   const CONTAINER_PATTERN = /^tsX[A-Za-z0-9]+$/i;
 
   let processing = false;
   let lockTimer = 0;
+  let startConfirmTimer = 0;
+  let startConfirmUntil = 0;
+  let positionFrame = 0;
+  let lastAnchorTop = 10;
+  let minimized = loadMinimized();
   let state = loadState();
   const ui = {};
 
@@ -106,6 +113,15 @@
 
   function saveDraft(value) {
     try { localStorage.setItem(DRAFT_KEY, String(value || '')); } catch (_) {}
+  }
+
+  function loadMinimized() {
+    try { return localStorage.getItem(MINIMIZED_KEY) === '1'; }
+    catch (_) { return false; }
+  }
+
+  function saveMinimized() {
+    try { localStorage.setItem(MINIMIZED_KEY, minimized ? '1' : '0'); } catch (_) {}
   }
 
   function trace(event, data = {}) {
@@ -508,7 +524,7 @@
 
     const item = itemFor() || activateNext();
     if (!item) {
-      state.message = 'ARMED — scan next tsX';
+      state.message = 'RUNNING — scan next tsX';
       saveState();
       render();
       ui.draft?.focus();
@@ -529,7 +545,33 @@
     if (state.running) setTimeout(runQueue, NEXT_GAP_MS);
   }
 
-  function armQueue() {
+  function resetStartConfirmation({ renderNow = true } = {}) {
+    clearTimeout(startConfirmTimer);
+    startConfirmTimer = 0;
+    startConfirmUntil = 0;
+    if (renderNow) render();
+  }
+
+  function startQueue() {
+    if (state.running || processing) return;
+
+    if (Date.now() > startConfirmUntil) {
+      startConfirmUntil = Date.now() + START_CONFIRM_MS;
+      state.message = 'Click CONFIRM START to run Endless mode';
+      saveState();
+      render();
+      clearTimeout(startConfirmTimer);
+      startConfirmTimer = setTimeout(() => {
+        if (Date.now() < startConfirmUntil) return;
+        resetStartConfirmation({ renderNow: false });
+        state.message = 'Start confirmation expired';
+        saveState();
+        render();
+      }, START_CONFIRM_MS + 50);
+      return;
+    }
+
+    resetStartConfirmation({ renderNow: false });
     const login = saveLogin();
     if (!login) {
       state.message = 'Enter your employee login first';
@@ -548,22 +590,10 @@
     }
 
     const queued = counts().queued;
-    const approved = window.confirm(
-      `Arm Endless Unbind Queue for ${WAREHOUSE_ID}?\n\n` +
-      `${queued ? `${queued} queued. ` : ''}Every tsX added while armed will be unbound automatically.`
-    );
-    if (!approved) {
-      releaseLock();
-      state.message = 'Arm cancelled';
-      saveState();
-      render();
-      return;
-    }
-
     state.running = true;
-    state.message = queued ? `ARMED — ${queued} queued` : 'ARMED — scan next tsX';
+    state.message = queued ? `RUNNING — ${queued} queued` : 'RUNNING — scan next tsX';
     saveState();
-    trace('UNBIND_QUEUE_ARM', { queued, warehouseId: WAREHOUSE_ID });
+    trace('UNBIND_QUEUE_START', { queued, warehouseId: WAREHOUSE_ID });
     render();
     setTimeout(runQueue, 0);
   }
@@ -577,21 +607,25 @@
     render();
   }
 
-  function clearDone() {
+  function clearQueue() {
     if (processing) return;
-    state.items = state.items.filter(item => item.status !== 'done');
-    state.message = 'Completed rows cleared';
-    saveState();
-    render();
-  }
-
-  function clearAll() {
-    if (state.running || processing) return;
+    const hasDraft = !!clean(ui.draft?.value || '');
+    if (!state.items.length && !hasDraft) {
+      state.message = 'Queue is already clear';
+      saveState();
+      render();
+      return;
+    }
     if (state.items.length && !window.confirm('Clear the entire Unbind queue and history?')) return;
+    const wasRunning = state.running;
+    state.running = false;
+    releaseLock();
     state = defaultState();
     saveState();
     if (ui.draft) ui.draft.value = '';
     saveDraft('');
+    resetStartConfirmation({ renderNow: false });
+    trace('UNBIND_QUEUE_CLEAR', { wasRunning });
     render();
   }
 
@@ -626,6 +660,111 @@
     button.type = 'button';
     button.addEventListener('click', action);
     return button;
+  }
+
+  function setMinimized(value) {
+    minimized = !!value;
+    saveMinimized();
+    render();
+    schedulePosition();
+    if (!minimized) setTimeout(() => ui.draft?.focus(), 0);
+  }
+
+  function parseColor(value) {
+    const match = String(value || '').match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?/i);
+    if (!match) return null;
+    return {
+      r: Number(match[1]),
+      g: Number(match[2]),
+      b: Number(match[3]),
+      a: match[4] == null ? 1 : Number(match[4])
+    };
+  }
+
+  function isLightColor(color) {
+    return !!color && color.a > 0.05 && color.r >= 205 && color.g >= 205 && color.b >= 205;
+  }
+
+  function effectiveColorAt(x, y) {
+    let node = document.elementFromPoint(x, y);
+    while (node && node !== document.documentElement) {
+      const color = parseColor(getComputedStyle(node).backgroundColor);
+      if (color?.a > 0.05) return color;
+      node = node.parentElement;
+    }
+    return parseColor(getComputedStyle(document.documentElement).backgroundColor);
+  }
+
+  function findScanHeading() {
+    return [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(node =>
+      clean(node.textContent).toLowerCase() === 'scan container' &&
+      node.getClientRects().length &&
+      getComputedStyle(node).visibility !== 'hidden'
+    ) || null;
+  }
+
+  function findScanAreaBottom() {
+    const heading = findScanHeading();
+    if (!heading) return 0;
+    const headingRect = heading.getBoundingClientRect();
+
+    for (let node = heading.parentElement; node && node !== document.body; node = node.parentElement) {
+      const rect = node.getBoundingClientRect();
+      const color = parseColor(getComputedStyle(node).backgroundColor);
+      if (
+        rect.width >= window.innerWidth * 0.55 &&
+        rect.height >= 80 && rect.height <= 520 &&
+        rect.bottom >= headingRect.bottom + 28 &&
+        rect.bottom <= window.innerHeight + 2 &&
+        isLightColor(color)
+      ) return rect.bottom;
+    }
+
+    const panelVisibility = ui.panel?.style.visibility || '';
+    const miniVisibility = ui.mini?.style.visibility || '';
+    if (ui.panel) ui.panel.style.visibility = 'hidden';
+    if (ui.mini) ui.mini.style.visibility = 'hidden';
+
+    let boundary = 0;
+    try {
+      const x = Math.max(8, Math.min(window.innerWidth - 8, Math.round(window.innerWidth / 2)));
+      let sawLight = false;
+      let darkStart = 0;
+      for (let y = Math.max(0, Math.round(headingRect.bottom + 4)); y < window.innerHeight - 4; y += 4) {
+        if (isLightColor(effectiveColorAt(x, y))) {
+          sawLight = true;
+          darkStart = 0;
+        } else if (sawLight) {
+          if (!darkStart) darkStart = y;
+          if (y - darkStart >= 12) {
+            boundary = darkStart;
+            break;
+          }
+        }
+      }
+    } finally {
+      if (ui.panel) ui.panel.style.visibility = panelVisibility;
+      if (ui.mini) ui.mini.style.visibility = miniVisibility;
+    }
+
+    return boundary || Math.round(headingRect.bottom + 90);
+  }
+
+  function positionUi() {
+    positionFrame = 0;
+    const bottom = findScanAreaBottom();
+    if (bottom > 0) lastAnchorTop = Math.max(8, Math.round(bottom + 8));
+    const top = Math.min(lastAnchorTop, Math.max(8, window.innerHeight - 46));
+    if (ui.panel) {
+      ui.panel.style.top = `${top}px`;
+      ui.panel.style.maxHeight = `${Math.max(180, window.innerHeight - top - 10)}px`;
+    }
+    if (ui.mini) ui.mini.style.top = `${top}px`;
+  }
+
+  function schedulePosition() {
+    if (positionFrame) return;
+    positionFrame = requestAnimationFrame(positionUi);
   }
 
   function isolateTextField(field, onEnter) {
@@ -690,42 +829,82 @@
     if (!ui.panel) return;
     const summary = counts();
     ui.version.textContent = `UNBIND QUEUE v${VERSION}`;
-    ui.mode.textContent = state.running ? 'ENDLESS ARMED' : 'PAUSED';
+    ui.mode.textContent = state.running ? 'RUNNING' : 'PAUSED';
     ui.mode.style.background = state.running ? '#1d4ed8' : '#475569';
     ui.status.textContent = state.message;
     ui.counts.textContent =
       `${summary.queued} queued  •  ${summary.active} active  •  ${summary.done} done  •  ${summary.attention} attention`;
-    ui.arm.textContent = state.running ? 'ARMED' : 'ARM ENDLESS';
-    ui.arm.disabled = state.running || processing;
-    ui.arm.style.opacity = ui.arm.disabled ? '0.55' : '1';
+    ui.start.textContent = state.running
+      ? 'RUNNING'
+      : Date.now() <= startConfirmUntil ? 'CONFIRM START' : 'START';
+    ui.start.disabled = state.running || processing;
+    ui.start.style.opacity = ui.start.disabled ? '0.55' : '1';
     ui.pause.disabled = !state.running;
     ui.pause.style.opacity = ui.pause.disabled ? '0.55' : '1';
-    ui.add.disabled = false;
-    ui.clearDone.disabled = processing;
-    ui.clearAll.disabled = state.running || processing;
+    ui.clear.disabled = processing;
     ui.retry.disabled = state.running || processing || !summary.attention;
-    renderItems();
-    renderInvalid();
+    ui.panel.style.display = minimized ? 'none' : 'block';
+    ui.mini.style.display = minimized ? 'flex' : 'none';
+    ui.mini.title = processing
+      ? state.message
+      : state.running ? `Unbind Queue running — ${summary.queued} queued` : 'Open Unbind Queue';
+    ui.miniRing.style.animation = processing ? 'bwu2-unbind-spin .75s linear infinite' : 'none';
+    ui.miniRing.style.borderColor = summary.attention
+      ? '#fdba74'
+      : state.running ? '#93c5fd' : '#94a3b8';
+    ui.miniRing.style.borderTopColor = summary.attention
+      ? '#c2410c'
+      : state.running ? '#1d4ed8' : '#475569';
+    if (!minimized) {
+      renderItems();
+      renderInvalid();
+    }
+    schedulePosition();
   }
 
   function mount() {
     if (ui.panel || !document.body) return;
 
+    const style = element('style');
+    style.textContent = '@keyframes bwu2-unbind-spin{to{transform:rotate(360deg)}}';
+    document.head?.appendChild(style);
+
     ui.panel = element('section', null, [
       'position:fixed', 'top:10px', 'right:10px', 'z-index:2147483647', 'width:470px',
-      'max-height:82vh', 'overflow:hidden', 'border:3px solid #1e3a8a', 'border-radius:9px',
+      'max-width:calc(100vw - 20px)', 'overflow:auto', 'border:3px solid #1e3a8a', 'border-radius:9px',
       'background:#fff', 'color:#111827', 'box-shadow:0 10px 30px #0005', 'font:12px Arial,sans-serif'
     ].join(';'));
     ui.panel.id = 'bwu2-unbind-queue';
+
+    ui.mini = element('button', null, [
+      'display:none', 'position:fixed', 'top:10px', 'right:10px', 'z-index:2147483647',
+      'width:42px', 'height:36px', 'align-items:center', 'justify-content:center',
+      'border:2px solid #1e3a8a', 'border-radius:9px', 'background:#0f172a',
+      'box-shadow:0 6px 18px #0005', 'cursor:pointer'
+    ].join(';'));
+    ui.mini.type = 'button';
+    ui.mini.setAttribute('aria-label', 'Open Unbind Queue');
+    ui.miniRing = element('span', null,
+      'box-sizing:border-box;width:17px;height:17px;border:3px solid #94a3b8;border-top-color:#475569;border-radius:50%'
+    );
+    ui.mini.appendChild(ui.miniRing);
+    ui.mini.addEventListener('click', () => setMinimized(false));
 
     const header = element('div', null,
       'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#0f172a;color:#fff'
     );
     ui.version = element('strong', `UNBIND QUEUE v${VERSION}`, 'font-size:14px');
+    const headerActions = element('div', null, 'display:flex;align-items:center;gap:6px');
     ui.mode = element('strong', 'PAUSED',
       'padding:3px 7px;border-radius:999px;background:#475569;color:#fff;font-size:10px;letter-spacing:.4px'
     );
-    header.append(ui.version, ui.mode);
+    ui.minimize = makeButton('—', () => setMinimized(true),
+      'padding:1px 7px;border-color:#64748b;background:#1e293b;color:#fff;font-size:14px;line-height:16px'
+    );
+    ui.minimize.title = 'Minimize';
+    ui.minimize.setAttribute('aria-label', 'Minimize Unbind Queue');
+    headerActions.append(ui.mode, ui.minimize);
+    header.append(ui.version, headerActions);
 
     const body = element('div', null, 'padding:9px');
     const loginRow = element('div', null,
@@ -759,8 +938,8 @@
     ui.draft.addEventListener('input', () => saveDraft(ui.draft.value));
     isolateTextField(ui.draft, event => {
       // Paused: Enter remains a normal textarea newline so the operator can
-      // scan a whole batch before pressing ARM ENDLESS.
-      // Armed: scanner Enter submits the current line immediately and the
+      // scan a whole batch before pressing START twice.
+      // Running: scanner Enter submits the current line immediately and the
       // queue continues in native Endless style.
       if (!state.running) {
         setTimeout(() => saveDraft(ui.draft?.value || ''), 0);
@@ -771,10 +950,9 @@
     });
 
     const primary = element('div', null, 'display:flex;gap:5px;margin-top:6px');
-    ui.add = makeButton('ADD', addDraftToQueue, 'flex:1');
-    ui.arm = makeButton('ARM ENDLESS', armQueue, 'flex:1;background:#1d4ed8;color:#fff;border-color:#1d4ed8');
+    ui.start = makeButton('START', startQueue, 'flex:2;background:#1d4ed8;color:#fff;border-color:#1d4ed8');
     ui.pause = makeButton('PAUSE', () => pauseQueue('Paused safely'), 'flex:1;background:#f59e0b;color:#111827;border-color:#d97706');
-    primary.append(ui.add, ui.arm, ui.pause);
+    primary.append(ui.start, ui.pause);
 
     ui.status = element('div', 'Ready',
       'margin-top:7px;padding:7px;border-radius:5px;background:#eff6ff;color:#1e3a8a;font-weight:900'
@@ -788,16 +966,34 @@
     );
 
     const secondary = element('div', null, 'display:flex;gap:5px;margin-top:7px');
-    ui.clearDone = makeButton('CLEAR DONE', clearDone, 'flex:1;font-size:10px');
     ui.retry = makeButton('REQUEUE ATTENTION', retryAttention, 'flex:1;font-size:10px');
-    ui.clearAll = makeButton('CLEAR ALL', clearAll, 'flex:1;font-size:10px');
-    secondary.append(ui.clearDone, ui.retry, ui.clearAll);
+    ui.clear = makeButton('CLEAR', clearQueue, 'flex:1;font-size:10px');
+    secondary.append(ui.retry, ui.clear);
 
     body.append(loginRow, ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
     ui.panel.append(header, body);
-    document.body.appendChild(ui.panel);
+    document.body.append(ui.panel, ui.mini);
+
+    document.addEventListener('pointerdown', event => {
+      if (!startConfirmUntil || event.target === ui.start || ui.start.contains(event.target)) return;
+      resetStartConfirmation({ renderNow: false });
+      state.message = 'Start confirmation cancelled';
+      saveState();
+      render();
+    }, true);
+
+    const observer = new MutationObserver(records => {
+      const nativeChange = records.some(record =>
+        !ui.panel.contains(record.target) && !ui.mini.contains(record.target)
+      );
+      if (nativeChange) schedulePosition();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', schedulePosition, { passive: true });
+
     render();
-    setTimeout(() => ui.draft.focus(), 0);
+    positionUi();
+    if (!minimized) setTimeout(() => ui.draft.focus(), 0);
   }
 
   window.addEventListener('storage', event => {
