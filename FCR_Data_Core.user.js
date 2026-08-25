@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.9 FCR Data Core
+// @name         TEST v0.2.10 FCR Data Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.9
-// @description  Shared modular FCResearch data engine: product, inventory, history, Hazmat, bin-size, cache and request dedupe.
+// @version      0.2.10
+// @description  Shared modular FCResearch data engine with bounded recovery for transient inventory failures.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
@@ -18,10 +18,10 @@
 (() => {
   'use strict';
 
-  if (window.__fcrDataCore_v029test) return;
-  window.__fcrDataCore_v029test = true;
+  if (window.__fcrDataCore_v0210test) return;
+  window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.9';
+  const VERSION = '0.2.10';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const CANCEL_EVENT = 'fcr-data-core:cancel';
@@ -36,6 +36,7 @@
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
+  const INVENTORY_RETRY_DELAYS_MS = [250, 400, 650, 1000, 1500];
   const SIDELINE_API = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
   const MARKETPLACE = 'AU';
   const SECTION_ENDPOINTS = new Set([
@@ -367,6 +368,26 @@
     return `${location.origin}/${encodeURIComponent(fc)}/results`;
   }
 
+  function waitForRequestRetry(ms, context, endpoint) {
+    return new Promise((resolve, reject) => {
+      const controller = new AbortController();
+      const groupKey = registerGroupController(context, controller);
+      const timer = setTimeout(finish, Math.max(0, Number(ms) || 0));
+
+      function finish() {
+        clearTimeout(timer);
+        unregisterGroupController(groupKey, controller);
+        resolve();
+      }
+
+      controller.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        unregisterGroupController(groupKey, controller);
+        reject(new Error(`${endpoint}: cancelled`));
+      }, { once: true });
+    });
+  }
+
   async function fcrPostForm(endpoint, fields, identity = '', context = {}) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(fields || {})) params.set(key, String(value ?? ''));
@@ -381,34 +402,49 @@
 
     const work = (async () => {
       const started = performance.now();
-      const controller = new AbortController();
-      const groupKey = registerGroupController(context, controller);
-      let timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; controller.abort('fcr-data-core:timeout'); }, REQUEST_TIMEOUT_MS);
-      try {
-        const response = await fetch(`${apiBase()}/${endpoint}`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          cache: 'no-store',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'text/html, */*; q=0.01',
-            'X-Requested-With': 'XMLHttpRequest'
-          },
-          body: params.toString(),
-          signal: controller.signal
-        });
-        const text = await response.text();
-        if (!response.ok) throw new Error(`${endpoint}: HTTP ${response.status}`);
-        const ms = Math.round(performance.now() - started);
-        recordUsage(`network.${endpoint}`, ms);
-        return { text, ms, status: response.status };
-      } catch (error) {
-        if (error?.name === 'AbortError') throw new Error(`${endpoint}: ${timedOut ? 'timed out' : 'cancelled'}`);
-        throw error;
-      } finally {
-        clearTimeout(timer);
-        unregisterGroupController(groupKey, controller);
+      const retryDelays = endpoint === 'inventory' || endpoint === 'inventory-more'
+        ? INVENTORY_RETRY_DELAYS_MS
+        : [];
+      let retries = 0;
+
+      while (true) {
+        const controller = new AbortController();
+        const groupKey = registerGroupController(context, controller);
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; controller.abort('fcr-data-core:timeout'); }, REQUEST_TIMEOUT_MS);
+        try {
+          const response = await fetch(`${apiBase()}/${endpoint}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Accept': 'text/html, */*; q=0.01',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: params.toString(),
+            signal: controller.signal
+          });
+          const text = await response.text();
+          if (!response.ok) {
+            const error = new Error(`${endpoint}: HTTP ${response.status}`);
+            error.status = response.status;
+            throw error;
+          }
+          const elapsedMs = Math.round(performance.now() - started);
+          recordUsage(`network.${endpoint}`, elapsedMs);
+          return { text, ms: elapsedMs, status: response.status, retries };
+        } catch (error) {
+          if (error?.name === 'AbortError') throw new Error(`${endpoint}: ${timedOut ? 'timed out' : 'cancelled'}`);
+          const retryDelay = retryDelays[retries];
+          if (!(Number(error?.status) >= 500 && Number(error?.status) < 600) || retryDelay == null) throw error;
+          retries++;
+          recordUsage(`network.${endpoint}.retry`);
+          await waitForRequestRetry(retryDelay, context, endpoint);
+        } finally {
+          clearTimeout(timer);
+          unregisterGroupController(groupKey, controller);
+        }
       }
     })();
 
