@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.51 FC-Lite
+// @name        TEST v0.1.52 FC-Lite — Compact Tote Audit
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.51
+// @version      0.1.52
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.51';
+  const VERSION = '0.1.52';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -982,12 +982,12 @@
     systemSussyBadge.textContent = sussy ? `SUSSY DIMS ${sussy}/${total}` : `DIMS CLEAR ${total}/${total}`;
   }
 
-  function showSystemLoading(wanted) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • Loading ${wanted}…`; if(systemSussyBadge){systemSussyBadge.hidden=true;systemSussyBadge.textContent='DIMS …';systemSussyBadge.className='fcratc-system-sussy-badge loading';} systemTbody.innerHTML='<tr><td colspan="12" class="fcratc-system-message">Loading system inventory…</td></tr>'; }
-  function showSystemError(message) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent='AMAZON RECORD • Inventory error'; systemTbody.innerHTML=`<tr><td colspan="12" class="fcratc-system-message error">${esc(message)}</td></tr>`; }
+  function showSystemLoading(wanted) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • Loading ${wanted}…`; if(systemSussyBadge){systemSussyBadge.hidden=true;systemSussyBadge.textContent='DIMS …';systemSussyBadge.className='fcratc-system-sussy-badge loading';} systemTbody.innerHTML='<tr><td colspan="7" class="fcratc-system-message">Loading system inventory…</td></tr>'; }
+  function showSystemError(message) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent='AMAZON RECORD • Inventory error'; systemTbody.innerHTML=`<tr><td colspan="7" class="fcratc-system-message error">${esc(message)}</td></tr>`; }
   function renderSystemInventory(rows) {
     if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • ${rows.length} row${rows.length===1?'':'s'} • ${sumQty(rows)}u`;
-    if(!rows.length){systemTbody.innerHTML='<tr><td colspan="12" class="fcratc-system-message">No inventory returned</td></tr>';return;}
-    systemTbody.innerHTML=rows.map((r,index)=>{const asin=upper(r.asin);return `<tr data-system-row="${index}"><td>${esc(r.container)}</td><td><span class="fcratc-asin" data-asin="${esc(asin)}">${esc(r.asin)}</span><span class="fcratc-haz" data-asin="${esc(asin)}" data-level="loading">…</span></td><td class="fcratc-system-fnsku">${esc(r.fnsku)}</td><td>${esc(r.fcsku)}</td><td>${esc(r.lpn)}</td><td class="num">${esc(r.qty)}</td><td>${esc(r.disposition)}</td><td>${esc(r.consumer)}</td><td>${esc(r.consumerId)}</td><td>${esc(r.outerLocation)}</td><td>${esc(r.outerLocationType)}</td><td class="title-cell" title="${esc(r.title)}">${esc(r.title)}</td></tr>`;}).join('');
+    if(!rows.length){systemTbody.innerHTML='<tr><td colspan="7" class="fcratc-system-message">No inventory returned</td></tr>';return;}
+    systemTbody.innerHTML=rows.map((r,index)=>{const asin=upper(r.asin);return `<tr data-system-row="${index}"><td><span class="fcratc-asin" data-asin="${esc(asin)}">${esc(r.asin)}</span><span class="fcratc-haz" data-asin="${esc(asin)}" data-level="loading">…</span></td><td class="fcratc-system-fnsku">${esc(r.fnsku)}</td><td>${esc(r.fcsku)}</td><td class="num">${esc(r.qty)}</td><td>${esc(r.disposition)}</td><td>${esc(r.outerLocation)}</td><td class="title-cell" title="${esc(r.title)}">${esc(r.title)}</td></tr>`;}).join('');
   }
 
   function hideHoverCard(){hoverSerial++;if(hoverCard)hoverCard.hidden=true;}
@@ -1421,8 +1421,9 @@
       .fcratc-system-recheck:disabled { opacity:.55; cursor:wait; }
       .fcratc-system-scroll { width:100%; overflow:auto; background:#fff; }
       #fcratc-system-table {
-        width:100%;
-        min-width:1260px;
+        width:min(1080px,100%);
+        min-width:900px;
+        table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
         font-size:10.5px;
@@ -1450,7 +1451,15 @@
       #fcratc-system-table tbody tr:nth-child(even) td { background:#f5f8fc; }
       #fcratc-system-table tbody tr:hover td { background:#e7f0fb; }
       #fcratc-system-table td.num { text-align:right; font-weight:900; }
-      #fcratc-system-table .title-cell { max-width:330px; overflow:hidden; text-overflow:ellipsis; }
+      #fcratc-system-table th:nth-child(1) { width:170px; }
+      #fcratc-system-table th:nth-child(2) { width:140px; }
+      #fcratc-system-table th:nth-child(3) { width:130px; }
+      #fcratc-system-table th:nth-child(4) { width:52px; }
+      #fcratc-system-table th:nth-child(5) { width:110px; }
+      #fcratc-system-table th:nth-child(6) { width:190px; }
+      #fcratc-system-table th:nth-child(7) { width:288px; }
+      #fcratc-system-table td { overflow:hidden; text-overflow:ellipsis; }
+      #fcratc-system-table .title-cell { overflow:hidden; text-overflow:ellipsis; }
       .fcratc-asin { color:#075eb8; font-weight:900; cursor:help; user-select:text; }
       .fcratc-asin:hover { text-decoration:underline; }
       .fcratc-haz {
@@ -1569,7 +1578,8 @@
         font-size:11px;
       }
       #fcratc-root.fcratc-standalone #fcratc-system-table {
-        min-width:1450px;
+        width:min(1120px,100%);
+        min-width:980px;
         font-size:13px;
       }
       #fcratc-root.fcratc-standalone #fcratc-system-table th {
@@ -2799,7 +2809,7 @@
       </div>
       <div class="fcratc-system" hidden>
         <div class="fcratc-system-head"><span class="fcratc-system-title">SYSTEM INVENTORY</span><span class="fcratc-system-caption">WHAT AMAZON SAYS IS HERE</span><span class="fcratc-system-summary">AMAZON RECORD • —</span><span class="fcratc-system-sussy-badge loading" hidden>DIMS …</span><button type="button" class="fcratc-system-recheck">Recheck N/A + L0</button></div>
-        <div class="fcratc-system-scroll"><table id="fcratc-system-table"><thead><tr><th>Container</th><th>ASIN / Haz</th><th>FNSKU</th><th>FcSku</th><th>LPN</th><th>Qty</th><th>Disposition</th><th>Consumer</th><th>Consumer ID</th><th>Outer location</th><th>Outer location type</th><th>Title</th></tr></thead><tbody></tbody></table></div>
+        <div class="fcratc-system-scroll"><table id="fcratc-system-table"><thead><tr><th>ASIN / Haz</th><th>FNSKU</th><th>FcSku</th><th>Qty</th><th>Disposition</th><th>Outer location</th><th>Title</th></tr></thead><tbody></tbody></table></div>
       </div>
     `;
 
