@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.50 FC-Lite
+// @name        TEST v0.1.52 FC-Lite — Compact Tote Audit
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.50
+// @version      0.1.52
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -15,8 +15,8 @@
 (() => {
   'use strict';
 
-  if (window.__fcrLite_v0150test) return;
-  window.__fcrLite_v0150test = true;
+  if (window.__fcrLite_v0151test) return;
+  window.__fcrLite_v0151test = true;
 
   const TOTE_HASH = '#fcr-tote-checker';
   const SECTIONS_HASH = '#fcr-lite';
@@ -37,7 +37,8 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.50';
+  const VERSION = '0.1.52';
+  const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
   const SECTION_CONCURRENCY = 5;
@@ -981,12 +982,12 @@
     systemSussyBadge.textContent = sussy ? `SUSSY DIMS ${sussy}/${total}` : `DIMS CLEAR ${total}/${total}`;
   }
 
-  function showSystemLoading(wanted) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • Loading ${wanted}…`; if(systemSussyBadge){systemSussyBadge.hidden=true;systemSussyBadge.textContent='DIMS …';systemSussyBadge.className='fcratc-system-sussy-badge loading';} systemTbody.innerHTML='<tr><td colspan="12" class="fcratc-system-message">Loading system inventory…</td></tr>'; }
-  function showSystemError(message) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent='AMAZON RECORD • Inventory error'; systemTbody.innerHTML=`<tr><td colspan="12" class="fcratc-system-message error">${esc(message)}</td></tr>`; }
+  function showSystemLoading(wanted) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • Loading ${wanted}…`; if(systemSussyBadge){systemSussyBadge.hidden=true;systemSussyBadge.textContent='DIMS …';systemSussyBadge.className='fcratc-system-sussy-badge loading';} systemTbody.innerHTML='<tr><td colspan="7" class="fcratc-system-message">Loading system inventory…</td></tr>'; }
+  function showSystemError(message) { if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent='AMAZON RECORD • Inventory error'; systemTbody.innerHTML=`<tr><td colspan="7" class="fcratc-system-message error">${esc(message)}</td></tr>`; }
   function renderSystemInventory(rows) {
     if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • ${rows.length} row${rows.length===1?'':'s'} • ${sumQty(rows)}u`;
-    if(!rows.length){systemTbody.innerHTML='<tr><td colspan="12" class="fcratc-system-message">No inventory returned</td></tr>';return;}
-    systemTbody.innerHTML=rows.map((r,index)=>{const asin=upper(r.asin);return `<tr data-system-row="${index}"><td>${esc(r.container)}</td><td><span class="fcratc-asin" data-asin="${esc(asin)}">${esc(r.asin)}</span><span class="fcratc-haz" data-asin="${esc(asin)}" data-level="loading">…</span></td><td class="fcratc-system-fnsku">${esc(r.fnsku)}</td><td>${esc(r.fcsku)}</td><td>${esc(r.lpn)}</td><td class="num">${esc(r.qty)}</td><td>${esc(r.disposition)}</td><td>${esc(r.consumer)}</td><td>${esc(r.consumerId)}</td><td>${esc(r.outerLocation)}</td><td>${esc(r.outerLocationType)}</td><td class="title-cell" title="${esc(r.title)}">${esc(r.title)}</td></tr>`;}).join('');
+    if(!rows.length){systemTbody.innerHTML='<tr><td colspan="7" class="fcratc-system-message">No inventory returned</td></tr>';return;}
+    systemTbody.innerHTML=rows.map((r,index)=>{const asin=upper(r.asin);return `<tr data-system-row="${index}"><td><span class="fcratc-asin" data-asin="${esc(asin)}">${esc(r.asin)}</span><span class="fcratc-haz" data-asin="${esc(asin)}" data-level="loading">…</span></td><td class="fcratc-system-fnsku">${esc(r.fnsku)}</td><td>${esc(r.fcsku)}</td><td class="num">${esc(r.qty)}</td><td>${esc(r.disposition)}</td><td>${esc(r.outerLocation)}</td><td class="title-cell" title="${esc(r.title)}">${esc(r.title)}</td></tr>`;}).join('');
   }
 
   function hideHoverCard(){hoverSerial++;if(hoverCard)hoverCard.hidden=true;}
@@ -1101,7 +1102,7 @@
       html[data-fcratc-standalone="1"] body {
         min-height:100%;
         margin:0!important;
-        background:#e9eef5!important;
+        background:#e7edf3!important;
       }
       html[data-fcratc-standalone="1"] body > *:not(#fcratc-root):not([data-fcr-tool-ui="1"]) { display:none!important; }
       #fcratc-root.fcratc-standalone {
@@ -1114,10 +1115,10 @@
         padding:12px;
         /* FC-Lite is the page layer, not a modal. Keep tool overlays above it. */
         z-index:10;
-        color:#172536;
+        color:#1b2a3a;
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
-        font-size:14px;
-        line-height:1.35;
+        font-size:14.25px;
+        line-height:1.42;
       }
       #fcratc-root.fcratc-standalone #fcratc-panel { width:100%; max-width:none; }
       #fcratc-root.fcratc-standalone .fcratc-min { display:none; }
@@ -1420,8 +1421,9 @@
       .fcratc-system-recheck:disabled { opacity:.55; cursor:wait; }
       .fcratc-system-scroll { width:100%; overflow:auto; background:#fff; }
       #fcratc-system-table {
-        width:100%;
-        min-width:1260px;
+        width:min(1080px,100%);
+        min-width:900px;
+        table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
         font-size:10.5px;
@@ -1449,7 +1451,15 @@
       #fcratc-system-table tbody tr:nth-child(even) td { background:#f5f8fc; }
       #fcratc-system-table tbody tr:hover td { background:#e7f0fb; }
       #fcratc-system-table td.num { text-align:right; font-weight:900; }
-      #fcratc-system-table .title-cell { max-width:330px; overflow:hidden; text-overflow:ellipsis; }
+      #fcratc-system-table th:nth-child(1) { width:170px; }
+      #fcratc-system-table th:nth-child(2) { width:140px; }
+      #fcratc-system-table th:nth-child(3) { width:130px; }
+      #fcratc-system-table th:nth-child(4) { width:52px; }
+      #fcratc-system-table th:nth-child(5) { width:110px; }
+      #fcratc-system-table th:nth-child(6) { width:190px; }
+      #fcratc-system-table th:nth-child(7) { width:288px; }
+      #fcratc-system-table td { overflow:hidden; text-overflow:ellipsis; }
+      #fcratc-system-table .title-cell { overflow:hidden; text-overflow:ellipsis; }
       .fcratc-asin { color:#075eb8; font-weight:900; cursor:help; user-select:text; }
       .fcratc-asin:hover { text-decoration:underline; }
       .fcratc-haz {
@@ -1568,7 +1578,8 @@
         font-size:11px;
       }
       #fcratc-root.fcratc-standalone #fcratc-system-table {
-        min-width:1450px;
+        width:min(1120px,100%);
+        min-width:980px;
         font-size:13px;
       }
       #fcratc-root.fcratc-standalone #fcratc-system-table th {
@@ -1629,7 +1640,7 @@
       #fcrlite-sections-app { width:100%; }
       #fcrlite-search {
         flex:1 1 320px;min-width:160px;height:34px;border:1px solid #94a3b8;border-radius:5px;
-        padding:0 10px;font-size:15px;font-weight:800;outline:none;
+        padding:0 10px;background:#fbfcfe;color:#172536;font-size:15px;font-weight:800;outline:none;
       }
       #fcratc-root.fcratc-standalone .fcratc-litebar > * { flex-shrink:0; }
       #fcratc-root.fcratc-standalone .fcratc-litebar > #fcrlite-search { flex-shrink:1; }
@@ -1654,14 +1665,14 @@
       }
       .fcrlite-go,.fcrlite-toggle-btn {
         height:34px;border:1px solid #94a3b8;border-radius:5px;padding:0 12px;
-        background:#fff;color:#172033;font-size:12.5px;font-weight:900;cursor:pointer;white-space:nowrap;
+        background:#f8fafc;color:#172033;font-size:12.5px;font-weight:900;cursor:pointer;white-space:nowrap;
       }
       .fcrlite-go:disabled { opacity:.55;cursor:wait; }
       .fcrlite-toggle-btn { background:#dbeafe; }
       .fcrlite-status { color:#dbeafe;font-size:12px;font-weight:800;white-space:nowrap; }
       .fcrlite-toggles {
         display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 10px;
-        margin-top:7px;padding:9px;border:1px solid #a8bdd5;border-radius:7px;background:#fff;
+        margin-top:7px;padding:9px;border:1px solid #b8c5d2;border-radius:7px;background:#f6f8fb;
       }
       .fcrlite-toggles[hidden] { display:none; }
       .fcrlite-toggle {
@@ -1672,40 +1683,40 @@
       .fcrlite-toggle input { width:16px;height:16px;accent-color:#0f5fbf; }
       .fcrlite-results { display:grid;gap:10px;margin-top:8px; }
       .fcrlite-card {
-        overflow:visible;border:1px solid #c7d0da;border-radius:5px;background:#fff;
-        box-shadow:0 1px 2px rgba(15,23,42,.05);
+        overflow:visible;border:1px solid #c5d0da;border-radius:6px;background:#f7f9fb;
+        box-shadow:0 1px 3px rgba(15,23,42,.055);
       }
       .fcrlite-card-head {
-        display:flex;align-items:center;gap:8px;min-height:33px;padding:5px 10px;background:#dce6f0;
-        border-bottom:1px solid #b8c6d5;color:#10243a;font-size:15px;font-weight:900;letter-spacing:.01em;
+        display:flex;align-items:center;gap:8px;min-height:35px;padding:6px 10px;background:#d8e2ec;
+        border-bottom:1px solid #b8c5d1;color:#10243a;font-size:15px;font-weight:900;letter-spacing:.01em;
       }
       .fcrlite-card-head .meta { margin-left:auto;color:#52606d;font-size:11.5px;font-weight:700; }
       .fcrlite-card.partial { border-color:#d97706; }
       .fcrlite-card.partial .fcrlite-card-head { background:#fff7ed; }
-      .fcrlite-card-body { overflow-x:auto;overflow-y:visible;max-height:none;padding:8px;color:#172536;font-size:13.5px; }
+      .fcrlite-card-body { overflow-x:auto;overflow-y:visible;max-height:none;padding:9px;color:#172536;background:#f7f9fb;font-size:14px; }
       .fcrlite-card.loading .fcrlite-card-body { color:#64748b;font-weight:800; }
       .fcrlite-card.error .fcrlite-card-body { color:#991b1b;font-weight:800; }
-      .fcrlite-card-body table { width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.34; }
+      .fcrlite-card-body table { width:100%;border-collapse:collapse;font-size:14px;line-height:1.4; }
       .fcrlite-card-body th,.fcrlite-card-body td {
-        padding:6px 8px;border:0;border-right:1px solid #e0e6ec;border-bottom:1px solid #c9d3dd;text-align:left;vertical-align:top;white-space:nowrap;
+        padding:7px 9px;border:0;border-right:1px solid #dce3ea;border-bottom:1px solid #cbd5df;text-align:left;vertical-align:top;white-space:nowrap;
       }
       .fcrlite-card-body th {
-        background:#d7e1eb;color:#10243a;border-right:1px solid #c3ced8;border-bottom:2px solid #aebdca;font-weight:900;
+        background:#dbe4ed;color:#10243a;border-right:1px solid #c5d0da;border-bottom:2px solid #afbdca;font-weight:900;
       }
       .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:nth-child(even) > td {
-        background:#e7eff7;
+        background:#e5edf5;
       }
       .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:hover > td {
-        background:#d7e8f6;
+        background:#d5e4f1;
       }
       .fcrlite-card-body a { color:#005ea8;text-decoration:none; }
       .fcrlite-card-body a:hover { text-decoration:underline; }
       .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody td { transition:background-color .08s linear; }
-      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:nth-child(odd) > td { background:#fff; }
+      .fcrlite-card:not([data-endpoint="product"]) .fcrlite-card-body tbody tr:nth-child(odd) > td { background:#f8fafc; }
       .fcrlite-card[data-endpoint="inventory"] .fcrlite-card-body tbody tr:nth-child(even) > td,
-      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:nth-child(even) > td { background:#e2edf7; }
+      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:nth-child(even) > td { background:#e2ebf4; }
       .fcrlite-card[data-endpoint="inventory"] .fcrlite-card-body tbody tr:hover > td,
-      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:hover > td { background:#cfe3f4; }
+      .fcrlite-card[data-endpoint="inventory-history"] .fcrlite-card-body tbody tr:hover > td { background:#cedfed; }
       .fcrlite-card-body img { max-width:170px;max-height:230px;object-fit:contain; }
       .fcrlite-card-body .section-title { font-size:17px;font-weight:900; }
       .fcrlite-card-body .help,.fcrlite-card-body .filters-popover,.fcrlite-card-body .a-popover-preload,
@@ -1760,11 +1771,11 @@
           max-width:285px;max-height:360px;
         }
       }
-      .fcrlite-native-tools { display:flex;align-items:center;gap:8px;min-height:32px;padding:4px 8px;border-bottom:1px solid #d5dde6;background:#f7f9fb; }
+      .fcrlite-native-tools { display:flex;align-items:center;gap:8px;min-height:34px;padding:5px 8px;border-bottom:1px solid #d2dbe4;background:#f2f5f8; }
       .fcrlite-native-info { padding:4px 8px;color:#52606d;font-size:11px;font-weight:700; }
       .fcrlite-inventory-search { margin-left:auto;display:flex;align-items:center;gap:6px; }
       .fcrlite-inventory-search::before { content:'⌕';color:#334155;font-size:17px;font-weight:900;line-height:1; }
-      .fcrlite-inventory-filter { width:245px;height:29px;padding:0 9px;border:1px solid #8f9ead;border-radius:6px;background:#fff;color:#172536;font:700 12.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;outline:none; }
+      .fcrlite-inventory-filter { width:245px;height:30px;padding:0 9px;border:1px solid #8f9ead;border-radius:6px;background:#fbfcfe;color:#172536;font:700 12.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;outline:none; }
       .fcrlite-inventory-filter:focus { border-color:#4f83b7;box-shadow:0 0 0 2px rgba(79,131,183,.14); }
       .fcrlite-card[data-endpoint="inventory"] > .fcrlite-card-head .meta { margin-left:0; }
       .fcrlite-inventory-summary { display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-left:8px; }
@@ -2587,6 +2598,19 @@
     root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-tote-toggle').addEventListener('click', openToteMode);
 
+    function announceSectionRendered(def, search, serial, data) {
+      try {
+        window.dispatchEvent(new CustomEvent(SECTION_RENDERED_EVENT, {
+          detail: JSON.stringify({
+            endpoint: def.endpoint,
+            search,
+            serial,
+            complete: data?.complete !== false
+          })
+        }));
+      } catch {}
+    }
+
     function renderSectionCard(def, card, data, search, rawInput, serial, requestGroup, range = {}) {
       if (serial !== runSerial || !card) return;
       card.classList.remove('loading', 'error', 'partial', 'loading-more');
@@ -2608,6 +2632,7 @@
           await reloadInventoryHistory(card, search, serial, requestGroup, startDate, endDate);
         });
       }
+      announceSectionRendered(def, search, serial, data);
     }
 
     async function reloadInventoryHistory(card, search, serial, requestGroup, startDate, endDate) {
@@ -2784,7 +2809,7 @@
       </div>
       <div class="fcratc-system" hidden>
         <div class="fcratc-system-head"><span class="fcratc-system-title">SYSTEM INVENTORY</span><span class="fcratc-system-caption">WHAT AMAZON SAYS IS HERE</span><span class="fcratc-system-summary">AMAZON RECORD • —</span><span class="fcratc-system-sussy-badge loading" hidden>DIMS …</span><button type="button" class="fcratc-system-recheck">Recheck N/A + L0</button></div>
-        <div class="fcratc-system-scroll"><table id="fcratc-system-table"><thead><tr><th>Container</th><th>ASIN / Haz</th><th>FNSKU</th><th>FcSku</th><th>LPN</th><th>Qty</th><th>Disposition</th><th>Consumer</th><th>Consumer ID</th><th>Outer location</th><th>Outer location type</th><th>Title</th></tr></thead><tbody></tbody></table></div>
+        <div class="fcratc-system-scroll"><table id="fcratc-system-table"><thead><tr><th>ASIN / Haz</th><th>FNSKU</th><th>FcSku</th><th>Qty</th><th>Disposition</th><th>Outer location</th><th>Title</th></tr></thead><tbody></tbody></table></div>
       </div>
     `;
 
