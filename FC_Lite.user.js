@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.52 FC-Lite — Compact Tote Audit
+// @name        TEST v0.1.53 FC-Lite — Tote Audit Focus
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.52
+// @version      0.1.53
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.52';
+  const VERSION = '0.1.53';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -1325,8 +1325,8 @@
         border-radius:999px;
         font-size:9px;
       }
-      .madcat-pill.yes { background:#e0e7ff; color:#3730a3; }
-      .madcat-pill.no { background:#e5e7eb; color:#4b5563; }
+      .madcat-pill.yes { border-color:#a16207; background:#fde047; color:#422006; }
+      .madcat-pill.no { border-color:#991b1b; background:#ef4444; color:#111827; }
 
       .result-pill {
         min-width:31px;
@@ -1421,9 +1421,8 @@
       .fcratc-system-recheck:disabled { opacity:.55; cursor:wait; }
       .fcratc-system-scroll { width:100%; overflow:auto; background:#fff; }
       #fcratc-system-table {
-        width:min(1080px,100%);
-        min-width:900px;
-        table-layout:fixed;
+        width:100%;
+        min-width:1260px;
         border-collapse:separate;
         border-spacing:0;
         font-size:10.5px;
@@ -1451,15 +1450,16 @@
       #fcratc-system-table tbody tr:nth-child(even) td { background:#f5f8fc; }
       #fcratc-system-table tbody tr:hover td { background:#e7f0fb; }
       #fcratc-system-table td.num { text-align:right; font-weight:900; }
-      #fcratc-system-table th:nth-child(1) { width:170px; }
-      #fcratc-system-table th:nth-child(2) { width:140px; }
-      #fcratc-system-table th:nth-child(3) { width:130px; }
-      #fcratc-system-table th:nth-child(4) { width:52px; }
-      #fcratc-system-table th:nth-child(5) { width:110px; }
-      #fcratc-system-table th:nth-child(6) { width:190px; }
-      #fcratc-system-table th:nth-child(7) { width:288px; }
-      #fcratc-system-table td { overflow:hidden; text-overflow:ellipsis; }
       #fcratc-system-table .title-cell { overflow:hidden; text-overflow:ellipsis; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table { width:min(1080px,100%);min-width:900px;table-layout:fixed; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(1) { width:170px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(2) { width:140px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(3) { width:130px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(4) { width:52px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(5) { width:110px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(6) { width:190px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table th:nth-child(7) { width:288px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table td { overflow:hidden; text-overflow:ellipsis; }
       .fcratc-asin { color:#075eb8; font-weight:900; cursor:help; user-select:text; }
       .fcratc-asin:hover { text-decoration:underline; }
       .fcratc-haz {
@@ -1577,7 +1577,7 @@
         padding:0 10px;
         font-size:11px;
       }
-      #fcratc-root.fcratc-standalone #fcratc-system-table {
+      #fcratc-root.fcratc-tote-audit.fcratc-standalone #fcratc-system-table {
         width:min(1120px,100%);
         min-width:980px;
         font-size:13px;
@@ -2830,7 +2830,7 @@
     hoverCard.hidden = true;
     document.documentElement.appendChild(hoverCard);
 
-    root.classList.add('fcratc-standalone');
+    root.classList.add('fcratc-standalone', 'fcratc-tote-audit');
     document.body.prepend(root);
 
     scanInput.addEventListener('keydown', event => {
