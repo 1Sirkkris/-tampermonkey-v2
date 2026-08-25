@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         MAIN v0.9.8 AFT Edit/SKU/Move master
+// @name:en      MAIN v0.9.9 AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.8
+// @version      0.9.9
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -21,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.8';
+  const VERSION = '0.9.9';
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -366,7 +367,7 @@
     style.textContent = `
       .aftm{position:fixed;z-index:2147483647;font:13px/1.35 Arial,sans-serif;color:#1f2a30;background:#f4f6f7;border:1px solid #89979e;border-radius:8px;overflow:hidden;box-shadow:0 6px 20px #0004}.aftm *{box-sizing:border-box}.aftm button{cursor:pointer;font-weight:700}.aftm button:disabled{opacity:.5;cursor:not-allowed}.aftm input,.aftm textarea,.aftm select{width:100%;padding:7px;border:1px solid #91a0aa;border-radius:5px;background:#fff;color:#1d252b}.aftm select:disabled{background:#d7dcdf!important;color:#7a858b!important;border-color:#bcc5c9!important;opacity:1!important;cursor:not-allowed!important}.aftm [hidden]{display:none!important}
       .aftm .head,.aftm .move-head,.aftm .section-head,.aftm .fcsku-head{display:flex;align-items:center;justify-content:space-between;background:#36545c;color:#fff;padding:8px 10px;font-weight:800}.aftm .head button,.aftm .move-head button,.aftm .section-head button,.aftm .fcsku-head button{width:27px;height:22px;padding:0;border:1px solid #9eb0b5;border-radius:5px;background:#294249;color:#fff}.aftm .body,.aftm .move-body,.aftm .fcsku-body{padding:9px;display:grid;gap:7px}.aftm label{display:grid;gap:3px;font-weight:700}.aftm-row{display:flex;gap:7px}.aftm-row>*{flex:1}.aftm-run,.move-run,.fcsku-run,#aftm-each .primary{background:#2f6f63!important;color:#fff!important;border:0!important;padding:8px;border-radius:5px}.aftm-stop,.aftm-clear,.move-stop,.move-clear,.fcsku-stop,.fcsku-clear{background:#e8ecee;color:#182126;border:1px solid #a8b4ba;padding:7px;border-radius:5px}.aftm-status,.move-status{min-height:17px}.aftm-stepbox,.fcsku-log{width:100%;height:82px;padding:6px;border:1px solid #9aa8af;border-radius:5px;background:#fff;color:#1f2a30;font:10px/1.45 Consolas,monospace;resize:vertical;white-space:pre;overflow:auto}
-      #aftm-each,#aftm-sku,#aftm-move{top:125px;left:15px;width:318px}#aftm-each{background:#eef7fb;border-color:#527985}#aftm-each .timer{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#e8f6ff;padding:7px 10px;font-weight:700}#aftm-each .danger{background:#d94a4a;color:#fff;border:1px solid #b93737;padding:6px 10px;border-radius:6px}#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:8px;align-items:end}#aftm-sku .sku-start input{font-weight:800;text-align:center;background:#eef1f2}#aftm-sku .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}#aftm-sku .sku-stepcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;min-height:0}#aftm-sku .sku-stepcards[data-count="1"]{grid-template-columns:1fr}#aftm-sku .sku-card{min-width:0;border:1px solid #9aa8af;border-radius:6px;background:#fff;overflow:hidden}#aftm-sku .sku-card-title{padding:5px 7px;background:#e9eef0;border-bottom:1px solid #c8d0d4;font:700 10px/1.25 Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-sku .sku-card-steps{padding:5px 7px;display:grid;gap:2px;font:10px/1.25 Consolas,monospace}#aftm-sku .sku-step{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-sku .sku-step[data-state="active"]{font-weight:800;background:#eef7f4;border-radius:3px;padding:1px 3px;margin:0 -3px}#aftm-sku .sku-step[data-state="error"]{font-weight:800}
+      #aftm-each,#aftm-sku,#aftm-move{top:125px;left:15px;width:318px}#aftm-each{width:368px;max-width:calc(100vw - 30px);background:#eef7fb;border-color:#527985}#aftm-each .timer{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#e8f6ff;padding:7px 10px;font-weight:700}#aftm-each .danger{background:#d94a4a;color:#fff;border:1px solid #b93737;padding:6px 10px;border-radius:6px}#aftm-each .body{gap:9px;background:#f4fafc}#aftm-each .each-state-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}#aftm-each .each-state-btn{min-width:0;padding:8px 5px;border:1px solid #8fa2aa;border-radius:6px;background:#fff;color:#26343a;font-size:12px;white-space:nowrap}#aftm-each .each-state-btn[data-active="1"]{background:#295f58;color:#fff;border-color:#173f3a;box-shadow:inset 0 0 0 1px #fff7}#aftm-each .each-state-btn:focus-visible{outline:3px solid #f59e0b;outline-offset:1px}#aftm-each [data-list]{min-height:126px;resize:vertical;font:12px/1.45 Consolas,monospace}#aftm-each .primary{min-height:38px;font-size:13px}#aftm-each .aftm-stepbox{height:126px;min-height:116px;font-size:11px;line-height:1.5;background:#fbfdfe}#aftm-each .aftm-status{min-height:28px;padding:5px 7px;border:1px solid #c3d3d9;border-radius:5px;background:#e8f3f7;font-weight:700}#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:8px;align-items:end}#aftm-sku .sku-start input{font-weight:800;text-align:center;background:#eef1f2}#aftm-sku .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}#aftm-sku .sku-stepcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;min-height:0}#aftm-sku .sku-stepcards[data-count="1"]{grid-template-columns:1fr}#aftm-sku .sku-card{min-width:0;border:1px solid #9aa8af;border-radius:6px;background:#fff;overflow:hidden}#aftm-sku .sku-card-title{padding:5px 7px;background:#e9eef0;border-bottom:1px solid #c8d0d4;font:700 10px/1.25 Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-sku .sku-card-steps{padding:5px 7px;display:grid;gap:2px;font:10px/1.25 Consolas,monospace}#aftm-sku .sku-step{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-sku .sku-step[data-state="active"]{font-weight:800;background:#eef7f4;border-radius:3px;padding:1px 3px;margin:0 -3px}#aftm-sku .sku-step[data-state="error"]{font-weight:800}
       #aftm-datelot{right:12px;bottom:12px;width:420px}#aftm-datelot .exp-grid-head,#aftm-datelot .exp-row{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;min-width:0;width:100%}#aftm-datelot .exp-grid-head{padding:0 2px;font-size:10px;font-weight:800;color:#617078}#aftm-datelot .exp-grid-head span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-datelot .exp-rows{display:grid;gap:6px;max-height:205px;overflow-y:auto;overflow-x:hidden;padding-right:2px;min-width:0}#aftm-datelot .exp-row{min-width:0;width:100%;overflow:hidden}#aftm-datelot .exp-row input{min-width:0;max-width:100%;width:100%;padding:6px}#aftm-datelot .exp-row [data-code]{font-family:Consolas,monospace;font-size:12px}#aftm-datelot .exp-row [data-date]{min-width:0;width:100%}#aftm-datelot .exp-add{background:#edf1f2;color:#263238;border:1px solid #a8b4ba;padding:6px;border-radius:5px}#aftm-datelot .exp-busy{position:absolute;inset:39px 0 0;z-index:20;background:rgba(236,240,242,.86);backdrop-filter:blur(1px);display:grid;place-items:center;padding:18px}#aftm-datelot .exp-busy-card{min-width:210px;max-width:300px;padding:16px 18px;border:1px solid #94a3aa;border-radius:8px;background:#fff;box-shadow:0 5px 18px #0003;text-align:center}#aftm-datelot .exp-spinner{width:34px;height:34px;margin:0 auto 10px;border:4px solid #c7d0d4;border-top-color:#2f6f63;border-radius:50%;animation:aftm-exp-spin .75s linear infinite}#aftm-datelot .exp-busy-title{font-size:14px;font-weight:900;letter-spacing:.4px;color:#24343a}#aftm-datelot .exp-busy-status{margin-top:5px;min-height:16px;font-size:11px;font-weight:700;color:#54646b}#aftm-datelot .exp-busy-stop{margin-top:11px;width:100%;padding:7px;border:1px solid #a8b4ba;border-radius:5px;background:#e8ecee;color:#182126;font-weight:800}@keyframes aftm-exp-spin{to{transform:rotate(360deg)}}#aftm-move{border-color:#225d67}#aftm-move .move-head{background:#225d67}#aftm-move .move-items{height:104px;resize:vertical;font:11px Consolas,monospace}#aftm-move .move-note{font-size:10px;color:#68757b}#aftm-move .move-status{font-weight:700}
       #aftm-fcsku{top:86px;left:10px;width:320px;border-color:#002e36}#aftm-fcsku .fcsku-head{background:#002e36}#aftm-fcsku .fcsku-status{padding:5px 6px;border:1px solid #9bb;border-radius:4px;background:#fff;font-weight:700}#aftm-fcsku .fcsku-metrics{padding:4px 6px;background:#e9f6ff;border:1px solid #9bb;border-radius:4px;font-size:11px;font-weight:600}#aftm-fcsku .fcsku-label{font-weight:bold;margin-top:3px}#aftm-fcsku .fcsku-locations{height:120px;font:11px Consolas,monospace;resize:vertical}
       #aftm-control{top:76px;right:10px;width:174px;font-size:11px}#aftm-control .ctrl-head{width:100%;border:0;border-radius:0;background:#36545c;color:#fff;padding:6px 8px;display:flex;justify-content:space-between}#aftm-control .ctrl-body{padding:6px;display:grid;gap:5px;background:#eef1f2}#aftm-control[data-open="0"]{width:auto;min-width:102px}#aftm-control[data-open="0"] .ctrl-body{display:none}.ctrl-toggle{border:1px solid #9ca9ae;border-radius:5px;padding:5px 7px;background:#fff;color:#263238;text-align:left}.ctrl-toggle[data-on="1"]{background:#2f6f63;color:#fff;border-color:#25594f}.ctrl-toggle[data-on="0"]{background:#e8ecee;color:#59656b}.ctrl-toggle[data-active="1"]{box-shadow:inset 0 0 0 1px #fff8,0 0 0 1px #25594f}.ctrl-note{font-size:10px;color:#68757b;padding:0 2px}
@@ -496,10 +497,11 @@
       }
     },
 
-    wireDamage(stateEl, damageEl) {
+    wireDamage(stateEl, damageEl, damageWrap = damageEl.closest('label')) {
       const sync = () => {
         const enabled = low(stateEl.value) === 'unsellable';
         damageEl.disabled = !enabled;
+        if (damageWrap) damageWrap.hidden = !enabled;
         if (!enabled) damageEl.blur();
       };
 
@@ -575,16 +577,17 @@
         </div>
 
         <div class="body">
-          <label>
+          <label class="each-state-picker">
             Inventory State
-            <select data-state>
-              <option>Sellable</option>
-              <option selected>Unsellable</option>
-              <option>Pending Research</option>
-            </select>
+            <input type="hidden" data-state value="Unsellable">
+            <span class="each-state-buttons" data-state-buttons role="group" aria-label="Inventory State">
+              <button type="button" class="each-state-btn" data-state-value="Sellable">Sellable</button>
+              <button type="button" class="each-state-btn" data-state-value="Pending Research">Pending</button>
+              <button type="button" class="each-state-btn" data-state-value="Unsellable">Unsellable</button>
+            </span>
           </label>
 
-          <label>
+          <label data-disp-wrap>
             Disposition
             <select data-disp>
               <option>Amazon Damage</option>
@@ -612,11 +615,36 @@
 
       const state = $('[data-state]', panel);
       const disp = $('[data-disp]', panel);
+      const stateButtons = $$('[data-state-value]', panel);
 
-      state.value = localStorage.getItem('aftm_each_state') || 'Unsellable';
+      const savedState = localStorage.getItem('aftm_each_state');
+      state.value = ['Sellable', 'Pending Research', 'Unsellable'].includes(savedState)
+        ? savedState
+        : 'Unsellable';
       disp.value = localStorage.getItem('aftm_each_disp') || 'Amazon Damage';
 
-      this.wireDamage(state, disp);
+      const drawStateButtons = () => {
+        for (const button of stateButtons) {
+          const active = button.dataset.stateValue === state.value;
+          button.dataset.active = active ? '1' : '0';
+          button.setAttribute('aria-pressed', active ? 'true' : 'false');
+          const label = button.dataset.stateValue === 'Pending Research'
+            ? 'Pending'
+            : button.dataset.stateValue;
+          button.textContent = `${active ? '✓ ' : ''}${label}`;
+        }
+      };
+
+      for (const button of stateButtons) {
+        button.onclick = () => {
+          state.value = button.dataset.stateValue;
+          state.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+      }
+
+      state.addEventListener('change', drawStateButtons);
+      this.wireDamage(state, disp, $('[data-disp-wrap]', panel));
+      drawStateButtons();
 
       const toggleMin = wireMin(panel, this.keys.eachMin);
       $('[data-toggle]', panel).onclick = event => {
