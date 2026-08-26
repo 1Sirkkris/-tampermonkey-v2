@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.5 BWU2 Observability Core
+// @name         CORE v0.1.6 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.5
+// @version      0.1.6
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -41,7 +41,9 @@
   const SLOW_NETWORK_MS = 1500;
   const VISIBILITY_DEBOUNCE_MS = 750;
   const VIEWPORT_DEBOUNCE_MS = 500;
-  const POLL_NETWORK_QUIET_MS = 1200;
+  const ROUTINE_NETWORK_REPORT_MS = 60000;
+  const VISIBILITY_REPORT_MS = 60000;
+  const BLOCKED_SECTIONS_QUIET_MS = 1200;
   const SAMPLE_PREFIX = `${PREFIX}sample:`;
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
@@ -80,6 +82,8 @@
   let uiTimer = 0;
   let lastEventLoopLogAt = 0;
   let visibilityTimer = 0;
+  let visibilityReportTimer = 0;
+  let visibilityStats = emptyVisibilityStats();
   let viewportTimer = 0;
   let lastViewport = '';
   let performanceObserver = null;
@@ -88,6 +92,8 @@
   let fcrNetworkStats = new Map();
   let pollNetworkTimer = 0;
   let pollNetworkStats = new Map();
+  let blockedSectionsTimer = 0;
+  let blockedSections = new Set();
   const corePending = new Map();
   let coreSuccessTimer = 0;
   let coreSuccessStats = new Map();
@@ -106,6 +112,10 @@
     } catch {
       return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
     }
+  }
+
+  function emptyVisibilityStats() {
+    return { transitions: 0, hidden: 0, visible: 0, firstAt: '', lastAt: '', last: '' };
   }
 
   function defaultMeta() {
@@ -156,6 +166,12 @@
     pollNetworkStats = new Map();
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
+    clearTimeout(visibilityReportTimer);
+    visibilityReportTimer = 0;
+    visibilityStats = emptyVisibilityStats();
+    clearTimeout(blockedSectionsTimer);
+    blockedSectionsTimer = 0;
+    blockedSections = new Set();
     corePending.clear();
     clearTimeout(coreSuccessTimer);
     coreSuccessTimer = 0;
@@ -284,7 +300,10 @@
 
   function isPollNetwork(rawUrl) {
     const url = parsedUrl(rawUrl);
-    return !!url && /\/status$/i.test(url.pathname);
+    if (!url) return false;
+    return /\/status$/i.test(url.pathname) ||
+      (/^sim-ticketing-graphql-fleet\.corp\.amazon\.com$/i.test(url.hostname) && /^\/graphql\/?$/i.test(url.pathname)) ||
+      (/^dataplane\.rum\.[^.]+\.amazonaws\.com$/i.test(url.hostname) && /^\/appmonitors\//i.test(url.pathname));
   }
 
   function isFcrNetwork(rawUrl) {
@@ -453,8 +472,7 @@
     stat.totalMs += Number(base.ms || 0);
     stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
     pollNetworkStats.set(key, stat);
-    clearTimeout(pollNetworkTimer);
-    pollNetworkTimer = setTimeout(flushPollNetworkSummary, POLL_NETWORK_QUIET_MS);
+    if (!pollNetworkTimer) pollNetworkTimer = setTimeout(flushPollNetworkSummary, ROUTINE_NETWORK_REPORT_MS);
   }
 
   function flushPollNetworkSummary() {
@@ -602,6 +620,12 @@
     pollNetworkStats = new Map();
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
+    clearTimeout(visibilityReportTimer);
+    visibilityReportTimer = 0;
+    visibilityStats = emptyVisibilityStats();
+    clearTimeout(blockedSectionsTimer);
+    blockedSectionsTimer = 0;
+    blockedSections = new Set();
     corePending.clear();
     clearTimeout(coreSuccessTimer);
     coreSuccessTimer = 0;
@@ -770,35 +794,33 @@
     }
   }
 
-  function targetInfo(target) {
+  function targetInfo(target, allowTextLabel = false) {
     const element = target instanceof Element ? target : target?.parentElement;
     if (!element || uiRoot?.contains(element)) return null;
 
-    const label =
+    const explicitLabel =
       element.getAttribute('aria-label') ||
       element.getAttribute('title') ||
-      element.innerText ||
-      element.textContent ||
       '';
+    const tag = element.tagName?.toLowerCase() || 'unknown';
+    const textLabel = allowTextLabel && ['button', 'a'].includes(tag)
+      ? String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+      : '';
 
     return {
-      tag: element.tagName?.toLowerCase() || 'unknown',
+      tag,
       id: scrubText(element.id || ''),
       role: element.getAttribute('role') || '',
       type: element.getAttribute('type') || '',
       name: element.getAttribute('name') || '',
-      label: scrubText(String(label).replace(/\s+/g, ' ').trim().slice(0, 100))
+      label: scrubText(String(explicitLabel || textLabel).replace(/\s+/g, ' ').trim().slice(0, 60))
     };
   }
 
-  function shouldLogClick(target) {
+  function clickTarget(target) {
     const element = target instanceof Element ? target : target?.parentElement;
-    if (!element) return false;
-    const tag = element.tagName?.toLowerCase() || '';
-    const type = String(element.getAttribute?.('type') || '').toLowerCase();
-    if (tag === 'textarea') return false;
-    if (tag === 'input' && ['text', 'search', 'date', 'datetime-local', 'number', 'email', 'password', 'submit', 'reset', 'file', ''].includes(type)) return false;
-    return true;
+    if (!element) return null;
+    return element.closest('button, a[href], [role="button"], [role="menuitem"], [role="tab"], input[type="button"], input[type="checkbox"], input[type="radio"]');
   }
 
   function shouldLogChange(target) {
@@ -811,8 +833,10 @@
 
   function installActionTrace() {
     document.addEventListener('click', event => {
-      if (!event.isTrusted || !shouldLogClick(event.target)) return;
-      const info = targetInfo(event.target);
+      if (!event.isTrusted) return;
+      const action = clickTarget(event.target);
+      if (!action) return;
+      const info = targetInfo(action, true);
       if (info) add('ui.click', info);
     }, true);
 
@@ -894,9 +918,25 @@
       const visibility = document.visibilityState;
       visibilityTimer = setTimeout(() => {
         visibilityTimer = 0;
-        if (document.visibilityState === visibility) add('page.visibility', { visibility });
+        if (document.visibilityState !== visibility) return;
+        const now = new Date().toISOString();
+        visibilityStats.transitions++;
+        visibilityStats[visibility] = (Number(visibilityStats[visibility]) || 0) + 1;
+        visibilityStats.firstAt ||= now;
+        visibilityStats.lastAt = now;
+        visibilityStats.last = visibility;
+        if (!visibilityReportTimer) visibilityReportTimer = setTimeout(flushVisibilitySummary, VISIBILITY_REPORT_MS);
       }, VISIBILITY_DEBOUNCE_MS);
     }, true);
+  }
+
+  function flushVisibilitySummary() {
+    clearTimeout(visibilityReportTimer);
+    visibilityReportTimer = 0;
+    if (!visibilityStats.transitions) return;
+    const summary = visibilityStats;
+    visibilityStats = emptyVisibilityStats();
+    add('page.visibility.summary', summary);
   }
 
   function recordRejection(reason) {
@@ -1225,9 +1265,25 @@
       let detail = event.detail;
       try { if (typeof detail === 'string') detail = JSON.parse(detail); } catch {}
       if (!detail || typeof detail !== 'object') return;
-      if (['master.open', 'stow.open'].includes(String(detail.key || ''))) return;
+      const key = String(detail.key || '');
+      if (['master.open', 'stow.open'].includes(key)) return;
+      if (key.startsWith('master.section.blocked.')) {
+        blockedSections.add(scrubText(key.slice('master.section.blocked.'.length)));
+        clearTimeout(blockedSectionsTimer);
+        blockedSectionsTimer = setTimeout(flushBlockedSectionsSummary, BLOCKED_SECTIONS_QUIET_MS);
+        return;
+      }
       add('fcr.usage', detail);
     }, true);
+  }
+
+  function flushBlockedSectionsSummary() {
+    clearTimeout(blockedSectionsTimer);
+    blockedSectionsTimer = 0;
+    if (!blockedSections.size) return;
+    const sections = [...blockedSections].filter(Boolean).sort();
+    blockedSections = new Set();
+    add('fcr.usage', { key: 'master.sections.blocked', count: sections.length, sections });
   }
 
   function viewportSnapshot() {
@@ -1383,8 +1439,12 @@
     clearTimeout(viewportTimer);
     clearTimeout(fcrNetworkTimer);
     clearTimeout(pollNetworkTimer);
+    clearTimeout(visibilityReportTimer);
+    clearTimeout(blockedSectionsTimer);
     flushFcrNetworkSummary();
     flushPollNetworkSummary();
+    flushVisibilitySummary();
+    flushBlockedSectionsSummary();
     flushCoreSuccessSummary();
     flushPage();
     if (mutationObserver) mutationObserver.disconnect();
