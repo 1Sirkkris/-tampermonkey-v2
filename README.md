@@ -17,7 +17,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Stow Andons Helper | 5.5.1 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
 | Bin Check Overlay | 7.4.1 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
 | Dropzone Selector Queue | 0.2.17 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
-| BWU2 Observability Core | 0.1.5 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
+| BWU2 Observability Core | 0.1.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
 
 Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
 
