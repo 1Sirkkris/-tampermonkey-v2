@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.56 FC-Lite — Tote Audit XL Text
+// @name        TEST v0.1.57 FC-Lite — Tote Audit Distance Alerts
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.56
+// @version      0.1.57
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.56';
+  const VERSION = '0.1.57';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -514,7 +514,7 @@
     const checked = total > 0 ? Math.min(scans, total) : scans;
     const result = row.querySelector('.result');
     if (!result) return;
-    result.innerHTML = `<strong class="result-pill found">✓${total > 1 ? `${checked}/${total}` : checked}</strong>`;
+    result.innerHTML = `<strong class="result-pill found">✓ IN TOTE${total > 1 ? ` ${checked}/${total}` : ''}</strong>`;
     result.title = `Physically scanned ${checked} of ${total || '?'} unit${total === 1 ? '' : 's'} in tote`;
   }
 
@@ -699,7 +699,7 @@
       row._fcratcMatches = matches;
       updateToteResultProgress(row);
     } else {
-      result.innerHTML = '<strong class="result-pill missing">✕</strong>';
+      result.innerHTML = '<strong class="result-pill missing">✕ NOT IN TOTE</strong>';
       result.title = 'Not in tote';
     }
 
@@ -1602,7 +1602,18 @@
       #fcratc-root.fcratc-tote-audit .fcratc-tote-toggle,
       #fcratc-root.fcratc-tote-audit .fcratc-full-fcr { font-size:14.5px; }
       #fcratc-root.fcratc-tote-audit .fcratc-state { font-size:18px; }
-      #fcratc-root.fcratc-tote-audit #fcratc-input { font-size:22px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-top { min-height:50px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-state {
+        flex:0 0 138px;
+        min-width:138px;
+        height:42px;
+        padding:0 12px;
+        box-sizing:border-box;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-input {
+        height:42px;
+        font-size:22px;
+      }
       #fcratc-root.fcratc-tote-audit .fcratc-meta {
         min-height:39px;
         font-size:18px;
@@ -1618,6 +1629,32 @@
       #fcratc-root.fcratc-tote-audit .bin-size,
       #fcratc-root.fcratc-tote-audit .madcat-pill,
       #fcratc-root.fcratc-tote-audit .result-pill { font-size:16px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table { width:min(1000px,100%); }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(1) { width:160px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(4) { width:82px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(5) { width:190px; }
+      #fcratc-root.fcratc-tote-audit .result-pill {
+        min-height:34px;
+        padding:6px 12px;
+        box-sizing:border-box;
+        white-space:nowrap;
+      }
+      #fcratc-root.fcratc-tote-audit .result-pill.missing {
+        background:#9f1239;
+        border:2px solid #701a35;
+        color:#fff;
+        box-shadow:0 0 0 2px #fecdd3;
+      }
+      #fcratc-root.fcratc-tote-audit .result-pill.found {
+        background:#075985;
+        border:2px solid #0c4a6e;
+        color:#fff;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td { background:#fff1f2; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td:first-child {
+        box-shadow:inset 6px 0 0 #be123c;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td.result { background:#ffe4e6; }
       #fcratc-root.fcratc-tote-audit .fcratc-system-caption { font-size:15px; }
       #fcratc-root.fcratc-tote-audit .fcratc-system-summary,
       #fcratc-root.fcratc-tote-audit .fcratc-system-sussy-badge {
