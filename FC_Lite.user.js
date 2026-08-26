@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.57 FC-Lite — Tote Audit Distance Alerts
+// @name        TEST v0.1.58 FC-Lite — Tote Audit XXL
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.57
+// @version      0.1.58
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.57';
+  const VERSION = '0.1.58';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -675,7 +675,9 @@
     const sortCell = row.querySelector('.sortable');
     sortCell.classList.toggle('yes', sort === 'TRUE');
     sortCell.classList.toggle('no', sort === 'FALSE');
-    sortCell.innerHTML = sort === '—' ? '—' : `<span class="sort-pill ${sort === 'FALSE' ? 'no' : 'yes'}" title="Sortable: ${sort}">${sort === 'TRUE' ? '✓' : '✕'}</span>`;
+    sortCell.innerHTML = sort === '—'
+      ? '—'
+      : `<span class="sort-pill ${sort === 'FALSE' ? 'no' : 'yes'}" title="${sort === 'FALSE' ? 'Not sortable' : 'Sortable'}" aria-label="${sort === 'FALSE' ? 'Not sortable' : 'Sortable'}">${sort === 'FALSE' ? '🚫 NON-SORT' : '✓ SORTABLE'}</span>`;
 
     const dimsCell = row.querySelector('.dimensions');
     const dimsHost = dimsCell?.querySelector('.dims-pill');
@@ -1595,47 +1597,115 @@
       #fcratc-root.fcratc-standalone .fcratc-asin { font-size:13px; }
 
       /* Tote Audit readability only. Normal FC-Lite sections do not receive these sizes. */
-      #fcratc-root.fcratc-tote-audit .fcratc-lite-sub { font-size:15px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-lite-container { font-size:14.5px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-core-status { font-size:13.5px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-copy-stats,
-      #fcratc-root.fcratc-tote-audit .fcratc-tote-toggle,
-      #fcratc-root.fcratc-tote-audit .fcratc-full-fcr { font-size:14.5px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-state { font-size:18px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-top { min-height:50px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-state {
-        flex:0 0 138px;
-        min-width:138px;
-        height:42px;
-        padding:0 12px;
-        box-sizing:border-box;
+      #fcratc-root.fcratc-tote-audit .fcratc-litebar {
+        min-height:76px;
+        gap:10px;
+        padding:10px 12px;
+        overflow:visible;
       }
-      #fcratc-root.fcratc-tote-audit #fcratc-input {
-        height:42px;
+      #fcratc-root.fcratc-tote-audit .fcratc-lite-brand { font-size:32px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-lite-sub { font-size:22.5px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-lite-container {
+        padding:7px 12px;
         font-size:22px;
+        white-space:nowrap;
       }
-      #fcratc-root.fcratc-tote-audit .fcratc-meta {
-        min-height:39px;
-        font-size:18px;
-      }
-      #fcratc-root.fcratc-tote-audit #fcratc-table td {
-        height:50px;
+      #fcratc-root.fcratc-tote-audit .fcratc-core-status {
+        min-height:42px;
+        padding:6px 11px;
+        display:inline-flex;
+        align-items:center;
         font-size:20px;
       }
-      #fcratc-root.fcratc-tote-audit .scan-code { font-size:20px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-copy-stats,
+      #fcratc-root.fcratc-tote-audit .fcratc-tote-toggle,
+      #fcratc-root.fcratc-tote-audit .fcratc-full-fcr {
+        min-height:50px;
+        height:50px;
+        padding:0 16px;
+        font-size:22px;
+        white-space:nowrap;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-top {
+        min-height:72px;
+        gap:8px;
+        padding:6px;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-state {
+        flex:0 0 190px;
+        min-width:190px;
+        height:60px;
+        padding:0 16px;
+        box-sizing:border-box;
+        font-size:27px;
+        white-space:nowrap;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-input {
+        height:60px;
+        padding:0 14px;
+        font-size:33px;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-btn {
+        flex:0 0 60px;
+        width:60px;
+        height:60px;
+        font-size:25px;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-meta {
+        min-height:58px;
+        gap:12px;
+        padding:7px 12px;
+        font-size:27px;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td {
+        height:75px;
+        padding:10px 12px;
+        font-size:30px;
+      }
+      #fcratc-root.fcratc-tote-audit .scan-code { font-size:30px; }
       #fcratc-root.fcratc-tote-audit .scan-count,
       #fcratc-root.fcratc-tote-audit .sort-pill,
       #fcratc-root.fcratc-tote-audit .dims-pill,
       #fcratc-root.fcratc-tote-audit .bin-size,
       #fcratc-root.fcratc-tote-audit .madcat-pill,
-      #fcratc-root.fcratc-tote-audit .result-pill { font-size:16px; }
-      #fcratc-root.fcratc-tote-audit #fcratc-table { width:min(1000px,100%); }
-      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(1) { width:160px; }
-      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(4) { width:82px; }
-      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(5) { width:190px; }
+      #fcratc-root.fcratc-tote-audit .result-pill { font-size:24px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table { width:min(1450px,100%); }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(1) { width:220px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(2) { width:220px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(4) { width:125px; }
+      #fcratc-root.fcratc-tote-audit #fcratc-table td:nth-child(5) { width:250px; }
+      #fcratc-root.fcratc-tote-audit .sort-pill {
+        width:auto;
+        min-width:180px;
+        height:48px;
+        gap:8px;
+        padding:0 14px;
+        border-width:2px;
+        border-radius:9px;
+      }
+      #fcratc-root.fcratc-tote-audit .sort-pill.no {
+        background:#9f1239;
+        border-color:#701a35;
+        color:#fff;
+      }
+      #fcratc-root.fcratc-tote-audit .sort-pill.yes {
+        background:#166534;
+        border:2px solid #14532d;
+        color:#fff;
+      }
+      #fcratc-root.fcratc-tote-audit .dims-pill { max-width:none; }
+      #fcratc-root.fcratc-tote-audit .bin-size {
+        max-width:240px;
+        padding:6px 10px;
+      }
+      #fcratc-root.fcratc-tote-audit .madcat-pill {
+        min-width:82px;
+        min-height:44px;
+        padding:8px 12px;
+      }
       #fcratc-root.fcratc-tote-audit .result-pill {
-        min-height:34px;
-        padding:6px 12px;
+        min-height:52px;
+        padding:10px 18px;
         box-sizing:border-box;
         white-space:nowrap;
       }
@@ -1652,27 +1722,45 @@
       }
       #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td { background:#fff1f2; }
       #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td:first-child {
-        box-shadow:inset 6px 0 0 #be123c;
+        box-shadow:inset 8px 0 0 #be123c;
       }
       #fcratc-root.fcratc-tote-audit #fcratc-table tr.missing td.result { background:#ffe4e6; }
-      #fcratc-root.fcratc-tote-audit .fcratc-system-caption { font-size:15px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-system-head {
+        min-height:72px;
+        gap:14px;
+        padding:10px 14px;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-system-title { font-size:30px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-system-caption { font-size:22px; }
       #fcratc-root.fcratc-tote-audit .fcratc-system-summary,
       #fcratc-root.fcratc-tote-audit .fcratc-system-sussy-badge {
-        min-height:34px;
-        font-size:16px;
+        min-height:48px;
+        padding:0 14px;
+        font-size:24px;
       }
-      #fcratc-root.fcratc-tote-audit .fcratc-system-recheck { font-size:16px; }
-      #fcratc-root.fcratc-tote-audit #fcratc-system-table { font-size:20px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-system-recheck {
+        min-height:48px;
+        padding:0 14px;
+        font-size:22px;
+        white-space:nowrap;
+      }
+      #fcratc-root.fcratc-tote-audit #fcratc-system-table { font-size:30px; }
       #fcratc-root.fcratc-tote-audit #fcratc-system-table th {
-        height:48px;
-        font-size:18px;
+        height:64px;
+        padding:10px 12px;
+        font-size:26px;
       }
       #fcratc-root.fcratc-tote-audit #fcratc-system-table td {
-        height:54px;
-        font-size:20px;
+        height:81px;
+        padding:10px 12px;
+        font-size:30px;
       }
-      #fcratc-root.fcratc-tote-audit .fcratc-haz { font-size:16px; }
-      #fcratc-root.fcratc-tote-audit .fcratc-asin { font-size:20px; }
+      #fcratc-root.fcratc-tote-audit .fcratc-haz {
+        min-height:40px;
+        padding:0 10px;
+        font-size:24px;
+      }
+      #fcratc-root.fcratc-tote-audit .fcratc-asin { font-size:30px; }
 
       #fcratc-hover-card{position:fixed;z-index:2147483647;width:410px;min-height:150px;padding:8px;display:flex;gap:10px;background:#222;color:#fff;border:1px solid #111;border-radius:5px;box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none;font-family:Arial,Helvetica,sans-serif}#fcratc-hover-card[hidden]{display:none!important}.fcratc-hover-img{flex:0 0 150px;width:150px;height:150px;display:flex;align-items:center;justify-content:center;background:#fff;color:#64748b;overflow:hidden}.fcratc-hover-img img{max-width:100%;max-height:100%;object-fit:contain}.fcratc-hover-info{flex:1;min-width:0;padding-top:3px}.fcratc-hover-info>div{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:5px;margin-bottom:7px}.fcratc-hover-info span{color:#aeb6c2;font-size:9px}.fcratc-hover-info strong{width:max-content;max-width:100%;padding:3px 5px;border-radius:4px;background:#fff3c4;color:#111;font-size:11px;overflow:hidden;text-overflow:ellipsis}.fcratc-hover-info .sortable-hover{background:#ffe55c}.fcratc-hover-info .sortable-hover.no{background:#fecaca}.fcratc-hover-loading{padding:12px;font-weight:800}
 
