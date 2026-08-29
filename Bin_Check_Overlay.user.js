@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v7.4.1 Bin check Overlay — Direct Core
+// @name         TEST v7.4.2 Bin check Overlay — Inventory Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.1
-// @description  Direct FCR Data Core inventory overlay; no native inventory scrolling/render dependency.
+// @version      7.4.2
+// @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations only for matching P-9 containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-idle
@@ -14,21 +14,16 @@
 (() => {
   'use strict';
 
-  if (window.__binOverlay_v741test || location.hash.startsWith('#fcr-tote-checker')) return;
-  window.__binOverlay_v741test = true;
+  if (window.__binOverlay_v742test || location.hash.startsWith('#fcr-tote-checker')) return;
+  window.__binOverlay_v742test = true;
 
-  const VERSION = '7.4.1';
-  const POD_REGEX = /P-\d-(?:[A-Z]\d{3}){2}/;
+  const VERSION = '7.4.2';
+  const POD_REGEX = /\bP-9-(?:[A-Z]\d{3}){2}\b/i;
   const FLOORS = ['P2', 'P3', 'P4'];
   const RETRY_DELAY_MS = 2500;
   const MAX_RETRIES = 1;
   const MAX_CONCURRENT_REQUESTS = 12;
-  const CORE_TIMEOUT_MS = 30000;
   const FLOOR_CACHE_TTL = 30 * 60 * 1000;
-
-  const CORE_REQUEST_EVENT = 'fcr-data-core:request';
-  const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
-  const corePending = new Map();
 
   function clean(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -45,32 +40,6 @@
       if (typeof window.BWU2Trace === 'function') window.BWU2Trace(type, data);
       else window.postMessage({ __BWU2_TRACE__: true, type, data }, '*');
     } catch {}
-  }
-
-  window.addEventListener(CORE_RESPONSE_EVENT, event => {
-    let message;
-    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
-    const pending = corePending.get(message?.id);
-    if (!pending) return;
-    corePending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.ok) pending.resolve(message.data);
-    else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
-  });
-
-  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS) {
-    const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        corePending.delete(id);
-        reject(new Error('FCR Data Core missing / timed out'));
-      }, timeout);
-
-      corePending.set(id, { resolve, reject, timer });
-      window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
-        detail: JSON.stringify({ id, type, payload, client: 'overlay-v741' })
-      }));
-    });
   }
 
   const state = {
@@ -93,7 +62,9 @@
     controllers: new Set(),
     retryTimers: new Set(),
     inventoryMs: 0,
-    hierarchyStartedAt: 0
+    hierarchyStartedAt: 0,
+    snapshotRows: 0,
+    snapshotSource: ''
   };
 
   function currentSearch() {
@@ -152,7 +123,7 @@
       usage('open');
       button.hidden = true;
       buildOverlay();
-      void loadDirect();
+      void loadSnapshot();
     });
 
     nav.appendChild(button);
@@ -162,9 +133,6 @@
   function start() {
     const liteMode = location.hash.startsWith('#fcr-lite');
 
-    // Native FCResearch only needs a one-shot mount. FC-Lite rebuilds the
-    // Inventory card in-place on every search, so its #inventory-nav can be
-    // replaced after this button has already mounted.
     if (!liteMode) {
       if (installStartButton()) return;
 
@@ -199,8 +167,6 @@
       installStartButton();
 
       observer = new MutationObserver(records => {
-        // Only react to subtree structure changes. FC-Lite replaces/rebuilds
-        // section DOM during searches; style/text churn does not matter here.
         if (!records.some(record => record.type === 'childList')) return;
         scheduleReconcile();
       });
@@ -235,28 +201,97 @@
     return replacement;
   }
 
-  async function loadDirect() {
-    resetRun();
-    const runId = state.runId;
-    const search = currentSearch();
+  function inventoryIndexes(table) {
+    const headers = [...table.querySelectorAll('thead th')].map(th => ({
+      id: clean(th.id).toLowerCase(),
+      text: clean(th.textContent).replace(/\([\d,]+\)/g, '').trim().toLowerCase()
+    }));
+    const find = (...names) => headers.findIndex(header => names.includes(header.id) || names.includes(header.text));
+    return {
+      container: find('inventory-container', 'container'),
+      fnsku: find('inventory-fnsku', 'fnsku'),
+      fcsku: find('inventory-fcsku', 'fcsku'),
+      qty: find('inventory-quantity', 'quantity')
+    };
+  }
 
-    if (!search) {
-      setStatusText('No active FCResearch search');
-      return;
+  function rowIsVisible(row) {
+    if (!row || row.hidden || row.getAttribute('aria-hidden') === 'true') return false;
+    if (row.style?.display === 'none' || row.classList?.contains('filtered-out')) return false;
+    if (row.isConnected) {
+      try { if (getComputedStyle(row).display === 'none') return false; } catch {}
+    }
+    return true;
+  }
+
+  function dataTableAppliedRows(table) {
+    const jq = window.jQuery || window.$;
+    try {
+      if (!jq?.fn?.dataTable?.isDataTable?.(table)) return null;
+      const api = jq(table).DataTable();
+      const nodes = api.rows({ search: 'applied' }).nodes().toArray().filter(Boolean);
+      return nodes;
+    } catch {
+      return null;
+    }
+  }
+
+  function snapshotInventoryRows() {
+    const table = document.getElementById('table-inventory');
+    if (!table) return { rows: [], source: 'missing-table' };
+
+    const indexes = inventoryIndexes(table);
+    if (indexes.container < 0) return { rows: [], source: 'missing-container-column' };
+
+    let source = 'visible-dom';
+    let rowNodes = dataTableAppliedRows(table);
+    if (rowNodes) source = 'datatable-filter';
+    else rowNodes = [...(table.tBodies?.[0]?.rows || [])].filter(rowIsVisible);
+
+    const rows = [];
+    for (const row of rowNodes) {
+      if (!row?.cells?.length) continue;
+      const value = index => index >= 0 ? clean(row.cells[index]?.textContent) : '';
+      const container = value(indexes.container);
+      if (!container) continue;
+      rows.push({
+        container,
+        fnsku: value(indexes.fnsku),
+        fcsku: value(indexes.fcsku),
+        qty: Number(value(indexes.qty).replace(/[^\d.-]/g, '')) || 0
+      });
     }
 
-    setStatusText('Core inventory…');
+    return { rows, source };
+  }
+
+  async function loadSnapshot() {
+    resetRun();
+    const runId = state.runId;
+    setStatusText('Snapshot inventory…');
     const started = performance.now();
 
     try {
-      const result = await coreRequest('inventory', { container: search });
+      const snapshot = snapshotInventoryRows();
       if (runId !== state.runId) return;
 
-      state.inventoryMs = Math.round(performance.now() - started);
-      const inventoryRows = Array.isArray(result?.rows) ? result.rows : [];
+      state.inventoryMs = Math.max(1, Math.round(performance.now() - started));
+      state.snapshotRows = snapshot.rows.length;
+      state.snapshotSource = snapshot.source;
 
-      for (const row of inventoryRows) {
-        const record = makeCoreRecord(row);
+      if (snapshot.source === 'missing-table') {
+        setStatusText('Inventory table not ready');
+        trace('BIN_OVERLAY_ERROR', { stage: 'snapshot', message: 'Inventory table not ready' });
+        return;
+      }
+      if (snapshot.source === 'missing-container-column') {
+        setStatusText('Inventory Container column not found');
+        trace('BIN_OVERLAY_ERROR', { stage: 'snapshot', message: 'Inventory Container column not found' });
+        return;
+      }
+
+      for (const row of snapshot.rows) {
+        const record = makeInventoryRecord(row);
         if (!record) continue;
 
         state.totalRows++;
@@ -265,18 +300,20 @@
       }
 
       state.totalPods = state.podBuckets.size;
-      usage('inventory.core', state.inventoryMs);
+      usage('inventory.snapshot', state.inventoryMs);
       trace('BIN_OVERLAY_INVENTORY', {
+        source: snapshot.source,
         ms: state.inventoryMs,
-        inventoryRows: inventoryRows.length,
+        inventoryRows: snapshot.rows.length,
         podRows: state.totalRows,
-        pods: state.totalPods
+        pods: state.totalPods,
+        podPrefix: 'P-9'
       });
 
       refreshOverlay();
 
       if (!state.totalPods) {
-        setStatusText(`Core ${state.inventoryMs}ms • no P-level pods`);
+        setStatusText(`Snapshot ${state.snapshotRows} rows • no P-9 bins`);
         return;
       }
 
@@ -299,14 +336,14 @@
     } catch (error) {
       if (runId !== state.runId) return;
       const message = clean(error?.message || error);
-      setStatusText(message.includes('Data Core') ? 'CORE MISSING / TIMEOUT' : `ERROR • ${message}`);
-      trace('BIN_OVERLAY_ERROR', { stage: 'inventory', message });
+      setStatusText(`ERROR • ${message}`);
+      trace('BIN_OVERLAY_ERROR', { stage: 'snapshot', message });
     }
   }
 
-  function makeCoreRecord(row) {
+  function makeInventoryRecord(row) {
     const containerText = clean(row?.container);
-    const pod = containerText.match(POD_REGEX)?.[0];
+    const pod = containerText.match(POD_REGEX)?.[0]?.toUpperCase();
     if (!pod) return null;
 
     const quantityValue = Number(row?.qty) || 0;
@@ -348,6 +385,8 @@
     state.paused = false;
     state.inventoryMs = 0;
     state.hierarchyStartedAt = 0;
+    state.snapshotRows = 0;
+    state.snapshotSource = '';
 
     updateControlStates();
     updatePauseButton();
@@ -382,7 +421,9 @@
         inventoryMs: state.inventoryMs,
         hierarchyMs,
         rows: state.totalRows,
-        pods: state.totalPods
+        pods: state.totalPods,
+        snapshotRows: state.snapshotRows,
+        snapshotSource: state.snapshotSource
       });
     }
   }
@@ -541,7 +582,7 @@
       <div id="pLevelOverlayHeader">
         <div id="pLevelOverlaySummary">
           <span id="pLevelOverlayTitle">Overlay v${VERSION}</span>
-          <span id="pLevelOverlayStatus">Core ready</span>
+          <span id="pLevelOverlayStatus">Snapshot ready</span>
         </div>
         <div id="pLevelOverlayActions">
           <button type="button" id="pLevelPauseBtn">Pause</button>
@@ -562,7 +603,7 @@
           <span class="p-level-divider" aria-hidden="true"></span>
           <button type="button" id="pLevelLazyBtn">Lazy bin check</button>
         </div>
-        <div class="p-level-muted" id="pLevelOverlayHint">Direct Data Core inventory • no FCResearch table scrolling.</div>
+        <div class="p-level-muted" id="pLevelOverlayHint">Uses the Inventory rows matching your current filter at click • P-9 bins only.</div>
         <table id="pLevelOverlayTable">
           <thead><tr><th>Floor</th><th>Container</th><th>Qty</th><th>FNSKU</th><th>FcSku</th></tr></thead>
           <tbody></tbody>
@@ -723,12 +764,12 @@
     const total = state.totalPods;
     const remaining = Math.max(total - loaded, 0);
 
-    if (!total && state.inventoryMs) {
-      status.textContent = `Core ${state.inventoryMs}ms • no P-level pods`;
+    if (!total && state.snapshotSource) {
+      status.textContent = `Snapshot ${state.snapshotRows} rows • no P-9 bins`;
       return;
     }
 
-    status.textContent = `Core ${state.inventoryMs || '-'}ms • ${loaded}/${total} pods • ${remaining} left`;
+    status.textContent = `Snapshot ${state.snapshotRows || '-'} rows • ${loaded}/${total} pods • ${remaining} left`;
   }
 
   function copyLazyBinCheck() {
@@ -818,10 +859,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('p-level-overlay-style-v741')) return;
+    if (document.getElementById('p-level-overlay-style-v742')) return;
 
     const style = document.createElement('style');
-    style.id = 'p-level-overlay-style-v741';
+    style.id = 'p-level-overlay-style-v742';
     style.textContent = `
       #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
       #pLevelOverlay[hidden]{display:none}
