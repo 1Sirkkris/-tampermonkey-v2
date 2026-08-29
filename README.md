@@ -7,7 +7,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Script | Version | Install/update |
 | --- | --- | --- |
 | Carton PrEditor | 7.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
-| SIM Markdown Toolbar | 5.1.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
+| SIM Markdown Toolbar | 5.1.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.3.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
 | Sideline API Move | 0.2.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
 | AFT Edit/SKU/Move | 0.9.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
