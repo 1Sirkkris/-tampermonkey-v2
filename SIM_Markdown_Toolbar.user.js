@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        MAIN v5.1.0 SIM Markdown Toolbar
+// @name        MAIN v5.1.1 SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.0
+// @version      5.1.1
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        none
@@ -16,6 +16,7 @@
     const TOOLBAR_CLASS = "sim-md-toolbar";
     const IMAGE_BUTTON_CLASS = "sim-open-images-btn";
     const DOWNLOAD_BUTTON_CLASS = "sim-download-images-btn";
+    const IMAGE_ACTIONS_CLASS = "sim-image-actions";
     const COLLAPSE_SECTIONS = ["Ticket synopsis", "Announcements"];
     const collapsedSections = new Set();
 
@@ -159,9 +160,19 @@
                 min-width: 180px;
                 height: 24px;
             }
+            .${IMAGE_ACTIONS_CLASS} {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                flex: 0 0 auto;
+                margin-left: 8px;
+                padding: 0;
+                list-style: none;
+            }
+
             .${IMAGE_BUTTON_CLASS},
             .${DOWNLOAD_BUTTON_CLASS} {
-                margin-left: 8px;
+                margin: 0;
                 padding: 2px 8px;
                 height: 24px;
                 font-size: 11px;
@@ -623,8 +634,7 @@
 
         // Keep detection inside the Attachments table/section where possible so an
         // unrelated .jpg link in the ticket body is not accidentally included.
-        const existingButton = document.querySelector("." + IMAGE_BUTTON_CLASS);
-        const label = existingButton ? existingButton.parentElement : findAttachmentsLabel();
+        const label = findAttachmentsLabel();
         const scope =
             (label && label.closest("table")) ||
             (label && label.closest("section")) ||
@@ -680,6 +690,40 @@
         }
 
         return null;
+    }
+
+    function findAuditTrailTab() {
+        const tabs = document.querySelectorAll('[role="tab"]');
+
+        for (const tab of tabs) {
+            if ((tab.textContent || "").trim() === "Audit Trail") return tab;
+        }
+
+        return null;
+    }
+
+    function ensureImageActionsGroup() {
+        let group = document.querySelector("." + IMAGE_ACTIONS_CLASS);
+        const auditTab = findAuditTrailTab();
+
+        if (!auditTab) return null;
+
+        const tabList = auditTab.closest('[role="tablist"]');
+        if (!tabList) return null;
+
+        const auditItem = auditTab.closest('li,[role="presentation"]') || auditTab;
+
+        if (!group) {
+            group = document.createElement("li");
+            group.className = IMAGE_ACTIONS_CLASS;
+            group.setAttribute("role", "presentation");
+        }
+
+        if (group.parentElement !== tabList || group.previousElementSibling !== auditItem) {
+            auditItem.insertAdjacentElement("afterend", group);
+        }
+
+        return group;
     }
 
     function styleGalleryWindow(win, images) {
@@ -855,15 +899,15 @@
         const images = getImageAttachments();
         let openBtn = document.querySelector("." + IMAGE_BUTTON_CLASS);
         let downloadBtn = document.querySelector("." + DOWNLOAD_BUTTON_CLASS);
+        let group = document.querySelector("." + IMAGE_ACTIONS_CLASS);
 
         if (!images.length) {
-            if (openBtn) openBtn.remove();
-            if (downloadBtn) downloadBtn.remove();
+            if (group) group.remove();
             return;
         }
 
-        const label = findAttachmentsLabel();
-        if (!label) return;
+        group = ensureImageActionsGroup();
+        if (!group) return;
 
         if (!openBtn) {
             openBtn = document.createElement("button");
@@ -871,7 +915,9 @@
             openBtn.className = IMAGE_BUTTON_CLASS;
             openBtn.title = "Open all image attachments in one scrollable Firefox gallery window";
             openBtn.addEventListener("click", openImageGallery);
-            label.appendChild(openBtn);
+            group.appendChild(openBtn);
+        } else if (openBtn.parentElement !== group) {
+            group.appendChild(openBtn);
         }
         openBtn.textContent = `Open Images (${images.length})`;
 
@@ -881,7 +927,9 @@
             downloadBtn.className = DOWNLOAD_BUTTON_CLASS;
             downloadBtn.title = "Download all image attachments";
             downloadBtn.addEventListener("click", downloadAllImages);
-            label.appendChild(downloadBtn);
+            group.appendChild(downloadBtn);
+        } else if (downloadBtn.parentElement !== group) {
+            group.appendChild(downloadBtn);
         }
 
         if (!downloadBtn.disabled) {
