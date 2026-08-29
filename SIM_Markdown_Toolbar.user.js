@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name        MAIN v5.1.1 SIM Markdown Toolbar
+// @name        MAIN v5.1.2 SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.1
+// @version      5.1.2
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
-// @grant        none
+// @grant        GM_getValue
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js
 // ==/UserScript==
@@ -13,6 +13,7 @@
     "use strict";
 
     const SNIPPET_KEY = "simMdSnippets_v1";
+    const LEGACY_SNIPPET_KEY = "sim_md_snippets_v1";
     const TOOLBAR_CLASS = "sim-md-toolbar";
     const IMAGE_BUTTON_CLASS = "sim-open-images-btn";
     const DOWNLOAD_BUTTON_CLASS = "sim-download-images-btn";
@@ -95,7 +96,7 @@
         return out;
     }
 
-    function loadSnippets() {
+    function loadCurrentSnippets() {
         const raw = localStorage.getItem(SNIPPET_KEY);
         if (!raw) return [];
         try {
@@ -115,11 +116,86 @@
             } catch (e2) {
                 if (!warnedBadStorage) {
                     warnedBadStorage = true;
-                    console.warn("[SIM MD] Snippet storage is malformed and could not be repaired. Use Import to restore.");
+                    console.warn("[SIM MD] Current snippet storage is malformed; legacy recovery will be attempted.");
                 }
                 return [];
             }
         }
+    }
+
+    function normalizeLegacySnippets(value) {
+        let data = value;
+
+        if (typeof data === "string") {
+            const candidates = [data];
+            if (data.startsWith("s{") || data.startsWith("s[")) candidates.push(data.slice(1));
+
+            data = null;
+            for (const candidate of candidates) {
+                try {
+                    data = JSON.parse(candidate);
+                    break;
+                } catch (_) {}
+            }
+        }
+
+        if (Array.isArray(data)) return normalizeImported(data);
+        if (!data || typeof data !== "object") return [];
+
+        return normalizeImported(
+            Object.entries(data).map(([name, text]) => ({ name, text }))
+        );
+    }
+
+    function loadLegacySnippets() {
+        const found = [];
+
+        // Very old builds used the snake_case key. Check page storage too in case
+        // a browser/profile migration placed the value there.
+        try {
+            const raw = localStorage.getItem(LEGACY_SNIPPET_KEY);
+            if (raw) found.push(...normalizeLegacySnippets(raw));
+        } catch (_) {}
+
+        // Older Tampermonkey backups kept the same key in userscript storage.
+        // Read-only migration: never overwrite or delete the legacy copy.
+        try {
+            if (typeof GM_getValue === "function") {
+                const legacy = GM_getValue(LEGACY_SNIPPET_KEY, null);
+                if (legacy != null) found.push(...normalizeLegacySnippets(legacy));
+            }
+        } catch (_) {}
+
+        const unique = [];
+        const names = new Set();
+        for (const sn of found) {
+            if (names.has(sn.name)) continue;
+            names.add(sn.name);
+            unique.push(sn);
+        }
+        return unique;
+    }
+
+    function loadSnippets() {
+        const current = loadCurrentSnippets();
+        const legacy = loadLegacySnippets();
+        if (!legacy.length) return current;
+
+        const merged = current.slice();
+        const names = new Set(merged.map(sn => sn.name));
+
+        for (const sn of legacy) {
+            if (names.has(sn.name)) continue;
+            names.add(sn.name);
+            merged.push(sn);
+        }
+
+        if (merged.length !== current.length) {
+            localStorage.setItem(SNIPPET_KEY, JSON.stringify(merged));
+            console.info(`[SIM MD] Restored ${merged.length - current.length} legacy snippet(s).`);
+        }
+
+        return merged;
     }
 
     function saveSnippets(v) {
@@ -434,10 +510,10 @@
             if (d) o.disabled=true;
             sel.appendChild(o);
         };
-        opt("","Snippets…");
-        opt("","──────────",true);
+        opt("","Snippets\u2026");
+        opt("","\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",true);
         snippets.forEach((s,i)=>opt("s:"+i,s.name));
-        opt("","──────────",true);
+        opt("","\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",true);
         opt("add","+ Add Snippet");
         opt("manage","Manage Snippets");
         sel.value="";
@@ -742,7 +818,7 @@
         header.style.cssText =
             "position:sticky;top:0;z-index:10;background:#111;padding:4px 0 12px;" +
             "font-weight:600;font-size:14px;";
-        header.textContent = `SIM Attachments — ${images.length} image${images.length === 1 ? "" : "s"}`;
+        header.textContent = `SIM Attachments \u2014 ${images.length} image${images.length === 1 ? "" : "s"}`;
         d.body.appendChild(header);
 
         images.forEach((item, index) => {
@@ -756,7 +832,7 @@
             title.target = "_blank";
             title.rel = "noopener";
             title.textContent = `${index + 1}. ${item.name}`;
-            title.title = "Click: open image • Ctrl+Click: copy displayed filename";
+            title.title = "Click: open image \u2022 Ctrl+Click: copy displayed filename";
             title.style.cssText =
                 "display:block;margin:0 0 8px;color:#8ab4f8;text-decoration:none;" +
                 "font-weight:600;overflow-wrap:anywhere;";
@@ -785,7 +861,7 @@
                 }
 
                 const original = title.textContent;
-                title.textContent = `✓ Copied: ${copyText}`;
+                title.textContent = `\u2713 Copied: ${copyText}`;
                 setTimeout(() => {
                     if (title.isConnected) title.textContent = original;
                 }, 900);
@@ -886,7 +962,7 @@
         }
 
         if (btn) {
-            btn.textContent = `✓ Downloaded (${images.length})`;
+            btn.textContent = `\u2713 Downloaded (${images.length})`;
             setTimeout(() => {
                 if (!btn.isConnected) return;
                 btn.disabled = false;
@@ -956,7 +1032,7 @@
         B("Code",    t=>wrap(t,"`","`"), "Inline code");
         B("CodeBlk", insertCodeBlock, "Fenced code block");
         B("Quote",   t=>prefixLines(t,()=>"> "), "Quote selected line(s)");
-        B("•",       t=>prefixLines(t,()=>"- "), "Bullet selected line(s)");
+        B("\u2022",       t=>prefixLines(t,()=>"- "), "Bullet selected line(s)");
         B("1.",      t=>prefixLines(t,i=>`${i+1}. `), "Number selected line(s)");
         B("Table",   insertTable, "Blank table, or convert selected Excel/tab-separated cells");
         B("HR",      insertHorizontalRule, "Horizontal rule");
