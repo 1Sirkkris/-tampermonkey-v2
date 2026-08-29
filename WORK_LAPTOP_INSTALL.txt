@@ -9,11 +9,11 @@ Disable older copies first.
 04 FCResearch Master v0.1.20
 05 FC-Lite v0.1.58
 06 Stow Andons v5.5.1
-07 Bin Check Overlay v7.4.1
+07 Bin Check Overlay v7.4.2
 08 Dropzone Queue v0.2.17
 10 BWU2 Observability Core v0.1.6
 11 Calm Code v1.3.0
 
-Updater-enabled sources: main a3d57c2.
+Updater-enabled sources: main 71834f0.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.
