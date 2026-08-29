@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v7.4.2 Bin check Overlay — Inventory Snapshot
+// @name         TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.2
-// @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations only for matching P-9 containers.
+// @version      7.4.3
+// @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-idle
@@ -14,11 +14,11 @@
 (() => {
   'use strict';
 
-  if (window.__binOverlay_v742test || location.hash.startsWith('#fcr-tote-checker')) return;
-  window.__binOverlay_v742test = true;
+  if (window.__binOverlay_v743test || location.hash.startsWith('#fcr-tote-checker')) return;
+  window.__binOverlay_v743test = true;
 
-  const VERSION = '7.4.2';
-  const POD_REGEX = /\bP-9-(?:[A-Z]\d{3}){2}\b/i;
+  const VERSION = '7.4.3';
+  const POD_REGEX = /\bP-\d-(?:[A-Z]\d{3}){2}\b/i;
   const FLOORS = ['P2', 'P3', 'P4'];
   const RETRY_DELAY_MS = 2500;
   const MAX_RETRIES = 1;
@@ -307,13 +307,13 @@
         inventoryRows: snapshot.rows.length,
         podRows: state.totalRows,
         pods: state.totalPods,
-        podPrefix: 'P-9'
+        scope: 'filtered-inventory'
       });
 
       refreshOverlay();
 
       if (!state.totalPods) {
-        setStatusText(`Snapshot ${state.snapshotRows} rows • no P-9 bins`);
+        setStatusText(`Snapshot ${state.snapshotRows} rows • no P-level bins`);
         return;
       }
 
@@ -603,7 +603,7 @@
           <span class="p-level-divider" aria-hidden="true"></span>
           <button type="button" id="pLevelLazyBtn">Lazy bin check</button>
         </div>
-        <div class="p-level-muted" id="pLevelOverlayHint">Uses the Inventory rows matching your current filter at click • P-9 bins only.</div>
+        <div class="p-level-muted" id="pLevelOverlayHint">Uses the Inventory rows matching your current filter at click • P-level location bins only.</div>
         <table id="pLevelOverlayTable">
           <thead><tr><th>Floor</th><th>Container</th><th>Qty</th><th>FNSKU</th><th>FcSku</th></tr></thead>
           <tbody></tbody>
@@ -765,7 +765,7 @@
     const remaining = Math.max(total - loaded, 0);
 
     if (!total && state.snapshotSource) {
-      status.textContent = `Snapshot ${state.snapshotRows} rows • no P-9 bins`;
+      status.textContent = `Snapshot ${state.snapshotRows} rows • no P-level bins`;
       return;
     }
 
@@ -823,6 +823,7 @@
     });
 
     document.body.appendChild(textarea);
+    textarea.focus({ preventScroll: true });
     textarea.select();
     textarea.setSelectionRange(0, textarea.value.length);
 
@@ -859,10 +860,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('p-level-overlay-style-v742')) return;
+    if (document.getElementById('p-level-overlay-style-v743')) return;
 
     const style = document.createElement('style');
-    style.id = 'p-level-overlay-style-v742';
+    style.id = 'p-level-overlay-style-v743';
     style.textContent = `
       #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
       #pLevelOverlay[hidden]{display:none}
