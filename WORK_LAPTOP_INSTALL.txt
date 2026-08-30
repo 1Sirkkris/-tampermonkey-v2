@@ -11,9 +11,9 @@ Disable older copies first.
 06 Stow Andons v5.5.1
 07 Bin Check Overlay v7.4.3
 08 Dropzone Queue v0.2.17
-10 BWU2 Observability Core v0.1.6
+10 BWU2 Observability Core v0.1.7
 11 Calm Code v1.3.0
 
-Updater-enabled sources: main 1b01ef7.
+Updater-enabled sources: main 714c95e.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.
