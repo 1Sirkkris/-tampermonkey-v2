@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloud Write Test</title>
+<style>
+  :root{
+    --bg:#eef1f5;
+    --card:#ffffff;
+    --ink:#232f3e;
+    --muted:#5f6b78;
+    --accent:#ff9900;
+    --good:#2f7a45;
+    --bad:#9b3838;
+    --warn:#8a5a00;
+    --border:#c7ced7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{width:min(820px,94vw);margin:36px auto}
+  h1{margin:0 0 6px;font-size:28px}
+  .sub{margin:0 0 18px;color:var(--muted);font-weight:700;line-height:1.45}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{border:0;border-radius:8px;padding:11px 16px;background:var(--ink);color:white;font-weight:900;cursor:pointer}
+  button.primary{background:var(--accent)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .status{margin-top:14px;padding:11px 12px;border-radius:8px;background:#f4f6f8;font-weight:800;white-space:pre-wrap;line-height:1.45}
+  .status.good{color:var(--good)}
+  .status.bad{color:var(--bad)}
+  .status.warn{color:var(--warn)}
+  .meta{margin-top:12px;font-size:12px;color:var(--muted);line-height:1.5;word-break:break-all}
+  pre{margin:14px 0 0;padding:12px;border:1px solid var(--border);border-radius:9px;background:#f8fafb;white-space:pre-wrap;word-break:break-word;font:13px/1.4 Consolas,monospace;min-height:80px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cloud Write Test</h1>
+  <p class="sub">
+    Disposable test only. Reads and attempts to overwrite the sibling file
+    <strong>Cloud_Write_Test_Data.json</strong>. Nothing else is touched.
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <button id="readBtn" type="button">Read Test File</button>
+      <button id="writeBtn" class="primary" type="button">Test Write</button>
+    </div>
+
+    <div id="status" class="status">Not tested yet.</div>
+
+    <div class="meta">
+      Page protocol: <span id="protocol"></span><br>
+      Page location: <span id="pageUrl"></span><br>
+      Write target: <span id="targetUrl"></span>
+    </div>
+
+    <pre id="output">No data loaded yet.</pre>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var TARGET = "Cloud_Write_Test_Data.json";
+  var readBtn = document.getElementById("readBtn");
+  var writeBtn = document.getElementById("writeBtn");
+  var status = document.getElementById("status");
+  var output = document.getElementById("output");
+
+  document.getElementById("protocol").textContent = location.protocol;
+  document.getElementById("pageUrl").textContent = location.href;
+  document.getElementById("targetUrl").textContent = new URL(TARGET, location.href).href;
+
+  function setStatus(message, type){
+    status.className = "status" + (type ? " " + type : "");
+    status.textContent = message;
+  }
+
+  function show(value){
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  async function readFile(){
+    var response = await fetch(TARGET, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin"
+    });
+
+    if(!response.ok){
+      throw new Error("GET failed: HTTP " + response.status + " " + response.statusText);
+    }
+
+    var data = await response.json();
+    return {
+      data: data,
+      etag: response.headers.get("ETag") || ""
+    };
+  }
+
+  async function runRead(){
+    readBtn.disabled = true;
+    writeBtn.disabled = true;
+    setStatus("Reading...", "");
+
+    try{
+      var current = await readFile();
+      show(current.data);
+      setStatus("READ SUCCESS — sibling JSON fetched.", "good");
+    }catch(err){
+      setStatus("READ FAILED — " + String(err && err.message ? err.message : err), "bad");
+    }finally{
+      readBtn.disabled = false;
+      writeBtn.disabled = false;
+    }
+  }
+
+  async function runWrite(){
+    readBtn.disabled = true;
+    writeBtn.disabled = true;
+    setStatus("Reading current file before write...", "");
+
+    try{
+      var current = await readFile();
+      var marker = "cloud-write-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+
+      var next = current.data && typeof current.data === "object" ? current.data : {};
+      next.write_test = {
+        marker: marker,
+        saved_at: new Date().toISOString()
+      };
+
+      var headers = {
+        "Content-Type": "application/json;charset=UTF-8"
+      };
+      if(current.etag) headers["If-Match"] = current.etag;
+
+      setStatus("Attempting one PUT to the disposable test JSON...", "warn");
+
+      var response = await fetch(TARGET, {
+        method: "PUT",
+        headers: headers,
+        body: JSON.stringify(next, null, 2),
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+
+      var bodyPreview = "";
+      try{
+        bodyPreview = (await response.text()).slice(0, 500);
+      }catch(ignore){}
+
+      if(!response.ok){
+        show({
+          method: "PUT",
+          status: response.status,
+          statusText: response.statusText,
+          allow: response.headers.get("Allow") || "",
+          responsePreview: bodyPreview
+        });
+        throw new Error("PUT rejected: HTTP " + response.status + " " + response.statusText);
+      }
+
+      setStatus("PUT returned success. Re-reading to prove it actually persisted...", "warn");
+
+      await new Promise(function(resolve){ setTimeout(resolve, 350); });
+      var verify = await readFile();
+      show(verify.data);
+
+      if(verify.data && verify.data.write_test && verify.data.write_test.marker === marker){
+        setStatus("WRITE SUCCESS — PUT persisted and re-read matched. Shared template editing is viable.", "good");
+      }else{
+        setStatus("WRITE NOT PROVEN — PUT looked successful, but re-read did not contain the saved marker.", "bad");
+      }
+    }catch(err){
+      if(!/^WRITE NOT PROVEN/.test(status.textContent)){
+        setStatus(
+          "WRITE FAILED — " + String(err && err.message ? err.message : err) +
+          "\n\nSend me a screenshot of this page. No DevTools needed.",
+          "bad"
+        );
+      }
+    }finally{
+      readBtn.disabled = false;
+      writeBtn.disabled = false;
+    }
+  }
+
+  readBtn.addEventListener("click", runRead);
+  writeBtn.addEventListener("click", runWrite);
+})();
+</script>
+</body>
+</html>
