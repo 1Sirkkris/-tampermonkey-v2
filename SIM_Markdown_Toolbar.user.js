@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        MAIN v5.1.2 SIM Markdown Toolbar
+// @name        MAIN v5.1.3 SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.2
+// @version      5.1.3
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -14,6 +14,7 @@
 
     const SNIPPET_KEY = "simMdSnippets_v1";
     const LEGACY_SNIPPET_KEY = "sim_md_snippets_v1";
+    const LEGACY_MIGRATION_KEY = "simMdSnippetsLegacyMigrated_v1";
     const TOOLBAR_CLASS = "sim-md-toolbar";
     const IMAGE_BUTTON_CLASS = "sim-open-images-btn";
     const DOWNLOAD_BUTTON_CLASS = "sim-download-images-btn";
@@ -176,8 +177,24 @@
         return unique;
     }
 
+    function legacyMigrationComplete() {
+        try {
+            return localStorage.getItem(LEGACY_MIGRATION_KEY) === "1";
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function markLegacyMigrationComplete() {
+        try {
+            localStorage.setItem(LEGACY_MIGRATION_KEY, "1");
+        } catch (_) {}
+    }
+
     function loadSnippets() {
         const current = loadCurrentSnippets();
+        if (legacyMigrationComplete()) return current;
+
         const legacy = loadLegacySnippets();
         if (!legacy.length) return current;
 
@@ -195,12 +212,18 @@
             console.info(`[SIM MD] Restored ${merged.length - current.length} legacy snippet(s).`);
         }
 
+        // Legacy recovery is a one-time migration. Without this marker, deleting
+        // a snippet makes the old legacy copy appear again on the next refresh.
+        markLegacyMigrationComplete();
         return merged;
     }
 
     function saveSnippets(v) {
         const clean = normalizeImported(v || []);
         localStorage.setItem(SNIPPET_KEY, JSON.stringify(clean));
+        // Any explicit add/edit/delete/import makes the current store authoritative.
+        // Do not silently resurrect older legacy entries after the user's change.
+        markLegacyMigrationComplete();
         snippets = clean;
         refreshAllSnippetSelects();
     }
