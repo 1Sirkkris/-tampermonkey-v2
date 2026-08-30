@@ -1,0 +1,16 @@
+// ==UserScript==
+// @name         DIAG v0.1.0 Drive Bridge Probe
+// @namespace    MONKIES
+// @version      0.1.0
+// @description  TXT install wrapper for the disposable Drive bridge diagnostic.
+// @match        https://t.corp.amazon.com/*
+// @match        https://sim.amazon.com/*
+// @grant        GM_xmlhttpRequest
+// @connect      drive-render.corp.amazon.com
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Bridge_Probe.user.js?v=0.1.0
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Bridge_Probe.txt
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Bridge_Probe.txt
+// @run-at       document-end
+// ==/UserScript==
+
+// The diagnostic implementation is loaded from the canonical GitHub .user.js above.
