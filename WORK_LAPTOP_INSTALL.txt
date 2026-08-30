@@ -3,17 +3,17 @@ WORK LAPTOP PACK
 Install these 10 scripts in Tampermonkey and enable all 10.
 Disable older copies first.
 
-01 Sideline v0.2.3
-02 AFT Edit-SKU-Move v0.9.11
-03 FCR Data Core v0.2.10
+01 Sideline v0.2.4
+02 AFT Edit-SKU-Move v0.9.12
+03 FCR Data Core v0.2.11
 04 FCResearch Master v0.1.20
-05 FC-Lite v0.1.58
+05 FC-Lite v0.1.59
 06 Stow Andons v5.5.1
 07 Bin Check Overlay v7.4.3
-08 Dropzone Queue v0.2.17
-10 BWU2 Observability Core v0.1.7
-11 Calm Code v1.3.0
+08 Dropzone Queue v0.2.18
+10 BWU2 Observability Core v0.1.8
+11 Calm Code v1.3.1
 
-Updater-enabled sources: main 714c95e.
+Updater-enabled sources: main 4a51e89.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.

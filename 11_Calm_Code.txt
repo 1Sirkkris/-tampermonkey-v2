@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN v1.3.0 Calm Code
-// @version      1.3.0
+// @name       MAIN v1.3.1 Calm Code
+// @version      1.3.1
 // @description Adds Calm Code Buttons into the FCLM Labor Tracking Kiosk for AFE. Initial code from jeickels@, dkingamz@ & salloumr@
 // @author      @blelliot and @nichpres edit by @phanmpet
 // @match      https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*
@@ -14,6 +14,13 @@
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js
 // ==/UserScript==
+(() => {
+'use strict';
+const CALM_VERSION = '1.3.1';
+const CALM_GUARD_ATTR = 'data-bwu2-calm-code';
+if (document.documentElement.hasAttribute(CALM_GUARD_ATTR)) return;
+document.documentElement.setAttribute(CALM_GUARD_ATTR, CALM_VERSION);
+
 var css = document.createElement("style");
 css.innerHTML += `
 * {
@@ -128,3 +135,4 @@ Array.from(document.querySelectorAll('#body > #toolbox > .row > .roles > button'
         document.forms[0].submit()
     })
 })
+})();

@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.3 Sideline API Move TEST
+// @name         MAIN v0.2.4 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.3
+// @version      0.2.4
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.3';
+  const VERSION = '0.2.4';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -4178,12 +4178,26 @@
     };
 
     let expiryRaf = 0;
+    let recoveryTimer = 0;
+    let recoveryUntil = 0;
     const scheduleNativeExpiry = () => {
       if (expiryRaf) return;
       expiryRaf = requestAnimationFrame(() => {
         expiryRaf = 0;
         nativeExpiryTick();
       });
+    };
+
+    const armRecoveryWatchdog = (durationMs = 12000) => {
+      recoveryUntil = Math.max(recoveryUntil, Date.now() + durationMs);
+      if (recoveryTimer) return;
+      const poll = () => {
+        recoveryTimer = 0;
+        screenDirty = true;
+        nativeExpiryTick();
+        if (Date.now() < recoveryUntil) recoveryTimer = setTimeout(poll, 500);
+      };
+      recoveryTimer = setTimeout(poll, 500);
     };
 
     const observer = new MutationObserver(mutations => {
@@ -4207,10 +4221,25 @@
       attributeFilter:['hidden','aria-hidden']
     });
 
-    setInterval(() => {
-      screenDirty = true;
-      nativeExpiryTick();
-    }, 1000);
+    const recoverAfterInteraction = event => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(helperSelector)) return;
+      armRecoveryWatchdog();
+    };
+    for (const type of ['keydown', 'input', 'change', 'click']) {
+      document.addEventListener(type, recoverAfterInteraction, true);
+    }
+    window.addEventListener('pageshow', () => armRecoveryWatchdog(15000));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) armRecoveryWatchdog(8000);
+    });
+    window.addEventListener('pagehide', () => {
+      observer.disconnect();
+      if (expiryRaf) cancelAnimationFrame(expiryRaf);
+      clearTimeout(recoveryTimer);
+    }, { once:true });
+
+    armRecoveryWatchdog(15000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
