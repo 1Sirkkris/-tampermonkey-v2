@@ -1,19 +1,11 @@
 // ==UserScript==
-// @name         DIAG v0.1.0 Drive Auto Upload Probe
+// @name         DIAG v0.2.0 Drive Auto Upload Probe
 // @namespace    MONKIES
-// @version      0.1.0
+// @version      0.2.0
 // @description  TXT installer for the Drive auto-upload diagnostic.
 // @match        https://drive.corp.amazon.com/*
-// @match        https://t.corp.amazon.com/*
-// @match        https://sim.amazon.com/*
-// @grant        unsafeWindow
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_deleteValue
-// @grant        GM_xmlhttpRequest
-// @connect      drive.corp.amazon.com
-// @connect      document-versions-production.s3.us-west-2.amazonaws.com
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Auto_Upload_Probe.user.js?v=0.1.0
+// @grant        none
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Auto_Upload_Probe.user.js?v=0.2.0
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Auto_Upload_Probe.txt
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Auto_Upload_Probe.txt
 // @run-at       document-start
