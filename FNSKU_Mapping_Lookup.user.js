@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN v1.3.2-test FNSKU mapping Lookup
-// @version      1.3.2-test
+// @name       MAIN v1.3.3-test FNSKU mapping Lookup
+// @version      1.3.3-test
 // @description  Read-only regional FNSKU lookup with HOME merchant/MSKU details, JP fallback and matched JP/AU candidates.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.2-test';
+  const VERSION = '1.3.3-test';
   const GUARD_ATTR = 'data-bwu2-fnsku-mapping-lookup';
   if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
   document.documentElement.setAttribute(GUARD_ATTR, VERSION);
@@ -189,14 +189,65 @@
     return /sign\s*in|sso\/login|is_authenticated/i.test(html) && !/fnsku-table/i.test(html);
   }
 
-  function hasNextPage(html) {
-    if (!html) return false;
+  function nextPageInfo(html, currentUrl) {
+    if (!html) return { hasNext: false, url: '' };
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    return Array.from(doc.querySelectorAll('a,button,input[type="button"],input[type="submit"]')).some(element => {
+    const controls = Array.from(doc.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+    const next = controls.find(element => {
       const label = String(element.textContent || element.value || '').replace(/\s+/g, ' ').trim();
       const disabled = element.disabled || element.getAttribute('aria-disabled') === 'true' || element.classList.contains('disabled');
       return !disabled && /^next\s*>?$/i.test(label);
     });
+
+    if (!next) return { hasNext: false, url: '' };
+
+    const href = next.getAttribute('href');
+    if (href && !/^javascript:/i.test(href)) {
+      try {
+        return { hasNext: true, url: new URL(href, currentUrl).toString() };
+      } catch (_) {}
+    }
+
+    const form = next.closest('form') || (next.getAttribute('form') ? doc.getElementById(next.getAttribute('form')) : null);
+    if (form && String(form.getAttribute('method') || 'get').toLowerCase() === 'get') {
+      try {
+        const url = new URL(next.getAttribute('formaction') || form.getAttribute('action') || currentUrl, currentUrl);
+        const params = new URLSearchParams();
+
+        Array.from(form.querySelectorAll('input,select,textarea,button')).forEach(control => {
+          if (!control.name || control.disabled) return;
+          const tag = control.tagName.toLowerCase();
+          const type = String(control.getAttribute('type') || '').toLowerCase();
+
+          if (control === next) {
+            params.append(control.name, control.value || control.textContent || '');
+            return;
+          }
+          if (tag === 'button' || type === 'submit' || type === 'button' || type === 'reset' || type === 'file') return;
+          if ((type === 'checkbox' || type === 'radio') && !control.checked) return;
+
+          if (tag === 'select') {
+            Array.from(control.options || []).filter(option => option.selected).forEach(option => params.append(control.name, option.value));
+          } else {
+            params.append(control.name, control.value || '');
+          }
+        });
+
+        url.search = params.toString();
+        return { hasNext: true, url: url.toString() };
+      } catch (_) {}
+    }
+
+    const tokenInput = doc.querySelector('input[name="paginationToken"], textarea[name="paginationToken"]');
+    if (tokenInput && tokenInput.value) {
+      try {
+        const url = new URL(currentUrl);
+        url.searchParams.set('paginationToken', tokenInput.value);
+        return { hasNext: true, url: url.toString() };
+      } catch (_) {}
+    }
+
+    return { hasNext: true, url: '' };
   }
 
   async function lookupFnsku(region, fnsku) {
@@ -217,21 +268,59 @@
   }
 
   async function lookupJpAsin(asin) {
-    const url = buildGetUrl('jp', 'ASIN_MAPPINGS', { asin });
-    const response = await gmGet(url, 'JP ASIN');
-    const rows = parseRows(response.text);
+    const MAX_PAGES = 50;
+    let nextUrl = buildGetUrl('jp', 'ASIN_MAPPINGS', { asin });
+    let page = 0;
+    let elapsedMs = 0;
+    let truncated = false;
+    const seenUrls = new Set();
+    const allRows = [];
 
-    if (!rows.length && looksLikeLoginHtml(response.text)) {
-      throw new Error('JP: authentication response instead of results');
+    while (nextUrl && page < MAX_PAGES) {
+      if (seenUrls.has(nextUrl)) {
+        truncated = true;
+        debug('JP_PAGINATION_LOOP', { asin, page: page + 1, nextUrl });
+        break;
+      }
+      seenUrls.add(nextUrl);
+
+      page += 1;
+      const response = await gmGet(nextUrl, `JP ASIN p${page}`);
+      elapsedMs += response.elapsedMs;
+      const pageRows = parseRows(response.text);
+
+      if (!pageRows.length && looksLikeLoginHtml(response.text)) {
+        throw new Error('JP: authentication response instead of results');
+      }
+
+      allRows.push(...pageRows);
+
+      const pageInfo = nextPageInfo(response.text, response.finalUrl || nextUrl);
+      if (!pageInfo.hasNext) {
+        nextUrl = '';
+        break;
+      }
+      if (!pageInfo.url) {
+        truncated = true;
+        debug('JP_PAGINATION_UNRESOLVED', { asin, page });
+        nextUrl = '';
+        break;
+      }
+
+      nextUrl = pageInfo.url;
     }
 
-    const exact = rows.filter(r => r.asin === asin);
-    const usable = exact.length ? exact : rows;
+    if (nextUrl && page >= MAX_PAGES) {
+      truncated = true;
+      debug('JP_PAGINATION_LIMIT', { asin, page, maxPages: MAX_PAGES });
+    }
+
+    const exact = allRows.filter(r => r.asin === asin);
+    const usable = uniqueRows(exact.length ? exact : allRows);
     const fnskus = unique(usable.map(r => r.fnsku));
 
-    const hasNext = hasNextPage(response.text);
-    debug('JP_RESULT', { asin, rows: usable.length, fnskus, hasNext });
-    return { region: 'jp', rows: usable, fnskus, hasNext, elapsedMs: response.elapsedMs };
+    debug('JP_RESULT', { asin, pages: page, rows: usable.length, fnskus, truncated });
+    return { region: 'jp', rows: usable, fnskus, hasNext: truncated, pages: page, elapsedMs };
   }
 
   function setStatus(html, kind = 'normal') {
@@ -337,6 +426,22 @@
     return `<div class="fnsku-table-wrap"><table class="fnsku-map-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function renderDirectAsin(result) {
+    const { asin, jpMappings, jpHasNext, jpPages, totalMs } = result;
+    const rows = uniqueRows(jpMappings.map(row => ({ ...row, region: 'JP' })));
+
+    setStatus(
+      `<div class="fnsku-line"><span>Source</span>${resultPill(asin)}</div>` +
+      '<div class="fnsku-line"><span>Type</span><b>ASIN</b></div>' +
+      '<div class="fnsku-line"><span>Found</span><b>JP / AU</b></div>' +
+      `<div class="fnsku-section-title">JP / AU mappings (${rows.length})</div>` +
+      mappingTable(rows) +
+      (jpHasNext ? '<div class="fnsku-page-warning"><b>More JP/AU results exist but pagination could not be completed safely.</b> Results above may be incomplete.</div>' : '') +
+      `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · ${jpPages} page${jpPages === 1 ? '' : 's'} · click any ID to copy</div>`,
+      rows.length ? 'success' : 'warn'
+    );
+  }
+
   function renderSuccess(result) {
     const { sourceFnsku, sourceRegions, asin, sourceMappings, jpMappings, jpHasNext, totalMs } = result;
     const regionText = sourceRegions.join(' + ');
@@ -355,7 +460,7 @@
       `<div class="fnsku-section-title">JP / AU candidates (${candidates.length})</div>` +
       `<div class="fnsku-match-note">${comparison}</div>` +
       mappingTable(candidates, { candidate: true }) +
-      (jpHasNext ? '<div class="fnsku-page-warning"><b>More JP/AU results exist after this batch.</b> No match here is not a final no-match.</div>' : '') +
+      (jpHasNext ? '<div class="fnsku-page-warning"><b>More JP/AU results exist but pagination could not be completed safely.</b> Results above may be incomplete.</div>' : '') +
       `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · click any ID to copy</div>`,
       candidates.length ? 'success' : 'warn'
     );
@@ -402,15 +507,15 @@
     const input = document.getElementById('fnsku-direct-input');
     if (!input || state.running) return;
 
-    const sourceFnsku = input.value.trim().toUpperCase();
-    if (!sourceFnsku) {
-      setStatus('Scan / paste source FNSKU first.', 'warn');
+    const sourceCode = input.value.trim().toUpperCase();
+    if (!sourceCode) {
+      setStatus('Scan / paste source FNSKU or ASIN first.', 'warn');
       input.focus();
       return;
     }
 
-    if (!/^[A-Z0-9]{10,}$/.test(sourceFnsku)) {
-      setStatus(`Suspicious barcode: <b>${escapeHtml(sourceFnsku)}</b>`, 'warn');
+    if (!/^[A-Z0-9]{10,}$/.test(sourceCode)) {
+      setStatus(`Suspicious barcode: <b>${escapeHtml(sourceCode)}</b>`, 'warn');
       input.focus();
       return;
     }
@@ -421,17 +526,60 @@
       return;
     }
 
+    const directAsin = /^B0[A-Z0-9]{8}$/.test(sourceCode);
     state.running = true;
     state.runId += 1;
     const myRun = state.runId;
     state.debug = [];
     const started = performance.now();
-    debug('RUN_START', { sourceFnsku, pageRegion: currentRegion(), tokenPresent: true });
+    debug('RUN_START', {
+      sourceCode,
+      inputType: directAsin ? 'ASIN' : 'FNSKU',
+      pageRegion: currentRegion(),
+      tokenPresent: true,
+    });
 
     setBusy(true);
-    setStatus(`Looking up <b>${escapeHtml(sourceFnsku)}</b> in NA + EU simultaneously...`);
 
     try {
+      if (directAsin) {
+        setStatus(`ASIN detected: <b>${escapeHtml(sourceCode)}</b>.<br>Querying JP / AU mappings directly...`);
+
+        const jp = await lookupJpAsin(sourceCode);
+        if (myRun !== state.runId) return;
+
+        const totalMs = performance.now() - started;
+        state.lastResult = {
+          mode: 'asin-direct',
+          asin: sourceCode,
+          jpMappings: jp.rows,
+          jpFnskus: jp.fnskus,
+          jpHasNext: jp.hasNext,
+          jpPages: jp.pages,
+          totalMs,
+        };
+
+        debug('RUN_SUCCESS_ASIN_DIRECT', {
+          asin: sourceCode,
+          jpMappings: jp.rows.length,
+          jpFnskus: jp.fnskus.length,
+          jpPages: jp.pages,
+          jpHasNext: jp.hasNext,
+          totalMs,
+        });
+
+        if (!jp.rows.length) {
+          setStatus(`<b>No JP / AU mappings found for ASIN ${escapeHtml(sourceCode)}.</b>`, 'warn');
+          return;
+        }
+
+        renderDirectAsin(state.lastResult);
+        return;
+      }
+
+      const sourceFnsku = sourceCode;
+      setStatus(`Looking up <b>${escapeHtml(sourceFnsku)}</b> in NA + EU simultaneously...`);
+
       const settled = await Promise.allSettled([
         lookupFnsku('na', sourceFnsku),
         lookupFnsku('eu', sourceFnsku),
@@ -528,6 +676,7 @@
         jpMappings: jp.rows,
         jpFnskus,
         jpHasNext: jp.hasNext,
+        jpPages: jp.pages,
         totalMs,
       };
       debug('RUN_SUCCESS', {
@@ -537,6 +686,7 @@
         homeMappings: sourceMappings.length,
         jpMappings: jp.rows.length,
         jpFnskus: jpFnskus.length,
+        jpPages: jp.pages,
         jpHasNext: jp.hasNext,
         totalMs,
       });
@@ -652,7 +802,7 @@
         <div class="fnsku-title">FNSKU Direct Lookup v${VERSION}</div>
         <div class="fnsku-region">${currentRegion().toUpperCase()}</div>
       </div>
-      <input id="fnsku-direct-input" autocomplete="off" placeholder="Scan / paste source FNSKU">
+      <input id="fnsku-direct-input" autocomplete="off" placeholder="Scan / paste FNSKU or ASIN">
       <div class="fnsku-row">
         <button class="fnsku-btn primary" id="fnsku-direct-run" type="button">LOOKUP</button>
         <button class="fnsku-btn" id="fnsku-direct-clear" type="button">CLEAR</button>
@@ -663,7 +813,7 @@
         <button class="fnsku-btn" data-go="eu" type="button">Go EU</button>
         <button class="fnsku-btn" data-go="jp" type="button">Go JP</button>
       </div>
-      <div id="fnsku-direct-status">Ready. Checks NA + EU first, then JP/AU automatically when no mapping is found.</div>
+      <div id="fnsku-direct-status">Ready. ASIN scans go direct to JP/AU; FNSKU scans check NA + EU first, then JP/AU.</div>
       <div class="fnsku-small">TEST build · read-only GET requests · no automatic region hopping</div>
     `;
 
