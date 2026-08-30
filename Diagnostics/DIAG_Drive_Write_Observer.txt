@@ -1,0 +1,14 @@
+// ==UserScript==
+// @name         DIAG v0.1.0 Drive Write Observer
+// @namespace    MONKIES
+// @version      0.1.0
+// @description  TXT installer for the passive Drive UI write observer.
+// @match        https://drive.corp.amazon.com/*
+// @grant        none
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Write_Observer.user.js?v=0.1.0
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Write_Observer.txt
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/DIAG_Drive_Write_Observer.txt
+// @run-at       document-start
+// ==/UserScript==
+
+// Diagnostic implementation loads from canonical GitHub source above.
