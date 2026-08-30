@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "purpose": "Disposable Tampermonkey <-> Drive bridge probe",
+  "read_marker": "BWU2_DRIVE_BRIDGE_READ_OK",
+  "write_test": null
+}
