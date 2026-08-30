@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "name": "Write Test Template",
+      "text": "Disposable test data only."
+    }
+  ],
+  "write_test": null
+}
