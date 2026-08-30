@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.7 BWU2 Observability Core
+// @name         CORE v0.1.8 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.7
+// @version      0.1.8
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -16,6 +16,8 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_listValues
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js
 // ==/UserScript==
@@ -23,15 +25,15 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
   const COUNT_PREFIX = `${PREFIX}count:`;
+  const REVISION_KEY = `${PREFIX}revision`;
   const MAX_EVENTS = 3000;
   const WARN_AT = Math.floor(MAX_EVENTS * 0.80);
   const FLUSH_MS = 300;
-  const COUNT_REFRESH_MS = 500;
   const MAX_BODY_CHARS = 5000;
   const MUTATION_REPORT_MS = 10000;
   const EVENT_LOOP_WARN_MS = 500;
@@ -59,6 +61,7 @@
   const NOISE_PATH = /(?:^|\/)logger(?:$|[/?#])/i;
   const FCR_HOST = /(?:fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app)/i;
   const SIM_HOST = /^t\.corp\.amazon\.com$/i;
+  const CARTON_HOST = /^aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com$/i;
 
   const pageId = randomId('p_');
   let meta = loadMeta();
@@ -69,7 +72,6 @@
   let flushTimer = 0;
   let eventSeq = 0;
   let lastHref = location.href;
-  let lastCountReadAt = 0;
   let lastGlobalCount = 0;
   let full = false;
   let mutationObserver = null;
@@ -79,7 +81,8 @@
   let uiRoot = null;
   let uiCount = null;
   let uiClear = null;
-  let uiTimer = 0;
+  let countSyncTimer = 0;
+  let countListenerId = null;
   let lastEventLoopLogAt = 0;
   let visibilityTimer = 0;
   let visibilityReportTimer = 0;
@@ -105,6 +108,14 @@
   function gmSet(key, value) { try { GM_setValue(key, value); return true; } catch { return false; } }
   function gmDelete(key) { try { GM_deleteValue(key); } catch {} }
   function gmKeys() { try { return GM_listValues() || []; } catch { return []; } }
+  function gmListen(key, callback) {
+    try { return typeof GM_addValueChangeListener === 'function' ? GM_addValueChangeListener(key, callback) : null; }
+    catch { return null; }
+  }
+  function gmUnlisten(id) {
+    try { if (id != null && typeof GM_removeValueChangeListener === 'function') GM_removeValueChangeListener(id); }
+    catch {}
+  }
 
   function randomId(prefix = '') {
     try {
@@ -158,7 +169,6 @@
     eventSeq = 0;
     pageStoreKey = pageKey(activeSessionId);
     pageCountKey = countKey(activeSessionId);
-    lastCountReadAt = 0;
     lastGlobalCount = 0;
     full = false;
     mutationStats = emptyMutationStats();
@@ -187,8 +197,7 @@
 
   function sessionCount(force = false) {
     syncSession();
-    const now = Date.now();
-    if (!force && now - lastCountReadAt < COUNT_REFRESH_MS) return lastGlobalCount;
+    if (!force) return lastGlobalCount;
 
     let total = 0;
     const prefix = `${COUNT_PREFIX}${activeSessionId}:`;
@@ -196,7 +205,6 @@
       if (key.startsWith(prefix)) total += Math.max(0, Number(gmGet(key, 0)) || 0);
     }
 
-    lastCountReadAt = now;
     lastGlobalCount = total;
     full = total >= MAX_EVENTS;
     return total;
@@ -333,6 +341,11 @@
     const url = parsedUrl(rawUrl);
     if (SIM_HOST.test(location.hostname)) return false;
     if (url && FCR_HOST.test(url.hostname)) return false;
+    if (
+      CARTON_HOST.test(location.hostname) &&
+      url?.origin === location.origin &&
+      !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname)
+    ) return true;
     if (url) return DETAILED_PATH.test(url.pathname);
     return DETAILED_PATH.test(String(rawUrl || ''));
   }
@@ -551,6 +564,7 @@
         events: pageEvents
       }));
       gmSet(pageCountKey, pageEvents.length);
+      gmSet(REVISION_KEY, `${activeSessionId}:${pageId}:${eventSeq}:${Date.now()}`);
     } catch {}
   }
 
@@ -659,7 +673,6 @@
     pageCountKey = countKey(activeSessionId);
     gmSet(pageCountKey, 0);
     lastGlobalCount = 0;
-    lastCountReadAt = Date.now();
     full = false;
     mutationStats = emptyMutationStats();
     fcrNetworkStats = new Map();
@@ -1048,6 +1061,7 @@
   }
 
   function installMutationHealth() {
+    if (!isFCResearch()) return;
     const start = () => {
       if (!document.documentElement || mutationObserver) return;
 
@@ -1462,8 +1476,21 @@
       start();
     }
 
-    uiTimer = setInterval(() => renderUi(true), 1000);
   }
+
+  function bootCountSync() {
+    sessionCount(true);
+    countListenerId = gmListen(REVISION_KEY, () => {
+      clearTimeout(countSyncTimer);
+      countSyncTimer = setTimeout(() => {
+        countSyncTimer = 0;
+        sessionCount(true);
+        renderUi();
+      }, 80);
+    });
+  }
+
+  bootCountSync();
 
   add('page.start', {
     version: VERSION,
@@ -1505,6 +1532,7 @@
     if (performanceObserver) performanceObserver.disconnect();
     if (mutationTimer) clearInterval(mutationTimer);
     if (eventLoopTimer) clearInterval(eventLoopTimer);
-    if (uiTimer) clearInterval(uiTimer);
+    clearTimeout(countSyncTimer);
+    gmUnlisten(countListenerId);
   }, { once: true });
 })();

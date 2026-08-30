@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        MAIN v5.1.4 SIM Markdown Toolbar
+// @name        MAIN v5.1.5 SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.4
+// @version      5.1.5
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -11,6 +11,11 @@
 
 (function () {
     "use strict";
+
+    const VERSION = "5.1.5";
+    const GUARD_ATTR = "data-bwu2-sim-markdown-toolbar";
+    if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
+    document.documentElement.setAttribute(GUARD_ATTR, VERSION);
 
     const SNIPPET_KEY = "simMdSnippets_v1";
     const LEGACY_SNIPPET_KEY = "sim_md_snippets_v1";

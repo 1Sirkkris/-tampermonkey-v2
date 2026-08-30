@@ -1,10 +1,9 @@
 // ==UserScript==
-// @name         TEST v0.2.17 Dropzone Selector Queue
+// @name         TEST v0.2.18 Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.2.17
+// @version      0.2.18
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
-// @match        aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/move-container*
-// @match        aft-moveapp-*.proxy.amazon.com/move-container*
+// @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
@@ -14,7 +13,10 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.17';
+  const VERSION = '0.2.18';
+  const GUARD_ATTR = 'data-bwu2-dropzone-selector-queue';
+  if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
+  document.documentElement.setAttribute(GUARD_ATTR, VERSION);
 
   const STORAGE_DZ = 'moveapp_dz_selector_type_v021';
   const STORAGE_FLOOR = 'moveapp_dz_selector_floor_v021';
@@ -797,14 +799,14 @@
   function colorForFloor(floor) {
     if (floor === 'P1') return '#7a5b9e';
     if (floor === 'P2') return '#2f5d9f';
-    if (floor === 'P3') return '#2f7d46';
-    if (floor === 'P4') return '#a03535';
+    if (floor === 'P3') return '#8a5a00';
+    if (floor === 'P4') return '#7b2f8e';
     return '#555';
   }
 
   function mkBtn(text, active, color, disabled = false) {
     const btn = document.createElement('button');
-    btn.textContent = text;
+    btn.textContent = `${active ? '✓ ' : ''}${text}`;
     btn.style.cssText = [
       'border:0',
       'border-radius:7px',
@@ -1098,15 +1100,40 @@
     characterData: true
   });
 
-  const fallbackTick = setInterval(tick, 1000);
-  window.addEventListener('pageshow', scheduleTick);
+  let recoveryTimer = 0;
+  let recoveryUntil = 0;
+  const armRecoveryWatchdog = (durationMs = 8000) => {
+    recoveryUntil = Math.max(recoveryUntil, Date.now() + durationMs);
+    if (recoveryTimer) return;
+    const poll = () => {
+      recoveryTimer = 0;
+      tick();
+      if (Date.now() < recoveryUntil) recoveryTimer = setTimeout(poll, 500);
+    };
+    recoveryTimer = setTimeout(poll, 500);
+  };
+
+  const recoverAfterInteraction = event => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('#moveapp-dz-selector')) return;
+    armRecoveryWatchdog();
+  };
+
+  for (const type of ['keydown', 'input', 'change', 'click']) {
+    document.addEventListener(type, recoverAfterInteraction, true);
+  }
+  window.addEventListener('pageshow', () => {
+    scheduleTick();
+    armRecoveryWatchdog(12000);
+  });
   document.addEventListener('DOMContentLoaded', scheduleTick, { once: true });
   window.addEventListener('pagehide', () => {
     moveObserver.disconnect();
     clearTimeout(tickTimer);
-    clearInterval(fallbackTick);
+    clearTimeout(recoveryTimer);
   }, { once: true });
 
   scheduleTick();
+  armRecoveryWatchdog(12000);
 
 })();

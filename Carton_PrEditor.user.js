@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name       MAIN  v7.2 Carton PrEditor
+// @name       MAIN v7.3 Carton PrEditor
 // @namespace    http://tampermonkey.net/
-// @version      7.2
+// @version      7.3
 // @description  Auto-click Complete when a valid barcode appears AND count ≥ 2; beeps + toggle
 // @match        https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*
 // @grant        none
@@ -11,7 +11,11 @@
 
 (() => {
   'use strict';
-  console.log("📦 Carton PrEditor Auto Complete v7.2 (2+ required, no skip) active");
+  const VERSION = '7.3';
+  const GUARD_ATTR = 'data-bwu2-carton-preditor';
+  if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
+  document.documentElement.setAttribute(GUARD_ATTR, VERSION);
+  console.log(`📦 Carton PrEditor Auto Complete v${VERSION} (2+ required, no skip) active`);
 
   const BARCODE_ID = "input-page-barcode-container-tertiary-text";
   const BUTTON_ID  = "input-page-button-container-button";
@@ -22,16 +26,23 @@
 
   let enabled = true;
   let lastVal = "";
+  let audioContext = null;
 
   // 🔊 two short beeps
   const beepTwice = () => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return;
+    if (!audioContext || audioContext.state === 'closed') audioContext = new Audio();
+    const ctx = audioContext;
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    const base = ctx.currentTime + 0.01;
     const p = t => {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type = "sine"; o.frequency.value = 880;
       o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.25, ctx.currentTime + t);
-      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.12);
+      g.gain.setValueAtTime(0.25, base + t);
+      o.addEventListener('ended', () => { o.disconnect(); g.disconnect(); }, { once:true });
+      o.start(base + t); o.stop(base + t + 0.12);
     };
     p(0); p(0.25);
   };
@@ -62,18 +73,55 @@
     }
   };
 
-  // One observer to detect barcode text updates / element recreation
-  new MutationObserver(() => {
+  const inspectBarcode = () => {
     if (!enabled) return;
     const el = document.getElementById(BARCODE_ID);
     if (!el) return;
-    const val = el.innerText.trim();
+    const val = String(el.innerText || el.textContent || '').trim();
     if (val && val !== lastVal && BARCODE_RE.test(val)) {
       lastVal = val;
       console.log("📠 Detected barcode:", val);
       tryComplete();
     }
-  }).observe(document.body, { subtree:true, childList:true, characterData:true });
+  };
+
+  // Observe the barcode's local React area after hydration. A short interaction
+  // watchdog reacquires it if React replaces the parent without a document mutation.
+  let barcodeObserver = null;
+  let observerTarget = null;
+  let recoveryTimer = 0;
+  let recoveryUntil = 0;
+
+  const attachBarcodeObserver = () => {
+    const barcode = document.getElementById(BARCODE_ID);
+    const target = barcode?.parentElement || document.body;
+    if (!target) return;
+    if (target !== observerTarget) {
+      barcodeObserver?.disconnect();
+      observerTarget = target;
+      barcodeObserver = new MutationObserver(() => {
+        attachBarcodeObserver();
+        inspectBarcode();
+      });
+      barcodeObserver.observe(target, { subtree:true, childList:true, characterData:true });
+    }
+    inspectBarcode();
+  };
+
+  const armRecoveryWatchdog = (durationMs = 5000) => {
+    recoveryUntil = Math.max(recoveryUntil, Date.now() + durationMs);
+    if (recoveryTimer) return;
+    const poll = () => {
+      recoveryTimer = 0;
+      attachBarcodeObserver();
+      if (Date.now() < recoveryUntil) recoveryTimer = setTimeout(poll, 250);
+    };
+    recoveryTimer = setTimeout(poll, 250);
+  };
+
+  for (const type of ['keydown', 'input', 'change']) {
+    document.addEventListener(type, () => armRecoveryWatchdog(), true);
+  }
 
   // ON/OFF toggle
   const makeToggle = () => {
@@ -85,20 +133,33 @@
       border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,.3);
       cursor:pointer;user-select:none;`;
     const dot = document.createElement("div");
-    dot.style.cssText = "width:10px;height:10px;border-radius:50%;background:limegreen;";
+    dot.style.cssText = "width:11px;height:11px;border-radius:50%;background:#1677c8;border:2px solid #b9e0ff;";
     const label = document.createElement("span");
-    label.textContent = "AutoComplete: ON";
+    label.textContent = "AutoComplete: ✓ ON";
     div.onclick = () => {
       enabled = !enabled;
-      dot.style.background = enabled ? "limegreen" : "red";
-      label.textContent    = enabled ? "AutoComplete: ON" : "AutoComplete: OFF";
+      dot.style.background = enabled ? "#1677c8" : "#8b1e6b";
+      dot.style.borderColor = enabled ? "#b9e0ff" : "#ffd0ef";
+      label.textContent    = enabled ? "AutoComplete: ✓ ON" : "AutoComplete: × OFF";
       div.style.opacity    = enabled ? "1" : "0.7";
+      if (enabled) armRecoveryWatchdog(2000);
     };
     div.append(dot, label);
     document.body.appendChild(div);
   };
 
+  const start = () => {
+    makeToggle();
+    attachBarcodeObserver();
+    armRecoveryWatchdog(12000);
+  };
+
   document.readyState === "loading"
-    ? document.addEventListener("DOMContentLoaded", makeToggle)
-    : makeToggle();
+    ? document.addEventListener("DOMContentLoaded", start, { once:true })
+    : start();
+
+  window.addEventListener('pagehide', () => {
+    barcodeObserver?.disconnect();
+    clearTimeout(recoveryTimer);
+  }, { once:true });
 })();

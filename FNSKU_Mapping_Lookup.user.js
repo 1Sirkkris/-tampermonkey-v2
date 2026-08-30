@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN  v1.3.1 FNSKU mapping Lookup
-// @version      1.3.1-test
+// @name       MAIN v1.3.2-test FNSKU mapping Lookup
+// @version      1.3.2-test
 // @description  Read-only regional FNSKU lookup with HOME merchant/MSKU details, JP fallback and matched JP/AU candidates.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -19,7 +19,10 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.1-test';
+  const VERSION = '1.3.2-test';
+  const GUARD_ATTR = 'data-bwu2-fnsku-mapping-lookup';
+  if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
+  document.documentElement.setAttribute(GUARD_ATTR, VERSION);
   const HOSTS = {
     na: 'fba-fnsku-commingling-console-na.aka.amazon.com',
     eu: 'fba-fnsku-commingling-console-eu.aka.amazon.com',

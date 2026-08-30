@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.2.10 FCR Data Core
+// @name         TEST v0.2.11 FCR Data Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.10
+// @version      0.2.11
 // @description  Shared modular FCResearch data engine with bounded recovery for transient inventory failures.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,9 +21,10 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.10';
+  const VERSION = '0.2.11';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
+  const PROGRESS_EVENT = 'fcr-data-core:progress';
   const CANCEL_EVENT = 'fcr-data-core:cancel';
   const READY_EVENT = 'fcr-data-core:ready';
   const USAGE_EVENT = 'fcr-usage:event';
@@ -487,8 +488,7 @@
     };
   }
 
-  function parseInventoryHtml(html) {
-    const doc = parseHtml(html);
+  function parseInventoryDocument(doc) {
     const table = doc.querySelector('#table-inventory');
     if (!table) throw new Error('Inventory table not returned');
     const idx = inventoryIndexes(table);
@@ -505,6 +505,35 @@
       if (row.asin || row.fnsku || row.fcsku) rows.push(row);
     }
     return rows;
+  }
+
+  function parseInventoryHtml(html) {
+    return parseInventoryDocument(parseHtml(html));
+  }
+
+  function inventoryPreviewFromDocument(doc, startedAt, networkMs) {
+    const rows = parseInventoryDocument(doc);
+    const partialQuantity = rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    const hasMore = Boolean(paginationToken(doc));
+    const headerTotal = inventoryQuantityTotal(doc);
+    const body = doc.body.cloneNode(true);
+    const qtyHeader = body.querySelector('#inventory-quantity');
+    if (qtyHeader && !hasMore) qtyHeader.textContent = `Quantity (${headerTotal ?? partialQuantity})`;
+    body.querySelectorAll('.pagination-token').forEach(node => node.remove());
+
+    return {
+      rows,
+      html: body.innerHTML,
+      pages: 1,
+      records: rows.length,
+      totalQuantity: hasMore ? null : (headerTotal ?? partialQuantity),
+      partialQuantity,
+      complete: !hasMore,
+      preview: hasMore,
+      warning: hasMore ? 'Loading remaining inventory pages' : '',
+      ms: Math.round(performance.now() - startedAt),
+      networkMs
+    };
   }
 
   function paginationToken(doc) {
@@ -612,7 +641,7 @@
     };
   }
 
-  async function fetchFullInventory(searchValue, allowPartial = false, context = {}) {
+  async function fetchFullInventory(searchValue, allowPartial = false, context = {}, onPreview = null) {
     const search = clean(searchValue);
     const started = performance.now();
     const first = await fcrPost('inventory', search, context);
@@ -628,6 +657,10 @@
     let complete = true;
     let warning = '';
     let totalMs = first.ms;
+
+    if (typeof onPreview === 'function') {
+      onPreview(inventoryPreviewFromDocument(doc, started, first.ms));
+    }
 
     while (token) {
       if (seenTokens.has(token)) {
@@ -656,7 +689,7 @@
       }
     }
 
-    const parsedRows = parseInventoryHtml(doc.documentElement.outerHTML);
+    const parsedRows = parseInventoryDocument(doc);
     const totalQuantity = parsedRows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
     const headerTotal = inventoryQuantityTotal(doc);
     const qtyHeader = doc.querySelector('#inventory-quantity');
@@ -684,30 +717,7 @@
     const started = performance.now();
     const first = await fcrPost('inventory', search, context);
     const doc = parseHtml(first.text);
-    const table = doc.querySelector('#table-inventory');
-    if (!table) throw new Error('Inventory table not returned');
-
-    const rows = parseInventoryHtml(doc.documentElement.outerHTML);
-    const partialQuantity = rows.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
-    const hasMore = Boolean(paginationToken(doc));
-    const headerTotal = inventoryQuantityTotal(doc);
-    const qtyHeader = doc.querySelector('#inventory-quantity');
-    if (qtyHeader && !hasMore) qtyHeader.textContent = `Quantity (${headerTotal ?? partialQuantity})`;
-    doc.querySelectorAll('.pagination-token').forEach(node => node.remove());
-
-    return {
-      rows,
-      html: doc.body.innerHTML,
-      pages: 1,
-      records: rows.length,
-      totalQuantity: hasMore ? null : (headerTotal ?? partialQuantity),
-      partialQuantity,
-      complete: !hasMore,
-      preview: hasMore,
-      warning: hasMore ? 'Loading remaining inventory pages' : '',
-      ms: Math.round(performance.now() - started),
-      networkMs: first.ms
-    };
+    return inventoryPreviewFromDocument(doc, started, first.ms);
   }
 
   function parseHistoryHtml(html) {
@@ -1056,7 +1066,15 @@
     stats.sectionNetwork++;
 
     if (name === 'inventory') {
-      const result = await fetchFullInventory(search, true, context);
+      const reportPreview = options.preview === true && typeof context.progress === 'function'
+        ? preview => context.progress({
+            endpoint: name,
+            ...preview,
+            status: 200,
+            source: 'network'
+          })
+        : null;
+      const result = await fetchFullInventory(search, true, context, reportPreview);
       return {
         endpoint: name,
         html: result.html,
@@ -1104,9 +1122,19 @@
     }));
   }
 
+  function reportProgress(id, data) {
+    window.dispatchEvent(new CustomEvent(PROGRESS_EVENT, {
+      detail: JSON.stringify({ id, data, version: VERSION })
+    }));
+  }
+
   async function handleRequest(message) {
     const { id, type, payload = {}, client = 'unknown', group = '' } = message || {};
-    const context = { client, group: clean(group) };
+    const context = {
+      client,
+      group: clean(group),
+      progress: data => reportProgress(id, data)
+    };
     if (!id || !type) return;
     const tracked = !['ping', 'stats', 'usageStats', 'usageReset', 'rememberProduct', 'rememberBinSize'].includes(type);
     if (tracked) {

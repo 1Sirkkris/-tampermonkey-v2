@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.58 FC-Lite — Tote Audit XXL
+// @name        TEST v0.1.59 FC-Lite — Tote Audit XXL
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.58
+// @version      0.1.59
 // @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.58';
+  const VERSION = '0.1.59';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -254,6 +254,7 @@
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
+  const CORE_PROGRESS_EVENT = 'fcr-data-core:progress';
   const CORE_CANCEL_EVENT = 'fcr-data-core:cancel';
   const CORE_TIMEOUT_MS = 17000;
   const corePending = new Map();
@@ -269,14 +270,22 @@
     else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
   });
 
-  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS, group = '') {
+  window.addEventListener(CORE_PROGRESS_EVENT, event => {
+    let message;
+    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
+    const pending = corePending.get(message?.id);
+    if (!pending?.onProgress) return;
+    try { pending.onProgress(message.data); } catch {}
+  });
+
+  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS, group = '', onProgress = null) {
     const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         corePending.delete(id);
         reject(new Error('FCR Data Core missing / timed out'));
       }, timeout);
-      corePending.set(id, { resolve, reject, timer });
+      corePending.set(id, { resolve, reject, timer, onProgress });
       window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
         detail: JSON.stringify({ id, type, payload, client: 'fclite', group: clean(group) })
       }));
@@ -2866,19 +2875,20 @@
           if (!card) return;
 
           if (def.endpoint === 'inventory') {
-            const previewPromise = coreRequest('inventoryPreview', { code: search }, 30000, requestGroup).catch(() => null);
-            // Attach the full-request rejection handler immediately. A superseding search can
-            // cancel this request while we're still awaiting preview; delaying the handler until
-            // after preview allowed the browser to report a transient unhandled rejection.
-            const fullPromise = coreRequest('section', { endpoint: def.endpoint, code: search }, timeout, requestGroup)
-              .then(data => ({ ok: true, data }), error => ({ ok: false, error }));
-            const preview = await previewPromise;
+            const data = await coreRequest(
+              'section',
+              { endpoint: def.endpoint, code: search, preview: true },
+              timeout,
+              requestGroup,
+              preview => {
+                if (serial !== runSerial || !card.isConnected) return;
+                if (preview?.html && preview?.preview === true) {
+                  renderSectionCard(def, card, preview, search, rawInput, serial, requestGroup);
+                }
+              }
+            );
             if (serial !== runSerial) return;
-            if (preview?.html && preview?.preview === true) renderSectionCard(def, card, preview, search, rawInput, serial, requestGroup);
-            const full = await fullPromise;
-            if (serial !== runSerial) return;
-            if (!full.ok) throw full.error;
-            renderSectionCard(def, card, full.data, search, rawInput, serial, requestGroup);
+            renderSectionCard(def, card, data, search, rawInput, serial, requestGroup);
           } else {
             const data = await coreRequest('section', { endpoint: def.endpoint, code: search }, timeout, requestGroup);
             if (serial !== runSerial) return;
