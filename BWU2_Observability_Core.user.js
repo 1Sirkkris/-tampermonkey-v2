@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.6 BWU2 Observability Core
+// @name         CORE v0.1.7 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.6
+// @version      0.1.7
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -92,6 +92,8 @@
   let fcrNetworkStats = new Map();
   let pollNetworkTimer = 0;
   let pollNetworkStats = new Map();
+  let routineNetworkTimer = 0;
+  let routineNetworkStats = new Map();
   let blockedSectionsTimer = 0;
   let blockedSections = new Set();
   const corePending = new Map();
@@ -166,6 +168,9 @@
     pollNetworkStats = new Map();
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
+    routineNetworkStats = new Map();
+    clearTimeout(routineNetworkTimer);
+    routineNetworkTimer = 0;
     clearTimeout(visibilityReportTimer);
     visibilityReportTimer = 0;
     visibilityStats = emptyVisibilityStats();
@@ -236,9 +241,22 @@
 
   function sanitizePath(value) {
     return String(value ?? '').split('/').map(segment => {
-      if (/^P\d{8,14}$/i.test(segment)) return fingerprint(segment, 'ticket');
+      if (/^[A-Z]\d{8,14}$/i.test(segment)) return fingerprint(segment, 'ticket');
       return scrubText(segment);
     }).join('/');
+  }
+
+  function sanitizeTitle(value) {
+    const text = String(value ?? '');
+    const fcrTitle = text.match(/^\s*(.*?)\s*\|\s*FCResearch\s*$/i);
+    if (!fcrTitle) return scrubText(text);
+
+    const subject = fcrTitle[1].trim();
+    if (!subject) return '| FCResearch';
+
+    const scrubbed = scrubText(subject);
+    const safeSubject = scrubbed === subject ? fingerprint(subject, 'search') : scrubbed;
+    return `${safeSubject} | FCResearch`;
   }
 
   function sanitizeUrl(value) {
@@ -488,6 +506,36 @@
     add('network.poll.summary', { endpoints });
   }
 
+  function recordRoutineNetwork(base, rawUrl) {
+    const url = parsedUrl(rawUrl);
+    const key = `${base.method} ${url?.hostname || ''}${url?.pathname || ''}`;
+    const stat = routineNetworkStats.get(key) || {
+      method: base.method, host: url?.hostname || '', path: sanitizePath(url?.pathname || ''),
+      count: 0, failures: 0, totalMs: 0, maxMs: 0
+    };
+    stat.count++;
+    if (!base.ok) stat.failures++;
+    stat.totalMs += Number(base.ms || 0);
+    stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
+    routineNetworkStats.set(key, stat);
+    if (!routineNetworkTimer) routineNetworkTimer = setTimeout(flushRoutineNetworkSummary, ROUTINE_NETWORK_REPORT_MS);
+
+    if (!base.ok) add('network.http-error', base);
+  }
+
+  function flushRoutineNetworkSummary() {
+    clearTimeout(routineNetworkTimer);
+    routineNetworkTimer = 0;
+    if (!routineNetworkStats.size) return;
+    const endpoints = [...routineNetworkStats.values()].map(stat => ({
+      method: stat.method, host: stat.host, path: stat.path, count: stat.count,
+      failures: stat.failures, averageMs: stat.count ? Math.round(stat.totalMs / stat.count) : 0,
+      maxMs: Math.round(stat.maxMs)
+    }));
+    routineNetworkStats = new Map();
+    add('network.routine.summary', { endpoints });
+  }
+
   function flushPage() {
     syncSession();
     clearTimeout(flushTimer);
@@ -620,6 +668,9 @@
     pollNetworkStats = new Map();
     clearTimeout(pollNetworkTimer);
     pollNetworkTimer = 0;
+    routineNetworkStats = new Map();
+    clearTimeout(routineNetworkTimer);
+    routineNetworkTimer = 0;
     clearTimeout(visibilityReportTimer);
     visibilityReportTimer = 0;
     visibilityStats = emptyVisibilityStats();
@@ -681,7 +732,7 @@
           } else if (isPollNetwork(rawUrl)) {
             recordPollNetwork(base, rawUrl);
           } else {
-            add('network.meta', base);
+            recordRoutineNetwork(base, rawUrl);
           }
 
           return response;
@@ -781,7 +832,7 @@
           } else if (isPollNetwork(info.url)) {
             recordPollNetwork(base, info.url);
           } else {
-            add('network.meta', base);
+            recordRoutineNetwork(base, info.url);
           }
         }, { once: true });
 
@@ -1418,7 +1469,7 @@
     version: VERSION,
     host: location.hostname,
     path: sanitizePath(location.pathname),
-    title: document.title || '',
+    title: sanitizeTitle(document.title || ''),
     viewport: viewportSnapshot()
   });
 
@@ -1439,10 +1490,12 @@
     clearTimeout(viewportTimer);
     clearTimeout(fcrNetworkTimer);
     clearTimeout(pollNetworkTimer);
+    clearTimeout(routineNetworkTimer);
     clearTimeout(visibilityReportTimer);
     clearTimeout(blockedSectionsTimer);
     flushFcrNetworkSummary();
     flushPollNetworkSummary();
+    flushRoutineNetworkSummary();
     flushVisibilitySummary();
     flushBlockedSectionsSummary();
     flushCoreSuccessSummary();

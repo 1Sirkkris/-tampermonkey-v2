@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        MAIN v5.1.3 SIM Markdown Toolbar
+// @name        MAIN v5.1.4 SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.3
+// @version      5.1.4
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -1018,7 +1018,8 @@
         } else if (openBtn.parentElement !== group) {
             group.appendChild(openBtn);
         }
-        openBtn.textContent = `Open Images (${images.length})`;
+        const openLabel = `Open Images (${images.length})`;
+        if (openBtn.textContent !== openLabel) openBtn.textContent = openLabel;
 
         if (!downloadBtn) {
             downloadBtn = document.createElement("button");
@@ -1032,7 +1033,8 @@
         }
 
         if (!downloadBtn.disabled) {
-            downloadBtn.textContent = `Download Images (${images.length})`;
+            const downloadLabel = `Download Images (${images.length})`;
+            if (downloadBtn.textContent !== downloadLabel) downloadBtn.textContent = downloadLabel;
         }
     }
 
