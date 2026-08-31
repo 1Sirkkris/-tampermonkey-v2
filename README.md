@@ -27,6 +27,7 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 
 | Script | Version | Purpose | Install/update |
 | --- | --- | --- | --- |
+| Amazon AU ASIN Variation Finder | 0.1.0-test | Right-click a product variation and reveal matching child ASINs from Amazon's loaded variation data, including unavailable swatches when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
 | FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
 | FCResearch → RIVER Ticket Assistant | 0.3.1 | Restore Hazmat N/A/L0 payload capture and the historical RIVER option-driving sequence using the current workflow ID; keep Related TTs, information verification and Create Issue manual pending live validation. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |
 | RIVER Workflow Observability | 0.1.0 | Capture RIVER inputs, navigation and fetch/XHR request/response shape while redacting secrets and fingerprinting identifiers. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/RIVER_Observability_Capture.user.js) |
