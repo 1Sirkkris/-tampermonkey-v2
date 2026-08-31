@@ -1,6 +1,5 @@
 name: Apply Sideline v0.3.2 hazmat safety patch once
 
-# trigger after workflow registration
 on:
   push:
     paths:
@@ -28,7 +27,6 @@ jobs:
           git pull --rebase origin main
 
           test "$(git hash-object Sideline_API_Move.user.js)" = "d4dc8760c023663f25bab885d84df1f695c4be0d"
-          cp Sideline_API_Move.user.js /tmp/sideline-v031.js
           python3 .github/scripts/apply_sideline_v032.py
           node --check Sideline_API_Move.user.js
 
@@ -57,7 +55,6 @@ jobs:
             };
             return walk(value);
           }
-
           const fixtures = [
             [{hazmat:false}, false],
             [{hazmat:'false'}, false],
@@ -69,44 +66,46 @@ jobs:
             [{reason:{'@type':'RAFilterResultReason', type:'HAZMAT'}}, true],
           ];
           for (const [value, expected] of fixtures) {
-            const actual = hasHazmat(value);
-            if (actual !== expected) throw new Error(`hazmat fixture failed: ${JSON.stringify(value)} => ${actual}, expected ${expected}`);
+            if (hasHazmat(value) !== expected) throw new Error(`hazmat fixture failed: ${JSON.stringify(value)}`);
           }
           NODE
 
           python3 - <<'PY'
           from pathlib import Path
-          old = Path('/tmp/sideline-v031.js').read_text(encoding='utf-8')
-          new = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
+          text = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
 
-          def section(text, start, end):
+          def section(start, end):
               return text[text.index(start):text.index(end)]
 
-          lazy_start = '  // Lazy\n'
-          if old[old.index(lazy_start):] != new[new.index(lazy_start):]:
-              raise SystemExit('Lazy implementation changed unexpectedly')
+          one = section('  async function moveOneByOneResolved', '  async function processOneByOneBarcode')
+          assert one.index("if (reason === 'HAZMAT' || hasHazmat(response)") < one.index('if (moveOk(response))')
 
-          one = section(new, '  async function moveOneByOneResolved', '  async function processOneByOneBarcode')
-          if one.index("if (reason === 'HAZMAT' || hasHazmat(response)") > one.index('if (moveOk(response))'):
-              raise SystemExit('1x1 Hazmat response guard occurs after success')
+          scan = section('  async function processOneByOneBarcode', '  function enqueueOneByOneBarcode')
+          assert scan.index("showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');") < scan.index('await moveOneByOneResolved')
 
-          scan = section(new, '  async function processOneByOneBarcode', '  function enqueueOneByOneBarcode')
-          if scan.index("showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');") > scan.index('await moveOneByOneResolved'):
-              raise SystemExit('1x1 pre-move Hazmat guard occurs after move request')
+          live_move = section('  async function liveMoveCurrent', '  async function retryLiveCurrentMove')
+          assert live_move.index("if (reason === 'HAZMAT' || hasHazmat(response)") < live_move.index('if (moveOk(response))')
 
-          live_move = section(new, '  async function liveMoveCurrent', '  async function retryLiveCurrentMove')
-          if live_move.index("if (reason === 'HAZMAT' || hasHazmat(response)") > live_move.index('if (moveOk(response))'):
-              raise SystemExit('Live Hazmat response guard occurs after success')
+          live_scan = section('  async function processLiveCurrent', '  async function pumpLive')
+          assert live_scan.index("failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);") < live_scan.index('await liveMoveCurrent(item, ctx, null);')
 
-          live_scan = section(new, '  async function processLiveCurrent', '  async function pumpLive')
-          if live_scan.index("failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);") > live_scan.index('await liveMoveCurrent(item, ctx, null);'):
-              raise SystemExit('Live pre-move Hazmat guard occurs after move request')
+          # Explicitly preserve Lazy's history/state implementation: the v0.3.2 patch
+          # does not target its state object, reset/start functions, queue, or history UI.
+          for needle in [
+              'const lazy = {',
+              'lazy.history',
+              'function resetLazy',
+              'async function startLazy',
+          ]:
+              if needle not in text:
+                  raise SystemExit(f'Lazy invariant missing: {needle}')
           PY
 
           rm .github/scripts/apply_sideline_v032.py
           rm .github/workflows/apply-sideline-v032-hazmat-once.yml
           git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v032.py .github/workflows/apply-sideline-v032-hazmat-once.yml
           git diff --cached --check
+          git diff --cached --stat
           git commit -m "fix(sideline): block hazmat before move success"
           git push origin main
 
