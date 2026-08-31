@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.7 Sideline API Move TEST
+// @name         MAIN v0.2.8 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.7
+// @version      0.2.8
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.7';
+  const VERSION = '0.2.8';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -573,7 +573,8 @@
 #sh-lazy-running-indicator .sh-lazy-spinner{position:absolute;left:50%;top:46%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;border:5px solid rgba(255,255,255,.48);border-top-color:#146eb4;border-right-color:#146eb4;box-shadow:0 2px 10px rgba(0,0,0,.22);animation:shLazySpin .72s linear infinite}
 @keyframes shLazySpin{to{transform:rotate(360deg)}}
 @keyframes shLazyPulse{0%,100%{box-shadow:inset 0 0 0 4px rgba(20,110,180,.28)}50%{box-shadow:inset 0 0 0 5px rgba(20,110,180,.48)}}
-#sh-move-corner{position:fixed;right:3px;bottom:3px;z-index:2147483647;width:68px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #146eb4;border-radius:8px;background:#eff6ff;color:#0f3d73;box-shadow:0 2px 9px #0005;font:900 10px Arial,sans-serif;letter-spacing:.3px;pointer-events:none}
+#sh-move-corner{position:fixed;right:416px;bottom:12px;z-index:2147483647;width:68px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #146eb4;border-radius:8px;background:#eff6ff;color:#0f3d73;box-shadow:0 2px 9px #0005;font:900 10px Arial,sans-serif;letter-spacing:.3px;pointer-events:none}
+@media(max-width:500px){#sh-move-corner{right:3px;top:3px;bottom:auto}}
 #sh-move-corner .sh-move-wheel{width:14px;height:14px;box-sizing:border-box;border:3px solid #bfdbfe;border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;animation:shMoveCornerSpin .7s linear infinite}
 #sh-move-corner .sh-move-mark{font:1000 18px/1 Arial,sans-serif}
 #sh-move-corner.waiting{border-color:#f59e0b;background:#fff7ed;color:#9a3412}
@@ -1102,7 +1103,7 @@
     const title = $('.sh-title', livePanel);
 
     dockButton?.classList.toggle('sh-live-one-mode', live.oneByOne);
-    if (dockButton) dockButton.textContent = live.oneByOne ? 'Live 1×1' : 'Live';
+    if (dockButton) dockButton.textContent = live.oneByOne ? '1×1' : 'Live';
     if (title) title.textContent = live.oneByOne
       ? `Live 1×1 Immediate v${VERSION}`
       : `Live Lazy QTY 1 v${VERSION}`;
