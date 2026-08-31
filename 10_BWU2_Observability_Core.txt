@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.8 BWU2 Observability Core
+// @name         CORE v0.1.9 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.8
+// @version      0.1.9
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -10,6 +10,7 @@
 // @include      /^https?:\/\/t\.corp\.amazon\.com\//
 // @include      /^https?:\/\/aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com\//
+// @include      /^https?:\/\/river\.amazon\.com\//
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_getValue
@@ -25,7 +26,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -62,6 +63,7 @@
   const FCR_HOST = /(?:fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app)/i;
   const SIM_HOST = /^t\.corp\.amazon\.com$/i;
   const CARTON_HOST = /^aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com$/i;
+  const RIVER_HOST = /^river\.amazon\.com$/i;
 
   const pageId = randomId('p_');
   let meta = loadMeta();
@@ -342,7 +344,7 @@
     if (SIM_HOST.test(location.hostname)) return false;
     if (url && FCR_HOST.test(url.hostname)) return false;
     if (
-      CARTON_HOST.test(location.hostname) &&
+      (CARTON_HOST.test(location.hostname) || RIVER_HOST.test(location.hostname)) &&
       url?.origin === location.origin &&
       !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname)
     ) return true;
@@ -369,7 +371,8 @@
     if (/^(?:ts|cs)x[A-Za-z0-9_-]+$/i.test(text)) return 'container';
     if (/^(?:B0|X0|ZZ)[A-Z0-9]{8}$/i.test(text)) return 'item';
     if (/^P-\d-(?:[A-Z]\d{3}){2}$/i.test(text)) return 'pod';
-    if (/^\d{8,14}$/.test(text)) return 'numeric';
+    if (/^\d{1,7}$/.test(text)) return 'numeric';
+    if (/^\d{8,14}$/.test(text)) return 'numeric-id';
     return 'text';
   }
 
@@ -390,6 +393,21 @@
     const keys = Object.keys(value).slice(0, 30);
     const out = { kind: 'object', keys };
     if (Object.prototype.hasOwnProperty.call(value, 's')) out.searchKind = classifySearchValue(value.s);
+
+    if (RIVER_HOST.test(location.hostname)) {
+      out.fields = {};
+      for (const [key, raw] of Object.entries(value).slice(0, 30)) {
+        if (SENSITIVE_KEY.test(key)) {
+          out.fields[key] = { kind: 'redacted' };
+          continue;
+        }
+        const text = String(raw ?? '');
+        const field = { kind: classifySearchValue(text), length: text.length };
+        if (/^(?:quantity|count|units|shipments|page)$/i.test(key) && /^\d+$/.test(text)) field.value = Number(text);
+        out.fields[key] = field;
+      }
+    }
+
     return out;
   }
 
@@ -867,14 +885,18 @@
       element.getAttribute('title') ||
       '';
     const tag = element.tagName?.toLowerCase() || 'unknown';
-    const textLabel = allowTextLabel && ['button', 'a'].includes(tag)
+    const role = element.getAttribute('role') || '';
+    const textLabel = allowTextLabel && (
+      ['button', 'a', 'label'].includes(tag) ||
+      ['button', 'menuitem', 'tab', 'radio', 'option'].includes(role)
+    )
       ? String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)
       : '';
 
     return {
       tag,
       id: scrubText(element.id || ''),
-      role: element.getAttribute('role') || '',
+      role,
       type: element.getAttribute('type') || '',
       name: element.getAttribute('name') || '',
       label: scrubText(String(explicitLabel || textLabel).replace(/\s+/g, ' ').trim().slice(0, 60))
@@ -884,7 +906,7 @@
   function clickTarget(target) {
     const element = target instanceof Element ? target : target?.parentElement;
     if (!element) return null;
-    return element.closest('button, a[href], [role="button"], [role="menuitem"], [role="tab"], input[type="button"], input[type="checkbox"], input[type="radio"]');
+    return element.closest('button, a[href], [role="button"], [role="menuitem"], [role="tab"], [role="radio"], [role="option"], input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"]');
   }
 
   function shouldLogChange(target) {
@@ -892,6 +914,9 @@
     if (!element) return false;
     const tag = element.tagName?.toLowerCase() || '';
     const type = String(element.getAttribute?.('type') || '').toLowerCase();
+    if (RIVER_HOST.test(location.hostname)) {
+      return tag === 'select' || tag === 'textarea' || (tag === 'input' && !['password', 'file', 'hidden'].includes(type));
+    }
     return tag === 'select' || (tag === 'input' && ['checkbox', 'radio'].includes(type));
   }
 
@@ -913,7 +938,29 @@
     document.addEventListener('change', event => {
       if (!event.isTrusted || !shouldLogChange(event.target)) return;
       const info = targetInfo(event.target);
-      if (info) add('ui.change', info);
+      if (!info) return;
+
+      if (!RIVER_HOST.test(location.hostname)) {
+        add('ui.change', info);
+        return;
+      }
+
+      const element = event.target instanceof Element ? event.target : null;
+      let value = '';
+      try {
+        value = element?.tagName === 'SELECT'
+          ? element.options?.[element.selectedIndex]?.text || element.value || ''
+          : element?.value || '';
+      } catch {}
+
+      const detail = {
+        ...info,
+        inputKind: classifySearchValue(value),
+        inputLength: String(value || '').length
+      };
+      if (element?.tagName === 'SELECT') detail.selected = scrubText(value);
+      if (element && 'checked' in element && ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase())) detail.checked = !!element.checked;
+      add('ui.change', detail);
     }, true);
 
     document.addEventListener('keydown', event => {
