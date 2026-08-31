@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         CORE v0.1.10 BWU2 Observability Core
+// @name         CORE v0.1.11 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.10
-// @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
+// @version      0.1.11
+// @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
@@ -26,7 +26,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.11';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -374,6 +374,67 @@
     return 'text';
   }
 
+  function boundedRiverValue(value, key = '', depth = 0, seen = new WeakSet()) {
+    if (SENSITIVE_KEY.test(key)) return '<redacted>';
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+    if (typeof value === 'bigint') return String(value);
+    if (typeof value === 'string') {
+      const safe = sanitize(value, key);
+      return typeof safe === 'string' ? clip(safe, 240) : safe;
+    }
+    if (depth >= 4) return `<max-depth:${Object.prototype.toString.call(value).slice(8, -1)}>`;
+    if (typeof value !== 'object') return `<${typeof value}>`;
+    if (seen.has(value)) return '<circular>';
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const out = value.slice(0, 20).map(item => boundedRiverValue(item, key, depth + 1, seen));
+      if (value.length > 20) out.push(`<truncated-items:${value.length - 20}>`);
+      return out;
+    }
+
+    const output = {};
+    let count = 0;
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (++count > 60) {
+        output.__truncated = true;
+        break;
+      }
+      output[childKey] = boundedRiverValue(childValue, childKey, depth + 1, seen);
+    }
+    return output;
+  }
+
+  function riverStateHints(value) {
+    const out = {};
+    let count = 0;
+    const seen = new WeakSet();
+
+    const visit = (node, path = '', depth = 0) => {
+      if (count >= 50 || depth > 6 || node == null) return;
+      if (typeof node !== 'object') return;
+      if (seen.has(node)) return;
+      seen.add(node);
+
+      const entries = Array.isArray(node) ? node.entries() : Object.entries(node);
+      for (const [rawKey, child] of entries) {
+        if (count >= 50) break;
+        const key = Array.isArray(node) ? String(rawKey) : String(rawKey || '');
+        const nextPath = path ? `${path}.${key}` : key;
+        const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (/^(?:workflow|step|question|option|answer|node|state|screen|page|prompt|transition)(?:id|key|name|type|value|code)?$/.test(normalizedKey)
+          && (child == null || ['string', 'number', 'boolean'].includes(typeof child))) {
+          out[nextPath] = boundedRiverValue(child, key);
+          count++;
+        }
+        if (child && typeof child === 'object') visit(child, nextPath, depth + 1);
+      }
+    };
+
+    visit(value);
+    return out;
+  }
+
   function summarizeRequestShape(body) {
     let value = body;
     try {
@@ -404,14 +465,85 @@
         if (/^(?:quantity|count|units|shipments|page)$/i.test(key) && /^\d+$/.test(text)) field.value = Number(text);
         out.fields[key] = field;
       }
+      out.body = boundedRiverValue(value);
+      const hints = riverStateHints(value);
+      if (Object.keys(hints).length) out.stateHints = hints;
     }
 
     return out;
   }
 
+  function summarizeRiverHtml(raw) {
+    try {
+      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      const headings = [...doc.querySelectorAll('h1,h2,h3,h4,[role="heading"],legend')]
+        .map(node => scrubText(cleanText(node.textContent)))
+        .filter(Boolean)
+        .slice(0, 16);
+      const forms = [...doc.forms].slice(0, 8).map(form => ({
+        id: scrubText(form.id || ''),
+        name: scrubText(form.getAttribute('name') || ''),
+        method: scrubText(form.getAttribute('method') || 'GET'),
+        action: form.getAttribute('action') ? sanitizeUrl(form.getAttribute('action')) : '',
+        controls: form.querySelectorAll('input,textarea,select,button').length
+      }));
+      const stateAttrs = [];
+      for (const element of [...doc.querySelectorAll('[data-step],[data-step-id],[data-question],[data-question-id],[data-workflow],[data-workflow-id],[data-option],[data-option-id],[data-state],[data-screen]')].slice(0, 30)) {
+        const attrs = {};
+        for (const attr of element.attributes || []) {
+          if (/^(?:data-)?(?:workflow|step|question|option|state|screen)(?:-|$)/i.test(attr.name)) attrs[attr.name] = boundedRiverValue(attr.value, attr.name);
+        }
+        if (Object.keys(attrs).length) stateAttrs.push({ tag: element.tagName?.toLowerCase() || '', id: scrubText(element.id || ''), attrs });
+      }
+      const hiddenState = [...doc.querySelectorAll('input[type="hidden"]')].slice(0, 40).map(input => ({
+        name: scrubText(input.name || ''),
+        value: /(?:workflow|step|question|option|state|screen)/i.test(input.name || '') ? boundedRiverValue(input.value, input.name) : `<hidden:${String(input.value || '').length}>`
+      }));
+      return {
+        headings,
+        forms,
+        stateAttrs,
+        hiddenState,
+        controls: doc.querySelectorAll('input,textarea,select,button,[role="radio"],[role="option"]').length
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  function cleanText(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  function summarizeRiverResponse(text, contentType = '') {
+    const raw = String(text ?? '');
+    const base = { chars: raw.length };
+    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        const hints = riverStateHints(parsed);
+        return {
+          ...base,
+          kind: Array.isArray(parsed) ? 'json-array' : 'json-object',
+          ...(Array.isArray(parsed) ? { length: parsed.length } : { keys: Object.keys(parsed || {}).slice(0, 40) }),
+          body: boundedRiverValue(parsed),
+          ...(Object.keys(hints).length ? { stateHints: hints } : {})
+        };
+      } catch {}
+    }
+
+    if (/html/i.test(contentType) || /<\/?(?:html|body|form|main|div|section)\b/i.test(raw)) {
+      return { ...base, kind: 'html', ...summarizeRiverHtml(raw) };
+    }
+
+    return { ...base, kind: 'text', text: scrubText(raw.slice(0, 1800)) };
+  }
+
   function summarizeFcrResponse(text, contentType = '') {
     const raw = String(text ?? '');
     const base = { chars: raw.length };
+
+    if (RIVER_HOST.test(location.hostname)) return summarizeRiverResponse(raw, contentType);
 
     if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
       try {
@@ -878,9 +1010,16 @@
     const element = target instanceof Element ? target : target?.parentElement;
     if (!element || uiRoot?.contains(element)) return null;
 
+    let associated = '';
+    try {
+      const label = element.id ? document.querySelector(`label[for="${CSS.escape(element.id)}"]`) : element.closest('label');
+      associated = cleanText(label?.textContent || element.closest('fieldset')?.querySelector('legend')?.textContent || '');
+    } catch {}
+
     const explicitLabel =
       element.getAttribute('aria-label') ||
       element.getAttribute('title') ||
+      associated ||
       '';
     const tag = element.tagName?.toLowerCase() || 'unknown';
     const role = element.getAttribute('role') || '';
@@ -920,25 +1059,36 @@
 
   function installActionTrace() {
     document.addEventListener('click', event => {
-      if (!event.isTrusted) return;
+      const river = RIVER_HOST.test(location.hostname);
+      if (!event.isTrusted && !river) return;
       const action = clickTarget(event.target);
       if (!action) return;
       const info = targetInfo(action, true);
-      if (info) add('ui.click', info);
+      if (info) add('ui.click', { ...info, trusted: !!event.isTrusted });
     }, true);
 
     document.addEventListener('submit', event => {
-      if (!event.isTrusted) return;
+      const river = RIVER_HOST.test(location.hostname);
+      if (!event.isTrusted && !river) return;
       const info = targetInfo(event.target);
-      if (info) add('ui.submit', info);
+      if (!info) return;
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      add('ui.submit', {
+        ...info,
+        trusted: !!event.isTrusted,
+        method: scrubText(form?.method || ''),
+        action: form?.action ? sanitizeUrl(form.action) : '',
+        controls: form?.elements?.length || 0
+      });
     }, true);
 
     document.addEventListener('change', event => {
-      if (!event.isTrusted || !shouldLogChange(event.target)) return;
+      const river = RIVER_HOST.test(location.hostname);
+      if ((!event.isTrusted && !river) || !shouldLogChange(event.target)) return;
       const info = targetInfo(event.target);
       if (!info) return;
 
-      if (!RIVER_HOST.test(location.hostname)) {
+      if (!river) {
         add('ui.change', info);
         return;
       }
@@ -953,10 +1103,14 @@
 
       const detail = {
         ...info,
+        trusted: !!event.isTrusted,
         inputKind: classifySearchValue(value),
         inputLength: String(value || '').length
       };
-      if (element?.tagName === 'SELECT') detail.selected = scrubText(value);
+      if (element?.tagName === 'SELECT') {
+        detail.selected = scrubText(value);
+        detail.selectedValue = boundedRiverValue(element.value || '', element.name || element.id || 'option');
+      }
       if (element && 'checked' in element && ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase())) detail.checked = !!element.checked;
       add('ui.change', detail);
     }, true);
