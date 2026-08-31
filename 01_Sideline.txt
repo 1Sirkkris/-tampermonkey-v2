@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.6 Sideline API Move TEST
+// @name         MAIN v0.3.7 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.6
+// @version      0.3.7
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.6';
+  const VERSION = '0.3.7';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -612,7 +612,7 @@
 #sh-og-expiry .og-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;font-size:13px;font-weight:900;color:#9a3412}#sh-og-expiry .og-head strong{color:#111827}
 #sh-og-expiry .og-grid{display:grid;gap:5px}.og-month{grid-template-columns:repeat(4,minmax(0,1fr))}.og-day{grid-template-columns:repeat(7,minmax(0,1fr))}.og-year{grid-template-columns:repeat(4,minmax(0,1fr))}
 #sh-og-expiry button{min-width:0;height:35px;border:1px solid #c7d2fe;border-radius:7px;background:#f5f7ff;color:#1e3a8a;font-size:13px;font-weight:850;cursor:pointer}#sh-og-expiry button:hover:not(:disabled){background:#e0e7ff}#sh-og-expiry button.selected{background:#2563eb;color:#fff;border-color:#1d4ed8}#sh-og-expiry button:disabled{opacity:.35;cursor:not-allowed}
-#sh-og-expiry .og-footer{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.og-footer button{width:100%;height:48px!important;background:#7c3aed!important;color:#fff!important;border-color:#6d28d9!important;font-size:15px!important}.og-footer .production-confirm{background:#146eb4!important;border-color:#0f5c99!important}.og-footer .og-return-source{background:#eff6ff!important;color:#0f3d73!important;border:2px solid #146eb4!important}
+#sh-og-expiry .og-footer{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.og-footer.og-footer-single{grid-template-columns:1fr}.og-footer button{width:100%;height:48px!important;background:#7c3aed!important;color:#fff!important;border-color:#6d28d9!important;font-size:15px!important}.og-footer .production-confirm{background:#146eb4!important;border-color:#0f5c99!important}.og-footer .og-return-source{background:#eff6ff!important;color:#0f3d73!important;border:2px solid #146eb4!important}
 `;
   document.documentElement.appendChild(style);
 
@@ -700,7 +700,10 @@
     const root = document.createElement('div');
     root.id = id;
     root.className = 'sh-panel';
-    root.innerHTML = `<div class="sh-title">${title}</div><button type="button" class="sh-btn sh-return-source" data-return-source>↩ Return to Source</button>`;
+    const returnSource = key === 'lazy' || key === 'live'
+      ? '<button type="button" class="sh-btn sh-return-source" data-return-source>↩ Return to Source</button>'
+      : '';
+    root.innerHTML = `<div class="sh-title">${title}</div>${returnSource}`;
     root.style.display = 'none';
     document.body.appendChild(root);
     panels[key] = root;
@@ -1331,18 +1334,8 @@
     item.ctx = ctx;
     item.preflightIssue = null;
 
-    // Live lookups run ahead of processing. Hazmat must be rejected here before an
-    // item can ever be labelled READY and take the fast prechecked move path.
-    if (hasHazmat(result.response)) {
-      item.preflightStatus = 'ISSUE';
-      item.preflightIssue = { kind:'hazmat', title:'HAZMAT — ITEM NOT MOVED', reason:'HAZMAT' };
-
-      if (!autoSkipQueuedLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT')) {
-        renderLive();
-      }
-      return;
-    }
-
+    // Product hazard metadata is informational here. Expiry/manual requirements
+    // are resolved first; a real Hazmat rejection is decided only by the move response.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       item.preflightStatus = 'DATE';
 
@@ -2200,7 +2193,7 @@
         showOneByOneError(
           item,
           reason,
-          hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
+          isHazmatRejectionResponse(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
         );
         return;
       }
@@ -2219,11 +2212,11 @@
       return;
     }
 
-    if (reason === 'HAZMAT' || hasHazmat(response) || /destination incompatible/i.test(reason)) {
+    if (reason === 'HAZMAT' || isHazmatRejectionResponse(response) || /destination incompatible/i.test(reason)) {
       showOneByOneError(
         item,
-        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
-        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'
+        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
+        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'
       );
       return;
     }
@@ -2234,10 +2227,7 @@
     }
 
     if (moveOk(response)) {
-      item.acceptedOverage = isAllowedOverageResponse(response);
       finishOneByOneMoved(item);
-      if (item.acceptedOverage) live.note = 'OVERAGE OK — moved QTY 1 — ready for next scan';
-      renderLive();
       return;
     }
 
@@ -2279,13 +2269,8 @@
 
     item.ctx = ctx;
 
-    // Fail closed before any state-changing move request when scan metadata already
-    // identifies the item as Hazmat / dangerous goods.
-    if (hasHazmat(response)) {
-      showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');
-      return;
-    }
-
+    // Expiry/manual data requirements take precedence over product Hazmat metadata.
+    // A Hazmat hard failure is only raised if the move/workflow response rejects for Hazmat.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       live.oneInFlight.delete(item.id);
       parkLiveDateItem(item, ctx);
@@ -2394,7 +2379,7 @@
           : (error?.message || 'MOVE API ERROR');
         failLiveItem(
           item,
-          hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
+          isHazmatRejectionResponse(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
           reason,
           ctx
         );
@@ -2413,11 +2398,11 @@
       return false;
     }
 
-    if (reason === 'HAZMAT' || hasHazmat(response) || /destination incompatible/i.test(reason)) {
+    if (reason === 'HAZMAT' || isHazmatRejectionResponse(response) || /destination incompatible/i.test(reason)) {
       failLiveItem(
         item,
-        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE',
-        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
+        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE',
+        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
         ctx
       );
       return false;
@@ -2429,12 +2414,7 @@
     }
 
     if (moveOk(response)) {
-      item.acceptedOverage = isAllowedOverageResponse(response);
       finishLiveMoved(item);
-      if (item.acceptedOverage) {
-        live.note = `OVERAGE OK — moved ${itemQty(item)} unit${itemQty(item) === 1 ? '' : 's'} — ready for next scan`;
-        renderLive();
-      }
       return true;
     }
 
@@ -2635,13 +2615,8 @@
 
     item.ctx = ctx;
 
-    // Normal Live also fails closed before /api/move-items when scan metadata says
-    // Hazmat. The failed barcode is surfaced while the rest of Live can continue.
-    if (hasHazmat(response)) {
-      failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);
-      return;
-    }
-
+    // Product Hazmat metadata alone is not a rejection. Handle expiry first and
+    // let the actual move/workflow response decide whether Hazmat blocks processing.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       parkLiveDateItem(item, ctx);
       return;
@@ -3647,7 +3622,7 @@
 
     const type = clean(response?.['@type']);
     if (type === 'InvalidBarcodeResponse' || type === 'RequestMultipleBarcodesResponse') return false;
-    if (hasHazmat(response) || hasPredicant(response) || isDamagedDestinationResponse(response)) return false;
+    if (isHazmatRejectionResponse(response) || hasPredicant(response) || isDamagedDestinationResponse(response)) return false;
 
     const filter = response?.filterResult;
     const filterReason = clean(
@@ -3752,6 +3727,50 @@
     return walk(value);
   }
 
+  function isHazmatRejectionResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+
+    const filter = response.filterResult || {};
+    const filterReason = filter.reason || {};
+    const responseReason = response.reason || {};
+    const problems = (Array.isArray(response.problems) ? response.problems : []).filter(Boolean);
+    const labels = [
+      response.message,
+      response.description,
+      response.errorMessage,
+      response.errorCode,
+      typeof response.reason === 'string' ? response.reason : '',
+      responseReason.type,
+      responseReason.description,
+      responseReason.message,
+      responseReason['@type'],
+      filterReason.type,
+      filterReason.description,
+      filterReason.message,
+      filterReason['@type'],
+      filter.filterType,
+      ...problems.flatMap(problem => [
+        problem?.description,
+        problem?.message,
+        problem?.reason,
+        problem?.code,
+        problem?.['@type']
+      ])
+    ].map(clean).filter(Boolean);
+
+    if (!labels.some(label => /hazmat|dangerous.?goods/i.test(label))) return false;
+
+    const responseType = clean(response?.['@type']);
+    return !!(
+      response.success === false ||
+      filter.compatible === false ||
+      problems.length ||
+      response.errorMessage ||
+      response.errorCode ||
+      /error|reject|incompat|filter/i.test(responseType)
+    );
+  }
+
   function hasMoveProblems(response) {
     return Array.isArray(response?.problems) && response.problems.some(Boolean);
   }
@@ -3760,7 +3779,7 @@
     if (isAllowedOverageResponse(response)) return true;
     if (!response || response.success !== true) return false;
     if (response.filterResult?.compatible === false) return false;
-    if (hasHazmat(response)) return false;
+    if (isHazmatRejectionResponse(response)) return false;
     if (hasMoveProblems(response)) return false;
     if (hasPredicant(response)) return false;
 
@@ -3769,7 +3788,7 @@
 
   function moveReason(response) {
     if (!response) return 'EMPTY MOVE RESPONSE';
-    if (hasHazmat(response)) return 'HAZMAT';
+    if (isHazmatRejectionResponse(response)) return 'HAZMAT';
     if (isAllowedOverageResponse(response)) return 'OVERAGE';
 
     const reason = response.filterResult?.reason;
@@ -3963,9 +3982,7 @@
       }
 
       item.status = 'MOVED';
-      item.acceptedOverage = isAllowedOverageResponse(response);
       lazy.error = '';
-      if (item.acceptedOverage) lazy.note = `OVERAGE OK — moved ${totalQty} unit${totalQty === 1 ? '' : 's'} — continuing`;
       renderLazy();
       return true;
     }
@@ -4404,7 +4421,7 @@
           makePanel('DAY',selection.day ? String(selection.day).padStart(2,'0') : '—','og-day',dayButtons) +
           makePanel('YEAR',selection.year || '—','og-year',yearButtons) +
         `</div>` +
-        `<div class="og-footer"><button data-a="pao">PAO +900 DAYS &nbsp; ${dateLabel(paoDateMs())}</button><button type="button" class="og-return-source" data-return-source>↩ RETURN TO SOURCE</button></div>`;
+        `<div class="og-footer og-footer-single"><button data-a="pao">PAO +900 DAYS &nbsp; ${dateLabel(paoDateMs())}</button></div>`;
 
       const image = $('[data-role="native-product-image"]', root);
       if (image) {
