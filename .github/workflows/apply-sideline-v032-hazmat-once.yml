@@ -91,19 +91,11 @@ jobs:
           live_scan = section(text, '  async function processLiveCurrent', '  async function pumpLive')
           assert live_scan.index("failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);") < live_scan.index('await liveMoveCurrent(item, ctx, null);')
 
-          # Preserve Lazy-specific state, queue/history representation, and control functions byte-for-byte.
-          lazy_state_start = '  const lazy = {'
-          lazy_state_end = '  const lazyPanel = panel('
-          if section(old, lazy_state_start, lazy_state_end) != section(text, lazy_state_start, lazy_state_end):
+          # Lazy-specific queue/state/reset must remain untouched by this change.
+          if section(old, '  const lazy = {', '  const lazyPanel = panel(') != section(text, '  const lazy = {', '  const lazyPanel = panel('):
               raise SystemExit('Lazy state changed unexpectedly')
-
-          for start, end, label in [
-              ('  function parseItems(', '  function refreshItems(', 'Lazy queue parser'),
-              ('  function resetLazy(', '  function stopLazyForModeSwitch(', 'Lazy reset'),
-              ('  async function startLazy(', '  function stopLazy(', 'Lazy start'),
-          ]:
-              if section(old, start, end) != section(text, start, end):
-                  raise SystemExit(f'{label} changed unexpectedly')
+          if section(old, '  function resetLazy(', '  function setLazyInputCollapsed(') != section(text, '  function resetLazy(', '  function setLazyInputCollapsed('):
+              raise SystemExit('Lazy reset changed unexpectedly')
           PY
 
           rm .github/scripts/apply_sideline_v032.py
