@@ -1,0 +1,273 @@
+name: Apply Sideline v0.3.8 once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-sideline-v038-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object Sideline_API_Move.user.js)" = "b4c7f7a348b6fcef84bbaec2e7e2e9972251a27f"
+          grep -q "@version      0.3.7" Sideline_API_Move.user.js
+          grep -q "| Sideline API Move | 0.3.7 |" README.md
+
+      - name: Apply evidence-backed classifier
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('Sideline_API_Move.user.js')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(src, old, new, label):
+              count = src.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              return src.replace(old, new, 1)
+
+          text = replace_once(
+              text,
+              '// @name         MAIN v0.3.7 Sideline API Move TEST',
+              '// @name         MAIN v0.3.8 Sideline API Move TEST',
+              'name version'
+          )
+          text = replace_once(text, '// @version      0.3.7', '// @version      0.3.8', 'metadata version')
+          text = replace_once(text, "  const VERSION = '0.3.7';", "  const VERSION = '0.3.8';", 'runtime version')
+
+          text = replace_once(
+              text,
+              "    const itemNotInSource = type === 'ItemNotInContainerResponse';\n"
+              "    const explicitOverage = itemNotInSource || isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);",
+              "    const explicitOverage = isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);",
+              'do not infer overage from scan response type'
+          )
+
+          text = replace_once(
+              text,
+              "      dateType:clean(sku.datelotDetail?.expirationPromptType),\n"
+              "      dateDetail:sku.datelotDetail || {},\n"
+              "      overage:allowedOverage,",
+              "      dateType:clean(sku.datelotDetail?.expirationPromptType),\n"
+              "      dateDetail:sku.datelotDetail || {},\n"
+              "      hazmat:sku.hazmat === true,\n"
+              "      permissionLevel:clean(sku.itemDropzoneRecommendation?.permissionLevel).toUpperCase(),\n"
+              "      overage:allowedOverage,",
+              'resolve scan-stage restriction fields'
+          )
+
+          text = replace_once(
+              text,
+              "  function hasHazmat(value) {",
+              "  function scanStageIssue(ctx) {\n"
+              "    const permissionLevel = clean(ctx?.permissionLevel).toUpperCase();\n"
+              "    if (permissionLevel !== 'UNDER_REVIEW') return null;\n\n"
+              "    const hazmat = ctx?.hazmat === true;\n"
+              "    return {\n"
+              "      kind:hazmat ? 'hazmat' : 'under-review',\n"
+              "      title:hazmat ? 'HAZMAT — ITEM NOT MOVED' : 'ASIN UNDER REVIEW — ITEM NOT MOVED',\n"
+              "      reason:hazmat ? 'HAZMAT / UNDER REVIEW — RIVER REQUIRED' : 'ASIN UNDER REVIEW — RIVER REQUIRED'\n"
+              "    };\n"
+              "  }\n\n"
+              "  function hasHazmat(value) {",
+              'scan-stage issue helper'
+          )
+
+          text = replace_once(
+              text,
+              "  function hasMoveProblems(response) {\n"
+              "    return Array.isArray(response?.problems) && response.problems.some(Boolean);\n"
+              "  }\n\n",
+              "",
+              'remove blanket problems failure helper'
+          )
+          text = replace_once(
+              text,
+              "    if (hasMoveProblems(response)) return false;\n",
+              "",
+              'successful problems are not failures'
+          )
+
+          text = replace_once(
+              text,
+              "    // Product hazard metadata is informational here. Expiry/manual requirements\n"
+              "    // are resolved first; a real Hazmat rejection is decided only by the move response.",
+              "    // Expiry/manual requirements win first. After that, mirror native Sideline's\n"
+              "    // scan-stage UNDER_REVIEW stop before any state-changing move request.",
+              'live preflight comment'
+          )
+          text = replace_once(
+              text,
+              "    item.preflightStatus = 'READY';",
+              "    const scanIssue = scanStageIssue(ctx);\n"
+              "    if (scanIssue) {\n"
+              "      if (!autoSkipQueuedLiveItem(item, scanIssue.title, scanIssue.reason)) {\n"
+              "        item.preflightStatus = 'ISSUE';\n"
+              "        item.preflightIssue = { kind:scanIssue.kind, title:scanIssue.title, reason:scanIssue.reason };\n"
+              "        renderLive();\n"
+              "      }\n"
+              "      return;\n"
+              "    }\n\n"
+              "    item.preflightStatus = 'READY';",
+              'live preflight UNDER_REVIEW gate'
+          )
+
+          text = replace_once(
+              text,
+              "    // Expiry/manual data requirements take precedence over product Hazmat metadata.\n"
+              "    // A Hazmat hard failure is only raised if the move/workflow response rejects for Hazmat.",
+              "    // Expiry/manual data requirements take precedence. Then honor native Sideline's\n"
+              "    // scan-stage UNDER_REVIEW stop; Hazmat metadata alone is not a blocker.",
+              '1x1 comment'
+          )
+          text = replace_once(
+              text,
+              "    await moveOneByOneResolved(item, ctx, null, run);",
+              "    const scanIssue = scanStageIssue(ctx);\n"
+              "    if (scanIssue) {\n"
+              "      showOneByOneError(item, scanIssue.reason, scanIssue.title);\n"
+              "      return;\n"
+              "    }\n\n"
+              "    await moveOneByOneResolved(item, ctx, null, run);",
+              '1x1 UNDER_REVIEW gate'
+          )
+
+          text = replace_once(
+              text,
+              "    // Product Hazmat metadata alone is not a rejection. Handle expiry first and\n"
+              "    // let the actual move/workflow response decide whether Hazmat blocks processing.",
+              "    // Product Hazmat metadata alone is not a rejection. Handle expiry first, then\n"
+              "    // honor native Sideline's scan-stage UNDER_REVIEW stop before moving.",
+              'live current comment'
+          )
+          text = replace_once(
+              text,
+              "    await liveMoveCurrent(item, ctx, null);",
+              "    const scanIssue = scanStageIssue(ctx);\n"
+              "    if (scanIssue) {\n"
+              "      failLiveItem(item, scanIssue.title, scanIssue.reason, ctx);\n"
+              "      return;\n"
+              "    }\n\n"
+              "    await liveMoveCurrent(item, ctx, null);",
+              'live current UNDER_REVIEW gate'
+          )
+
+          text = replace_once(
+              text,
+              "    item.status = 'READY';\n    renderLazy();\n    return { kind:'ready', ctx };",
+              "    const scanIssue = scanStageIssue(ctx);\n"
+              "    if (scanIssue) {\n"
+              "      item.status = 'FAILED';\n"
+              "      item.failReason = scanIssue.reason;\n"
+              "      lazy.errors++;\n"
+              "      lazy.error = `${item.code} — ${scanIssue.reason} — NOT MOVED`;\n"
+              "      renderLazy();\n"
+              "      return { kind:'failed' };\n"
+              "    }\n\n"
+              "    item.status = 'READY';\n    renderLazy();\n    return { kind:'ready', ctx };",
+              'lazy UNDER_REVIEW gate'
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          readme = Path('README.md')
+          readme_text = readme.read_text(encoding='utf-8')
+          old = '| Sideline API Move | 0.3.7 |'
+          new = '| Sideline API Move | 0.3.8 |'
+          if readme_text.count(old) != 1:
+              raise SystemExit('README Sideline 0.3.7 row not unique')
+          readme.write_text(readme_text.replace(old, new, 1), encoding='utf-8')
+
+      - name: Static regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check Sideline_API_Move.user.js
+          grep -q "@version      0.3.8" Sideline_API_Move.user.js
+          grep -q "const VERSION = '0.3.8'" Sideline_API_Move.user.js
+          grep -q "permissionLevel:clean(sku.itemDropzoneRecommendation?.permissionLevel).toUpperCase()" Sideline_API_Move.user.js
+          grep -q "permissionLevel !== 'UNDER_REVIEW'" Sideline_API_Move.user.js
+          ! grep -q "function hasMoveProblems" Sideline_API_Move.user.js
+          ! grep -q "if (hasMoveProblems(response))" Sideline_API_Move.user.js
+          grep -q "| Sideline API Move | 0.3.8 |" README.md
+
+      - name: Classifier fixture checks
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
+
+          def between(start, end):
+              a = s.index(start)
+              b = s.index(end, a)
+              return s[a:b]
+
+          # Shared scan semantics: metadata by itself must not block; UNDER_REVIEW must.
+          helper = between('  function scanStageIssue(ctx) {', '  function hasHazmat(value) {')
+          assert "permissionLevel !== 'UNDER_REVIEW'" in helper
+          assert "ctx?.hazmat === true" in helper
+
+          # Expiry must precede the scan-stage blocker in each processing path.
+          preflight = between('    item.ctx = ctx;\n    item.preflightIssue = null;', '  function scheduleLiveLookup(item) {')
+          assert preflight.index("ctx.dateType === 'EXPIRATION_DATE'") < preflight.index('scanStageIssue(ctx)') < preflight.index("item.preflightStatus = 'READY'")
+
+          one = between('    // Expiry/manual data requirements take precedence.', '  function enqueueOneByOneBarcode(code) {')
+          assert one.index("ctx.dateType === 'EXPIRATION_DATE'") < one.index('scanStageIssue(ctx)') < one.index('await moveOneByOneResolved')
+
+          current = between('    // Product Hazmat metadata alone is not a rejection.', '    await liveMoveCurrent(item, ctx, null);')
+          assert current.index("ctx.dateType === 'EXPIRATION_DATE'") < current.index('scanStageIssue(ctx)')
+
+          lazy = between("      return { kind:'failed' };\n    }\n\n    item.ctx = ctx;", '  function parkDeferredDate(item, ctx) {')
+          assert lazy.index("ctx.dateType === 'EXPIRATION_DATE'") < lazy.index('scanStageIssue(ctx)') < lazy.index("item.status = 'READY'")
+
+          move_ok = between('  function moveOk(response) {', '  function moveReason(response) {')
+          assert 'response.success !== true' in move_ok
+          assert 'filterResult?.compatible === false' in move_ok
+          assert 'isHazmatRejectionResponse(response)' in move_ok
+          assert 'hasPredicant(response)' in move_ok
+          assert 'hasMoveProblems' not in move_ok
+
+          # ItemNotInContainerResponse is a scan state, not proof of an accepted Overage.
+          overage = between('  function isAllowedOverageResponse(response) {', '  function resolveItem(response, barcode) {')
+          assert "itemNotInSource" not in overage
+          assert "isOverageLabel(type) || diagnosticLabels.some(isOverageLabel)" in overage
+
+      - name: Remove one-time workflow and commit main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-sideline-v038-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Sideline_API_Move.user.js README.md .github/workflows/apply-sideline-v038-once.yml
+          git commit -m "fix(sideline): honor scan-stage under-review responses"
+          git push origin HEAD:main
+
+      - name: Sync work-laptop-pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main work-laptop-pack
+          MAIN_FILE="$(mktemp)"
+          git show origin/main:Sideline_API_Move.user.js > "$MAIN_FILE"
+          git checkout -B work-laptop-pack origin/work-laptop-pack
+          test "$(git hash-object 01_Sideline.txt)" = "b4c7f7a348b6fcef84bbaec2e7e2e9972251a27f"
+          cp "$MAIN_FILE" 01_Sideline.txt
+          node --check 01_Sideline.txt
+          cmp -s "$MAIN_FILE" 01_Sideline.txt
+          git add 01_Sideline.txt
+          git commit -m "sync: Sideline API Move v0.3.8"
+          git push origin HEAD:work-laptop-pack
