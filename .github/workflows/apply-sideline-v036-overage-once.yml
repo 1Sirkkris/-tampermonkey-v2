@@ -1,0 +1,127 @@
+name: Apply Sideline v0.3.6 overage handling once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-sideline-v036-overage-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate Sideline v0.3.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main work-laptop-pack
+          git pull --rebase origin main
+
+          test "$(git hash-object Sideline_API_Move.user.js)" = "2900a7d2e91bb40f27321cfbf1e1f3eca41f9320"
+          cp Sideline_API_Move.user.js /tmp/sideline-v035.js
+
+          python3 .github/scripts/apply_sideline_v036_overage.py
+          python3 .github/scripts/tighten_sideline_v036_overage.py
+          node --check Sideline_API_Move.user.js
+          git diff --check
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = Path('/tmp/sideline-v035.js').read_text(encoding='utf-8')
+          new = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
+
+          def section(text, start, end):
+              a = text.index(start)
+              b = text.index(end, a + len(start))
+              return text[a:b]
+
+          required = [
+              "// @version      0.3.6",
+              "const VERSION = '0.3.6';",
+              'function isAllowedOverageResponse(response)',
+              "const itemNotInSource = type === 'ItemNotInContainerResponse';",
+              'if (diagnosticLabels.some(label => !isBenignOverageCompanion(label))) return false;',
+              'if (isAllowedOverageResponse(response)) return true;',
+              "if (isAllowedOverageResponse(response)) return 'OVERAGE';",
+              "? { kind:'response', response:error.payload, overage:true }",
+              'OVERAGE OK — moved',
+          ]
+          for needle in required:
+              if needle not in new:
+                  raise SystemExit(f'missing v0.3.6 invariant: {needle}')
+
+          # Overage gate remains explicitly fail-closed for every named genuine blocker.
+          overage = section(new, '  function isAllowedOverageResponse(', '  function resolveItem(')
+          for needle in [
+              "type === 'InvalidBarcodeResponse'",
+              "type === 'RequestMultipleBarcodesResponse'",
+              'hasHazmat(response)',
+              'hasPredicant(response)',
+              'isDamagedDestinationResponse(response)',
+              "filter?.compatible === false && !isOverageLabel(filterReason)",
+              'diagnosticLabels.some(label => !isBenignOverageCompanion(label))',
+              'incompatib',
+          ]:
+              if needle not in overage:
+                  raise SystemExit(f'overage safety gate missing: {needle}')
+
+          # All six scan/move error paths accept only payloads classified as Overage.
+          if new.count('isAllowedOverageResponse(error?.payload)') < 6:
+              raise SystemExit('not all Live/1x1/Lazy HTTP error paths gained the Overage exception')
+
+          # Existing Hazmat, invalid barcode, destination blocking, expiry escape and pacing stay present.
+          for needle in [
+              "showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');",
+              "autoSkipQueuedLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT')",
+              "failLiveItem(item, 'INVALID BARCODE — ITEM NOT MOVED', 'INVALID BARCODE');",
+              "blockLiveDestination(item, 'DESTINATION BLOCKED', 'DESTINATION DAMAGED'",
+              'if (!await waitForLiveMovePace(item, run)) return false;',
+              'data-return-source>↩ Return to Source</button>',
+              'data-return-source>↩ RETURN TO SOURCE</button>',
+          ]:
+              if needle not in new:
+                  raise SystemExit(f'existing safety/escape contract missing: {needle}')
+
+          # Overage must not alter the move request contract itself; it only changes response classification.
+          for start, end, label in [
+              ('  function buildMovePayload(', '  function liveItemMeta(', 'move payload'),
+              ('  function hasHazmat(', '  function hasMoveProblems(', 'hazmat parser'),
+              ('  function returnModeFromButton(', '  function returnSourceCodeForMode(', 'return-source router'),
+          ]:
+              if section(old, start, end) != section(new, start, end):
+                  raise SystemExit(f'{label} changed unexpectedly')
+          PY
+
+          git diff -- Sideline_API_Move.user.js README.md
+
+          rm .github/scripts/apply_sideline_v036_overage.py
+          rm .github/scripts/tighten_sideline_v036_overage.py
+          rm .github/workflows/apply-sideline-v036-overage-once.yml
+          git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v036_overage.py .github/scripts/tighten_sideline_v036_overage.py .github/workflows/apply-sideline-v036-overage-once.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "fix(sideline): allow overage without weakening blockers"
+          git push origin main
+
+          main_sha="$(git rev-parse HEAD)"
+          git checkout work-laptop-pack
+          git pull --rebase origin work-laptop-pack
+          git show "${main_sha}:Sideline_API_Move.user.js" > 01_Sideline.txt
+          cp 01_Sideline.txt /tmp/01_Sideline.js
+          node --check /tmp/01_Sideline.js
+          git add 01_Sideline.txt
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "sync(sideline): deploy v0.3.6 to laptop pack"
+            git push origin work-laptop-pack
+          fi
