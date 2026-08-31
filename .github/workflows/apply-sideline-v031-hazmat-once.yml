@@ -1,4 +1,4 @@
-name: Apply Sideline v0.3.1 hazmat fail-closed fix once
+name: Apply Sideline v0.3.1 hazmat fix once
 
 on:
   push:
@@ -13,12 +13,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Patch, validate, publish, and sync pack
+      - name: Apply and validate
         shell: bash
         run: |
           set -euo pipefail
@@ -28,129 +27,7 @@ jobs:
           git pull --rebase origin main
 
           test "$(git hash-object Sideline_API_Move.user.js)" = "fefa34f9f594d215e4bd30465df9283f6641e649"
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('Sideline_API_Move.user.js')
-          text = path.read_text(encoding='utf-8')
-
-          replacements = [
-              ('// @name         MAIN v0.3.0 Sideline API Move TEST', '// @name         MAIN v0.3.1 Sideline API Move TEST'),
-              ('// @version      0.3.0', '// @version      0.3.1'),
-              ("const VERSION = '0.3.0';", "const VERSION = '0.3.1';"),
-          ]
-          for old, new in replacements:
-              if text.count(old) != 1:
-                  raise SystemExit(f'Expected exactly one occurrence: {old!r}')
-              text = text.replace(old, new, 1)
-
-          old_move_ok = '''  function moveOk(response) {
-            if (!response || response.success !== true) return false;
-            if (response.filterResult?.compatible === false) return false;
-
-            if (hasPredicant(response)) return false;
-
-            return true;
-          }
-          '''
-          new_move_ok = '''  function hasHazmat(value) {
-            if (value == null) return false;
-            if (typeof value === 'string') return /(^|[^a-z])hazmat([^a-z]|$)/i.test(value);
-            if (Array.isArray(value)) return value.some(hasHazmat);
-            if (typeof value !== 'object') return false;
-            return Object.entries(value).some(([key, nested]) =>
-              /(^|[^a-z])hazmat([^a-z]|$)/i.test(key) || hasHazmat(nested)
-            );
-          }
-
-          function hasMoveProblems(response) {
-            return Array.isArray(response?.problems) && response.problems.some(Boolean);
-          }
-
-          function moveOk(response) {
-            if (!response || response.success !== true) return false;
-            if (response.filterResult?.compatible === false) return false;
-            if (hasHazmat(response)) return false;
-            if (hasMoveProblems(response)) return false;
-            if (hasPredicant(response)) return false;
-
-            return true;
-          }
-          '''
-          if text.count(old_move_ok) != 1:
-              raise SystemExit('moveOk block did not match expected v0.3.0 source')
-          text = text.replace(old_move_ok, new_move_ok, 1)
-
-          old_reason_head = '''  function moveReason(response) {
-            if (!response) return 'EMPTY MOVE RESPONSE';
-
-            const reason = response.filterResult?.reason;
-          '''
-          new_reason_head = '''  function moveReason(response) {
-            if (!response) return 'EMPTY MOVE RESPONSE';
-            if (hasHazmat(response)) return 'HAZMAT';
-
-            const reason = response.filterResult?.reason;
-          '''
-          if text.count(old_reason_head) != 1:
-              raise SystemExit('moveReason head did not match expected v0.3.0 source')
-          text = text.replace(old_reason_head, new_reason_head, 1)
-
-          old_one_catch = '''    } catch (error) {
-              if (error?.name === 'AbortError') return;
-              showOneByOneError(item, error?.message || 'MOVE API ERROR');
-              return;
-            }
-          '''
-          new_one_catch = '''    } catch (error) {
-              if (error?.name === 'AbortError') return;
-              const payloadReason = moveReason(error?.payload);
-              const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
-                ? payloadReason
-                : (error?.message || 'MOVE API ERROR');
-              showOneByOneError(
-                item,
-                reason,
-                hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
-              );
-              return;
-            }
-          '''
-          if text.count(old_one_catch) != 1:
-              raise SystemExit('1x1 move catch did not match expected v0.3.0 source')
-          text = text.replace(old_one_catch, new_one_catch, 1)
-
-          old_live_catch = '''      failLiveItem(item, 'MOVE API ERROR — ITEM NOT MOVED', error?.message || 'MOVE API ERROR', ctx);
-              return false;
-          '''
-          new_live_catch = '''      const payloadReason = moveReason(error?.payload);
-              const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
-                ? payloadReason
-                : (error?.message || 'MOVE API ERROR');
-              failLiveItem(
-                item,
-                hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
-                reason,
-                ctx
-              );
-              return false;
-          '''
-          if text.count(old_live_catch) != 1:
-              raise SystemExit('Live move catch did not match expected v0.3.0 source')
-          text = text.replace(old_live_catch, new_live_catch, 1)
-
-          path.write_text(text, encoding='utf-8')
-
-          readme = Path('README.md')
-          readme_text = readme.read_text(encoding='utf-8')
-          old = '| Sideline API Move | 0.3.0 |'
-          new = '| Sideline API Move | 0.3.1 |'
-          if readme_text.count(old) != 1:
-              raise SystemExit('README Sideline version row did not match 0.3.0')
-          readme.write_text(readme_text.replace(old, new, 1), encoding='utf-8')
-          PY
-
+          python3 .github/scripts/apply_sideline_v031.py
           node --check Sideline_API_Move.user.js
 
           node <<'NODE'
@@ -189,34 +66,22 @@ jobs:
           }
 
           const fixtures = [
-            ['plain success', {success:true, '@type':'MoveItemsResponse'}, true],
-            ['hazmat RA filter despite success', {success:true, filterResult:{compatible:true, reason:{'@type':'RAFilterResultReason', type:'HAZMAT'}}}, false],
-            ['nested hazmat marker despite success', {success:true, metadata:{restriction:'HAZMAT'}}, false],
-            ['incompatible destination', {success:true, filterResult:{compatible:false}}, false],
-            ['problem present despite success', {success:true, problems:[{description:'blocked'}]}, false],
-            ['predicant despite success', {success:true, predicant:true}, false],
+            [{success:true, '@type':'MoveItemsResponse'}, true],
+            [{success:true, filterResult:{compatible:true, reason:{'@type':'RAFilterResultReason', type:'HAZMAT'}}}, false],
+            [{success:true, metadata:{restriction:'HAZMAT'}}, false],
+            [{success:true, filterResult:{compatible:false}}, false],
+            [{success:true, problems:[{description:'blocked'}]}, false],
+            [{success:true, predicant:true}, false],
           ];
-          for (const [name, response, expected] of fixtures) {
-            const actual = moveOk(response);
-            if (actual !== expected) throw new Error(`${name}: expected ${expected}, got ${actual}`);
+          for (const [response, expected] of fixtures) {
+            if (moveOk(response) !== expected) throw new Error('moveOk fixture failed');
           }
           NODE
 
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
-          assert "if (hasHazmat(response)) return false;" in text
-          assert "if (hasMoveProblems(response)) return false;" in text
-          assert "if (hasHazmat(response)) return 'HAZMAT';" in text
-          assert "showOneByOneError(" in text
-          assert "HAZMAT — ITEM NOT MOVED" in text
-          assert "const VERSION = '0.3.1';" in text
-          PY
-
+          rm .github/scripts/apply_sideline_v031.py
           rm .github/workflows/apply-sideline-v031-hazmat-once.yml
-          git add Sideline_API_Move.user.js README.md .github/workflows/apply-sideline-v031-hazmat-once.yml
+          git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v031.py .github/workflows/apply-sideline-v031-hazmat-once.yml
           git diff --cached --check
-          git diff --cached --stat
           git commit -m "fix(sideline): fail closed on hazmat move responses"
           git push origin main
 
