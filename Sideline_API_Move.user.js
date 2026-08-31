@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.4 Sideline API Move TEST
+// @name         MAIN v0.3.5 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.4
+// @version      0.3.5
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.4';
+  const VERSION = '0.3.5';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -3989,6 +3989,7 @@
       const selection = { month:null, day:1, year:null };
       const root = document.createElement('div');
       root.id = 'sh-og-expiry';
+      root.dataset.owner = owner === live ? 'live' : 'lazy';
       root.innerHTML = '<div class="og-wrap"></div>';
       document.body.appendChild(root);
       const wrap = $('.og-wrap',root);
@@ -4817,7 +4818,8 @@
   }
 
   function stopLazyForReturn(note) {
-    const current = lazy.items[lazy.index];
+    const wasActive = !!(lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve);
+    const current = wasActive ? lazy.items[lazy.index] : null;
     if (current && !['MOVED','FAILED','INVALID'].includes(current.status)) {
       current.status = 'ABANDONED';
       current.failReason = 'RETURN TO SOURCE — ABANDONED';
@@ -4879,40 +4881,67 @@
     return await waitForNativeSourceScan(1800) ? 'source scan' : '';
   }
 
-  async function universalReturnToSource() {
+  function returnModeFromButton(button) {
+    const expiryRoot = button.closest?.('#sh-og-expiry');
+    if (expiryRoot) {
+      if (expiryRoot.dataset.owner === 'live' || expiryRoot.dataset.owner === 'lazy') return expiryRoot.dataset.owner;
+      if (live.running || live.sourceReady || live.current || live.datePending.length || live.issue || live.oneInFlight.size) return 'live';
+      if (lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve) return 'lazy';
+      if (shared.owner === 'qty' || shared.owner === 'qty-clear') return 'qty';
+      return 'native';
+    }
+
+    if (button.closest?.('#sh-live')) return 'live';
+    if (button.closest?.('#sh-lazy')) return 'lazy';
+    if (button.closest?.('#sh-queue')) return 'queue';
+    if (button.closest?.('#sh-scrub')) return 'scrub';
+    if (button.closest?.('#sh-qty')) return 'qty';
+    return 'native';
+  }
+
+  function returnSourceCodeForMode(mode) {
+    if (mode === 'live') return clean(live.src || loadedSourceContainer());
+    if (mode === 'lazy') return clean(lazy.src || loadedSourceContainer());
+    return clean(loadedSourceContainer());
+  }
+
+  async function universalReturnToSource(mode='native') {
     if (returnSourceBusy) return;
     returnSourceBusy = true;
 
-    const sourceCode = clean(live.src || lazy.src || loadedSourceContainer());
-    const liveWasActive = !!(live.running || live.sourceReady || live.current || live.datePending.length || live.issue || live.oneInFlight.size);
-    const lazyWasActive = !!(lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve);
-    const queueWasActive = q.running;
-    const qtyWasActive = shared.owner === 'qty' || shared.owner === 'qty-clear';
+    const sourceCode = returnSourceCodeForMode(mode);
+    const previousOwner = shared.owner;
+    const dateOpen = !!$('#sh-og-expiry') || screen() === 'EXPIRY';
 
-    escapeEpoch++;
-    expiryRequestSeq++;
-    qtyRequestSeq++;
-    nativeExpirySuppressedUntil = Date.now() + 5000;
+    if (dateOpen) {
+      expiryRequestSeq++;
+      nativeExpirySuppressedUntil = Date.now() + 5000;
+    }
 
-    q.runSeq++;
-    q.running = false;
-    q.paused = false;
-    renderQueue('returned to source');
-
-    feature.scrub = false;
-    renderScrub();
-
-    stopLiveForReturn('returned to source');
-    stopLazyForReturn('returned to source — current item abandoned');
+    if (mode === 'queue') {
+      q.runSeq++;
+      q.running = false;
+      q.paused = false;
+      renderQueue('returned to source');
+    } else if (mode === 'scrub') {
+      escapeEpoch++;
+      feature.scrub = false;
+      shared.scrubBusy = false;
+      renderScrub();
+    } else if (mode === 'qty') {
+      qtyRequestSeq++;
+      qtyClear.disabled = false;
+      qtyStatus.textContent = 'Returning to source — quantity action cancelled';
+    } else if (mode === 'live') {
+      stopLiveForReturn('returned to source');
+    } else if (mode === 'lazy') {
+      stopLazyForReturn('returned to source — current item abandoned');
+    }
 
     $('#sh-og-expiry')?.remove();
     $('#sh-invalid-toast')?.remove();
-    shared.scrubBusy = false;
-    shared.queueBusy = false;
-    shared.expiryBusy = true;
+    shared.expiryBusy = dateOpen;
     shared.owner = 'return-source';
-    qtyClear.disabled = false;
-    if (qtyWasActive) qtyStatus.textContent = 'Returned to source — quantity action cancelled';
 
     savePanelStates();
     applyPanels();
@@ -4923,31 +4952,47 @@
         ? `returned to ${outcome}`
         : 'helper escaped — native source control not found';
 
-      if (liveWasActive) {
+      if (mode === 'live') {
         live.note = message;
         renderLive();
-      }
-      if (lazyWasActive) {
+      } else if (mode === 'lazy') {
         lazy.note = `${message} — queue/history preserved`;
         renderLazy();
+      } else if (mode === 'queue') {
+        renderQueue(message);
+      } else if (mode === 'qty') {
+        qtyStatus.textContent = message;
+      } else if (mode === 'scrub') {
+        scrubStatus.textContent = `OFF | ${message}`;
       }
-      if (queueWasActive) renderQueue(message);
-      if (qtyWasActive) qtyStatus.textContent = message;
     } catch (error) {
       const message = `RETURN TO SOURCE FAILED — ${error?.message || error}`;
-      live.error = liveWasActive ? message : live.error;
-      lazy.error = lazyWasActive ? message : lazy.error;
-      if (queueWasActive) qError.textContent = message;
-      if (qtyWasActive) qtyStatus.textContent = message;
-      renderLive();
-      renderLazy();
+      if (mode === 'live') {
+        live.error = message;
+        renderLive();
+      } else if (mode === 'lazy') {
+        lazy.error = message;
+        renderLazy();
+      } else if (mode === 'queue') {
+        qError.textContent = message;
+      } else if (mode === 'qty') {
+        qtyStatus.textContent = message;
+      } else if (mode === 'scrub') {
+        scrubStatus.textContent = `OFF | ${message}`;
+      }
     } finally {
-      shared.expiryBusy = false;
-      if (shared.owner === 'return-source') shared.owner = '';
+      if (dateOpen) shared.expiryBusy = false;
+      if (shared.owner === 'return-source') {
+        const ownerWasTarget =
+          previousOwner === mode ||
+          (mode === 'lazy' && /^lazy(?:-|$)/.test(previousOwner)) ||
+          (mode === 'qty' && (previousOwner === 'qty' || previousOwner === 'qty-clear'));
+        shared.owner = previousOwner && !ownerWasTarget ? previousOwner : '';
+      }
       returnSourceBusy = false;
       screenDirty = true;
       requestPanelLayout();
-      setTimeout(nativeExpiryTick, 5500);
+      if (dateOpen) setTimeout(nativeExpiryTick, 5500);
     }
   }
 
@@ -4957,7 +5002,7 @@
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    universalReturnToSource();
+    universalReturnToSource(returnModeFromButton(button));
   }
 
   // Boot
