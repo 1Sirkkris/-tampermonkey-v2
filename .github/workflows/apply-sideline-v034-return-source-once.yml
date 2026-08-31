@@ -1,0 +1,144 @@
+name: Apply Sideline v0.3.4 return-source escape once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-sideline-v034-return-source-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply, validate, publish, sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main work-laptop-pack
+          git pull --rebase origin main
+
+          test "$(git hash-object Sideline_API_Move.user.js)" = "c28bb4ac46c0d4308f01c4b4c0edc07fbc47079b"
+          cp Sideline_API_Move.user.js /tmp/sideline-v033.js
+          python3 .github/scripts/apply_sideline_v034_return_source.py
+          node --check Sideline_API_Move.user.js
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = Path('/tmp/sideline-v033.js').read_text(encoding='utf-8')
+          new = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
+
+          def section(text, start, end):
+              a = text.index(start)
+              b = text.index(end, a + len(start))
+              return text[a:b]
+
+          required = [
+              "// @version      0.3.4",
+              "const VERSION = '0.3.4';",
+              "data-return-source>↩ Return to Source</button>",
+              "data-return-source>↩ RETURN TO SOURCE</button>",
+              "async function universalReturnToSource()",
+              "function stopLiveForReturn(note)",
+              "function stopLazyForReturn(note)",
+              "async function returnNativeToSourceContainer(sourceCode)",
+              "document.addEventListener('click', handleUniversalReturnClick, true);",
+              "nativeExpirySuppressedUntil = Date.now() + 5000;",
+              "qtyRequestSeq++;",
+              "q.runSeq++;",
+          ]
+          for needle in required:
+              if needle not in new:
+                  raise SystemExit(f'missing required invariant: {needle}')
+
+          # All helper panels inherit an obvious escape control from panel().
+          panel_fn = section(new, '  function panel(', '  function savePanelStates(')
+          assert 'data-return-source' in panel_fn
+
+          # Both scripted and native date overlays expose Return to Source.
+          api_date = section(new, '  function showApiDatePicker(', '  function nativeExpiryInputs(')
+          assert 'og-return-source' in api_date and 'RETURN TO SOURCE' in api_date
+          native_date = section(new, '  function showNativeExpiryPicker(', '  function nativeExpiryTick(')
+          assert 'og-return-source' in native_date and 'RETURN TO SOURCE' in native_date
+
+          # Manual intervention cards have a local escape as well.
+          live_issue = section(new, '  function liveIssueHtml(', '  function livePreflightIssueHtml(')
+          assert 'data-return-source' in live_issue
+          lazy_render = section(new, '  function renderLazy(', '  let damageTitleTimer')
+          assert 'data-return-source' in lazy_render
+
+          # Return cancels owners/tokens and cannot leave expiry/retry overlays alive.
+          universal = section(new, '  async function universalReturnToSource()', '  function handleUniversalReturnClick(')
+          for needle in [
+              'escapeEpoch++;', 'expiryRequestSeq++;', 'qtyRequestSeq++;', 'q.runSeq++;',
+              'feature.scrub = false;', "stopLiveForReturn('returned to source');",
+              "stopLazyForReturn('returned to source — current item abandoned');",
+              "$('#sh-og-expiry')?.remove();", "shared.owner = 'return-source';"
+          ]:
+              assert needle in universal, needle
+
+          # Lazy queue/history/input are preserved by the escape path; it is not Reset Lazy.
+          lazy_return = section(new, '  function stopLazyForReturn(note)', '  async function returnNativeToSourceContainer(')
+          for forbidden in ['lazy.items = []', 'lazy.deferred = []', "lItems.value = ''", "lSrc.value = ''", "lDest.value = ''"]:
+              if forbidden in lazy_return:
+                  raise SystemExit(f'Lazy escape unexpectedly clears state: {forbidden}')
+
+          # Live clears only unfinished work while preserving completed history/counters.
+          live_return = section(new, '  function stopLiveForReturn(note)', '  function stopLazyForReturn(note)')
+          for required_live in ['live.queue = [];', 'live.current = null;', 'live.datePending = [];', 'live.issue = null;']:
+              assert required_live in live_return, required_live
+          for forbidden in ['live.history = []', 'live.moved = 0', 'live.skipped = 0']:
+              if forbidden in live_return:
+                  raise SystemExit(f'Live escape unexpectedly clears completed history/counter: {forbidden}')
+
+          # Existing safety contracts from v0.3.3 must remain intact.
+          for needle in [
+              "showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');",
+              "if (hasHazmat(result.response)) {",
+              "autoSkipQueuedLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT')",
+              'if (!await waitForLiveMovePace(item, run)) return false;',
+          ]:
+              if needle not in new:
+                  raise SystemExit(f'existing safety contract missing: {needle}')
+
+          # The v0.3.4 patch must not alter payload construction or Hazmat classification.
+          for start, end, label in [
+              ('  function buildMovePayload(', '  function liveItemMeta(', 'move payload'),
+              ('  function hasHazmat(', '  function hasMoveProblems(', 'hazmat parser'),
+          ]:
+              if section(old, start, end) != section(new, start, end):
+                  raise SystemExit(f'{label} changed unexpectedly')
+          PY
+
+          git diff --check
+          git diff -- Sideline_API_Move.user.js README.md
+
+          rm .github/scripts/apply_sideline_v034_return_source.py
+          rm .github/workflows/apply-sideline-v034-return-source-once.yml
+          git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v034_return_source.py .github/workflows/apply-sideline-v034-return-source-once.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "fix(sideline): add universal return-to-source escape"
+          git push origin main
+
+          main_sha="$(git rev-parse HEAD)"
+          git checkout work-laptop-pack
+          git pull --rebase origin work-laptop-pack
+          git show "${main_sha}:Sideline_API_Move.user.js" > 01_Sideline.txt
+          cp 01_Sideline.txt /tmp/01_Sideline.js
+          node --check /tmp/01_Sideline.js
+          git add 01_Sideline.txt
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "sync(sideline): deploy v0.3.4 to laptop pack"
+            git push origin work-laptop-pack
+          fi
