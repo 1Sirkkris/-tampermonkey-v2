@@ -29,6 +29,17 @@ jobs:
           test "$(git hash-object Sideline_API_Move.user.js)" = "1f77915d818629ee6979a6181ad07a0bafd1456e"
           cp Sideline_API_Move.user.js /tmp/sideline-v036.js
 
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/apply_sideline_v037_expiry_hazmat.py')
+          s = p.read_text(encoding='utf-8')
+          old = """replace_all(\n\"reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n\"reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n1,\n'1x1 move response Hazmat title')\nreplace_all(\n\"reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n\"reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n1,\n'Live move response Hazmat title')\n"""
+          new = """replace_all(\n\"reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n\"reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'\",\n2,\n'move response Hazmat titles')\n"""
+          if s.count(old) != 1:
+              raise SystemExit('could not repair v0.3.7 patch assertion')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
           python3 .github/scripts/apply_sideline_v037_expiry_hazmat.py
           node --check Sideline_API_Move.user.js
           git diff --check
@@ -57,7 +68,6 @@ jobs:
               if needle not in new:
                   raise SystemExit(f'missing v0.3.7 invariant: {needle}')
 
-          # Expiry stays ahead of any move, and scan/product Hazmat metadata no longer auto-skips.
           one = section(new, '  async function processOneByOneBarcode(', '  function enqueueOneByOneBarcode(')
           if "showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');" in one:
               raise SystemExit('1x1 still hard-skips scan metadata Hazmat')
@@ -74,7 +84,6 @@ jobs:
           if 'hasHazmat(result.response)' in preflight:
               raise SystemExit('Live preflight still hard-skips product Hazmat metadata')
 
-          # Actual move rejection still has Hazmat hard-stop handling.
           one_move = section(new, '  async function moveOneByOneResolved(', '  async function processOneByOneBarcode(')
           live_move = section(new, '  async function liveMoveCurrent(', '  async function retryLiveCurrentMove(')
           for label, block in [('1x1', one_move), ('Live', live_move)]:
@@ -83,13 +92,11 @@ jobs:
               if 'HAZMAT — ITEM NOT MOVED' not in block:
                   raise SystemExit(f'{label} lost visible Hazmat failure')
 
-          # Overage remains accepted, but no special Overage message is rendered.
           if 'OVERAGE OK —' in new:
               raise SystemExit('Overage still has special user-facing UI text')
           if 'function isAllowedOverageResponse(response)' not in new or 'if (isAllowedOverageResponse(response)) return true;' not in new:
               raise SystemExit('Overage acceptance behavior was removed')
 
-          # Return-to-source visible controls are scoped to Lazy / Live / 1x1 and their API date picker.
           panel = section(new, '  function panel(', '  function savePanelStates(')
           if "key === 'lazy' || key === 'live'" not in panel:
               raise SystemExit('panel return-source scope missing')
@@ -98,7 +105,6 @@ jobs:
           if 'data-return-source' in native_block:
               raise SystemExit('native/QTY expiry still exposes Return to Source')
 
-          # Move payload contract and Overage classifier are otherwise preserved except Hazmat rejection semantics.
           if section(old, '  function buildMovePayload(', '  function liveItemMeta(') != section(new, '  function buildMovePayload(', '  function liveItemMeta('):
               raise SystemExit('move payload changed unexpectedly')
           PY
