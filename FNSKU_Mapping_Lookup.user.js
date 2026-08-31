@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN v1.3.5-test FNSKU mapping Lookup
-// @version      1.3.5-test
+// @name       MAIN v1.3.6-test FNSKU mapping Lookup
+// @version      1.3.6-test
 // @description  Read-only regional FNSKU lookup with HOME merchant/MSKU details, JP fallback and matched JP/AU candidates.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.5-test';
+  const VERSION = '1.3.6-test';
   const GUARD_ATTR = 'data-bwu2-fnsku-mapping-lookup';
   if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
   document.documentElement.setAttribute(GUARD_ATTR, VERSION);
@@ -405,8 +405,8 @@
     if (!rows.length) return '<div class="fnsku-no-rows">No mappings returned.</div>';
 
     const head = candidate
-      ? '<tr><th>Match</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>'
-      : '<tr><th>Region</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>';
+      ? '<tr><th>Match</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>ASIN</th><th>State</th></tr>'
+      : '<tr><th>Region</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>ASIN</th><th>State</th></tr>';
 
     const body = rows.map(row => {
       const first = candidate
@@ -419,6 +419,7 @@
         `<td>${tableValue(row.merchantId, 'Copy Merchant ID')}</td>` +
         `<td>${tableValue(row.msku, 'Copy MSKU')}</td>` +
         `<td>${tableValue(row.fnsku, 'Copy FNSKU')}</td>` +
+        `<td>${tableValue(row.asin, 'Copy ASIN')}</td>` +
         `<td>${escapeHtml(rowState(row))}</td>` +
         '</tr>';
     }).join('');
