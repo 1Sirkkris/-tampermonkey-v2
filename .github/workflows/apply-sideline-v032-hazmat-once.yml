@@ -27,6 +27,7 @@ jobs:
           git pull --rebase origin main
 
           test "$(git hash-object Sideline_API_Move.user.js)" = "d4dc8760c023663f25bab885d84df1f695c4be0d"
+          cp Sideline_API_Move.user.js /tmp/sideline-v031.js
           python3 .github/scripts/apply_sideline_v032.py
           node --check Sideline_API_Move.user.js
 
@@ -72,33 +73,37 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
+          old = Path('/tmp/sideline-v031.js').read_text(encoding='utf-8')
           text = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
 
-          def section(start, end):
-              return text[text.index(start):text.index(end)]
+          def section(source, start, end):
+              return source[source.index(start):source.index(end)]
 
-          one = section('  async function moveOneByOneResolved', '  async function processOneByOneBarcode')
+          one = section(text, '  async function moveOneByOneResolved', '  async function processOneByOneBarcode')
           assert one.index("if (reason === 'HAZMAT' || hasHazmat(response)") < one.index('if (moveOk(response))')
 
-          scan = section('  async function processOneByOneBarcode', '  function enqueueOneByOneBarcode')
+          scan = section(text, '  async function processOneByOneBarcode', '  function enqueueOneByOneBarcode')
           assert scan.index("showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');") < scan.index('await moveOneByOneResolved')
 
-          live_move = section('  async function liveMoveCurrent', '  async function retryLiveCurrentMove')
+          live_move = section(text, '  async function liveMoveCurrent', '  async function retryLiveCurrentMove')
           assert live_move.index("if (reason === 'HAZMAT' || hasHazmat(response)") < live_move.index('if (moveOk(response))')
 
-          live_scan = section('  async function processLiveCurrent', '  async function pumpLive')
+          live_scan = section(text, '  async function processLiveCurrent', '  async function pumpLive')
           assert live_scan.index("failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);") < live_scan.index('await liveMoveCurrent(item, ctx, null);')
 
-          # Explicitly preserve Lazy's history/state implementation: the v0.3.2 patch
-          # does not target its state object, reset/start functions, queue, or history UI.
-          for needle in [
-              'const lazy = {',
-              'lazy.history',
-              'function resetLazy',
-              'async function startLazy',
+          # Preserve Lazy-specific state, queue/history representation, and control functions byte-for-byte.
+          lazy_state_start = '  const lazy = {'
+          lazy_state_end = '  const lazyPanel = panel('
+          if section(old, lazy_state_start, lazy_state_end) != section(text, lazy_state_start, lazy_state_end):
+              raise SystemExit('Lazy state changed unexpectedly')
+
+          for start, end, label in [
+              ('  function parseItems(', '  function refreshItems(', 'Lazy queue parser'),
+              ('  function resetLazy(', '  function stopLazyForModeSwitch(', 'Lazy reset'),
+              ('  async function startLazy(', '  function stopLazy(', 'Lazy start'),
           ]:
-              if needle not in text:
-                  raise SystemExit(f'Lazy invariant missing: {needle}')
+              if section(old, start, end) != section(text, start, end):
+                  raise SystemExit(f'{label} changed unexpectedly')
           PY
 
           rm .github/scripts/apply_sideline_v032.py
