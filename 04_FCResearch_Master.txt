@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.20 FCResearch Master — Hide Disabled Spinners
+// @name         TEST v0.1.21 FCResearch Master — RIVER Ticket Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.20
+// @version      0.1.21
 // @description  TEST: Saved section controls with native loading rings hidden only for disabled sections.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.20';
+  const VERSION = '0.1.21';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -69,6 +69,9 @@
     'rgb(173,3,222)',
     'rgb(51,51,255)'
   ];
+  const RIVER_WORKFLOW_PATH = '/workflows';
+  const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
+  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
 
   const $ = (selector, root = document) => {
     try { return root.querySelector(selector); } catch { return null; }
@@ -930,15 +933,16 @@
   }
 
   function renderHazmatBadge(badge, result, { river = false, inventory = false } = {}) {
-    if (!badge) return;
+    if (!badge) return false;
     if (!result) {
+      const clickable = river;
       badge.style.background = LEVEL_COLORS[0];
       badge.textContent = 'Hazmat N/A';
-      badge.classList.remove('fc-river-l0');
-      badge.setAttribute('role', 'status');
-      badge.removeAttribute('tabindex');
-      badge.title = '';
-      return;
+      badge.classList.toggle('fc-river-l0', clickable);
+      badge.setAttribute('role', clickable ? 'button' : 'status');
+      if (clickable) { badge.tabIndex = 0; badge.title = 'Create Hazmat RIVER ticket'; }
+      else { badge.removeAttribute('tabindex'); badge.title = ''; }
+      return clickable;
     }
     const level = clampLevel(result[0]);
     const message = String(result[1] || '');
@@ -949,6 +953,46 @@
     badge.setAttribute('role', clickable ? 'button' : 'status');
     if (clickable) { badge.tabIndex = 0; badge.title = 'Create Hazmat RIVER ticket'; }
     else { badge.removeAttribute('tabindex'); badge.title = ''; }
+    return clickable;
+  }
+
+  function riverWorkflowUrl() {
+    const warehouseId = clean(getWarehouseId()).toUpperCase();
+    if (!/^[A-Z0-9-]{2,12}$/.test(warehouseId)) return '';
+    const url = new URL(`https://river.amazon.com/${encodeURIComponent(warehouseId)}${RIVER_WORKFLOW_PATH}`);
+    url.searchParams.set('buildingType', 'fc');
+    url.searchParams.set('workflowId', 'undefined');
+    url.searchParams.set('q0', RIVER_WORKFLOW_Q0);
+    url.searchParams.set('q1', RIVER_WORKFLOW_ID);
+    url.searchParams.set('id', RIVER_WORKFLOW_ID);
+    return url.href;
+  }
+
+  function setRiverTicketAction(badge, enabled) {
+    if (!badge) return;
+    badge.onclick = null;
+    badge.onkeydown = null;
+    if (!enabled) return;
+
+    const openTicket = event => {
+      if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      const url = riverWorkflowUrl();
+      if (!url) {
+        alert('FC warehouse ID is unavailable. Refresh FCResearch and try again.');
+        return;
+      }
+      usage('hazmat.river.open');
+      const opened = window.open(url, '_blank');
+      if (opened) {
+        try { opened.opener = null; } catch {}
+      } else {
+        location.assign(url);
+      }
+    };
+    badge.onclick = openTicket;
+    badge.onkeydown = openTicket;
   }
 
   function ensureProductHazmatUi(panel) {
@@ -971,7 +1015,8 @@
     try {
       const result = await getHazmat(panel.primaryId, force);
       if (runId !== productRunId || readProductPanel()?.signature !== panel.signature) return;
-      renderHazmatBadge(ui.badge, result, { river: true });
+      const riverReady = renderHazmatBadge(ui.badge, result, { river: true });
+      setRiverTicketAction(ui.badge, riverReady);
       ui.button.onclick = async () => { const current = readProductPanel(); if (current) await Promise.all([updateProductHazmat(current, true), annotateInventory(true)]); };
     } finally { if (force) setBusyButton(ui.button, false); }
   }
