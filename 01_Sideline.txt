@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.8 Sideline API Move TEST
+// @name         MAIN v0.2.9 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.8
+// @version      0.2.9
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.8';
+  const VERSION = '0.2.9';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -563,6 +563,13 @@
 #sh-live .sh-live-current{padding:6px 8px;margin-top:7px;border:2px solid #f59e0b;background:#fff7ed;color:#9a3412;border-radius:4px;font-weight:900}
 #sh-live .sh-live-blocked{animation:shLiveBlocked .65s ease-in-out infinite alternate}
 @keyframes shLiveBlocked{from{box-shadow:0 0 0 0 rgba(239,68,68,.12)}to{box-shadow:0 0 0 6px rgba(239,68,68,.18)}}
+#sh-live .sh-live-one-result{display:none;margin:8px 0;padding:10px;border:3px solid;border-left-width:8px;border-radius:5px;font-weight:900}
+#sh-live .sh-live-one-result.show{display:block}
+#sh-live .sh-live-one-result.ok{border-color:#16a34a;background:#dcfce7;color:#14532d}
+#sh-live .sh-live-one-result.bad{border-color:#dc2626;background:#fff1f2;color:#7f1d1d}
+#sh-live .sh-live-one-result-title{font-size:16px;font-weight:1000;margin-bottom:6px}
+#sh-live .sh-live-one-result-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 7px;font-size:12px;line-height:1.3}
+#sh-live .sh-live-one-result-grid b{font-weight:1000}
 #sh-live .sh-live-idle-pulse{border-width:3px!important;animation:shLiveIdlePulse .8s steps(2,end) infinite!important}
 @keyframes shLiveIdlePulse{
   0%,100%{border-color:#146eb4!important;box-shadow:0 0 0 3px rgba(20,110,180,.24)}
@@ -1027,7 +1034,7 @@
   const live = {
     oneByOne:false,
     oneInFlight:new Map(),
-    oneTransientError:'',
+    oneResult:null,
     oneErrorToken:0,
     oneErrorTimer:0,
     running:false,
@@ -1077,7 +1084,7 @@
     '<div class="sh-live-issue"></div>' +
     '<div class="sh-status" data-live-status></div>' +
     '<div class="sh-error" data-live-error></div>' +
-    '<div class="sh-error" data-live-transient-error></div>' +
+    '<div class="sh-live-one-result" data-live-one-result></div>' +
     '<div class="sh-live-current" data-live-current style="display:none"></div>' +
     '<div class="sh-live-history"></div>'
   );
@@ -1087,7 +1094,7 @@
   const liveScan = $('[data-f="live-scan"]', livePanel);
   const liveStatus = $('[data-live-status]', livePanel);
   const liveError = $('[data-live-error]', livePanel);
-  const liveTransientError = $('[data-live-transient-error]', livePanel);
+  const liveOneResult = $('[data-live-one-result]', livePanel);
   const liveReady = $('.sh-live-ready', livePanel);
   const liveQueueLabel = $('[data-live-queue-label]', livePanel);
   const liveIssue = $('.sh-live-issue', livePanel);
@@ -1156,7 +1163,7 @@
   function beginLiveRun() {
     live.lookupWait = [];
     live.oneInFlight.clear();
-    live.oneTransientError = '';
+    live.oneResult = null;
     clearTimeout(live.oneErrorTimer);
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
@@ -1576,7 +1583,29 @@
       : '';
     setTextIfChanged(liveStatus, `${state}${live.note ? ` | ${live.note}` : ''}${precheckSuffix}${expirySuffix}${issueAheadSuffix}`);
     setTextIfChanged(liveError, live.error || '');
-    setTextIfChanged(liveTransientError, live.oneTransientError || '');
+
+    const oneResult = live.oneByOne ? live.oneResult : null;
+    if (oneResult) {
+      const resultHtml =
+        `<div class="sh-live-one-result-title">${oneResult.ok ? '✓ MOVED — QTY 1' : '⚠ NOT MOVED — AUTO-SKIPPED'}</div>` +
+        `<div class="sh-live-one-result-grid">` +
+          `<b>SCAN:</b><span>${esc(oneResult.scan || '—')}</span>` +
+          `<b>ASIN:</b><span>${esc(oneResult.asin || '—')}</span>` +
+          `<b>FNSKU:</b><span>${esc(oneResult.fnsku || '—')}</span>` +
+          (!oneResult.ok ? `<b>Issue:</b><span>${esc(oneResult.reason || 'NOT MOVED')}</span>` : '') +
+        `</div>`;
+      if (liveOneResult.dataset.html !== resultHtml) {
+        liveOneResult.dataset.html = resultHtml;
+        liveOneResult.innerHTML = resultHtml;
+      }
+      liveOneResult.classList.toggle('ok', !!oneResult.ok);
+      liveOneResult.classList.toggle('bad', !oneResult.ok);
+      liveOneResult.classList.add('show');
+    } else {
+      if (liveOneResult.dataset.html !== '') liveOneResult.dataset.html = '';
+      if (liveOneResult.innerHTML) liveOneResult.innerHTML = '';
+      liveOneResult.classList.remove('show','ok','bad');
+    }
 
     const hardIssueHtml = liveIssueHtml();
     const issueHtml = hardIssueHtml || livePreflightIssueHtml(preflightIssues);
@@ -1604,15 +1633,22 @@
       if (liveCurrent.innerHTML) liveCurrent.innerHTML = '';
     }
 
-    const historyToken = `${live.history.length}:${live.history[0]?.id || ''}`;
-    if (historyToken !== liveHistoryToken) {
-      liveHistoryToken = historyToken;
-      liveHistory.innerHTML = live.history.slice(0, 14).map(item => {
-        const ctx = item.ctx;
-        return `<div class="sh-live-history-row">✓ ${esc(item.code)} ×${esc(String(item.qty || 1))}` +
-          (ctx?.fnsku ? ` &nbsp; | &nbsp; ${esc(ctx.fnsku)}` : '') +
-          ` → ${esc(item.destination || live.dest)}</div>`;
-      }).join('');
+    if (live.oneByOne) {
+      if (liveHistory.style.display !== 'none') liveHistory.style.display = 'none';
+      if (liveHistory.innerHTML) liveHistory.innerHTML = '';
+      liveHistoryToken = '';
+    } else {
+      if (liveHistory.style.display !== '') liveHistory.style.display = '';
+      const historyToken = `${live.history.length}:${live.history[0]?.id || ''}`;
+      if (historyToken !== liveHistoryToken) {
+        liveHistoryToken = historyToken;
+        liveHistory.innerHTML = live.history.slice(0, 14).map(item => {
+          const ctx = item.ctx;
+          return `<div class="sh-live-history-row">✓ ${esc(item.code)} ×${esc(String(item.qty || 1))}` +
+            (ctx?.fnsku ? ` &nbsp; | &nbsp; ${esc(ctx.fnsku)}` : '') +
+            ` → ${esc(item.destination || live.dest)}</div>`;
+        }).join('');
+      }
     }
 
     const liveWorking = !!(
@@ -1641,7 +1677,7 @@
     clearTimeout(live.oneErrorTimer);
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
-    live.oneTransientError = '';
+    live.oneResult = null;
     live.oneInFlight.clear();
 
     live.running = false;
@@ -1689,7 +1725,7 @@
     clearTimeout(live.oneErrorTimer);
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
-    live.oneTransientError = '';
+    live.oneResult = null;
     live.oneInFlight.clear();
 
     live.running = false;
@@ -1928,13 +1964,32 @@
     renderLive();
   }
 
+  function setOneByOneResult(item, ok, reason='') {
+    const meta = liveItemMeta(item);
+    const token = ++live.oneErrorToken;
+    clearTimeout(live.oneErrorTimer);
+    live.oneResult = {
+      ok:!!ok,
+      scan:meta.scan,
+      asin:meta.asin,
+      fnsku:meta.fnsku,
+      reason:clean(reason)
+    };
+
+    live.oneErrorTimer = setTimeout(() => {
+      if (live.oneErrorToken !== token) return;
+      live.oneErrorTimer = 0;
+      live.oneResult = null;
+      renderLive();
+    }, 5000);
+  }
+
   function finishOneByOneMoved(item) {
     live.oneInFlight.delete(item.id);
     item.status = 'MOVED';
     item.destination = item.destination || live.dest;
     live.moved += 1;
-    live.history.unshift(item);
-    if (live.history.length > 100) live.history.length = 100;
+    setOneByOneResult(item, true);
     if (live.current === item) {
       live.current = null;
       live.issue = null;
@@ -1951,19 +2006,9 @@
     item.status = 'SKIPPED';
     live.skipped += 1;
     live.note = 'item skipped — scan next item';
-
-    const token = ++live.oneErrorToken;
-    clearTimeout(live.oneErrorTimer);
-    live.oneTransientError = `⚠ ${item.code} — ${clean(reason) || 'NOT MOVED'} — scan next item`;
+    setOneByOneResult(item, false, reason);
     renderLive();
     finishMoveCorner('live', false);
-
-    live.oneErrorTimer = setTimeout(() => {
-      if (live.oneErrorToken !== token) return;
-      live.oneErrorTimer = 0;
-      live.oneTransientError = '';
-      renderLive();
-    }, 5000);
   }
 
   function blockOneByOneDestination(item, title, reason, ctx, expirationMs) {
@@ -2037,7 +2082,7 @@
     }
 
     if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
-      blockOneByOneDestination(item, 'HAZMAT / DESTINATION ISSUE', reason || 'HAZMAT', ctx, expirationMs);
+      showOneByOneError(item, reason || 'HAZMAT');
       return;
     }
 
