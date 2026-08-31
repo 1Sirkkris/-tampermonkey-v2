@@ -13,15 +13,19 @@ The user defines the real-world workflow and correct outcome. The agent owns the
 
 Interpret short, rough, informal or non-technical requests from surrounding workflow and evidence. Do not require the user to translate a problem into code, API, DOM or Git terminology.
 
-Priority:
+### PRIORITY
 
 `Correctness/data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX`
 
 Never improve a lower priority by sacrificing a higher one.
 
+Explicit user instructions in the current task take precedence over this file.
+
 ---
 
-## PRECEDENCE AND CONTINUITY
+# 1. GET THE TASK RIGHT
+
+## 1.1 PRECEDENCE AND CONTINUITY
 
 1. The user’s latest explicit instruction overrides older wording, assumptions, defaults and stale artifacts.
 2. Treat corrections such as `no`, `not that`, `same problem`, `still broken`, and scope corrections as requirements.
@@ -36,11 +40,7 @@ Never improve a lower priority by sacrificing a higher one.
 7. Do not ask a clarification question when the intended result can be safely inferred from existing workflow, evidence or history.
 8. If ambiguity materially changes safety, data integrity or scope and cannot be resolved from available evidence, identify only the blocking uncertainty.
 
-Explicit user instructions in the current task take precedence over this file.
-
----
-
-## AUTHORIZATION BOUNDARY
+## 1.2 AUTHORIZATION BOUNDARY
 
 ### READ-ONLY
 
@@ -59,43 +59,21 @@ Treat these as read-only unless the user separately authorizes a change:
 - do not change yet
 - testing first
 
-Read-only work may:
-
-- read code and history
-- compare versions/diffs
-- inspect logs, screenshots and captured responses
-- trace execution paths
-- identify likely causes
-- state uncertainty
-- recommend a change
+Read-only work may read, compare, trace, inspect evidence, identify likely causes, state uncertainty and recommend a change.
 
 Read-only work must not:
 
-- modify files
-- alter versions
-- create or change diagnostic code
+- modify files or versions
+- create/change diagnostic code
 - commit or push
 - deploy or synchronize branches
 - fix something while reviewing
 
-`Continue` inherits the authorization of the current task.
-
-It is not permission to convert read-only work into implementation.
+`Continue` inherits the authorization of the current task. It does not turn read-only work into implementation.
 
 ### CHANGE AUTHORIZED
 
-Requests such as:
-
-- fix
-- change
-- implement
-- build
-- update
-- modify
-- optimize
-- refactor
-
-authorize the normal scoped engineering workflow:
+Requests such as `fix`, `change`, `implement`, `build`, `update`, `modify`, `optimize`, or `refactor` authorize the normal scoped engineering workflow:
 
 `inspect → change → validate → diff review → version → commit → push → deploy/sync when applicable → exact user update action`
 
@@ -112,21 +90,19 @@ Still require user approval before:
 
 ---
 
-## SOURCE TRUTH AND BASELINE
+# 2. PROTECT THE WORKING BASELINE
+
+## 2.1 SOURCE TRUTH AND BASELINE
 
 Before coding, review or diagnosis:
 
 1. Read this `AGENTS.md`.
 2. Inspect the exact canonical source and relevant history/diff.
-3. Identify the exact:
-   - script
-   - filename
-   - branch
-   - current version
+3. Identify the exact script, filename, branch and current version.
 4. Identify the last version confirmed working for the affected workflow.
 5. Check whether previous fixes already touched the same mechanism.
 
-Important distinction:
+Keep this distinction:
 
 `GitHub main = editable source truth`
 
@@ -147,69 +123,7 @@ Never silently replace a known-good baseline with an untested rewrite.
 
 If canonical source cannot be accessed, do not change code.
 
----
-
-## EVIDENCE DISCIPLINE
-
-Use these meanings consistently.
-
-**KNOWN**  
-Directly established by source/code/configuration, explicit user requirement or other authoritative evidence.
-
-**OBSERVED**  
-Behaviour directly visible in runtime evidence, logs, screenshots or captured responses.
-
-**TESTED**  
-The exact behaviour was intentionally exercised and its result observed.
-
-When relevant distinguish:
-
-- agent-tested
-- user-tested
-- production-tested
-
-**INFERRED**  
-Strongly supported by evidence but not directly demonstrated.
-
-**SUSPECTED**  
-Plausible hypothesis requiring more evidence.
-
-**UNKNOWN**  
-Evidence is missing, insufficient or contradictory.
-
-Do not promote:
-
-- `SUSPECTED → INFERRED`
-- `INFERRED → KNOWN`
-- `OBSERVED → TESTED`
-
-without evidence justifying the promotion.
-
-Static inspection, reasoning or simulation is not runtime testing.
-
-A screenshot proves only what it visibly contains.
-
-A UI error does not by itself prove a backend operation failed.
-
-Correlation is not root cause.
-
-Only claim root cause when the causal chain is adequately supported.
-
-Never claim:
-
-- a change was made when it was not
-- a commit/push/deployment happened without confirmation
-- a test passed when it was not run
-- an API returned something that was not captured
-- a requirement or known issue existed without supporting evidence
-
-Where live behaviour remains unverified, state:
-
-`Regression: Live validation needed.`
-
----
-
-## CHANGE DISCIPLINE
+## 2.2 CHANGE DISCIPLINE
 
 For a targeted bug or behaviour change:
 
@@ -221,20 +135,25 @@ Rules:
 - Preserve unrelated working behaviour.
 - Do not perform opportunistic cleanup during a targeted fix.
 - Do not redesign surrounding architecture unless the requested change requires it.
-- Understand strange-looking working logic before removing it.
-- Do not remove a fallback/workaround until its purpose is understood and it is proven obsolete or safely replaced.
 - Check previous fixes in the same area before changing it again.
 - Do not reintroduce behaviour previously removed or corrected.
 - If shared logic changes, inspect every directly affected caller/mode.
-- Never silently change:
-  - metadata
-  - workflow order
-  - storage
-  - selectors
-  - shortcuts
-  - API payloads
-  - defaults
-  - recovery behaviour
+- Never silently change metadata, workflow order, storage, selectors, shortcuts, API payloads, defaults or recovery behaviour.
+
+### UNDERSTAND DIFFERENCES BEFORE NORMALISING THEM
+
+Different behaviour, structure or priority does not automatically mean inconsistency or defect.
+
+Before proposing consolidation, standardisation, cleanup, unification or redesign:
+
+1. Determine what job the difference currently performs.
+2. Check whether it is intentional, workflow-specific, diagnostic, compatibility-related or a previously established exception.
+3. Preserve the difference when it serves a real purpose.
+4. Suggest or implement normalization only when evidence shows the difference is accidental, harmful, obsolete or materially limiting the workflow.
+
+Do not make separate modes, specialist tools, diagnostics, playbooks or unusual working logic behave the same merely for consistency or architectural neatness.
+
+Understand strange-looking working logic before removing it. Do not remove a fallback/workaround until its purpose is understood and it is proven obsolete or safely replaced.
 
 For every correction verify:
 
@@ -247,29 +166,17 @@ When the user explicitly requests a full cleanup or refactor, a complete standal
 Even then:
 
 - establish the functional baseline first
-- preserve intentional behaviour
+- preserve intentional behaviour and intentional differences
 - remove only genuinely dead/superseded code
 - do not replace deterministic working logic with cleaner-looking fragile logic
 - do not optimize for line count or function count
 - do not abstract simple code merely to appear cleaner
 
----
-
-## MODE AND STATE ISOLATION
+## 2.3 MODE AND STATE ISOLATION
 
 Separate tools, modes and workflows must not leak behaviour or state into each other.
 
-Each mode owns its relevant:
-
-- state
-- queue
-- busy/lock flags
-- retries
-- timers
-- observers
-- listeners
-- pending async operations
-- temporary UI
+Each mode owns its relevant state, queue, busy/lock flags, retries, timers, observers, listeners, pending async operations and temporary UI.
 
 When a mode is switched off or replaced:
 
@@ -292,47 +199,7 @@ Lazy, Live and 1x1 must preserve a safe **Return to Source / escape path** from 
 
 Do not generalize this requirement to unrelated tools or modes.
 
----
-
-## STATE-CHANGING REQUEST SAFETY
-
-Treat inventory moves and other non-idempotent/state-changing actions as high risk.
-
-Never automatically retry merely because the UI or response appears to report failure.
-
-If available evidence permits both possibilities:
-
-- operation failed
-- operation succeeded but confirmation failed
-
-then the result is:
-
-**UNKNOWN**
-
-On an UNKNOWN state-changing outcome:
-
-1. Stop automatic continuation.
-2. Do not resubmit the same mutation.
-3. Verify actual resulting state before another attempt.
-
-Never allow:
-
-`successful mutation → mistaken failure → automatic retry → duplicate mutation`
-
-Classify workflow outcomes from the most authoritative evidence available.
-
-Do not infer mutation success/failure solely from incidental scan/product metadata when the actual state-changing response can be captured.
-
-Special cases and exceptions require either:
-
-- captured behaviour; or
-- an explicit confirmed requirement
-
-Do not create exceptions from remembered assumptions.
-
----
-
-## FAULT ISOLATION
+## 2.4 FAULT ISOLATION
 
 Do not label the script/parser as broken merely because its output disagrees with a manual result.
 
@@ -354,7 +221,69 @@ Do not change code until the fault is reasonably localized.
 
 ---
 
-## VALIDATION AND REGRESSION
+# 3. DO NOT GUESS ABOUT REAL-WORLD EFFECTS
+
+## 3.1 EVIDENCE DISCIPLINE
+
+Use these meanings consistently:
+
+- **KNOWN** — directly established by source/code/configuration, explicit user requirement or other authoritative evidence.
+- **OBSERVED** — behaviour directly visible in runtime evidence, logs, screenshots or captured responses.
+- **TESTED** — the exact behaviour was intentionally exercised and its result observed. When relevant distinguish agent-tested, user-tested and production-tested.
+- **INFERRED** — strongly supported by evidence but not directly demonstrated.
+- **SUSPECTED** — plausible hypothesis requiring more evidence.
+- **UNKNOWN** — evidence is missing, insufficient or contradictory.
+
+Do not promote `SUSPECTED → INFERRED`, `INFERRED → KNOWN`, or `OBSERVED → TESTED` without evidence justifying it.
+
+Static inspection, reasoning or simulation is not runtime testing.
+
+A screenshot proves only what it visibly contains.
+
+A UI error does not by itself prove a backend operation failed.
+
+Correlation is not root cause. Only claim root cause when the causal chain is adequately supported.
+
+Never claim a change, commit, push, deployment, test result, API response, requirement or known issue without supporting evidence.
+
+Where live behaviour remains unverified, state:
+
+`Regression: Live validation needed.`
+
+## 3.2 STATE-CHANGING REQUEST SAFETY
+
+Treat inventory moves and other non-idempotent/state-changing actions as high risk.
+
+Never automatically retry merely because the UI or response appears to report failure.
+
+If available evidence permits both possibilities:
+
+- operation failed
+- operation succeeded but confirmation failed
+
+then the result is **UNKNOWN**.
+
+On an UNKNOWN state-changing outcome:
+
+1. Stop automatic continuation.
+2. Do not resubmit the same mutation.
+3. Verify actual resulting state before another attempt.
+
+Never allow:
+
+`successful mutation → mistaken failure → automatic retry → duplicate mutation`
+
+Classify workflow outcomes from the most authoritative evidence available.
+
+Do not infer mutation success/failure solely from incidental scan/product metadata when the actual state-changing response can be captured.
+
+Special cases and exceptions require captured behaviour or an explicit confirmed requirement. Do not create exceptions from remembered assumptions.
+
+---
+
+# 4. PROVE THE CHANGE
+
+## 4.1 VALIDATION AND REGRESSION
 
 Validate the affected risk, not a giant generic checklist.
 
@@ -389,9 +318,7 @@ Do not call inspection or static reasoning testing.
 
 Carry user test results forward as project evidence.
 
----
-
-## LIVE EVIDENCE
+## 4.2 LIVE EVIDENCE
 
 When static evidence cannot establish real-site behaviour, API responses, races or state transitions:
 
@@ -414,11 +341,13 @@ When diagnostic instrumentation is authorized:
 
 ---
 
-## AUDIT / OPTIMIZATION
+# 5. IMPROVE ONLY AFTER THE ABOVE IS SATISFIED
+
+## 5.1 AUDIT / OPTIMIZATION
 
 Only broaden discovery when the task is genuinely an audit, optimization or architecture review.
 
-For an explicit Discovery Dig, follow `docs/DISCOVERY-DIG.md`.
+For an explicit Discovery Dig, follow `docs/DISCOVERY-DIG.md`. It is a specialist playbook with its own discovery ranking; its different emphasis is intentional. `AGENTS.md` safety, data-integrity, authorization and evidence requirements still apply.
 
 Focus on the affected workflow and directly coupled code.
 
@@ -442,7 +371,9 @@ Directly connected opportunities may be reported but not implemented outside aut
 
 ---
 
-## VERSIONING, GITHUB AND DELIVERY
+# 6. DELIVER THE EXACT THING THAT WAS VALIDATED
+
+## 6.1 VERSIONING, GITHUB AND DELIVERY
 
 For every behaviour-changing userscript revision:
 
@@ -462,17 +393,9 @@ For deployed fleet scripts:
 - preserve a rollback commit/source version
 - verify the pack contains the intended exact revision
 - return the direct GitHub `.user.js` install/update link
-- default user action:
+- default user action: `open link → Update/Overwrite`
 
-`open link → Update/Overwrite`
-
-Do not make the normal workflow:
-
-- local script copies
-- manual source editing
-- full-script copy/paste from chat
-- competing source copies
-- waiting for a scheduled Tampermonkey update when a direct link is available
+Do not make the normal workflow local script copies, manual source editing, full-script copy/paste from chat, competing source copies, or waiting for a scheduled Tampermonkey update when a direct link is available.
 
 Unvalidated experimental/diagnostic candidates stay out of `work-laptop-pack`.
 
@@ -480,7 +403,7 @@ Before saying a version was pushed/deployed, verify that it actually was.
 
 ---
 
-## COMMUNICATION
+# 7. COMMUNICATE THE RESULT, NOT THE INTERNAL TED TALK
 
 Default style:
 
@@ -490,13 +413,9 @@ Default style:
 - plain English
 - use the user’s existing terminology
 - no unnecessary request restatement
-- no generic filler
-- no corporate language
+- no generic filler or corporate language
 - no fake certainty
-- no technical process diary
-- no developer essay unless requested
-
-The user is not expected to understand or care about implementation internals.
+- no technical process diary/developer essay unless requested
 
 The agent owns the technical complexity.
 
@@ -508,26 +427,7 @@ The user primarily needs:
 - what remains uncertain
 - what to do next
 
-Use more detail only when risk, complexity or the requested output requires it.
-
-When user action is necessary, give the smallest complete steps using exact visible labels.
-
----
-
-## USER-FACING OUTPUT DISCIPLINE
-
-Before sending a response, silently assess whether every included detail helps the user:
-
-- act
-- decide
-- test
-- understand a material risk
-
-If not, remove it.
-
 Default to **caveman-simple operational language**.
-
-Translate technical findings into what they mean for the workflow.
 
 Prefer:
 
@@ -537,73 +437,9 @@ or:
 
 `Found → Means → Next`
 
-Do not default to a developer post-mortem.
-
-Do not explain:
-
-- functions
-- closures
-- promises
-- DOM implementation
-- internal object/state structure
-- API plumbing
-- selectors
-- call stacks
-- code architecture
-- implementation history
-
-unless the user asks or the detail materially affects safety, testing or a decision.
-
-### TRANSLATION RULE
-
-Do the technical reasoning internally.
-
-Give the user the operational result.
-
-Example:
-
-Bad:
-
-`A stale asynchronous completion handler retained destination state after the mode transition.`
-
-Good:
-
-`Old mode was still running after switching modes. Fixed — OFF now means OFF immediately.`
-
-Bad:
-
-`The transport response did not establish whether the mutation committed.`
-
-Good:
-
-`We cannot prove whether the move happened. The script must stop instead of retrying and risking duplicate inventory.`
-
-Bad:
-
-`The normalized parser value differs from the manually entered comparison dataset.`
-
-Good:
-
-`Parser is correct. Manual number is wrong.`
-
-### RESPONSE LENGTH
+Do not explain implementation internals unless the user asks or the detail materially affects safety, testing or a decision.
 
 For normal script work, use the shortest answer that still lets the user act correctly.
-
-Do not include by default:
-
-- long root-cause explanations
-- implementation walkthroughs
-- function names
-- detailed investigation timelines
-- code excerpts
-- architectural commentary
-- JavaScript theory
-- exhaustive test commentary
-
-If technical detail does not change the user’s decision or next action, cut it.
-
-### SILENT OUTPUT SELF-CHECK
 
 Before sending, silently check:
 
@@ -615,113 +451,40 @@ Before sending, silently check:
 6. Is uncertainty clear without a long explanation?
 7. Did I repeat information the user already knows?
 
-If yes, shorten it before sending.
+For a completed change prefer:
 
-### NORMAL COMPLETED CHANGE
+**Changed:** plain-English change.  
+**Checked:** only what was actually verified.  
+**Next:** exact update/test action.  
+**Risk:** only when material uncertainty remains.
 
-Prefer:
+For review/diagnosis prefer:
 
-**Changed:**  
-What changed in plain English.
+**Found:** plain-English result.  
+**Means:** only if implication is not obvious.  
+**Next:** required test/evidence/action, if any.
 
-**Checked:**  
-Only what was actually verified.
-
-**Next:**  
-Exact update/test action.
-
-Add:
-
-**Risk:**  
-Only when material uncertainty remains.
-
-Example:
-
-**Changed:**  
-1x1 now blocks the hazmat item and lets you continue to the next item. It does not move the blocked item.
-
-**Checked:**  
-Code path and final diff checked. Live behaviour still needs your test.
-
-**Next:**  
-Update to v0.3.3 and scan the hazmat test item.
-
-### NORMAL REVIEW / DIAGNOSIS
-
-Prefer:
-
-**Found:**  
-Plain-English result.
-
-**Means:**  
-Only if the implication is not obvious.
-
-**Next:**  
-Required test/evidence/action, if any.
-
-Example:
-
-**Found:**  
-Parser is working correctly. P3 mismatch came from the manually entered number.
-
-**Next:**  
-No parser change needed.
-
-### USER QUESTIONS OVERRIDE
-
-If the user asks:
-
-- why
-- explain
-- technical detail
-- deep dive
-- show the logic
-- what exactly happened
-- full assessment
-
-provide the requested depth.
-
-Still explain the practical result first.
+If the user requests why/explanation/technical detail/deep dive/full assessment, provide it while keeping the practical result first.
 
 ---
 
-## HANDOFFS
+# 8. HANDOFFS AND RULE MAINTENANCE
+
+## 8.1 HANDOFFS
 
 The current capable chat owns the task end to end.
 
-Do not bounce work between chats merely because another workflow or label exists.
+Do not automatically create Work Mode tasks, new chats, duplicate tasks or unrelated branches.
 
-Do not automatically create:
+Use a handoff only when the current environment genuinely lacks a capability required to continue. Get approval before creating it.
 
-- Work Mode tasks
-- new chats
-- duplicate tasks
-- unrelated branches
-
-Use a handoff only when the current environment genuinely lacks a capability required to continue.
-
-Get approval before creating the handoff.
-
----
-
-## RULE QUALITY AND MAINTENANCE
+## 8.2 RULE QUALITY
 
 Treat `AGENTS.md` as executable operating guidance, not an encyclopedia.
 
-Every rule should prevent:
+Every rule should prevent a recurring mistake, material risk, known project-specific failure or repeated user instruction.
 
-- a recurring mistake
-- a material risk
-- a known project-specific failure
-- repeated user instruction
-
-Rules must be:
-
-- specific
-- actionable
-- durable
-- scoped
-- non-duplicative
+Rules must be specific, actionable, durable, scoped and non-duplicative.
 
 State each instruction once.
 
@@ -738,18 +501,13 @@ When a recurring agent failure occurs:
 3. Add a new rule only when the requirement is genuinely new.
 4. Remove superseded wording.
 
-Periodically prune:
-
-- duplication
-- stale requirements
-- obsolete workflows
-- explanations that no longer improve agent behaviour
+Periodically prune duplication, stale requirements, obsolete workflows and explanations that no longer improve agent behaviour.
 
 A shorter high-signal rulebook is preferable to a larger file where important constraints get lost.
 
 ---
 
-## FINAL GATE
+# FINAL GATE
 
 Before finishing a code-changing task verify:
 
@@ -758,7 +516,7 @@ Before finishing a code-changing task verify:
 - latest user corrections were applied
 - requested behaviour is present
 - rejected behaviour is absent
-- unrelated behaviour was preserved
+- unrelated behaviour and intentional differences were preserved
 - evidence labels match what was actually proven
 - final diff contains no unrelated change
 - affected shared modes/helpers were considered
@@ -768,10 +526,4 @@ Before finishing a code-changing task verify:
 - remaining live uncertainty is stated plainly
 - user-facing response contains only information the user needs
 
-Stop when:
-
-- requested goal is complete
-- further work is outside scope
-- live evidence is required
-- user approval is required
-- environment prevents safe progress
+Stop when the requested goal is complete, further work is outside scope, live evidence is required, user approval is required, or the environment prevents safe progress.
