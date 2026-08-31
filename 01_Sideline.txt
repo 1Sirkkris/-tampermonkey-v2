@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.2 Sideline API Move TEST
+// @name         MAIN v0.3.3 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.2
+// @version      0.3.3
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.2';
+  const VERSION = '0.3.3';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -1306,6 +1306,18 @@
 
     item.ctx = ctx;
     item.preflightIssue = null;
+
+    // Live lookups run ahead of processing. Hazmat must be rejected here before an
+    // item can ever be labelled READY and take the fast prechecked move path.
+    if (hasHazmat(result.response)) {
+      item.preflightStatus = 'ISSUE';
+      item.preflightIssue = { kind:'hazmat', title:'HAZMAT — ITEM NOT MOVED', reason:'HAZMAT' };
+
+      if (!autoSkipQueuedLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT')) {
+        renderLive();
+      }
+      return;
+    }
 
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       item.preflightStatus = 'DATE';
