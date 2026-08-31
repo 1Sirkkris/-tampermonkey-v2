@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.6
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.7
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.6
+// @version      0.3.7
 // @description  Event-driven Hazmat/L0 RIVER capture plus bounded step recognition/tracing; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV036) return;
-  window.__bwu2RiverAssistantV036 = true;
+  if (window.__bwu2RiverAssistantV037) return;
+  window.__bwu2RiverAssistantV037 = true;
 
-  const VERSION = '0.3.6';
+  const VERSION = '0.3.7';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -601,8 +601,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV036 === '1') return;
-    badge.dataset.riverAssistantV036 = '1';
+    if (!badge || badge.dataset.riverAssistantV037 === '1') return;
+    badge.dataset.riverAssistantV037 = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
@@ -831,7 +831,8 @@
       : [];
     const stateAttrs = [];
     if (root) {
-      for (const element of [root, ...root.querySelectorAll('[data-step],[data-step-id],[data-question],[data-question-id],[data-workflow],[data-workflow-id],[data-state],[data-screen]')].slice(0, 24)]) {
+      const stateElements = [root, ...root.querySelectorAll('[data-step],[data-step-id],[data-question],[data-question-id],[data-workflow],[data-workflow-id],[data-state],[data-screen]')].slice(0, 24);
+      for (const element of stateElements) {
         const attrs = {};
         for (const attr of element.attributes || []) {
           if (/^(?:data-)?(?:workflow|step|question|option|state|screen)(?:-|$)/i.test(attr.name)) attrs[attr.name] = clean(attr.value);
