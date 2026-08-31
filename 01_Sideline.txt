@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.6 Sideline API Move TEST
+// @name         MAIN v0.2.7 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.6
+// @version      0.2.7
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.6';
+  const VERSION = '0.2.7';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -709,12 +709,18 @@
       b.dataset.key = key;
       if (key === 'live') b.title = 'Click: show/hide Live | Ctrl+click: toggle immediate 1×1 mode';
       b.onclick = event => {
-        if (key === 'live' && event.ctrlKey) {
-          if (!toggleLiveOneByOneMode()) return;
-          feature.live = true;
+        if (key === 'live' && (event.ctrlKey || live.oneByOne)) {
+          const nextMode = toggleLiveOneByOneMode();
+          if (nextMode == null) {
+            feature.live = true;
+            savePanelStates();
+            applyPanels();
+            return;
+          }
+          feature.live = nextMode;
           savePanelStates();
           applyPanels();
-          setTimeout(() => live.sourceReady ? liveScan.focus() : liveSrc.focus(), 0);
+          if (nextMode) setTimeout(() => live.sourceReady ? liveScan.focus() : liveSrc.focus(), 0);
           return;
         }
         feature[key] = !feature[key];
@@ -1110,6 +1116,18 @@
   }
 
   function toggleLiveOneByOneMode() {
+    if (live.oneByOne) {
+      if (live.oneInFlight.size || live.processing) {
+        live.error = `WAIT — ${live.oneInFlight.size || 1} item still sending.`;
+        renderLive();
+        return null;
+      }
+
+      live.oneByOne = false;
+      resetLive('1×1 stopped', false);
+      return false;
+    }
+
     const hasActiveWork = !!(
       live.sourceReady ||
       live.running ||
@@ -1123,12 +1141,12 @@
     if (hasActiveWork) {
       live.error = 'RESET LIVE before changing 1×1 mode.';
       renderLive();
-      return false;
+      return null;
     }
 
-    live.oneByOne = !live.oneByOne;
+    live.oneByOne = true;
     live.error = '';
-    live.note = live.oneByOne ? '1×1 selected — scan source' : 'normal Live selected — scan source';
+    live.note = '1×1 selected — scan source';
     syncLiveModeUi();
     renderLive();
     return true;
@@ -1612,7 +1630,7 @@
     requestPanelLayout();
   }
 
-  function resetLive(note='reset') {
+  function resetLive(note='reset', focusSource=true) {
     cancelLiveRun();
     clearMoveCorner('live');
     live.dateResolve?.(null);
@@ -1657,7 +1675,7 @@
     liveDest.classList.remove('good','bad','sh-live-idle-pulse');
 
     renderLive();
-    setTimeout(() => liveSrc.focus(), 0);
+    if (focusSource) setTimeout(() => liveSrc.focus(), 0);
   }
 
   function stopLive() {
