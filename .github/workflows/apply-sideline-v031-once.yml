@@ -41,9 +41,10 @@ jobs:
                   raise SystemExit(f'{label}: expected 1 match, found {count}')
               text = text.replace(old, new, 1)
 
-          replace_once('// @name         MAIN v0.3.10 Sideline API Move TEST',
-                       '// @name         MAIN v0.3.11 Sideline API Move TEST',
-                       'name version')
+          def block(*lines):
+              return '\n'.join(lines) + '\n'
+
+          replace_once('// @name         MAIN v0.3.10 Sideline API Move TEST', '// @name         MAIN v0.3.11 Sideline API Move TEST', 'name version')
           replace_once('// @version      0.3.10', '// @version      0.3.11', 'metadata version')
           replace_once("  const VERSION = '0.3.10';", "  const VERSION = '0.3.11';", 'runtime version')
 
@@ -72,67 +73,71 @@ jobs:
           )
 
           replace_once(
-              """    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
-    setTextIfChanged(
-      liveReady,
-      live.oneByOne
-        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
-        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
-    );
-""",
-              """    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
-    if (liveDelay) {
-      liveDelay.style.display = live.oneByOne ? 'none' : '';
-      liveDelay.textContent = `Delay: ${live.delayEnabled ? 'YES' : 'NO'}`;
-      liveDelay.classList.toggle('sh-on', live.delayEnabled);
-      liveDelay.title = live.delayEnabled
-        ? 'Artificial Live move pacing is ON (5–11 seconds).'
-        : 'Artificial Live move pacing is OFF.';
-    }
-    setTextIfChanged(
-      liveReady,
-      live.oneByOne
-        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
-        : live.delayEnabled
-          ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
-          : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'
-    );
-""",
+              block(
+                  "    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');",
+                  "    setTextIfChanged(",
+                  "      liveReady,",
+                  "      live.oneByOne",
+                  "        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'",
+                  "        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'",
+                  "    );"
+              ),
+              block(
+                  "    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');",
+                  "    if (liveDelay) {",
+                  "      liveDelay.style.display = live.oneByOne ? 'none' : '';",
+                  "      liveDelay.textContent = `Delay: ${live.delayEnabled ? 'YES' : 'NO'}`;",
+                  "      liveDelay.classList.toggle('sh-on', live.delayEnabled);",
+                  "      liveDelay.title = live.delayEnabled",
+                  "        ? 'Artificial Live move pacing is ON (5–11 seconds).'",
+                  "        : 'Artificial Live move pacing is OFF.';",
+                  "    }",
+                  "    setTextIfChanged(",
+                  "      liveReady,",
+                  "      live.oneByOne",
+                  "        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'",
+                  "        : live.delayEnabled",
+                  "          ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'",
+                  "          : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'",
+                  "    );"
+              ),
               'Live delay render'
           )
 
           replace_once(
-              """  async function waitForLiveMovePace(item, run=live.activeRun) {
-    if (!currentLiveRun(run) || !live.running) return false;
-
-    const waitMs = Math.max(0, live.nextMoveAt - Date.now());
-    if (!waitMs) return true;
-
-    live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;
-    renderLive();
-
-    return await waitLiveMs(waitMs, run);
-  }
-""",
-              """  async function waitForLiveMovePace(item, run=live.activeRun) {
-    if (!currentLiveRun(run) || !live.running) return false;
-    if (!live.delayEnabled) return true;
-
-    let waitMs = Math.max(0, live.nextMoveAt - Date.now());
-    if (!waitMs) return true;
-
-    live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;
-    renderLive();
-
-    while (live.delayEnabled) {
-      waitMs = Math.max(0, live.nextMoveAt - Date.now());
-      if (!waitMs) return true;
-      if (!await waitLiveMs(Math.min(waitMs, 200), run)) return false;
-    }
-
-    return currentLiveRun(run) && live.running;
-  }
-""",
+              block(
+                  "  async function waitForLiveMovePace(item, run=live.activeRun) {",
+                  "    if (!currentLiveRun(run) || !live.running) return false;",
+                  "",
+                  "    const waitMs = Math.max(0, live.nextMoveAt - Date.now());",
+                  "    if (!waitMs) return true;",
+                  "",
+                  "    live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;",
+                  "    renderLive();",
+                  "",
+                  "    return await waitLiveMs(waitMs, run);",
+                  "  }"
+              ),
+              block(
+                  "  async function waitForLiveMovePace(item, run=live.activeRun) {",
+                  "    if (!currentLiveRun(run) || !live.running) return false;",
+                  "    if (!live.delayEnabled) return true;",
+                  "",
+                  "    let waitMs = Math.max(0, live.nextMoveAt - Date.now());",
+                  "    if (!waitMs) return true;",
+                  "",
+                  "    live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;",
+                  "    renderLive();",
+                  "",
+                  "    while (live.delayEnabled) {",
+                  "      waitMs = Math.max(0, live.nextMoveAt - Date.now());",
+                  "      if (!waitMs) return true;",
+                  "      if (!await waitLiveMs(Math.min(waitMs, 200), run)) return false;",
+                  "    }",
+                  "",
+                  "    return currentLiveRun(run) && live.running;",
+                  "  }"
+              ),
               'Live pacing gate'
           )
 
@@ -142,31 +147,33 @@ jobs:
           text = text.replace(old_pace, "live.nextMoveAt = live.delayEnabled ? Date.now() + randomLiveMoveDelayMs() : 0;")
 
           replace_once(
-              """    if (action === 'clear-source') {
-      clearLiveSource();
-      return;
-    }
-
-    if (action === 'skip') {
-""",
-              """    if (action === 'clear-source') {
-      clearLiveSource();
-      return;
-    }
-
-    if (action === 'delay') {
-      if (live.oneByOne) return;
-      live.delayEnabled = !live.delayEnabled;
-      if (!live.delayEnabled) live.nextMoveAt = 0;
-      live.note = live.delayEnabled
-        ? 'move delay ON — 5–11s pacing'
-        : 'move delay OFF — no artificial pacing';
-      renderLive();
-      return;
-    }
-
-    if (action === 'skip') {
-""",
+              block(
+                  "    if (action === 'clear-source') {",
+                  "      clearLiveSource();",
+                  "      return;",
+                  "    }",
+                  "",
+                  "    if (action === 'skip') {"
+              ),
+              block(
+                  "    if (action === 'clear-source') {",
+                  "      clearLiveSource();",
+                  "      return;",
+                  "    }",
+                  "",
+                  "    if (action === 'delay') {",
+                  "      if (live.oneByOne) return;",
+                  "      live.delayEnabled = !live.delayEnabled;",
+                  "      if (!live.delayEnabled) live.nextMoveAt = 0;",
+                  "      live.note = live.delayEnabled",
+                  "        ? 'move delay ON — 5–11s pacing'",
+                  "        : 'move delay OFF — no artificial pacing';",
+                  "      renderLive();",
+                  "      return;",
+                  "    }",
+                  "",
+                  "    if (action === 'skip') {"
+              ),
               'Live delay action'
           )
 
@@ -188,7 +195,6 @@ jobs:
           grep -q "delayEnabled:true" Sideline_API_Move.user.js
           grep -q 'data-live-delay>Delay: YES' Sideline_API_Move.user.js
           grep -q "if (!live.delayEnabled) return true;" Sideline_API_Move.user.js
-          grep -q "live.nextMoveAt = live.delayEnabled ?" Sideline_API_Move.user.js
           test "$(grep -c 'live.nextMoveAt = live.delayEnabled ?' Sideline_API_Move.user.js)" = "2"
           grep -q "if (live.oneByOne) return;" Sideline_API_Move.user.js
 
