@@ -1,4 +1,4 @@
-name: Apply Sideline v0.3.1 1x1 hazmat guard once
+name: Apply Sideline v0.3.9 direct close once
 
 on:
   push:
@@ -23,49 +23,345 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-          test "$(git hash-object Sideline_API_Move.user.js)" = "fefa34f9f594d215e4bd30465df9283f6641e649"
-          cp Sideline_API_Move.user.js /tmp/sideline-base.js
-          cat > /tmp/patch.z64 <<'PATCH64'
-          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
-          PATCH64
+          test "$(git hash-object Sideline_API_Move.user.js)" = "8a4b9dbe80dc351fee34904f38c7f930e587e3d2"
           python - <<'PY'
           from pathlib import Path
-          import base64, zlib
-          raw = base64.b64decode(''.join(Path('/tmp/patch.z64').read_text().split()))
-          Path('/tmp/patch.py').write_bytes(zlib.decompress(raw))
+
+          path = Path('Sideline_API_Move.user.js')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once('// @name         MAIN v0.3.8 Sideline API Move TEST', '// @name         MAIN v0.3.9 Sideline API Move TEST', 'name version')
+          replace_once('// @version      0.3.8', '// @version      0.3.9', 'metadata version')
+          replace_once("  const VERSION = '0.3.8';", "  const VERSION = '0.3.9';", 'runtime version')
+
+          replace_once(
+          """  const API_SCAN_SOURCE = '/api/scan-source-container';
+          const API_SCAN_ITEM = '/api/scanitem';
+          const API_MOVE_ITEMS = '/api/move-items';""",
+          """  const API_SCAN_SOURCE = '/api/scan-source-container';
+          const API_CLOSE_CONTAINER = '/api/close-container';
+          const API_SCAN_ITEM = '/api/scanitem';
+          const API_MOVE_ITEMS = '/api/move-items';""",
+          'close endpoint constant'
+          )
+
+          replace_once(
+          """  async function runExactPredicantRecovery(sourceCode, destinationCode, status) {
+
+            status('Predicant recovery 1/4 — preparing native Sideline...');
+
+            let sourceOpen = await nativeReturnToOriginalSource(sourceCode);
+
+            if (!sourceOpen) {
+              const ready = await normalizeNativeToSourceScan(status);
+              if (!ready) {
+                throw new Error('Could not return native Sideline to Scan Source.');
+              }
+
+              status(`Predicant recovery 1/4 — opening source ${sourceCode}...`);
+              await nativeOpenSourceContainer(sourceCode, 'original source');
+              sourceOpen = true;
+            }
+
+            status('Predicant recovery 2/4 — closing original source with NO...');
+            await nativeCloseLoadedContainer('original source', false);
+
+            status(`Predicant recovery 3/4 — opening destination ${destinationCode}...`);
+            await nativeOpenSourceContainer(destinationCode, 'destination');
+
+            status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES...`);
+            await nativeCloseLoadedContainer('destination', true);
+
+            return true;
+          }""",
+          """  async function runExactPredicantRecovery(sourceCode, destinationCode, status, run) {
+            status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
+            const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
+            if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
+              throw new Error('Original source API validation failed during Predicant recovery.');
+            }
+
+            status('Predicant recovery 2/4 — closing original source with NO by API...');
+            await closeContainerDirect(sourceCode, false);
+            if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
+
+            status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
+            const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
+            if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
+              throw new Error('Destination API validation failed during Predicant recovery.');
+            }
+
+            status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
+            await closeContainerDirect(destinationCode, true);
+            if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
+
+            return true;
+          }""",
+          'predicant recovery direct API'
+          )
+
+          replace_once(
+          """  function requestId() {
+            const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
+          }
+
+          function beginLazyRun() {""",
+          """  function requestId() {
+            const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
+          }
+
+          function closeContainerPayload(container, containerEmpty) {
+            return {
+              containerScannableId:container,
+              containerEmpty:containerEmpty === true,
+              directedLabel:false,
+              processPath:'UNDETERMINED',
+              requestId:requestId(),
+              tool:TOOL
+            };
+          }
+
+          async function closeContainerDirect(container, containerEmpty) {
+            const code = clean(container);
+            if (!validContainer(code)) throw new Error('Direct close requires a valid csX/tsX container.');
+
+            let response;
+            try {
+              response = await fetch(API_CLOSE_CONTAINER, {
+                method:'POST',
+                credentials:'same-origin',
+                headers:{'content-type':'application/json'},
+                body:JSON.stringify(closeContainerPayload(code, containerEmpty))
+              });
+            } catch (cause) {
+              const error = new Error(`Close outcome UNKNOWN for ${code} — verify container state manually before retrying.`);
+              error.name = 'CloseOutcomeUnknownError';
+              error.outcomeUnknown = true;
+              error.cause = cause;
+              throw error;
+            }
+
+            let raw = '';
+            try {
+              raw = await response.text();
+            } catch (cause) {
+              const error = new Error(`Close outcome UNKNOWN for ${code} — response could not be read. Verify container state manually before retrying.`);
+              error.name = 'CloseOutcomeUnknownError';
+              error.outcomeUnknown = true;
+              error.cause = cause;
+              throw error;
+            }
+
+            let payload = raw;
+            try { payload = raw ? JSON.parse(raw) : null; } catch {}
+
+            if (
+              !response.ok ||
+              clean(payload?.['@type']) !== 'CloseContainerResponse' ||
+              payload?.success !== true
+            ) {
+              const error = new Error(`Close NOT CONFIRMED for ${code}${response.ok ? '' : ` — HTTP ${response.status}`} — verify state before retrying.`);
+              error.name = 'CloseNotConfirmedError';
+              error.outcomeUnknown = true;
+              error.payload = payload;
+              throw error;
+            }
+
+            return payload;
+          }
+
+          function beginLazyRun() {""",
+          'direct close helper'
+          )
+
+          replace_once(
+          "await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery);",
+          "await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery, run);",
+          'predicant run wiring'
+          )
+
+          replace_once(
+          """    } catch (error) {
+              if (runWasCancelled(error, run)) return false;
+              lazy.predicant = true;
+              lazy.paused = true;
+              lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
+              lazy.note = 'scan destination again to retry recovery';
+              shared.owner = 'lazy';
+              renderLazy();
+              return false;
+            }
+          }
+
+          async function moveResolved""",
+          """    } catch (error) {
+              if (runWasCancelled(error, run)) return false;
+
+              if (error?.outcomeUnknown) {
+                cancelLazyRun();
+                lazy.running = false;
+                lazy.predicant = false;
+                lazy.paused = false;
+                lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
+                lazy.note = 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent';
+                shared.owner = '';
+                setLazyRunningIndicator(false);
+                renderLazy();
+                return false;
+              }
+
+              lazy.predicant = true;
+              lazy.paused = true;
+              lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
+              lazy.note = 'scan destination again to retry recovery';
+              shared.owner = 'lazy';
+              renderLazy();
+              return false;
+            }
+          }
+
+          async function moveResolved""",
+          'predicant unknown close safety'
+          )
+
+          replace_once(
+          """    const sourceCode = live.src;
+            const wasRunning = live.running;
+
+            live.running = false;
+            liveScan.disabled = true;
+            live.error = '';
+            live.note = `clearing source ${sourceCode}`;
+            renderLive();
+
+            shared.owner = 'live';
+
+            try {
+              const sourceLoaded = () =>
+                norm(loadedSourceContainer()) === norm(sourceCode) && !!changeButton();
+
+              if (sourceLoaded()) {
+                await nativeCloseLoadedContainer('live source', true);
+              }
+              else if (await waitForNativeSourceScan(2500)) {
+                await nativeOpenSourceContainer(sourceCode, 'live source');
+                await nativeCloseLoadedContainer('live source', true);
+              }
+              else {
+                const returned = await nativeReturnToOriginalSource(sourceCode);
+                if (returned === true || sourceLoaded()) {
+                  await nativeCloseLoadedContainer('live source', true);
+                } else {
+                  throw new Error('Could not safely reach the Live source container.');
+                }
+              }
+
+              resetLive(`SOURCE CLEARED — ${sourceCode} — scan next source`);
+            } catch (error) {
+              live.running = wasRunning;
+              live.error = `SOURCE CLEAR FAILED — ${error?.message || error}`;
+              live.note = 'retry Clear source or handle manually';
+              liveScan.disabled = !wasRunning;
+              liveDest.disabled = true;
+              shared.owner = 'live';
+              renderLive();
+              if (wasRunning) setTimeout(() => liveScan.focus(), 0);
+            }""",
+          """    const sourceCode = live.src;
+
+            live.running = false;
+            liveScan.disabled = true;
+            live.error = '';
+            live.note = `clearing source ${sourceCode} by API`;
+            renderLive();
+
+            shared.owner = 'live';
+
+            try {
+              await closeContainerDirect(sourceCode, true);
+              resetLive(`SOURCE CLEARED — ${sourceCode} — scan next source`);
+            } catch (error) {
+              live.running = false;
+              live.error = error?.outcomeUnknown
+                ? `SOURCE CLEAR UNKNOWN — ${error?.message || error}`
+                : `SOURCE CLEAR FAILED — ${error?.message || error}`;
+              live.note = error?.outcomeUnknown
+                ? 'VERIFY SOURCE STATE MANUALLY — no automatic close retry was sent'
+                : 'handle source manually';
+              liveScan.disabled = true;
+              liveDest.disabled = true;
+              shared.owner = 'live';
+              renderLive();
+            }""",
+          'live direct source clear'
+          )
+
+          replace_once(
+          """    try {
+              const sourceLoaded = () =>
+                norm(loadedSourceContainer()) === norm(lazy.src) && !!changeButton();
+
+              if (sourceLoaded()) {
+                await nativeCloseLoadedContainer('source', true);
+                return true;
+              }
+
+              if (await waitForNativeSourceScan(2500)) {
+                await nativeOpenSourceContainer(lazy.src, 'source');
+                await nativeCloseLoadedContainer('source', true);
+                return true;
+              }
+
+              const returned = await nativeReturnToOriginalSource(lazy.src);
+              if (returned === true || sourceLoaded()) {
+                await nativeCloseLoadedContainer('source', true);
+                return true;
+              }
+
+              throw new Error('Could not safely reach original source in native Sideline.');
+            } catch (error) {
+              lazy.error = `Moves complete — source clear failed: ${error?.message || error}`;
+              return false;
+            } finally {""",
+          """    try {
+              await closeContainerDirect(lazy.src, true);
+              return true;
+            } catch (error) {
+              lazy.error = error?.outcomeUnknown
+                ? `Moves complete — source clear UNKNOWN: ${error?.message || error}`
+                : `Moves complete — source clear failed: ${error?.message || error}`;
+              return false;
+            } finally {""",
+          'lazy direct source clear'
+          )
+
+          path.write_text(text)
+
+          readme_path = Path('README.md')
+          readme = readme_path.read_text()
+          old_row = '| Sideline API Move | 0.3.8 |'
+          new_row = '| Sideline API Move | 0.3.9 |'
+          if readme.count(old_row) != 1:
+              raise SystemExit(f'README Sideline row: expected 1 match, found {readme.count(old_row)}')
+          readme_path.write_text(readme.replace(old_row, new_row, 1))
           PY
-          python /tmp/patch.py
           node --check Sideline_API_Move.user.js
           git diff --check
+          grep -q "@version      0.3.9" Sideline_API_Move.user.js
+          grep -q "API_CLOSE_CONTAINER = '/api/close-container'" Sideline_API_Move.user.js
+          grep -q "closeContainerDirect(sourceCode, true)" Sideline_API_Move.user.js
+          grep -q "closeContainerDirect(destinationCode, true)" Sideline_API_Move.user.js
+          grep -q "no automatic close retry was sent" Sideline_API_Move.user.js
           git add Sideline_API_Move.user.js README.md
           git diff --cached --check
-          git commit -m "fix(sideline): hard-stop 1x1 hazmat before success"
+          git commit -m "perf(sideline): use proven close-container API paths"
           git push origin HEAD:main
