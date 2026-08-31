@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.0 Sideline API Move TEST
+// @name         MAIN v0.3.1 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.0
+// @version      0.3.1
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -2152,7 +2152,15 @@
       );
     } catch (error) {
       if (error?.name === 'AbortError') return;
-      showOneByOneError(item, error?.message || 'MOVE API ERROR');
+      const payloadReason = moveReason(error?.payload);
+      const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
+        ? payloadReason
+        : (error?.message || 'MOVE API ERROR');
+      showOneByOneError(
+        item,
+        reason,
+        hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
+      );
       return;
     }
 
@@ -2316,7 +2324,16 @@
 
       live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
 
-      failLiveItem(item, 'MOVE API ERROR — ITEM NOT MOVED', error?.message || 'MOVE API ERROR', ctx);
+      const payloadReason = moveReason(error?.payload);
+      const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
+        ? payloadReason
+        : (error?.message || 'MOVE API ERROR');
+      failLiveItem(
+        item,
+        hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
+        reason,
+        ctx
+      );
       return false;
     }
 
@@ -3556,10 +3573,25 @@
     };
   }
 
+  function hasHazmat(value) {
+    if (value == null) return false;
+    if (typeof value === 'string') return /(^|[^a-z])hazmat([^a-z]|$)/i.test(value);
+    if (Array.isArray(value)) return value.some(hasHazmat);
+    if (typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, nested]) =>
+      /(^|[^a-z])hazmat([^a-z]|$)/i.test(key) || hasHazmat(nested)
+    );
+  }
+
+  function hasMoveProblems(response) {
+    return Array.isArray(response?.problems) && response.problems.some(Boolean);
+  }
+
   function moveOk(response) {
     if (!response || response.success !== true) return false;
     if (response.filterResult?.compatible === false) return false;
-
+    if (hasHazmat(response)) return false;
+    if (hasMoveProblems(response)) return false;
     if (hasPredicant(response)) return false;
 
     return true;
@@ -3567,6 +3599,7 @@
 
   function moveReason(response) {
     if (!response) return 'EMPTY MOVE RESPONSE';
+    if (hasHazmat(response)) return 'HAZMAT';
 
     const reason = response.filterResult?.reason;
     const reasonType = clean(reason?.['@type']).toLowerCase();
