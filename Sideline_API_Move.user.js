@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.4 Sideline API Move TEST
+// @name         MAIN v0.2.5 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.4
+// @version      0.2.5
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.4';
+  const VERSION = '0.2.5';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -545,6 +545,10 @@
 #sh-live .sh-live-scan{font:900 18px Consolas,monospace;padding:12px;border:2px solid #146eb4}
 #sh-live .sh-live-scan:disabled{background:#f3f4f6;border-color:#cbd5e1;color:#64748b}
 #sh-live .sh-live-ready{margin:7px 0;padding:7px 9px;border:1px solid #bfdbfe;border-left:5px solid #146eb4;background:#eff6ff;color:#0f3d73;font-weight:900}
+#sh-live .sh-live-one-banner{display:none;margin:7px 0;padding:11px 12px;border:4px solid #111827;border-radius:5px;background:#fde047;color:#111827;text-align:center;font:1000 18px/1.2 Arial,sans-serif;letter-spacing:.8px;animation:shLiveOneFlash .52s steps(2,end) infinite}
+#sh-live .sh-live-one-banner.show{display:block}
+#sh-dock button.sh-live-one-mode{background:#fde047!important;color:#111827!important;border:3px solid #111827!important;padding:6px 4px!important;animation:shLiveOneFlash .52s steps(2,end) infinite}
+@keyframes shLiveOneFlash{0%,100%{background:#fde047;color:#111827;box-shadow:0 0 0 2px #111827}50%{background:#111827;color:#fff;box-shadow:0 0 0 4px #fde047}}
 #sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
 #sh-live .sh-live-metric{border:1px solid #c7d0dd;background:#f8fafc;padding:7px 4px;text-align:center}
 #sh-live .sh-live-metric b{display:block;font-size:22px;line-height:1}
@@ -705,7 +709,16 @@
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.key = key;
-      b.onclick = () => {
+      if (key === 'live') b.title = 'Click: show/hide Live | Ctrl+click: toggle immediate 1×1 mode';
+      b.onclick = event => {
+        if (key === 'live' && event.ctrlKey) {
+          if (!toggleLiveOneByOneMode()) return;
+          feature.live = true;
+          savePanelStates();
+          applyPanels();
+          setTimeout(() => live.sourceReady ? liveScan.focus() : liveSrc.focus(), 0);
+          return;
+        }
         feature[key] = !feature[key];
         savePanelStates();
         applyPanels();
@@ -1007,6 +1020,11 @@
 
   // Live
   const live = {
+    oneByOne:false,
+    oneInFlight:new Map(),
+    oneTransientError:'',
+    oneErrorToken:0,
+    oneErrorTimer:0,
     running:false,
     sourceReady:false,
     processing:false,
@@ -1033,6 +1051,7 @@
 
   const livePanel = panel('sh-live', `Live Lazy QTY 1 v${VERSION}`, 'live');
   livePanel.insertAdjacentHTML('beforeend',
+    '<div class="sh-live-one-banner">1×1 ACTIVE — IMMEDIATE QTY 1 — NO QUEUE</div>' +
     '<div class="sh-row">' +
       '<input class="sh-input" data-f="live-src" placeholder="1. Scan SOURCE (csX / tsX)">' +
       '<input class="sh-input" data-f="live-dest" placeholder="2. Scan DESTINATION" disabled>' +
@@ -1047,13 +1066,14 @@
     '</div>' +
     '<div class="sh-live-metrics">' +
       '<div class="sh-live-metric">Moved<b data-live-m="moved">0</b></div>' +
-      '<div class="sh-live-metric">Queued<b data-live-m="queued">0</b></div>' +
+      '<div class="sh-live-metric"><span data-live-queue-label>Queued</span><b data-live-m="queued">0</b></div>' +
       '<div class="sh-live-metric">Expiry<b data-live-m="expiry">0</b></div>' +
       '<div class="sh-live-metric">Skipped<b data-live-m="skipped">0</b></div>' +
     '</div>' +
     '<div class="sh-live-issue"></div>' +
     '<div class="sh-status" data-live-status></div>' +
     '<div class="sh-error" data-live-error></div>' +
+    '<div class="sh-error" data-live-transient-error></div>' +
     '<div class="sh-live-current" data-live-current style="display:none"></div>' +
     '<div class="sh-live-history"></div>'
   );
@@ -1063,6 +1083,10 @@
   const liveScan = $('[data-f="live-scan"]', livePanel);
   const liveStatus = $('[data-live-status]', livePanel);
   const liveError = $('[data-live-error]', livePanel);
+  const liveTransientError = $('[data-live-transient-error]', livePanel);
+  const liveOneBanner = $('.sh-live-one-banner', livePanel);
+  const liveReady = $('.sh-live-ready', livePanel);
+  const liveQueueLabel = $('[data-live-queue-label]', livePanel);
   const liveIssue = $('.sh-live-issue', livePanel);
   const liveCurrent = $('[data-live-current]', livePanel);
   const liveHistory = $('.sh-live-history', livePanel);
@@ -1071,8 +1095,57 @@
   const liveExpiry = $('[data-live-m="expiry"]', livePanel);
   const liveSkipped = $('[data-live-m="skipped"]', livePanel);
 
+  function syncLiveModeUi() {
+    const dockButton = dockButtons.find(button => button.dataset.key === 'live');
+    const title = $('.sh-title', livePanel);
+
+    liveOneBanner.classList.toggle('show', live.oneByOne);
+    dockButton?.classList.toggle('sh-live-one-mode', live.oneByOne);
+    if (dockButton) dockButton.textContent = live.oneByOne ? 'Live 1×1' : 'Live';
+    if (title) title.textContent = live.oneByOne
+      ? `Live 1×1 Immediate v${VERSION}`
+      : `Live Lazy QTY 1 v${VERSION}`;
+    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
+    setTextIfChanged(
+      liveReady,
+      live.oneByOne
+        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
+        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+    );
+  }
+
+  function toggleLiveOneByOneMode() {
+    const hasActiveWork = !!(
+      live.sourceReady ||
+      live.running ||
+      live.processing ||
+      live.current ||
+      live.queue.length ||
+      live.oneInFlight.size ||
+      live.datePending.length
+    );
+
+    if (hasActiveWork) {
+      live.error = 'RESET LIVE before changing 1×1 mode.';
+      renderLive();
+      return false;
+    }
+
+    live.oneByOne = !live.oneByOne;
+    live.error = '';
+    live.note = live.oneByOne ? '1×1 selected — scan source' : 'normal Live selected — scan source';
+    syncLiveModeUi();
+    renderLive();
+    return true;
+  }
+
   function beginLiveRun() {
     live.lookupWait = [];
+    live.oneInFlight.clear();
+    live.oneTransientError = '';
+    clearTimeout(live.oneErrorTimer);
+    live.oneErrorTimer = 0;
+    live.oneErrorToken++;
     resetLiveLookupPool();
     live.nextMoveAt = 0;
     return beginRun(live);
@@ -1429,7 +1502,9 @@
   let liveHistoryToken = '';
 
   function renderLive() {
-    const queuedUnits = sumQty(live.queue);
+    syncLiveModeUi();
+
+    const queuedUnits = live.oneByOne ? live.oneInFlight.size : sumQty(live.queue);
     const expiryUnits = sumQty(live.datePending);
     const currentUnits = live.current && !['MOVED','SKIPPED'].includes(live.current.status)
       ? itemQty(live.current)
@@ -1440,14 +1515,14 @@
     setTextIfChanged(liveExpiry, expiryUnits);
     setTextIfChanged(liveSkipped, live.skipped);
 
-    const precheckedQueuedUnits = live.queue.reduce(
+    const precheckedQueuedUnits = live.oneByOne ? 0 : live.queue.reduce(
       (sum, item) => sum + (item.preflightStatus ? itemQty(item) : 0),
       0
     );
-    const precheckedCurrentUnits = live.current?.preflightStatus ? itemQty(live.current) : 0;
+    const precheckedCurrentUnits = !live.oneByOne && live.current?.preflightStatus ? itemQty(live.current) : 0;
     const precheckedUnits = precheckedQueuedUnits + precheckedCurrentUnits + expiryUnits;
-    const precheckTotalUnits = queuedUnits + currentUnits + expiryUnits;
-    const preflightIssues = liveQueuedPreflightIssues();
+    const precheckTotalUnits = live.oneByOne ? 0 : queuedUnits + currentUnits + expiryUnits;
+    const preflightIssues = live.oneByOne ? [] : liveQueuedPreflightIssues();
     const issueAheadUnits = sumQty(preflightIssues);
 
     const liveIdle = !!(
@@ -1458,6 +1533,7 @@
       !live.issue &&
       !live.current &&
       live.queue.length === 0 &&
+      live.oneInFlight.size === 0 &&
       live.datePending.length === 0
     );
     liveSrc.classList.toggle('sh-live-idle-pulse', liveIdle);
@@ -1465,13 +1541,15 @@
 
     const state = live.issue
       ? 'BLOCKED — ACTION REQUIRED'
-      : live.processing
-        ? 'PROCESSING'
-        : live.running
-          ? 'READY — SCAN ITEM'
-          : live.sourceReady
-            ? 'SOURCE READY — SCAN DESTINATION'
-            : 'SCAN SOURCE';
+      : live.oneByOne && live.oneInFlight.size
+        ? `1×1 SENDING ${live.oneInFlight.size}`
+        : live.processing
+          ? 'PROCESSING'
+          : live.running
+            ? live.oneByOne ? '1×1 READY — SCAN ITEM' : 'READY — SCAN ITEM'
+            : live.sourceReady
+              ? 'SOURCE READY — SCAN DESTINATION'
+              : live.oneByOne ? '1×1 — SCAN SOURCE' : 'SCAN SOURCE';
 
     const expirySuffix = live.datePending.length
       ? ` | EXPIRY PENDING ${live.datePending.length}`
@@ -1484,6 +1562,7 @@
       : '';
     setTextIfChanged(liveStatus, `${state}${live.note ? ` | ${live.note}` : ''}${precheckSuffix}${expirySuffix}${issueAheadSuffix}`);
     setTextIfChanged(liveError, live.error || '');
+    setTextIfChanged(liveTransientError, live.oneTransientError || '');
 
     const hardIssueHtml = liveIssueHtml();
     const issueHtml = hardIssueHtml || livePreflightIssueHtml(preflightIssues);
@@ -1524,7 +1603,7 @@
 
     const liveWorking = !!(
       live.running &&
-      (live.processing || live.current || live.queue.length)
+      (live.processing || live.current || live.queue.length || live.oneInFlight.size)
     );
     const liveWaiting = !!(
       live.running &&
@@ -1545,6 +1624,11 @@
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
     clearLiveDateScanBuffer();
+    clearTimeout(live.oneErrorTimer);
+    live.oneErrorTimer = 0;
+    live.oneErrorToken++;
+    live.oneTransientError = '';
+    live.oneInFlight.clear();
 
     live.running = false;
     live.sourceReady = false;
@@ -1588,6 +1672,11 @@
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
     clearLiveDateScanBuffer();
+    clearTimeout(live.oneErrorTimer);
+    live.oneErrorTimer = 0;
+    live.oneErrorToken++;
+    live.oneTransientError = '';
+    live.oneInFlight.clear();
 
     live.running = false;
     live.processing = false;
@@ -1612,6 +1701,7 @@
 
     const pending =
       sumQty(live.queue) +
+      live.oneInFlight.size +
       (live.current ? itemQty(live.current) : 0) +
       sumQty(live.datePending);
     if (live.processing || live.issue || pending) {
@@ -1770,14 +1860,15 @@
       live.note = `destination changed → retrying ${live.current.code}`;
       live.issue = null;
       renderLive();
-      retryLiveCurrentMove();
+      if (live.oneByOne) retryOneByOneBlockedMove(live.current);
+      else retryLiveCurrentMove();
       return;
     }
 
     live.dest = code;
     live.running = true;
     live.error = '';
-    live.note = 'ready';
+    live.note = live.oneByOne ? '1×1 immediate ready' : 'ready';
     liveDest.classList.remove('bad');
     liveDest.classList.add('good');
     liveDest.disabled = true;
@@ -1823,6 +1914,194 @@
     renderLive();
   }
 
+  function finishOneByOneMoved(item) {
+    live.oneInFlight.delete(item.id);
+    item.status = 'MOVED';
+    item.destination = item.destination || live.dest;
+    live.moved += 1;
+    live.history.unshift(item);
+    if (live.history.length > 100) live.history.length = 100;
+    if (live.current === item) {
+      live.current = null;
+      live.issue = null;
+    }
+    if (!live.issue) live.note = 'moved QTY 1 — ready for next scan';
+    renderLive();
+    if (!live.oneInFlight.size && !live.datePending.length && !live.issue) {
+      finishMoveCorner('live', true);
+    }
+  }
+
+  function showOneByOneError(item, reason) {
+    live.oneInFlight.delete(item.id);
+    item.status = 'SKIPPED';
+    live.skipped += 1;
+    live.note = 'item skipped — scan next item';
+
+    const token = ++live.oneErrorToken;
+    clearTimeout(live.oneErrorTimer);
+    live.oneTransientError = `⚠ ${item.code} — ${clean(reason) || 'NOT MOVED'} — scan next item`;
+    renderLive();
+    finishMoveCorner('live', false);
+
+    live.oneErrorTimer = setTimeout(() => {
+      if (live.oneErrorToken !== token) return;
+      live.oneErrorTimer = 0;
+      live.oneTransientError = '';
+      renderLive();
+    }, 5000);
+  }
+
+  function blockOneByOneDestination(item, title, reason, ctx, expirationMs) {
+    live.oneInFlight.delete(item.id);
+    item.status = 'BLOCKED';
+    item.retryCtx = ctx;
+    item.retryExpirationMs = expirationMs;
+    live.current = item;
+    live.issue = { kind:'destination', title, reason };
+    live.error = '';
+    live.note = '1×1 stopped — scan a new destination';
+    liveScan.disabled = true;
+    liveDest.disabled = false;
+    liveDest.classList.remove('good');
+    liveDest.classList.add('bad');
+    renderLive();
+    setTimeout(() => {
+      liveDest.focus();
+      liveDest.select?.();
+    }, 0);
+  }
+
+  async function moveOneByOneResolved(item, ctx, expirationMs=null, run=live.activeRun) {
+    if (!currentLiveRun(run) || !live.running || !live.oneByOne) return;
+
+    if (live.issue?.kind === 'destination' && live.current !== item) {
+      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');
+      return;
+    }
+
+    if (norm(item.destination) !== norm(live.dest)) {
+      showOneByOneError(item, 'DESTINATION CHANGED — RESCAN ITEM');
+      return;
+    }
+
+    item.ctx = ctx;
+    item.status = 'MOVING';
+    item.retryCtx = ctx;
+    item.retryExpirationMs = expirationMs;
+    renderLive();
+
+    let response;
+    try {
+      response = await liveApi(
+        API_MOVE_ITEMS,
+        buildMovePayload(live.src, item.destination, live.sourceMeta, ctx, 1, expirationMs),
+        run
+      );
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      showOneByOneError(item, error?.message || 'MOVE API ERROR');
+      return;
+    }
+
+    if (!currentLiveRun(run)) return;
+
+    if (moveOk(response)) {
+      finishOneByOneMoved(item);
+      return;
+    }
+
+    const reason = moveReason(response);
+    if (live.issue?.kind === 'destination' && live.current !== item) {
+      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');
+      return;
+    }
+
+    if (isDamagedDestinationResponse(response)) {
+      blockOneByOneDestination(item, 'DESTINATION BLOCKED', 'DESTINATION DAMAGED', ctx, expirationMs);
+      return;
+    }
+
+    if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
+      blockOneByOneDestination(item, 'HAZMAT / DESTINATION ISSUE', reason || 'HAZMAT', ctx, expirationMs);
+      return;
+    }
+
+    if (hasPredicant(response)) {
+      blockOneByOneDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);
+      return;
+    }
+
+    showOneByOneError(item, reason || 'MOVE REJECTED');
+  }
+
+  async function processOneByOneBarcode(item) {
+    const run = live.activeRun;
+    if (!currentLiveRun(run) || !live.running || !live.oneByOne) return;
+
+    item.status = 'CHECKING';
+    renderLive();
+
+    let response;
+    try {
+      response = await liveApi(API_SCAN_ITEM, scanItemPayload(live.src, item.code), run);
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      showOneByOneError(item, error?.message || 'SCAN API ERROR');
+      return;
+    }
+
+    if (!currentLiveRun(run)) return;
+
+    const ctx = resolveItem(response, item.code);
+    if (!ctx.ok) {
+      const reason = ctx.invalid
+        ? 'INVALID BARCODE'
+        : ctx.type === 'RequestMultipleBarcodesResponse'
+          ? 'MULTIPLE BARCODE MATCHES'
+          : ctx.type || 'BARCODE NOT RESOLVED';
+      showOneByOneError(item, reason);
+      return;
+    }
+
+    item.ctx = ctx;
+    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
+      live.oneInFlight.delete(item.id);
+      parkLiveDateItem(item, ctx);
+      return;
+    }
+
+    await moveOneByOneResolved(item, ctx, null, run);
+  }
+
+  function enqueueOneByOneBarcode(code) {
+    const item = {
+      id:`live-one-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      code,
+      qty:1,
+      destination:live.dest,
+      status:'SCANNED',
+      ctx:null
+    };
+
+    live.oneInFlight.set(item.id, item);
+    live.error = '';
+    live.note = `sent ${code} ×1`;
+    renderLive();
+    processOneByOneBarcode(item);
+  }
+
+  function retryOneByOneBlockedMove(item) {
+    if (!item?.retryCtx || !live.running || !live.oneByOne) return;
+    item.destination = live.dest;
+    live.current = null;
+    live.oneInFlight.set(item.id, item);
+    liveScan.disabled = false;
+    renderLive();
+    moveOneByOneResolved(item, item.retryCtx, item.retryExpirationMs ?? null);
+    setTimeout(() => liveScan.focus(), 0);
+  }
+
   function finishLiveMoved(item) {
     item.status = 'MOVED';
     item.destination = live.dest;
@@ -1844,13 +2123,13 @@
     live.current = null;
     live.issue = null;
     live.error = '';
-    live.note = 'item skipped — queue continuing';
+    live.note = live.oneByOne ? 'item skipped — 1×1 ready' : 'item skipped — queue continuing';
     liveDest.disabled = !!live.running;
     liveScan.disabled = !live.running;
     renderLive();
     setTimeout(() => {
       liveScan.focus();
-      pumpLive();
+      if (!live.oneByOne) pumpLive();
     }, 0);
   }
 
@@ -1992,7 +2271,9 @@
     live.error = '';
     live.note = unitCount > 1
       ? `parked ${ctx.asin || item.code} ×${unitCount} — date required; split to individual units`
-      : `parked ${ctx.asin || item.code} — date required; continuing queue`;
+      : live.oneByOne
+        ? `parked ${ctx.asin || item.code} — date required; 1×1 remains ready`
+        : `parked ${ctx.asin || item.code} — date required; continuing queue`;
     renderLive();
 
     openNextLiveDatePicker();
@@ -2021,14 +2302,21 @@
       item.dateResolved = true;
       item.resolvedExpirationMs = chosen.finalExpirationMs;
       item.retryExpirationMs = chosen.finalExpirationMs;
-      item.status = 'QUEUED_DATE';
-
-      live.queue.unshift(item);
-
       live.error = '';
-      live.note = `date saved for ${item.ctx.asin || item.code} — queued to move`;
-      renderLive();
-      pumpLive();
+
+      if (live.oneByOne) {
+        item.status = 'MOVING_DATE';
+        live.oneInFlight.set(item.id, item);
+        live.note = `date saved for ${item.ctx.asin || item.code} — sending QTY 1`;
+        renderLive();
+        moveOneByOneResolved(item, item.ctx, chosen.finalExpirationMs);
+      } else {
+        item.status = 'QUEUED_DATE';
+        live.queue.unshift(item);
+        live.note = `date saved for ${item.ctx.asin || item.code} — queued to move`;
+        renderLive();
+        pumpLive();
+      }
 
       setTimeout(openNextLiveDatePicker, 0);
     });
@@ -2138,6 +2426,16 @@
     if (!live.running || !live.sourceReady || !live.dest) {
       live.error = 'Scan SOURCE then DESTINATION first.';
       renderLive();
+      return;
+    }
+
+    if (live.oneByOne) {
+      if (live.issue) {
+        live.error = '1×1 is BLOCKED — resolve the destination before scanning another item.';
+        renderLive();
+        return;
+      }
+      enqueueOneByOneBarcode(code);
       return;
     }
 
