@@ -4,363 +4,774 @@
 
 Repository: `1Sirkkris/-tampermonkey-v2`
 
-- `main` is the canonical source branch.
-- This root `AGENTS.md` on `main` is the single canonical coding rulebook.
-- `work-laptop-pack` is a deployment artifact, not a competing source or instruction branch.
-- Do not create or maintain branch-specific instruction variants.
+- `main` is the canonical editable source branch.
+- This root `AGENTS.md` on `main` is the canonical agent rulebook.
+- `work-laptop-pack` is the stable deployment artifact, not a competing source branch.
+- Do not create competing instruction files or source copies.
 
-The user defines the real-world outcome. The agent owns the technical implementation.
+The user defines the real-world workflow and correct outcome. The agent owns the technical implementation.
 
-The user is the Amazon FC workflow/domain expert and is not expected to speak in coder language. Interpret short, rough, misspelled, or informal requests using the surrounding workflow and evidence. Do not nitpick terminology when the intended outcome is clear.
+Interpret short, rough, informal or non-technical requests from surrounding workflow and evidence. Do not require the user to translate a problem into code, API, DOM or Git terminology.
 
-Do not require the user to understand code, APIs, DOM internals, request payloads, browser architecture, concurrency, frameworks, Git, or debugging tools.
+Priority:
 
-Optimize in this strict order:
+`Correctness/data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX`
 
-**Correctness/data integrity → Safety → User time saved → Reliability → Recovery → Performance → Simplicity → Maintainability → QoL/UX**
+Never improve a lower priority by sacrificing a higher one.
 
-Never sacrifice an earlier priority merely to improve a later one.
+---
 
-## PRECEDENCE / CORRECTIONS
+## PRECEDENCE AND CONTINUITY
 
-Within higher-level platform authority:
+1. The user’s latest explicit instruction overrides older wording, assumptions, defaults and stale artifacts.
+2. Treat corrections such as `no`, `not that`, `same problem`, `still broken`, and scope corrections as requirements.
+3. Repeated intentional corrections become standing project constraints until changed.
+4. Do not repeat a rejected behaviour, workaround, architecture or delivery method without new evidence.
+5. Before asking the user to repeat information, check:
+   - current conversation
+   - relevant available history
+   - current canonical source
+   - existing project instructions
+6. If history is unavailable, contradictory or genuinely insufficient, say so. Never fabricate continuity.
+7. Do not ask a clarification question when the intended result can be safely inferred from existing workflow, evidence or history.
+8. If ambiguity materially changes safety, data integrity or scope and cannot be resolved from available evidence, identify only the blocking uncertainty.
 
-1. The user's latest explicit statement wins over earlier user wording, assumptions, defaults, generic advice, and stale artifacts.
-2. Treat corrections such as “no,” “not that,” “same problem,” and “still broken” as requirements.
-3. Extract the rule behind a correction, remove the superseded assumption, and apply the correction across the affected task.
-4. Do not repeat a rejected behaviour, answer, workaround, architecture, user action, or delivery method without new evidence.
-5. Treat established workflow preferences and recurring corrections as standing project constraints until the user changes them.
+Explicit user instructions in the current task take precedence over this file.
 
-Do not make the user repeat rules already present in the conversation, this file, current source, or relevant history.
+---
 
-## USER / AGENT CONTRACT
+## AUTHORIZATION BOUNDARY
 
-Ask the user only for information they can reasonably provide:
+### READ-ONLY
 
-- what they normally do
-- what they want to happen
-- what visibly happened
-- what result is correct
-- a business/workflow constraint that cannot be inferred
+Treat these as read-only unless the user separately authorizes a change:
 
-Do not ask the user to:
+- review
+- inspect
+- assess
+- investigate
+- diagnose
+- analyse
+- confirm whether
+- compare
+- explain
+- plan
+- do not change yet
+- testing first
 
-- choose technical architecture
-- inspect or patch code
-- use DevTools manually
-- find endpoints or payloads
-- select concurrency limits
-- interpret raw technical errors
-- carry code or prompts between chats when tools can do it
+Read-only work may:
 
-Make technical decisions yourself. Ask one short question only when the answer materially changes correctness, safety, destructive scope, or intended behaviour.
+- read code and history
+- compare versions/diffs
+- inspect logs, screenshots and captured responses
+- trace execution paths
+- identify likely causes
+- state uncertainty
+- recommend a change
 
-Before asking, check the current conversation, source, relevant history, and available evidence. Do not ask for information already available or safely inferable.
+Read-only work must not:
 
-When user action is unavoidable, provide the smallest complete numbered steps using exact visible labels.
+- modify files
+- alter versions
+- create or change diagnostic code
+- commit or push
+- deploy or synchronize branches
+- fix something while reviewing
 
-## INTENT ROUTER
+`Continue` inherits the authorization of the current task.
 
-Interpret the user's verb as authorization scope.
+It is not permission to convert read-only work into implementation.
 
-### Review / explain / plan / assess
+### CHANGE AUTHORIZED
 
-- Inspect and report only.
-- Read-only GitHub and diagnostic checks are allowed.
-- Do not edit, commit, push, deploy, or start a new task unless asked.
+Requests such as:
 
-### Diagnose / investigate
+- fix
+- change
+- implement
+- build
+- update
+- modify
+- optimize
+- refactor
 
-- Inspect and establish the cause.
-- If static evidence is insufficient, create and push the smallest non-production diagnostic needed to finish the diagnosis.
-- Do not change or promote production behaviour unless the user also asked to fix/change it.
+authorize the normal scoped engineering workflow:
 
-### Fix / change / build / improve / optimize / update / continue
+`inspect → change → validate → diff review → version → commit → push → deploy/sync when applicable → exact user update action`
 
-- Complete the in-scope engineering end to end.
-- Inspect the canonical repo and applicable rules.
-- Edit the real source, version it, validate it, inspect the diff, commit it, push it, and deliver through GitHub.
-- A code-change request is standing authorization for the normal scoped commit and push. Do not ask separately whether to commit or push.
-- Do not stop at a local file or paste a replacement script into chat as the normal delivery.
-- Do not return only a plan, partial patch, or options list while authorized safe in-scope work remains.
-- Own routine follow-through without reminders: reconciliation, versioning, validation, cleanup, manifests, commit, push, deployment sync when applicable, rollback, and the exact update action.
+Do not ask separately for permission to perform normal in-scope edits, validation, commits or pushes.
 
-### Approval still required
+Still require user approval before:
 
-Ask before:
-
-- deleting scripts, branches, releases, or material data
+- deleting scripts, branches, releases or material data
 - force-pushing or rewriting history
-- changing repository visibility, settings, access, or secrets
-- adding production dependencies or credentials
-- modifying unrelated tools or expanding scope materially
-- promoting an unvalidated experimental/diagnostic candidate into the deployed fleet
-- creating a new branch outside the existing source/deployment workflow
-- creating a new Work Mode task/chat
+- changing repository visibility, access, settings, secrets or credentials
+- materially expanding into unrelated tools/workflows
+- promoting an unvalidated candidate into the deployed fleet
+- creating an unrelated branch, task or handoff
 
-## STARTUP / SOURCE TRUTH
+---
 
-Before any Tampermonkey coding, review, diagnosis, or architecture work:
+## SOURCE TRUTH AND BASELINE
 
-1. Fetch and follow this `AGENTS.md` from `main`.
-2. Inspect the current canonical repository source and relevant history/diff.
-3. Treat Project uploads, pasted scripts, exports, logs, and screenshots as evidence/input, not automatically as the source of truth.
-4. If the installed/runtime script appears newer or materially different, reconcile it into the repository before changing it. Never overwrite a newer working runtime with stale GitHub code.
-5. If the canonical repo or this rulebook cannot be accessed, stop before changing code and report `ENVIRONMENT BLOCKED`.
+Before coding, review or diagnosis:
 
-Never wait for the user to say "use agent prompt."
+1. Read this `AGENTS.md`.
+2. Inspect the exact canonical source and relevant history/diff.
+3. Identify the exact:
+   - script
+   - filename
+   - branch
+   - current version
+4. Identify the last version confirmed working for the affected workflow.
+5. Check whether previous fixes already touched the same mechanism.
 
-## TASK MODES
+Important distinction:
 
-### PATCH
+`GitHub main = editable source truth`
 
-Something broke. Reproduce or establish the failure, then use the smallest reliable root-cause fix. Preserve all unrelated behaviour.
+`Last user-confirmed working version = behavioural baseline`
 
-Search the affected script and directly coupled workflow for the same failure mechanism. Fix the safe in-scope class, then verify the reported case, the user's correction, and the old working path. Do not expand a local bug into an unrelated fleet rewrite.
+The newest commit is not automatically the last known-good version.
 
-### IMPROVE
+Treat uploads, pasted scripts, exports, screenshots and logs as evidence/input, not automatically as canonical source.
 
-Existing behaviour works but can be faster, safer, simpler, more reliable, or easier. Prove the main waste before changing architecture.
+If installed/runtime code appears newer or materially different:
 
-### BUILD
+- read-only task → report the mismatch
+- authorized change → reconcile the mismatch before modifying canonical source
 
-Add a new capability using the smallest mechanism that satisfies the real workflow.
+Never overwrite a newer confirmed-working runtime with stale repository code.
 
-### AUDIT / ARCHITECTURE
+Never silently replace a known-good baseline with an untested rewrite.
 
-Map the relevant ecosystem first. Rank opportunities by impact, evidence, effort, and regression risk. Do not tunnel-vision on the first API or rewrite the fleet without proof.
+If canonical source cannot be accessed, do not change code.
 
-Classify each reviewed script by its current execution model: **Direct API / Hybrid / DOM-UI macro / Passive observer-overlay**. State the main bottleneck and fragility created by that model.
+---
 
-Core loop:
+## EVIDENCE DISCIPLINE
 
-**Find → Understand → Measure → Decide → Build → Validate → Clean up → Deliver**
+Use these meanings consistently.
 
-## BOUNDED DISCOVERY
+**KNOWN**  
+Directly established by source/code/configuration, explicit user requirement or other authoritative evidence.
 
-For IMPROVE, BUILD, and AUDIT work, inspect the relevant scripts/pages/services for:
+**OBSERVED**  
+Behaviour directly visible in runtime evidence, logs, screenshots or captured responses.
 
-- UI automation replaceable by an authorized direct request
-- duplicate/in-flight-equivalent requests
-- data already present in HTML, application state, storage, sibling responses, or shared cores
-- serial work that can safely use bounded concurrency or batching
-- repeated navigation/page loads
-- DOM scraping/rendering that can disappear
-- always-on polling, observers, timers, or listeners that can become lazy/event-driven
-- duplicated clients, caches, parsers, routing, normalization, or state ownership
-- opportunities to remove user actions or whole obsolete subsystems
+**TESTED**  
+The exact behaviour was intentionally exercised and its result observed.
 
-After the first sweep:
+When relevant distinguish:
 
-1. identify the top three practical opportunities
-2. select the highest-value sufficiently proven option
-3. implement and validate it
+- agent-tested
+- user-tested
+- production-tested
 
-Resume discovery only when new evidence changes the ranking. Broad does not mean infinite.
+**INFERRED**  
+Strongly supported by evidence but not directly demonstrated.
 
-Prefer one authoritative owner per shared responsibility where it removes real duplication. Merge scripts only for measured value, not file count or architectural neatness.
+**SUSPECTED**  
+Plausible hypothesis requiring more evidence.
 
-## FLEET REVIEW / FORWARD READINESS
+**UNKNOWN**  
+Evidence is missing, insufficient or contradictory.
 
-For every fleet audit, review, or improvement assessment:
+Do not promote:
 
-1. Identify likely next-enhancement scripts from conversation history, stated plans, known pain points, and current workflow friction.
-2. Check whether manual DOM/UI actions may be replaceable or strengthened by captured site requests. Never assume an API exists.
-3. Verify BWU2 Observability coverage for every next-in-line script: hostname/routes, relevant requests/responses, workflow events, and latency.
-4. If capture coverage is missing or unproven, flag and rank capture readiness before redesign. Review-only work reports the gap; diagnosis/change work creates the smallest authorized diagnostic.
-5. Report directly connected high-leverage opportunities even when outside the narrow inefficiency first found. Do not expand into unrelated work.
+- `SUSPECTED → INFERRED`
+- `INFERRED → KNOWN`
+- `OBSERVED → TESTED`
 
-Every fleet review must report:
+without evidence justifying the promotion.
 
-- current waste
-- high-leverage workflow opportunities
-- execution model and fragility
-- next-enhancement capture readiness
-- live evidence still required
+Static inspection, reasoning or simulation is not runtime testing.
 
-Do not wait until enhancement work starts to discover that Observability cannot capture the target workflow.
+A screenshot proves only what it visibly contains.
 
-## ENGINEERING CONTRACT
+A UI error does not by itself prove a backend operation failed.
 
-Protect external and workflow contracts unless change is required and justified:
+Correlation is not root cause.
 
-- userscript name, filename, version, `@match`/`@include`, `@updateURL`, and `@downloadURL`
-- endpoints, methods, payloads, quantities, and ordering
-- storage/cache keys and persisted preferences
-- selectors, labels, IDs/classes, shortcuts, and focus behaviour
-- source/destination/item separation
-- expiry/date semantics
-- cancellation, recovery, and partial-completion behaviour
+Only claim root cause when the causal chain is adequately supported.
 
-For affected code, check:
+Never claim:
 
-- duplicate initialization
-- SPA/page/route changes
-- missing or replaced DOM
-- stale asynchronous completion
-- repeated actions and races
-- malformed/changed responses
-- timeouts, retries, cancellation, and partial failure
-- invalid/expired storage and caches
-- Firefox, Chrome, Tampermonkey, userscript/page world, CSP, iframes, and `GM_*` behaviour where relevant
+- a change was made when it was not
+- a commit/push/deployment happened without confirmation
+- a test passed when it was not run
+- an API returned something that was not captured
+- a requirement or known issue existed without supporting evidence
 
-Runtime rules:
+Where live behaviour remains unverified, state:
 
-- Use initialization guards.
-- Give observers, timers, listeners, and patches a clear owner, narrow scope, duplicate protection, and cleanup.
-- When inactive, prefer zero requests, zero polling, and zero repeated full-page scans where practical.
-- Deduplicate identical in-flight reads and share results.
-- Validate required response fields before consuming them.
-- Use bounded concurrency and abortable long/multi-request runs.
-- Never blindly retry state-changing requests.
-- Treat external strings as hostile; prefer safe text rendering and avoid unsafe evaluation.
-- Remove superseded UI automation, waits, observers, selectors, fallbacks, diagnostics, and debug output after the replacement is proven.
+`Regression: Live validation needed.`
 
-For every affected workflow, verify:
+---
 
-**Trigger → Action → Result**
+## CHANGE DISCIPLINE
 
-For every explicit correction, also verify:
+For a targeted bug or behaviour change:
 
-**Rejected behaviour absent → requested behaviour present → preserved behaviour unchanged**
+`last known-good → inspect evidence → exact requested change → smallest safe modification → preserve unrelated behaviour → inspect diff → assess regression risk → version/deliver → user tests`
 
-## PERFORMANCE CONTRACT
+Rules:
 
-Performance means the complete real workflow finishes sooner without increasing mistakes, backend risk, page freezing, or recovery cost.
+- Prefer surgical changes over rewrites.
+- Preserve unrelated working behaviour.
+- Do not perform opportunistic cleanup during a targeted fix.
+- Do not redesign surrounding architecture unless the requested change requires it.
+- Understand strange-looking working logic before removing it.
+- Do not remove a fallback/workaround until its purpose is understood and it is proven obsolete or safely replaced.
+- Check previous fixes in the same area before changing it again.
+- Do not reintroduce behaviour previously removed or corrected.
+- If shared logic changes, inspect every directly affected caller/mode.
+- Never silently change:
+  - metadata
+  - workflow order
+  - storage
+  - selectors
+  - shortcuts
+  - API payloads
+  - defaults
+  - recovery behaviour
 
-Profile or prove the main bottleneck first. Do not micro-optimize cold code.
+For every correction verify:
 
-Where measurable, compare the same workflow before and after using:
+`Rejected behaviour absent → requested behaviour present → preserved behaviour unchanged`
 
-- total workflow time
-- requests and retries
-- user clicks/scans/copy-pastes/page changes
-- repeated DOM scans and rendered work
-- observer/timer activity
-- browser long tasks
-- failures and recovery behaviour
+### EXPLICIT REFACTOR / CLEANUP
 
-Use repeated runs and a median when practical. Never invent numbers or claim speed from code appearance alone.
+When the user explicitly requests a full cleanup or refactor, a complete standalone replacement may be appropriate.
 
-If improvement is real but cannot be safely measured, say so plainly.
+Even then:
 
-Do not present syntax checks, static inspection, or code appearance as proof of live behaviour. Label confirmed, inferred, and unknown accurately.
+- establish the functional baseline first
+- preserve intentional behaviour
+- remove only genuinely dead/superseded code
+- do not replace deterministic working logic with cleaner-looking fragile logic
+- do not optimize for line count or function count
+- do not abstract simple code merely to appear cleaner
+
+---
+
+## MODE AND STATE ISOLATION
+
+Separate tools, modes and workflows must not leak behaviour or state into each other.
+
+Each mode owns its relevant:
+
+- state
+- queue
+- busy/lock flags
+- retries
+- timers
+- observers
+- listeners
+- pending async operations
+- temporary UI
+
+When a mode is switched off or replaced:
+
+- it is off immediately
+- cancel or invalidate pending work
+- clear mode-owned transient state
+- prevent stale async completion from continuing that workflow
+
+Changing shared logic requires checking every affected mode.
+
+### SIDELINE INVARIANTS
+
+Lazy Sideline, Live and 1x1 are separate workflows.
+
+Changes to one must not alter another unless explicitly required.
+
+Switching between them must not leave hidden state from the previous mode active.
+
+Lazy, Live and 1x1 must preserve a safe **Return to Source / escape path** from applicable manual-intervention states without requiring a page refresh.
+
+Do not generalize this requirement to unrelated tools or modes.
+
+---
+
+## STATE-CHANGING REQUEST SAFETY
+
+Treat inventory moves and other non-idempotent/state-changing actions as high risk.
+
+Never automatically retry merely because the UI or response appears to report failure.
+
+If available evidence permits both possibilities:
+
+- operation failed
+- operation succeeded but confirmation failed
+
+then the result is:
+
+**UNKNOWN**
+
+On an UNKNOWN state-changing outcome:
+
+1. Stop automatic continuation.
+2. Do not resubmit the same mutation.
+3. Verify actual resulting state before another attempt.
+
+Never allow:
+
+`successful mutation → mistaken failure → automatic retry → duplicate mutation`
+
+Classify workflow outcomes from the most authoritative evidence available.
+
+Do not infer mutation success/failure solely from incidental scan/product metadata when the actual state-changing response can be captured.
+
+Special cases and exceptions require either:
+
+- captured behaviour; or
+- an explicit confirmed requirement
+
+Do not create exceptions from remembered assumptions.
+
+---
+
+## FAULT ISOLATION
+
+Do not label the script/parser as broken merely because its output disagrees with a manual result.
+
+When relevant trace:
+
+`raw/source input → parser/classifier → internal value → displayed/output value → manual comparison`
+
+Distinguish between:
+
+- source-data error
+- operator/manual-entry error
+- parser/classifier error
+- display error
+- stale/duplicate script
+- backend behaviour
+- unknown cause
+
+Do not change code until the fault is reasonably localized.
+
+---
+
+## VALIDATION AND REGRESSION
+
+Validate the affected risk, not a giant generic checklist.
+
+Use:
+
+`Trigger → Action → Result`
+
+High-value checks where applicable:
+
+- previous working path still works
+- requested error path stops/continues correctly
+- mode-off clears runtime behaviour
+- mode switching clears stale state
+- shared logic did not alter other modes
+- stale async work cannot continue after reset/switch
+- error paths cannot accidentally continue processing
+- retries cannot duplicate successful actions
+- manual-intervention recovery exits cleanly
+- version/identity matches the script actually being tested
+
+When runtime behaviour contradicts inspected source, check for stale or duplicate enabled Tampermonkey scripts before rewriting correct code.
+
+Testing language:
+
+- `inspected` = code/evidence read
+- `static checked` = syntax/static reasoning performed
+- `runtime tested` = actually exercised
+- `user tested` = user exercised specified case
+- `production confirmed` = observed in deployed workflow
+
+Do not call inspection or static reasoning testing.
+
+Carry user test results forward as project evidence.
+
+---
 
 ## LIVE EVIDENCE
 
-Use live evidence when static review cannot prove real-site behaviour, private API contracts, session behaviour, dynamic DOM, races, response shapes, or performance.
+When static evidence cannot establish real-site behaviour, API responses, races or state transitions:
 
-1. State the exact claim or unknown.
-2. Create the smallest safe diagnostic using existing BWU2 Observability tooling where practical.
-3. Commit/push the diagnostic through GitHub; do not make the user manually patch code.
-4. Give exact minimal operator steps.
-5. Capture only what resolves the question.
-6. Separate confirmed, inferred, and unknown.
-7. Implement only what evidence supports.
-8. Retest and remove temporary instrumentation.
+1. State the exact unknown.
+2. Identify the smallest evidence needed.
+3. Use existing BWU2 Observability/capture capability where practical.
 
-Never capture or commit credentials, cookies, tokens, secret headers, or unnecessary identifiers/payloads.
+During read-only work, stop there unless instrumentation was explicitly authorized.
 
-When a script becomes next in the enhancement queue, assess capture coverage during the current review. Do not defer discovery of missing host, route, request/response, event, or latency capture until implementation begins.
+When diagnostic instrumentation is authorized:
 
-If live validation is still required, report exactly: `Regression: Live validation needed.`
+- create the smallest safe diagnostic
+- keep it separate from production behaviour
+- push it through GitHub
+- give only minimal operator steps
+- capture only what resolves the question
+- do not capture credentials, cookies, tokens or secret headers
+- implement production behaviour only after evidence supports it
+- remove temporary instrumentation when its purpose is complete and cleanup is in scope
 
-## VERSIONING, GITHUB, AND DELIVERY
+---
+
+## AUDIT / OPTIMIZATION
+
+Only broaden discovery when the task is genuinely an audit, optimization or architecture review.
+
+For an explicit Discovery Dig, follow `docs/DISCOVERY-DIG.md`.
+
+Focus on the affected workflow and directly coupled code.
+
+Look for proven high-value issues such as:
+
+- unnecessary waits
+- duplicate requests/actions
+- repeated DOM work
+- duplicated state ownership
+- unnecessary polling/listeners
+- UI automation replaceable by a proven safer mechanism
+- repeated user actions that can safely disappear
+
+Do not assume an API exists.
+
+Do not chase theoretical micro-optimizations.
+
+Do not automatically redesign adjacent scripts.
+
+Directly connected opportunities may be reported but not implemented outside authorized scope.
+
+---
+
+## VERSIONING, GITHUB AND DELIVERY
 
 For every behaviour-changing userscript revision:
 
 - bump `@version`
-- keep exposed UI/toast version labels consistent
-- preserve deployed filenames and update URLs unless an intentional migration is required
-- validate the affected workflow as far as the environment allows
-- inspect the final diff for unrelated changes and secrets
-- commit with a scoped message and push to `main`
-- update any existing version manifest/README entry affected by the change
+- keep exposed UI/toast versions consistent
+- preserve `@name`, `@namespace`, deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
+- ensure the version described is the version actually modified
+- inspect final diff for unrelated changes
+- commit with a scoped message
+- push to `main`
+- update an existing manifest/README entry where applicable
 
-Stable fleet delivery:
+For deployed fleet scripts:
 
-- Synchronize the exact validated version to `work-laptop-pack` when that script is part of the deployed work-laptop fleet.
-- Preserve the pack filename and Tampermonkey update path.
-- Record the source commit/version so rollback remains possible.
-- After every successful production userscript push and deployment sync, return a clickable GitHub `.user.js` install/update link for each changed deployed script. The link must target the exact deployed file on `work-laptop-pack` and be usable by opening it directly so Tampermonkey presents its Install/Update/Overwrite screen.
-- Prefer the GitHub-hosted raw route in this form: `https://github.com/<owner>/<repo>/raw/refs/heads/work-laptop-pack/<path>/<script>.user.js` so the visible link clearly remains a GitHub link while delivering the raw userscript.
-- The instant install/update link is the default user action. Do not make the user wait for Tampermonkey's scheduled update check or send them through `Tampermonkey → Utilities → Check for userscript updates` when the direct deployed `.user.js` link is available.
-- In the completion response, make `Next:` the direct clickable update link or the minimal instruction `Open update link → Update/Overwrite` when multiple changed scripts require separate links.
+- synchronize only the intended validated version to `work-laptop-pack`
+- preserve deployed filename/update path
+- preserve a rollback commit/source version
+- verify the pack contains the intended exact revision
+- return the direct GitHub `.user.js` install/update link
+- default user action:
 
-Experimental/diagnostic delivery:
+`open link → Update/Overwrite`
 
-- Keep genuinely unvalidated candidates out of deployed update paths and out of `work-laptop-pack`.
-- Store them in the repository using the existing test/diagnostic convention so GitHub remains the source of truth.
-- Provide a GitHub install/update path and the exact live-validation steps.
-- Promote only after evidence supports it.
-- A long-lived script containing `TEST` in its name is not automatically experimental; deployment intent and current fleet status control.
+Do not make the normal workflow:
 
-Never make the normal user workflow:
+- local script copies
+- manual source editing
+- full-script copy/paste from chat
+- competing source copies
+- waiting for a scheduled Tampermonkey update when a direct link is available
 
-- manually edit code
-- copy/paste a full replacement script from chat
-- choose between competing source copies
-- remember to ask for GitHub synchronization
+Unvalidated experimental/diagnostic candidates stay out of `work-laptop-pack`.
 
-If GitHub write/sync is blocked, do not silently leave a local-only revision. Report `ENVIRONMENT BLOCKED` and state the single missing capability.
+Before saying a version was pushed/deployed, verify that it actually was.
 
-## WORK-LAPTOP PACK
+---
 
-`work-laptop-pack` is the stable deployment branch.
+## COMMUNICATION
 
-- No speculative changes.
-- Only synchronize deliberately selected, validated fleet versions.
-- Keep exact deployed filenames/update paths and a rollback commit.
-- Confirm the pack points to the intended source revision.
-- Do not use the branch as an independent coding source or keep a competing `AGENTS.md` there.
+Default style:
+
+- concise
+- direct
+- practical
+- plain English
+- use the user’s existing terminology
+- no unnecessary request restatement
+- no generic filler
+- no corporate language
+- no fake certainty
+- no technical process diary
+- no developer essay unless requested
+
+The user is not expected to understand or care about implementation internals.
+
+The agent owns the technical complexity.
+
+The user primarily needs:
+
+- what happened
+- whether it matters
+- what changed
+- what remains uncertain
+- what to do next
+
+Use more detail only when risk, complexity or the requested output requires it.
+
+When user action is necessary, give the smallest complete steps using exact visible labels.
+
+---
+
+## USER-FACING OUTPUT DISCIPLINE
+
+Before sending a response, silently assess whether every included detail helps the user:
+
+- act
+- decide
+- test
+- understand a material risk
+
+If not, remove it.
+
+Default to **caveman-simple operational language**.
+
+Translate technical findings into what they mean for the workflow.
+
+Prefer:
+
+`Problem → Fix → Next`
+
+or:
+
+`Found → Means → Next`
+
+Do not default to a developer post-mortem.
+
+Do not explain:
+
+- functions
+- closures
+- promises
+- DOM implementation
+- internal object/state structure
+- API plumbing
+- selectors
+- call stacks
+- code architecture
+- implementation history
+
+unless the user asks or the detail materially affects safety, testing or a decision.
+
+### TRANSLATION RULE
+
+Do the technical reasoning internally.
+
+Give the user the operational result.
+
+Example:
+
+Bad:
+
+`A stale asynchronous completion handler retained destination state after the mode transition.`
+
+Good:
+
+`Old mode was still running after switching modes. Fixed — OFF now means OFF immediately.`
+
+Bad:
+
+`The transport response did not establish whether the mutation committed.`
+
+Good:
+
+`We cannot prove whether the move happened. The script must stop instead of retrying and risking duplicate inventory.`
+
+Bad:
+
+`The normalized parser value differs from the manually entered comparison dataset.`
+
+Good:
+
+`Parser is correct. Manual number is wrong.`
+
+### RESPONSE LENGTH
+
+For normal script work, use the shortest answer that still lets the user act correctly.
+
+Do not include by default:
+
+- long root-cause explanations
+- implementation walkthroughs
+- function names
+- detailed investigation timelines
+- code excerpts
+- architectural commentary
+- JavaScript theory
+- exhaustive test commentary
+
+If technical detail does not change the user’s decision or next action, cut it.
+
+### SILENT OUTPUT SELF-CHECK
+
+Before sending, silently check:
+
+1. Can this be shorter without losing anything useful?
+2. Am I explaining code the user did not ask to understand?
+3. Am I telling the investigation story instead of the result?
+4. Can this be said in simpler language?
+5. Is the next action obvious?
+6. Is uncertainty clear without a long explanation?
+7. Did I repeat information the user already knows?
+
+If yes, shorten it before sending.
+
+### NORMAL COMPLETED CHANGE
+
+Prefer:
+
+**Changed:**  
+What changed in plain English.
+
+**Checked:**  
+Only what was actually verified.
+
+**Next:**  
+Exact update/test action.
+
+Add:
+
+**Risk:**  
+Only when material uncertainty remains.
+
+Example:
+
+**Changed:**  
+1x1 now blocks the hazmat item and lets you continue to the next item. It does not move the blocked item.
+
+**Checked:**  
+Code path and final diff checked. Live behaviour still needs your test.
+
+**Next:**  
+Update to v0.3.3 and scan the hazmat test item.
+
+### NORMAL REVIEW / DIAGNOSIS
+
+Prefer:
+
+**Found:**  
+Plain-English result.
+
+**Means:**  
+Only if the implication is not obvious.
+
+**Next:**  
+Required test/evidence/action, if any.
+
+Example:
+
+**Found:**  
+Parser is working correctly. P3 mismatch came from the manually entered number.
+
+**Next:**  
+No parser change needed.
+
+### USER QUESTIONS OVERRIDE
+
+If the user asks:
+
+- why
+- explain
+- technical detail
+- deep dive
+- show the logic
+- what exactly happened
+- full assessment
+
+provide the requested depth.
+
+Still explain the practical result first.
+
+---
 
 ## HANDOFFS
 
-The current capable chat owns the task end to end. Do not bounce work between Overseer, Research, Live Evidence, and repo coding merely because those labels exist.
+The current capable chat owns the task end to end.
 
-Use another chat only when its environment provides evidence or repository access the current chat genuinely lacks.
+Do not bounce work between chats merely because another workflow or label exists.
 
-Never create or send to Work Mode automatically. Before any handoff say exactly:
+Do not automatically create:
 
-`REQUESTING TO SEND TO WORK MODE - WILL CREATE NEW CHAT`
+- Work Mode tasks
+- new chats
+- duplicate tasks
+- unrelated branches
 
-Then wait for approval. Do not create duplicate tasks. Give one complete copy-paste handoff only when a handoff is unavoidable.
+Use a handoff only when the current environment genuinely lacks a capability required to continue.
 
-## FINAL PASS / DONE
+Get approval before creating the handoff.
 
-Before completion:
+---
 
-- re-read the user's latest request and corrections
-- check requested, rejected, preserved, delivery, and proof requirements
-- review changed and directly affected areas
-- search the affected scope for the same failure mechanism
-- run relevant syntax/tests/checks
-- inspect the final diff
-- remove newly obsolete code and diagnostics
-- confirm version metadata and deployment paths
-- verify the GitHub commit/push and pack sync when applicable
-- preserve rollback
+## RULE QUALITY AND MAINTENANCE
 
-Stop when the goal is complete, remaining work is low-value/out of scope, live evidence is required, approval is required, or the environment blocks progress.
+Treat `AGENTS.md` as executable operating guidance, not an encyclopedia.
 
-Keep user-facing language concise and direct. No greeting, praise, filler, apology theatre, request restatement, fake certainty, or technical process diary.
+Every rule should prevent:
 
-Keep completion to:
+- a recurring mistake
+- a material risk
+- a known project-specific failure
+- repeated user instruction
 
-- `Changed:` what is different
-- `Proof:` what was checked
-- `Risk:` only material remaining risk
-- `Next:` one exact user action, or `None`
+Rules must be:
 
-For an end-of-day report when requested, use only:
+- specific
+- actionable
+- durable
+- scoped
+- non-duplicative
 
-`Script | Start version | End-of-day version | Revisions today`
+State each instruction once.
 
-Include touched scripts only unless the user asks for the full fleet.
+Do not add generic software-engineering advice the agent already knows.
 
-Finish with exactly one:
+Do not add speculative rules for problems that have not occurred.
 
-- `OFFLINE WORK COMPLETE`
-- `LIVE EVIDENCE REQUIRED`
-- `USER DECISION REQUIRED`
-- `ENVIRONMENT BLOCKED`
+Do not preserve obsolete rules merely because they already exist.
+
+When a recurring agent failure occurs:
+
+1. Determine whether an existing rule should already have prevented it.
+2. If yes, tighten or clarify that rule rather than duplicating it.
+3. Add a new rule only when the requirement is genuinely new.
+4. Remove superseded wording.
+
+Periodically prune:
+
+- duplication
+- stale requirements
+- obsolete workflows
+- explanations that no longer improve agent behaviour
+
+A shorter high-signal rulebook is preferable to a larger file where important constraints get lost.
+
+---
+
+## FINAL GATE
+
+Before finishing a code-changing task verify:
+
+- authorization matched work performed
+- canonical source/baseline/version were correct
+- latest user corrections were applied
+- requested behaviour is present
+- rejected behaviour is absent
+- unrelated behaviour was preserved
+- evidence labels match what was actually proven
+- final diff contains no unrelated change
+- affected shared modes/helpers were considered
+- state-changing retries cannot duplicate actions
+- version metadata is consistent
+- claimed GitHub push/deployment/update link is real
+- remaining live uncertainty is stated plainly
+- user-facing response contains only information the user needs
+
+Stop when:
+
+- requested goal is complete
+- further work is outside scope
+- live evidence is required
+- user approval is required
+- environment prevents safe progress
