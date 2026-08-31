@@ -35,11 +35,7 @@
   }
 
   function add(entry) {
-    rows.push({
-      time:new Date().toISOString(),
-      case:activeCase,
-      ...entry
-    });
+    rows.push({ time:new Date().toISOString(), case:activeCase, ...entry });
     if (rows.length > MAX) rows.splice(0, rows.length - MAX);
     render();
   }
@@ -81,13 +77,8 @@
 
   function mount() {
     if (box || !document.body) return;
-
     box = document.createElement('div');
-    box.style.cssText = [
-      'position:fixed','top:10px','right:10px','z-index:2147483647','width:520px','max-height:58vh',
-      'background:#fff','color:#111827','border:3px solid #f59e0b','border-radius:8px','box-shadow:0 8px 24px #0004',
-      'font:12px Arial,sans-serif','padding:8px'
-    ].join(';');
+    box.style.cssText = ['position:fixed','top:10px','right:10px','z-index:2147483647','width:520px','max-height:58vh','background:#fff','color:#111827','border:3px solid #f59e0b','border-radius:8px','box-shadow:0 8px 24px #0004','font:12px Arial,sans-serif','padding:8px'].join(';');
 
     const title = document.createElement('div');
     title.textContent = 'SIDELINE CLOSE — 3 PATH CAPTURE';
@@ -103,19 +94,12 @@
 
     const controls = document.createElement('div');
     controls.style.cssText = 'display:flex;gap:5px;margin-bottom:6px';
-
     const copy = makeButton('Copy', async () => {
       await navigator.clipboard.writeText(output());
       copy.textContent = 'Copied';
       setTimeout(() => copy.textContent = 'Copy', 900);
     });
-
-    const clear = makeButton('Clear', () => {
-      rows.length = 0;
-      activeCase = 'UNSET';
-      render();
-    });
-
+    const clear = makeButton('Clear', () => { rows.length = 0; activeCase = 'UNSET'; render(); });
     controls.append(clear, copy);
 
     const help = document.createElement('div');
@@ -124,7 +108,6 @@
 
     pre = document.createElement('pre');
     pre.style.cssText = 'margin:0;max-height:39vh;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#f8fafc;padding:7px;border-radius:5px';
-
     box.append(title, cases, controls, help, pre);
     document.body.appendChild(box);
     render();
@@ -134,42 +117,20 @@
   window.fetch = async function(input, init) {
     const url = typeof input === 'string' ? input : input?.url || '';
     if (!interesting(url)) return realFetch.apply(this, arguments);
-
     const method = clean(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
     const requestBody = parseBody(init?.body);
     const started = performance.now();
-
     try {
       const response = await realFetch.apply(this, arguments);
       let responseBody = null;
       try {
-        const clone = response.clone();
-        const txt = await clone.text();
+        const txt = await response.clone().text();
         try { responseBody = JSON.parse(txt); } catch { responseBody = txt; }
-      } catch (e) {
-        responseBody = `[response read failed: ${e?.message || e}]`;
-      }
-
-      add({
-        transport:'fetch',
-        method,
-        url,
-        requestBody,
-        status:response.status,
-        ok:response.ok,
-        ms:Math.round(performance.now() - started),
-        responseBody
-      });
+      } catch (e) { responseBody = `[response read failed: ${e?.message || e}]`; }
+      add({ transport:'fetch', method, url, requestBody, status:response.status, ok:response.ok, ms:Math.round(performance.now() - started), responseBody });
       return response;
     } catch (error) {
-      add({
-        transport:'fetch',
-        method,
-        url,
-        requestBody,
-        error:error?.message || String(error),
-        ms:Math.round(performance.now() - started)
-      });
+      add({ transport:'fetch', method, url, requestBody, error:error?.message || String(error), ms:Math.round(performance.now() - started) });
       throw error;
     }
   };
@@ -179,41 +140,23 @@
   const send = XHR.prototype.send;
 
   XHR.prototype.open = function(method, url) {
-    this.__bwu2Close3PathCapture = interesting(url)
-      ? { method:clean(method).toUpperCase(), url:String(url) }
-      : null;
+    this.__bwu2Close3PathCapture = interesting(url) ? { method:clean(method).toUpperCase(), url:String(url) } : null;
     return open.apply(this, arguments);
   };
 
   XHR.prototype.send = function(body) {
     const meta = this.__bwu2Close3PathCapture;
     if (!meta) return send.apply(this, arguments);
-
     const requestBody = parseBody(body);
     const started = performance.now();
-
     this.addEventListener('loadend', () => {
       let responseBody = this.responseText;
       try { responseBody = JSON.parse(responseBody); } catch {}
-
-      add({
-        transport:'xhr',
-        method:meta.method,
-        url:meta.url,
-        requestBody,
-        status:this.status,
-        ok:this.status >= 200 && this.status < 300,
-        ms:Math.round(performance.now() - started),
-        responseBody
-      });
+      add({ transport:'xhr', method:meta.method, url:meta.url, requestBody, status:this.status, ok:this.status >= 200 && this.status < 300, ms:Math.round(performance.now() - started), responseBody });
     }, { once:true });
-
     return send.apply(this, arguments);
   };
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', mount, { once:true });
-  } else {
-    mount();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
+  else mount();
 })();
