@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN v1.3.3-test FNSKU mapping Lookup
-// @version      1.3.3-test
+// @name       MAIN v1.3.4-test FNSKU mapping Lookup
+// @version      1.3.4-test
 // @description  Read-only regional FNSKU lookup with HOME merchant/MSKU details, JP fallback and matched JP/AU candidates.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.3-test';
+  const VERSION = '1.3.4-test';
   const GUARD_ATTR = 'data-bwu2-fnsku-mapping-lookup';
   if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
   document.documentElement.setAttribute(GUARD_ATTR, VERSION);
@@ -401,12 +401,12 @@
       );
   }
 
-  function mappingTable(rows, { candidate = false } = {}) {
+  function mappingTable(rows, { candidate = false, showFnsku = true } = {}) {
     if (!rows.length) return '<div class="fnsku-no-rows">No mappings returned.</div>';
 
     const head = candidate
       ? '<tr><th>Match</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>'
-      : '<tr><th>Region</th><th>Merchant ID</th><th>MSKU</th><th>FNSKU</th><th>State</th></tr>';
+      : `<tr><th>Region</th><th>Merchant ID</th><th>MSKU</th>${showFnsku ? '<th>FNSKU</th>' : ''}<th>State</th></tr>`;
 
     const body = rows.map(row => {
       const first = candidate
@@ -418,7 +418,7 @@
         first +
         `<td>${tableValue(row.merchantId, 'Copy Merchant ID')}</td>` +
         `<td>${tableValue(row.msku, 'Copy MSKU')}</td>` +
-        `<td>${tableValue(row.fnsku, 'Copy FNSKU')}</td>` +
+        (showFnsku ? `<td>${tableValue(row.fnsku, 'Copy FNSKU')}</td>` : '') +
         `<td>${escapeHtml(rowState(row))}</td>` +
         '</tr>';
     }).join('');
@@ -456,7 +456,7 @@
       `<div class="fnsku-line"><span>Found</span><b>${escapeHtml(regionText)}</b></div>` +
       `<div class="fnsku-line"><span>ASIN</span>${resultPill(asin)}</div>` +
       '<div class="fnsku-section-title">HOME mapping</div>' +
-      mappingTable(sourceMappings) +
+      mappingTable(sourceMappings, { showFnsku: false }) +
       `<div class="fnsku-section-title">JP / AU candidates (${candidates.length})</div>` +
       `<div class="fnsku-match-note">${comparison}</div>` +
       mappingTable(candidates, { candidate: true }) +
@@ -473,7 +473,7 @@
       '<div class="fnsku-line"><span>Found</span><b>JP / AU</b></div>' +
       `<div class="fnsku-line"><span>ASIN</span>${resultPill(asin)}</div>` +
       '<div class="fnsku-section-title">JP / AU mapping</div>' +
-      mappingTable(sourceMappings) +
+      mappingTable(sourceMappings, { showFnsku: false }) +
       `<div class="fnsku-timing">Done in ${Math.round(totalMs)} ms · source is already in the AU region · click any ID to copy</div>`,
       'success'
     );
