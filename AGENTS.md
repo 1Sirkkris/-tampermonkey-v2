@@ -282,7 +282,10 @@ Stable fleet delivery:
 - Synchronize the exact validated version to `work-laptop-pack` when that script is part of the deployed work-laptop fleet.
 - Preserve the pack filename and Tampermonkey update path.
 - Record the source commit/version so rollback remains possible.
-- After pushing, tell the user only the exact Tampermonkey action required, normally `Tampermonkey → Utilities → Check for userscript updates`.
+- After every successful production userscript push and deployment sync, return a clickable GitHub `.user.js` install/update link for each changed deployed script. The link must target the exact deployed file on `work-laptop-pack` and be usable by opening it directly so Tampermonkey presents its Install/Update/Overwrite screen.
+- Prefer the GitHub-hosted raw route in this form: `https://github.com/<owner>/<repo>/raw/refs/heads/work-laptop-pack/<path>/<script>.user.js` so the visible link clearly remains a GitHub link while delivering the raw userscript.
+- The instant install/update link is the default user action. Do not make the user wait for Tampermonkey's scheduled update check or send them through `Tampermonkey → Utilities → Check for userscript updates` when the direct deployed `.user.js` link is available.
+- In the completion response, make `Next:` the direct clickable update link or the minimal instruction `Open update link → Update/Overwrite` when multiple changed scripts require separate links.
 
 Experimental/diagnostic delivery:
 
