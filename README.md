@@ -17,7 +17,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Stow Andons Helper | 5.5.1 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
 | Bin Check Overlay | 7.4.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
 | Dropzone Selector Queue | 0.2.18 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
-| BWU2 Observability Core | 0.1.10 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
+| BWU2 Observability Core | 0.1.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
 
 Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
 
@@ -29,4 +29,4 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 | --- | --- | --- | --- |
 | Amazon AU ASIN Variation Finder | 0.1.1-test | Right-click current Amazon inline/classic variation swatches and reveal matching child ASINs from the loaded page, including unavailable options when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
 | FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
-| FCResearch → RIVER Ticket Assistant | 0.3.5 | Event-driven Hazmat N/A/L0 capture with late badge detection. Select the newest PO line matching the current ASIN/FNSKU, take the short Vendor Code from that exact line, derive quantity only from that line's Unfilled + Cancelled + Received values, leave zero/unavailable quantity manual, and avoid inventory-wide fallback fetching before running the approved RIVER sequence. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |
+| FCResearch → RIVER Ticket Assistant | 0.3.6 | Event-driven Hazmat N/A/L0 capture plus bounded RIVER step recognition/tracing. Unknown steps now capture a compact DOM/state snapshot and wait on one scoped transition observer instead of repeatedly scanning page text. Latest matching PO/vendor/quantity rules remain unchanged. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |
