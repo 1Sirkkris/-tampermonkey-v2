@@ -1,12 +1,11 @@
 // ==UserScript==
-// @name         TEST v0.1.0 Amazon AU ASIN Variation Finder
+// @name         TEST v0.1.1 Amazon AU ASIN Variation Finder
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.1.0
-// @description  Right-click an Amazon product variation and choose Find ASIN to reveal matching child ASINs, including unavailable options when Amazon exposes them in page data.
+// @version      0.1.1
+// @description  Right-click an Amazon product variation and choose Find ASIN to reveal child ASINs, including unavailable options when Amazon exposes them in the loaded page.
 // @author       Kris + ChatGPT
-// @match        https://www.amazon.com.au/*/dp/*
-// @match        https://www.amazon.com.au/dp/*
-// @match        https://www.amazon.com.au/gp/product/*
+// @match        https://www.amazon.com.au/*
+// @match        https://amazon.com.au/*
 // @run-at       document-idle
 // @grant        GM_setClipboard
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js
@@ -16,33 +15,21 @@
 (() => {
   'use strict';
 
-  const GUARD_ATTR = 'data-amazon-asin-variation-finder';
-  if (document.documentElement.hasAttribute(GUARD_ATTR)) return;
-  document.documentElement.setAttribute(GUARD_ATTR, '0.1.0');
-
-  const SCRIPT_VERSION = '0.1.0';
-  const ASIN_RE = /^[A-Z0-9]{10}$/i;
-  const ASIN_IN_URL_RE = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?=[/?#]|$)/i;
+  const VERSION = '0.1.1';
+  const GUARD = 'data-amazon-asin-variation-finder';
   const MENU_ID = 'aavf-context-menu';
   const PANEL_ID = 'aavf-panel';
   const TOAST_ID = 'aavf-toast';
+  const ASIN_RE = /^[A-Z0-9]{10}$/i;
+  const ASIN_URL_RE = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?=[/?#]|$)/i;
+
+  if (document.documentElement.hasAttribute(GUARD)) return;
+  document.documentElement.setAttribute(GUARD, VERSION);
 
   let activeContext = null;
 
-  function norm(value) {
-    return String(value ?? '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
-  }
-
-  function cleanLabel(value) {
-    return String(value ?? '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
+  const clean = (value) => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const norm = (value) => clean(value).toLowerCase();
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -53,7 +40,7 @@
       .replace(/'/g, '&#039;');
   }
 
-  function titleCaseDimension(key) {
+  function dimensionTitle(key) {
     const known = {
       color_name: 'Colour',
       colour_name: 'Colour',
@@ -64,189 +51,34 @@
       configuration: 'Configuration',
     };
     if (known[key]) return known[key];
-    return String(key || 'Variation')
+    return clean(key || 'Variation')
       .replace(/^variation_/, '')
       .replace(/_name$/, '')
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (m) => m.toUpperCase());
   }
 
-  function getAsinFromUrl(value) {
-    const match = String(value || '').match(ASIN_IN_URL_RE);
+  function asinFromUrl(value) {
+    const match = String(value || '').match(ASIN_URL_RE);
     return match ? match[1].toUpperCase() : null;
-  }
-
-  function collectAsinsFromElement(element) {
-    if (!element) return [];
-    const found = new Set();
-    const keys = [
-      'data-asin',
-      'data-defaultasin',
-      'data-default-asin',
-      'data-selected-asin',
-      'data-csa-c-item-id',
-      'data-dp-url',
-      'href',
-    ];
-
-    const add = (raw) => {
-      const value = cleanLabel(raw);
-      if (!value) return;
-      if (ASIN_RE.test(value)) found.add(value.toUpperCase());
-      const fromUrl = getAsinFromUrl(value);
-      if (fromUrl) found.add(fromUrl);
-    };
-
-    let node = element;
-    for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
-      for (const key of keys) add(node.getAttribute?.(key));
-    }
-
-    const descendants = element.querySelectorAll?.('[data-asin], [data-defaultasin], [data-default-asin], [data-selected-asin], [data-dp-url], a[href*="/dp/"], a[href*="/gp/product/"]') || [];
-    for (const child of descendants) {
-      for (const key of keys) add(child.getAttribute?.(key));
-    }
-
-    return [...found];
-  }
-
-  function findDimensionRoot(target) {
-    let node = target instanceof Element ? target : null;
-    while (node && node !== document.documentElement) {
-      if (node.id && /^variation_[\w-]+$/i.test(node.id)) return node;
-      node = node.parentElement;
-    }
-    return null;
-  }
-
-  function findVariationItem(target, dimensionRoot) {
-    if (!(target instanceof Element) || !dimensionRoot) return null;
-    let item = target.closest('li, .a-button-toggle, [role="radio"], [data-asin], [data-defaultasin], [data-default-asin]');
-    if (item && dimensionRoot.contains(item)) return item;
-    item = target.closest('span.a-button, a, button, input');
-    return item && dimensionRoot.contains(item) ? item : target;
-  }
-
-  function isLikelyVariationDimension(root) {
-    if (!root) return false;
-    return root.matches('[id^="variation_"]') && (
-      root.querySelector('li, .a-button-toggle, [role="radio"], input[type="radio"], img') ||
-      root.textContent.trim()
-    );
-  }
-
-  function getDimensionKey(root) {
-    return root?.id?.replace(/^variation_/, '') || null;
-  }
-
-  function getLabelFromAnnounce(item) {
-    const labelled = item?.querySelector?.('[aria-labelledby]') || (item?.matches?.('[aria-labelledby]') ? item : null);
-    const id = labelled?.getAttribute('aria-labelledby')?.split(/\s+/)[0];
-    if (!id) return '';
-    return cleanLabel(document.getElementById(id)?.textContent);
-  }
-
-  function getVariationIndex(item, dimensionKey) {
-    if (!item) return null;
-    const candidates = [item, ...(item.querySelectorAll?.('input[name], [aria-labelledby], [id]') || [])];
-    for (const el of candidates) {
-      const name = el.getAttribute?.('name');
-      if (/^\d+$/.test(name || '')) return Number(name);
-
-      for (const raw of [el.id, el.getAttribute?.('aria-labelledby')]) {
-        const text = String(raw || '');
-        const specific = dimensionKey && text.match(new RegExp(`${dimensionKey}_(\\d+)(?:_announce)?`, 'i'));
-        if (specific) return Number(specific[1]);
-        const generic = text.match(/_(\d+)_announce(?:\s|$)/);
-        if (generic) return Number(generic[1]);
-      }
-    }
-    return null;
-  }
-
-  function getItemLabel(item, dimensionKey) {
-    if (!item) return '';
-
-    const candidates = [];
-    const push = (value) => {
-      const cleaned = cleanLabel(value);
-      if (cleaned) candidates.push(cleaned);
-    };
-
-    push(item.getAttribute?.('aria-label'));
-    push(item.getAttribute?.('title'));
-    push(item.getAttribute?.('data-a-button-inner'));
-    push(getLabelFromAnnounce(item));
-
-    for (const img of item.querySelectorAll?.('img') || []) {
-      push(img.alt);
-      push(img.title);
-    }
-
-    for (const el of item.querySelectorAll?.('[aria-label], [title]') || []) {
-      push(el.getAttribute('aria-label'));
-      push(el.getAttribute('title'));
-    }
-
-    const text = cleanLabel(item.innerText || item.textContent);
-    push(text);
-
-    const junk = [
-      'see available options',
-      'currently unavailable',
-      'unavailable',
-      'select',
-      'click to select',
-    ];
-
-    const useful = candidates.find((candidate) => {
-      const n = norm(candidate);
-      return n && !junk.some((phrase) => n === phrase || n.startsWith(`${phrase} `));
-    });
-
-    if (useful) return useful;
-    return text || titleCaseDimension(dimensionKey);
-  }
-
-  function readSelectedValue(root) {
-    if (!root) return '';
-    const selection = root.querySelector('.selection, .a-color-secondary.selection, [id$="_selection"]');
-    if (selection) {
-      const text = cleanLabel(selection.textContent).replace(/^[:\-\s]+/, '');
-      if (text) return text;
-    }
-
-    const selected = root.querySelector('.a-button-selected, [aria-checked="true"], input:checked');
-    if (selected) return getItemLabel(selected.closest('li, .a-button-toggle, [role="radio"]') || selected, getDimensionKey(root));
-    return '';
-  }
-
-  function getSelectedDimensions() {
-    const selected = {};
-    for (const root of document.querySelectorAll('[id^="variation_"]')) {
-      if (!isLikelyVariationDimension(root)) continue;
-      const key = getDimensionKey(root);
-      const value = readSelectedValue(root);
-      if (key && value) selected[key] = value;
-    }
-    return selected;
   }
 
   function extractBalancedJson(text, key) {
     if (!text || !key) return null;
-    const patterns = [`"${key}"`, `'${key}'`];
+    const quotedKeys = [`"${key}"`, `'${key}'`];
     let keyIndex = -1;
-    let keyToken = '';
-    for (const pattern of patterns) {
-      const idx = text.indexOf(pattern);
-      if (idx !== -1 && (keyIndex === -1 || idx < keyIndex)) {
-        keyIndex = idx;
-        keyToken = pattern;
+    let tokenLength = 0;
+
+    for (const quoted of quotedKeys) {
+      const index = text.indexOf(quoted);
+      if (index !== -1 && (keyIndex === -1 || index < keyIndex)) {
+        keyIndex = index;
+        tokenLength = quoted.length;
       }
     }
     if (keyIndex === -1) return null;
 
-    const colon = text.indexOf(':', keyIndex + keyToken.length);
+    const colon = text.indexOf(':', keyIndex + tokenLength);
     if (colon === -1) return null;
 
     let start = colon + 1;
@@ -262,16 +94,11 @@
     for (let i = start; i < text.length; i += 1) {
       const ch = text[i];
       if (quote) {
-        if (escaped) {
-          escaped = false;
-        } else if (ch === '\\') {
-          escaped = true;
-        } else if (ch === quote) {
-          quote = null;
-        }
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === quote) quote = null;
         continue;
       }
-
       if (ch === '"' || ch === "'") {
         quote = ch;
         continue;
@@ -280,9 +107,8 @@
       else if (ch === close) {
         depth -= 1;
         if (depth === 0) {
-          const raw = text.slice(start, i + 1);
           try {
-            return JSON.parse(raw);
+            return JSON.parse(text.slice(start, i + 1));
           } catch {
             return null;
           }
@@ -302,52 +128,137 @@
     ];
     const data = Object.fromEntries(keys.map((key) => [key, null]));
 
-    const scripts = [...document.scripts]
-      .map((script) => script.textContent || '')
-      .filter((text) => /asinVariationValues|dimensionValuesDisplayData|dimensionToAsinMap|variationValues/.test(text));
-
-    for (const text of scripts) {
+    for (const script of document.scripts) {
+      const text = script.textContent || '';
+      if (!/variationValues|asinVariationValues|dimensionValuesDisplayData|dimensionToAsinMap/.test(text)) continue;
       for (const key of keys) {
         if (data[key]) continue;
-        const parsed = extractBalancedJson(text, key);
-        if (parsed && typeof parsed === 'object') data[key] = parsed;
+        const value = extractBalancedJson(text, key);
+        if (value && typeof value === 'object') data[key] = value;
       }
-      if (data.asinVariationValues && data.variationValues) break;
     }
-
     return data;
   }
 
-  function resolveVariationValue(rawValue, dimensionKey, variationValues) {
-    if (rawValue == null) return '';
-    const values = variationValues?.[dimensionKey];
-    if (Array.isArray(values)) {
-      const index = Number(rawValue);
-      if (Number.isInteger(index) && index >= 0 && index < values.length) {
-        return cleanLabel(values[index]);
+  function parseDimensionSignal(element) {
+    if (!(element instanceof Element)) return null;
+    const candidates = [element, ...element.querySelectorAll('[id], [aria-labelledby], input[name]')];
+
+    for (const candidate of candidates) {
+      const values = [candidate.id, candidate.getAttribute?.('aria-labelledby')];
+      for (const raw of values) {
+        const text = String(raw || '');
+        const match = text.match(/(?:^|\s)([a-z][\w-]*(?:_name)?|item_package_quantity|configuration)_(\d+)(?:_announce)?(?:\s|$)/i);
+        if (match) return { dimensionKey: match[1], index: Number(match[2]) };
       }
     }
-    return cleanLabel(rawValue);
+
+    for (const candidate of candidates) {
+      const name = candidate.getAttribute?.('name');
+      if (/^\d+$/.test(name || '')) return { dimensionKey: null, index: Number(name) };
+    }
+    return null;
   }
 
-  function buildRowsFromTwister(data) {
+  function findTile(target) {
+    if (!(target instanceof Element)) return null;
+    return target.closest(
+      'li.dimension-value-list-item-square-image, li.dimension-value-list-item, li[class*="dimension-value"], li, span.a-button-toggle, span.a-button'
+    );
+  }
+
+  function findClassicDimensionRoot(target) {
+    if (!(target instanceof Element)) return null;
+    let node = target;
+    while (node && node !== document.documentElement) {
+      if (node.id && /^variation_[\w-]+$/i.test(node.id)) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function isInsideTwister(target) {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('#twister, [id*="twister"], [class*="twister"]'));
+  }
+
+  function resolveLabelFromElement(item) {
+    if (!item) return '';
+    const values = [];
+    const add = (value) => {
+      const v = clean(value);
+      if (v) values.push(v);
+    };
+
+    add(item.getAttribute?.('aria-label'));
+    add(item.getAttribute?.('title'));
+
+    for (const child of item.querySelectorAll?.('[aria-label], [title], img, [aria-labelledby]') || []) {
+      add(child.getAttribute?.('aria-label'));
+      add(child.getAttribute?.('title'));
+      if (child.tagName === 'IMG') add(child.alt);
+      const labelledBy = child.getAttribute?.('aria-labelledby');
+      if (labelledBy) {
+        for (const id of labelledBy.split(/\s+/)) add(document.getElementById(id)?.textContent);
+      }
+    }
+
+    const junk = /^(see available options|currently unavailable|unavailable|select|click to select)$/i;
+    const useful = values.find((value) => !junk.test(value));
+    return useful || clean(item.innerText || item.textContent);
+  }
+
+  function collectDirectAsins(item) {
+    if (!item) return [];
+    const found = new Set();
+    const keys = ['data-asin', 'data-defaultasin', 'data-default-asin', 'data-selected-asin', 'data-dp-url', 'href'];
+
+    const add = (value) => {
+      const raw = clean(value);
+      if (!raw) return;
+      if (ASIN_RE.test(raw)) found.add(raw.toUpperCase());
+      const fromUrl = asinFromUrl(raw);
+      if (fromUrl) found.add(fromUrl);
+    };
+
+    let node = item;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      for (const key of keys) add(node.getAttribute?.(key));
+    }
+
+    for (const child of item.querySelectorAll?.('[data-asin], [data-defaultasin], [data-default-asin], [data-selected-asin], [data-dp-url], a[href]') || []) {
+      for (const key of keys) add(child.getAttribute?.(key));
+    }
+    return [...found];
+  }
+
+  function resolveVariationValue(rawValue, key, variationValues) {
+    if (rawValue == null) return '';
+    const values = variationValues?.[key];
+    const index = Number(rawValue);
+    if (Array.isArray(values) && Number.isInteger(index) && index >= 0 && index < values.length) {
+      return clean(values[index]);
+    }
+    return clean(rawValue);
+  }
+
+  function buildRows(data) {
     const rows = [];
     const seen = new Set();
-    const maps = data.asinVariationValues;
 
-    if (maps && typeof maps === 'object') {
-      for (const [asinRaw, dimensionMap] of Object.entries(maps)) {
+    if (data.asinVariationValues && typeof data.asinVariationValues === 'object') {
+      for (const [asinRaw, map] of Object.entries(data.asinVariationValues)) {
         const asin = String(asinRaw).toUpperCase();
-        if (!ASIN_RE.test(asin) || !dimensionMap || typeof dimensionMap !== 'object') continue;
+        if (!ASIN_RE.test(asin) || !map || typeof map !== 'object') continue;
         const dimensions = {};
-        for (const [key, rawValue] of Object.entries(dimensionMap)) {
+        for (const [key, rawValue] of Object.entries(map)) {
           if (key === 'ASIN') continue;
           dimensions[key] = resolveVariationValue(rawValue, key, data.variationValues);
         }
         const display = Array.isArray(data.dimensionValuesDisplayData?.[asin])
-          ? data.dimensionValuesDisplayData[asin].map(cleanLabel).filter(Boolean)
+          ? data.dimensionValuesDisplayData[asin].map(clean).filter(Boolean)
           : [];
-        rows.push({ asin, dimensions, display, source: 'twister' });
+        rows.push({ asin, dimensions, display });
         seen.add(asin);
       }
     }
@@ -356,10 +267,8 @@
       for (const [asinRaw, displayRaw] of Object.entries(data.dimensionValuesDisplayData)) {
         const asin = String(asinRaw).toUpperCase();
         if (!ASIN_RE.test(asin) || seen.has(asin)) continue;
-        const display = Array.isArray(displayRaw)
-          ? displayRaw.map(cleanLabel).filter(Boolean)
-          : [cleanLabel(displayRaw)].filter(Boolean);
-        rows.push({ asin, dimensions: {}, display, source: 'display-data' });
+        const display = Array.isArray(displayRaw) ? displayRaw.map(clean).filter(Boolean) : [clean(displayRaw)].filter(Boolean);
+        rows.push({ asin, dimensions: {}, display });
         seen.add(asin);
       }
     }
@@ -367,98 +276,109 @@
     return rows;
   }
 
-  function labelMatches(row, dimensionKey, clickedLabel) {
-    const needle = norm(clickedLabel);
-    if (!needle) return false;
+  function readSelectedDimensions(data) {
+    const selected = {};
+    const selectedNodes = document.querySelectorAll(
+      '#twister .a-button-selected, [id*="twister"] .a-button-selected, [id^="variation_"] .a-button-selected, [aria-checked="true"]'
+    );
 
-    const direct = norm(row.dimensions?.[dimensionKey]);
-    if (direct && (direct === needle || direct.includes(needle) || needle.includes(direct))) return true;
+    for (const node of selectedNodes) {
+      const tile = node.closest('li, span.a-button') || node;
+      const signal = parseDimensionSignal(tile);
+      if (!signal?.dimensionKey) continue;
+      const indexed = Number.isInteger(signal.index) ? clean(data.variationValues?.[signal.dimensionKey]?.[signal.index]) : '';
+      selected[signal.dimensionKey] = indexed || resolveLabelFromElement(tile);
+    }
+
+    for (const root of document.querySelectorAll('[id^="variation_"]')) {
+      const key = root.id.replace(/^variation_/, '');
+      if (selected[key]) continue;
+      const selectedNode = root.querySelector('.a-button-selected, [aria-checked="true"], input:checked');
+      if (selectedNode) selected[key] = resolveLabelFromElement(selectedNode.closest('li, span.a-button') || selectedNode);
+    }
+    return selected;
+  }
+
+  function makeContext(target) {
+    const tile = findTile(target);
+    if (!tile) return null;
+
+    const classicRoot = findClassicDimensionRoot(target);
+    if (!classicRoot && !isInsideTwister(target)) return null;
+
+    const data = parseTwisterData();
+    const tileSignal = parseDimensionSignal(tile);
+    const rootKey = classicRoot?.id?.replace(/^variation_/, '') || null;
+    const dimensionKey = tileSignal?.dimensionKey || rootKey;
+    const index = tileSignal?.index;
+    const indexedLabel = dimensionKey && Number.isInteger(index)
+      ? clean(data.variationValues?.[dimensionKey]?.[index])
+      : '';
+    const label = indexedLabel || resolveLabelFromElement(tile);
+    const directAsins = collectDirectAsins(tile);
+
+    if (!dimensionKey && !directAsins.length) return null;
+
+    return {
+      tile,
+      dimensionKey,
+      dimensionLabel: dimensionTitle(dimensionKey),
+      index,
+      label,
+      directAsins,
+      selectedDimensions: readSelectedDimensions(data),
+      data,
+    };
+  }
+
+  function rowMatchesClicked(row, context) {
+    const needle = norm(context.label);
+    if (!needle) return context.directAsins.includes(row.asin);
+
+    const directValue = norm(row.dimensions?.[context.dimensionKey]);
+    if (directValue && (directValue === needle || directValue.includes(needle) || needle.includes(directValue))) return true;
 
     return row.display.some((value) => {
-      const n = norm(value);
-      return n === needle || n.includes(needle) || needle.includes(n);
+      const candidate = norm(value);
+      return candidate === needle || candidate.includes(needle) || needle.includes(candidate);
     });
   }
 
-  function exactSelectionMatches(row, expected) {
-    const entries = Object.entries(expected).filter(([, value]) => cleanLabel(value));
-    if (!entries.length) return false;
-    let comparable = 0;
-    for (const [key, expectedValue] of entries) {
+  function rowMatchesSelection(row, expected) {
+    let compared = 0;
+    for (const [key, expectedValue] of Object.entries(expected)) {
+      if (!expectedValue) continue;
       const actual = row.dimensions?.[key];
       if (!actual) continue;
-      comparable += 1;
+      compared += 1;
       const a = norm(actual);
       const b = norm(expectedValue);
       if (!(a === b || a.includes(b) || b.includes(a))) return false;
     }
-    return comparable > 0;
+    return compared > 0;
   }
 
-  function formatDimensions(row) {
-    const parts = Object.entries(row.dimensions || {})
-      .filter(([, value]) => cleanLabel(value))
-      .map(([key, value]) => `${titleCaseDimension(key)}: ${value}`);
-    if (parts.length) return parts.join(' · ');
-    return row.display.join(' · ');
-  }
+  function findResults(context) {
+    const allRows = buildRows(context.data);
+    const direct = new Set(context.directAsins);
+    const expected = { ...context.selectedDimensions };
+    if (context.dimensionKey && context.label) expected[context.dimensionKey] = context.label;
 
-  function getContext(target) {
-    const root = findDimensionRoot(target);
-    if (!isLikelyVariationDimension(root)) return null;
-    const item = findVariationItem(target, root);
-    const dimensionKey = getDimensionKey(root);
-    const data = parseTwisterData();
-    const variationIndex = getVariationIndex(item, dimensionKey);
-    const indexedLabel = Number.isInteger(variationIndex)
-      ? cleanLabel(data.variationValues?.[dimensionKey]?.[variationIndex])
-      : '';
-    const label = indexedLabel || getItemLabel(item, dimensionKey);
-    return {
-      root,
-      item,
-      dimensionKey,
-      dimensionLabel: titleCaseDimension(dimensionKey),
-      variationIndex,
-      label,
-      directAsins: collectAsinsFromElement(item),
-      selectedDimensions: getSelectedDimensions(),
-      twisterData: data,
-    };
-  }
+    let rows = allRows.filter((row) => rowMatchesClicked(row, context));
+    if (!rows.length && direct.size) rows = allRows.filter((row) => direct.has(row.asin));
 
-  function findAsins(context) {
-    const data = context.twisterData || parseTwisterData();
-    const allRows = buildRowsFromTwister(data);
-    const expected = { ...context.selectedDimensions, [context.dimensionKey]: context.label };
-
-    let matches = allRows.filter((row) => labelMatches(row, context.dimensionKey, context.label));
-    const directSet = new Set(context.directAsins);
-
-    if (!matches.length && directSet.size) {
-      matches = allRows.filter((row) => directSet.has(row.asin));
+    for (const asin of direct) {
+      if (!rows.some((row) => row.asin === asin)) rows.push({ asin, dimensions: {}, display: [] });
     }
 
-    for (const asin of context.directAsins) {
-      if (!matches.some((row) => row.asin === asin)) {
-        matches.push({ asin, dimensions: {}, display: [], source: 'tile' });
-      }
-    }
-
-    matches = matches.map((row) => ({
+    rows = rows.map((row) => ({
       ...row,
-      exact: exactSelectionMatches(row, expected),
-      direct: directSet.has(row.asin),
+      direct: direct.has(row.asin),
+      exact: rowMatchesSelection(row, expected),
     }));
 
-    matches.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.direct) - Number(a.direct) || a.asin.localeCompare(b.asin));
-
-    return {
-      rows: matches,
-      allRows,
-      expected,
-      parsed: Boolean(data.asinVariationValues || data.dimensionValuesDisplayData || data.dimensionToAsinMap),
-    };
+    rows.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.direct) - Number(a.direct) || a.asin.localeCompare(b.asin));
+    return rows;
   }
 
   function ensureStyles() {
@@ -467,29 +387,27 @@
     style.id = 'aavf-styles';
     style.textContent = `
       #${MENU_ID}, #${PANEL_ID}, #${TOAST_ID} { font-family: Arial, Helvetica, sans-serif; box-sizing: border-box; }
-      #${MENU_ID} { position: fixed; z-index: 2147483646; min-width: 180px; padding: 6px; background: #111827; color: #fff; border: 1px solid #6b7280; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-      #${MENU_ID} button { width: 100%; border: 0; border-radius: 6px; padding: 10px 12px; text-align: left; font-size: 14px; font-weight: 700; color: #fff; background: #1f2937; cursor: pointer; }
-      #${MENU_ID} button:hover, #${MENU_ID} button:focus { outline: 2px solid #f59e0b; background: #374151; }
-      #${MENU_ID} .aavf-sub { display: block; margin-top: 3px; font-size: 11px; font-weight: 400; color: #d1d5db; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #${PANEL_ID} { position: fixed; z-index: 2147483646; width: min(520px, calc(100vw - 24px)); max-height: min(70vh, 560px); overflow: auto; padding: 14px; background: #fff; color: #111827; border: 2px solid #111827; border-radius: 10px; box-shadow: 0 12px 34px rgba(0,0,0,.35); }
+      #${MENU_ID} { position: fixed; z-index: 2147483646; min-width: 190px; padding: 6px; background: #111827; color: #fff; border: 2px solid #f59e0b; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+      #${MENU_ID} button { width: 100%; border: 0; border-radius: 6px; padding: 10px 12px; text-align: left; font-size: 14px; font-weight: 800; color: #fff; background: #1f2937; cursor: pointer; }
+      #${MENU_ID} button:hover, #${MENU_ID} button:focus { outline: 2px solid #fff; background: #374151; }
+      #${MENU_ID} .aavf-sub { display: block; margin-top: 3px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d1d5db; font-size: 11px; font-weight: 400; }
+      #${PANEL_ID} { position: fixed; z-index: 2147483646; width: min(540px, calc(100vw - 24px)); max-height: min(70vh, 580px); overflow: auto; padding: 14px; background: #fff; color: #111827; border: 2px solid #111827; border-radius: 10px; box-shadow: 0 12px 34px rgba(0,0,0,.35); }
       #${PANEL_ID} * { box-sizing: border-box; }
-      #${PANEL_ID} .aavf-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
-      #${PANEL_ID} .aavf-title { font-size: 16px; font-weight: 800; line-height: 1.25; }
+      #${PANEL_ID} .aavf-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+      #${PANEL_ID} .aavf-title { font-size: 16px; font-weight: 800; }
       #${PANEL_ID} .aavf-meta { margin-top: 3px; color: #4b5563; font-size: 12px; }
-      #${PANEL_ID} .aavf-close { flex: 0 0 auto; border: 1px solid #9ca3af; background: #f3f4f6; color: #111827; border-radius: 6px; width: 30px; height: 30px; cursor: pointer; font-size: 18px; line-height: 1; }
+      #${PANEL_ID} .aavf-close { width: 30px; height: 30px; border: 1px solid #9ca3af; border-radius: 6px; background: #f3f4f6; color: #111827; cursor: pointer; font-size: 18px; }
       #${PANEL_ID} .aavf-note { margin: 8px 0 10px; padding: 8px 10px; border-left: 4px solid #2563eb; background: #eff6ff; color: #1e3a8a; font-size: 12px; }
-      #${PANEL_ID} .aavf-empty { padding: 12px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 7px; font-size: 13px; }
-      #${PANEL_ID} .aavf-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid #e5e7eb; }
-      #${PANEL_ID} .aavf-row:first-of-type { border-top: 0; }
-      #${PANEL_ID} .aavf-asin { font-family: Consolas, 'Courier New', monospace; font-size: 15px; font-weight: 800; color: #111827; }
+      #${PANEL_ID} .aavf-empty { padding: 12px; border: 1px solid #d1d5db; border-radius: 7px; background: #f3f4f6; font-size: 13px; }
+      #${PANEL_ID} .aavf-row { display: grid; grid-template-columns: minmax(112px, auto) 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid #e5e7eb; }
+      #${PANEL_ID} .aavf-asin { font-family: Consolas, 'Courier New', monospace; font-size: 15px; font-weight: 800; }
       #${PANEL_ID} .aavf-dims { min-width: 0; color: #374151; font-size: 12px; line-height: 1.35; }
-      #${PANEL_ID} .aavf-badges { margin-top: 3px; display: flex; gap: 4px; flex-wrap: wrap; }
-      #${PANEL_ID} .aavf-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; border: 1px solid #111827; background: #fff7ed; color: #7c2d12; }
+      #${PANEL_ID} .aavf-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+      #${PANEL_ID} .aavf-badge { display: inline-block; padding: 1px 6px; border: 1px solid #111827; border-radius: 999px; background: #fff7ed; color: #7c2d12; font-size: 10px; font-weight: 800; }
       #${PANEL_ID} .aavf-badge.direct { background: #ecfeff; color: #164e63; }
-      #${PANEL_ID} .aavf-copy { border: 1px solid #111827; background: #111827; color: #fff; border-radius: 6px; padding: 7px 10px; cursor: pointer; font-weight: 800; }
-      #${PANEL_ID} .aavf-copy:hover, #${PANEL_ID} .aavf-copy:focus { outline: 2px solid #f59e0b; outline-offset: 1px; }
+      #${PANEL_ID} .aavf-copy { border: 1px solid #111827; border-radius: 6px; padding: 7px 10px; background: #111827; color: #fff; cursor: pointer; font-weight: 800; }
       #${PANEL_ID} .aavf-footer { margin-top: 10px; color: #6b7280; font-size: 10px; }
-      #${TOAST_ID} { position: fixed; z-index: 2147483647; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 14px; background: #111827; color: #fff; border: 2px solid #f59e0b; border-radius: 8px; font-size: 13px; font-weight: 800; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+      #${TOAST_ID} { position: fixed; z-index: 2147483647; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 14px; border: 2px solid #f59e0b; border-radius: 8px; background: #111827; color: #fff; font-size: 13px; font-weight: 800; }
       @media (max-width: 560px) {
         #${PANEL_ID} .aavf-row { grid-template-columns: 1fr auto; }
         #${PANEL_ID} .aavf-dims { grid-column: 1 / -1; }
@@ -498,50 +416,46 @@
     document.documentElement.appendChild(style);
   }
 
-  function removeMenu() {
-    document.getElementById(MENU_ID)?.remove();
+  function removeMenu() { document.getElementById(MENU_ID)?.remove(); }
+  function removePanel() { document.getElementById(PANEL_ID)?.remove(); }
+
+  function placeFixed(element, x, y, margin = 8) {
+    document.body.appendChild(element);
+    const rect = element.getBoundingClientRect();
+    element.style.left = `${Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin))}px`;
+    element.style.top = `${Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin))}px`;
   }
 
-  function removePanel() {
-    document.getElementById(PANEL_ID)?.remove();
-  }
-
-  function placeFixed(el, x, y, margin = 8) {
-    document.body.appendChild(el);
-    const rect = el.getBoundingClientRect();
-    const left = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin));
-    const top = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin));
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-  }
-
-  function showToast(message) {
+  function toast(message) {
     ensureStyles();
     document.getElementById(TOAST_ID)?.remove();
-    const toast = document.createElement('div');
-    toast.id = TOAST_ID;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2200);
+    const element = document.createElement('div');
+    element.id = TOAST_ID;
+    element.textContent = message;
+    document.body.appendChild(element);
+    setTimeout(() => element.remove(), 2200);
   }
 
-  async function copyText(text) {
-    const value = cleanLabel(text);
-    if (!value) return false;
+  async function copyAsin(asin) {
     try {
       if (typeof GM_setClipboard === 'function') {
-        GM_setClipboard(value, 'text');
+        GM_setClipboard(asin, 'text');
         return true;
       }
-    } catch {
-      // Fallback below.
-    }
+    } catch {}
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(asin);
       return true;
     } catch {
       return false;
     }
+  }
+
+  function formatRow(row) {
+    const dimensions = Object.entries(row.dimensions || {})
+      .filter(([, value]) => clean(value))
+      .map(([key, value]) => `${dimensionTitle(key)}: ${value}`);
+    return dimensions.length ? dimensions.join(' · ') : row.display.join(' · ');
   }
 
   function showResults(context, x, y) {
@@ -549,65 +463,48 @@
     removePanel();
     ensureStyles();
 
-    const result = findAsins(context);
+    const rows = findResults(context);
     const panel = document.createElement('section');
     panel.id = PANEL_ID;
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'ASIN variation results');
 
-    const exactCount = result.rows.filter((row) => row.exact).length;
-    const title = `${context.dimensionLabel}: ${context.label || 'Selected option'}`;
-
-    let note = '';
-    if (result.rows.length > 1) {
-      note = exactCount
-        ? 'Exact selected combination is first. Other rows are sibling child ASINs for this variation.'
-        : 'No exact selected combination was exposed, so these are the child ASINs Amazon links to this variation.';
-    } else if (result.rows.length === 1 && !result.rows[0].exact) {
-      note = 'Amazon exposed this child ASIN for the variation tile, but the exact selected combination could not be proven from page data.';
-    }
-
-    const rowsHtml = result.rows.length
-      ? result.rows.map((row) => {
-          const badges = [
-            row.exact ? '<span class="aavf-badge">EXACT</span>' : '',
-            row.direct ? '<span class="aavf-badge direct">TILE</span>' : '',
-          ].join('');
-          const dims = formatDimensions(row) || 'Variation details not exposed';
-          return `
-            <div class="aavf-row">
-              <div>
-                <div class="aavf-asin">${escapeHtml(row.asin)}</div>
-                <div class="aavf-badges">${badges}</div>
+    const rowsHtml = rows.length
+      ? rows.map((row) => `
+          <div class="aavf-row">
+            <div>
+              <div class="aavf-asin">${escapeHtml(row.asin)}</div>
+              <div class="aavf-badges">
+                ${row.exact ? '<span class="aavf-badge">EXACT</span>' : ''}
+                ${row.direct ? '<span class="aavf-badge direct">TILE</span>' : ''}
               </div>
-              <div class="aavf-dims">${escapeHtml(dims)}</div>
-              <button type="button" class="aavf-copy" data-asin="${escapeHtml(row.asin)}">Copy</button>
-            </div>`;
-        }).join('')
-      : `<div class="aavf-empty">No child ASIN was exposed for this tile in the loaded page. Try another variation tile or reload the product page once.</div>`;
+            </div>
+            <div class="aavf-dims">${escapeHtml(formatRow(row) || 'Variation details not exposed')}</div>
+            <button type="button" class="aavf-copy" data-asin="${escapeHtml(row.asin)}">Copy</button>
+          </div>`).join('')
+      : '<div class="aavf-empty">Amazon did not expose a child ASIN for this tile in the loaded page.</div>';
 
     panel.innerHTML = `
       <div class="aavf-head">
         <div>
-          <div class="aavf-title">${escapeHtml(title)}</div>
-          <div class="aavf-meta">${result.rows.length} ASIN${result.rows.length === 1 ? '' : 's'} found</div>
+          <div class="aavf-title">${escapeHtml(`${context.dimensionLabel}: ${context.label || 'variation'}`)}</div>
+          <div class="aavf-meta">${rows.length} ASIN${rows.length === 1 ? '' : 's'} found</div>
         </div>
         <button type="button" class="aavf-close" aria-label="Close">×</button>
       </div>
-      ${note ? `<div class="aavf-note">${escapeHtml(note)}</div>` : ''}
-      <div>${rowsHtml}</div>
-      <div class="aavf-footer">Amazon AU ASIN Variation Finder v${SCRIPT_VERSION} · Reads the current product page only; no network requests.</div>
+      ${rows.length > 1 ? '<div class="aavf-note">Exact selected combination is shown first when Amazon exposes enough data to prove it.</div>' : ''}
+      ${rowsHtml}
+      <div class="aavf-footer">Amazon AU ASIN Variation Finder v${VERSION} · reads the loaded product page only.</div>
     `;
 
     panel.querySelector('.aavf-close')?.addEventListener('click', removePanel);
     for (const button of panel.querySelectorAll('.aavf-copy')) {
       button.addEventListener('click', async () => {
         const asin = button.getAttribute('data-asin');
-        const ok = await copyText(asin);
-        showToast(ok ? `Copied ${asin}` : `ASIN: ${asin}`);
+        const copied = await copyAsin(asin);
+        toast(copied ? `Copied ${asin}` : `ASIN: ${asin}`);
       });
     }
-
     placeFixed(panel, x, y);
   }
 
@@ -624,27 +521,28 @@
       <button type="button" role="menuitem">
         Find ASIN
         <span class="aavf-sub">${escapeHtml(`${context.dimensionLabel}: ${context.label || 'variation'}`)}</span>
-      </button>
-    `;
-    menu.querySelector('button').addEventListener('click', () => showResults(activeContext, x, y));
+      </button>`;
+    menu.querySelector('button')?.addEventListener('click', () => showResults(activeContext, x, y));
     placeFixed(menu, x, y);
     menu.querySelector('button')?.focus({ preventScroll: true });
   }
 
-  document.addEventListener('contextmenu', (event) => {
+  function onContextMenu(event) {
     if (event.shiftKey) return;
-    const context = getContext(event.target);
+    const context = makeContext(event.target);
     if (!context) return;
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     showMenu(context, event.clientX, event.clientY);
-  }, true);
+  }
+
+  window.addEventListener('contextmenu', onContextMenu, true);
 
   document.addEventListener('pointerdown', (event) => {
     const menu = document.getElementById(MENU_ID);
     if (menu && !menu.contains(event.target)) removeMenu();
     const panel = document.getElementById(PANEL_ID);
-    if (panel && !panel.contains(event.target) && !findDimensionRoot(event.target)) removePanel();
+    if (panel && !panel.contains(event.target) && !isInsideTwister(event.target)) removePanel();
   }, true);
 
   document.addEventListener('keydown', (event) => {
