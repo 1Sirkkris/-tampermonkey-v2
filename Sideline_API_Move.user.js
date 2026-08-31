@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.9 Sideline API Move TEST
+// @name         MAIN v0.3.10 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.9
+// @version      0.3.10
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.9';
+  const VERSION = '0.3.10';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -504,27 +504,36 @@
   }
 
   async function runExactPredicantRecovery(sourceCode, destinationCode, status, run) {
-    status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
-    const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
-    if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
-      throw new Error('Original source API validation failed during Predicant recovery.');
+    let closeCommitted = false;
+
+    try {
+      status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
+      const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
+      if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
+        throw new Error('Original source API validation failed during Predicant recovery.');
+      }
+
+      status('Predicant recovery 2/4 — closing original source with NO by API...');
+      await closeContainerDirect(sourceCode, false);
+      closeCommitted = true;
+      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
+
+      status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
+      const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
+      if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
+        throw new Error('Destination API validation failed during Predicant recovery.');
+      }
+
+      status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
+      await closeContainerDirect(destinationCode, true);
+      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
+
+      return true;
+    } catch (error) {
+      if (error?.outcomeUnknown) throw error;
+      if (closeCommitted) error.recoveryNoRetry = true;
+      throw error;
     }
-
-    status('Predicant recovery 2/4 — closing original source with NO by API...');
-    await closeContainerDirect(sourceCode, false);
-    if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
-
-    status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
-    const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
-    if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
-      throw new Error('Destination API validation failed during Predicant recovery.');
-    }
-
-    status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
-    await closeContainerDirect(destinationCode, true);
-    if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
-
-    return true;
   }
 
   // UI
@@ -3955,8 +3964,11 @@
       renderLazy();
     };
 
+    let recoveryApplied = false;
+
     try {
       await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery, run);
+      recoveryApplied = true;
 
       setRecovery(`Destination reset — revalidating ${lazy.src}...`);
 
@@ -3976,20 +3988,24 @@
       await sleep(180);
       return true;
     } catch (error) {
-      if (runWasCancelled(error, run)) return false;
+      const noRetry = error?.outcomeUnknown || error?.recoveryNoRetry || recoveryApplied;
 
-      if (error?.outcomeUnknown) {
+      if (noRetry) {
         cancelLazyRun();
         lazy.running = false;
         lazy.predicant = false;
         lazy.paused = false;
         lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
-        lazy.note = 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent';
+        lazy.note = error?.outcomeUnknown
+          ? 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent'
+          : 'RECOVERY STATE CHANGED — verify source/destination manually; no automatic close retry was sent';
         shared.owner = '';
         setLazyRunningIndicator(false);
         renderLazy();
         return false;
       }
+
+      if (runWasCancelled(error, run)) return false;
 
       lazy.predicant = true;
       lazy.paused = true;
