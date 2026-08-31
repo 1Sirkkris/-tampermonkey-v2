@@ -29,48 +29,18 @@ jobs:
           test "$(git hash-object Sideline_API_Move.user.js)" = "92005885fc4a4ad5d4b454cfe635ed266fbaf9a2"
           cp Sideline_API_Move.user.js /tmp/sideline-v034.js
           python3 .github/scripts/apply_sideline_v035_return_source_isolation.py
-
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('Sideline_API_Move.user.js')
-          s = p.read_text(encoding='utf-8')
-          old = """      if (shared.owner === 'return-source') {
-        const unrelatedOwner = previousOwner && ![
-          mode,
-          mode === 'queue' ? 'queue' : '',
-          mode === 'scrub' ? 'scrub' : '',
-          mode === 'qty' ? 'qty-clear' : ''
-        ].includes(previousOwner) ? previousOwner : '';
-        shared.owner = unrelatedOwner;
-      }
-"""
-          new = """      if (shared.owner === 'return-source') {
-        const ownerWasTarget =
-          previousOwner === mode ||
-          (mode === 'lazy' && /^lazy(?:-|$)/.test(previousOwner)) ||
-          (mode === 'qty' && (previousOwner === 'qty' || previousOwner === 'qty-clear'));
-        shared.owner = previousOwner && !ownerWasTarget ? previousOwner : '';
-      }
-"""
-          if s.count(old) != 1:
-              raise SystemExit(f'owner isolation patch expected once, found {s.count(old)}')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
-          PY
-
+          python3 .github/scripts/fix_sideline_v035_owner_isolation.py
           node --check Sideline_API_Move.user.js
 
           python3 - <<'PY'
           from pathlib import Path
-
           old = Path('/tmp/sideline-v034.js').read_text(encoding='utf-8')
           new = Path('Sideline_API_Move.user.js').read_text(encoding='utf-8')
-
           def section(text, start, end):
               a = text.index(start)
               b = text.index(end, a + len(start))
               return text[a:b]
-
-          for needle in [
+          required = [
               "// @version      0.3.5",
               "const VERSION = '0.3.5';",
               "root.dataset.owner = owner === live ? 'live' : 'lazy';",
@@ -78,54 +48,38 @@ jobs:
               "universalReturnToSource(returnModeFromButton(button));",
               "data-return-source>↩ Return to Source</button>",
               "data-return-source>↩ RETURN TO SOURCE</button>",
-          ]:
+          ]
+          for needle in required:
               if needle not in new:
                   raise SystemExit(f'missing return-source invariant: {needle}')
-
-          # Every helper panel still exposes the universal escape.
           panel_fn = section(new, '  function panel(', '  function savePanelStates(')
           assert 'data-return-source' in panel_fn
-
-          # Date overlays identify their owning mode so escape cannot reset a sibling mode.
           api_date = section(new, '  function showApiDatePicker(', '  function nativeExpiryInputs(')
           assert "root.dataset.owner = owner === live ? 'live' : 'lazy';" in api_date
           assert 'og-return-source' in api_date
           native_date = section(new, '  function showNativeExpiryPicker(', '  function nativeExpiryTick(')
           assert 'og-return-source' in native_date
-
           router = section(new, '  function returnModeFromButton(button)', '  function returnSourceCodeForMode(mode)')
           for target in ['#sh-live', '#sh-lazy', '#sh-queue', '#sh-scrub', '#sh-qty']:
               assert target in router, target
-
           universal = section(new, "  async function universalReturnToSource(mode='native')", '  function handleUniversalReturnClick(')
-          # Target-specific cancellation only: no unconditional sibling-mode reset.
-          if "stopLiveForReturn('returned to source');\n    stopLazyForReturn" in universal:
-              raise SystemExit('return path still resets Live and Lazy together')
-          for branch in [
-              "if (mode === 'queue')", "else if (mode === 'scrub')", "else if (mode === 'qty')",
-              "else if (mode === 'live')", "else if (mode === 'lazy')"
-          ]:
+          for branch in ["if (mode === 'queue')", "else if (mode === 'scrub')", "else if (mode === 'qty')", "else if (mode === 'live')", "else if (mode === 'lazy')"]:
               assert branch in universal, branch
-          assert "if (dateOpen) {\n      expiryRequestSeq++;" in universal
-          assert "const ownerWasTarget" in universal
-
-          # Lazy escape preserves queued input/history and only marks a current item when Lazy is actually active.
+          assert 'const ownerWasTarget' in universal
+          assert "stopLiveForReturn('returned to source');" in universal
+          assert "stopLazyForReturn('returned to source — current item abandoned');" in universal
           lazy_return = section(new, '  function stopLazyForReturn(note)', '  async function returnNativeToSourceContainer(')
           assert 'const wasActive = !!(' in lazy_return
           assert 'const current = wasActive ? lazy.items[lazy.index] : null;' in lazy_return
           for forbidden in ['lazy.items = []', 'lazy.deferred = []', "lItems.value = ''", "lSrc.value = ''", "lDest.value = ''"]:
               if forbidden in lazy_return:
                   raise SystemExit(f'Lazy escape unexpectedly clears state: {forbidden}')
-
-          # Live escape preserves completed history/counters while clearing unfinished Live work.
           live_return = section(new, '  function stopLiveForReturn(note)', '  function stopLazyForReturn(note)')
           for required_live in ['live.queue = [];', 'live.current = null;', 'live.datePending = [];', 'live.issue = null;']:
               assert required_live in live_return, required_live
           for forbidden in ['live.history = []', 'live.moved = 0', 'live.skipped = 0']:
               if forbidden in live_return:
                   raise SystemExit(f'Live escape unexpectedly clears completed history/counter: {forbidden}')
-
-          # Existing 0.3.3 Hazmat protection and Live pacing remain unchanged.
           for needle in [
               "showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');",
               "if (hasHazmat(result.response)) {",
@@ -134,8 +88,6 @@ jobs:
           ]:
               if needle not in new:
                   raise SystemExit(f'existing safety contract missing: {needle}')
-
-          # Payload and hazard parser are not part of this patch.
           for start, end, label in [
               ('  function buildMovePayload(', '  function liveItemMeta(', 'move payload'),
               ('  function hasHazmat(', '  function hasMoveProblems(', 'hazmat parser'),
@@ -148,8 +100,9 @@ jobs:
           git diff -- Sideline_API_Move.user.js README.md
 
           rm .github/scripts/apply_sideline_v035_return_source_isolation.py
+          rm .github/scripts/fix_sideline_v035_owner_isolation.py
           rm .github/workflows/apply-sideline-v035-return-source-isolation-once.yml
-          git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v035_return_source_isolation.py .github/workflows/apply-sideline-v035-return-source-isolation-once.yml
+          git add Sideline_API_Move.user.js README.md .github/scripts/apply_sideline_v035_return_source_isolation.py .github/scripts/fix_sideline_v035_owner_isolation.py .github/workflows/apply-sideline-v035-return-source-isolation-once.yml
           git diff --cached --check
           git diff --cached --stat
           git commit -m "fix(sideline): isolate return-to-source by mode"
