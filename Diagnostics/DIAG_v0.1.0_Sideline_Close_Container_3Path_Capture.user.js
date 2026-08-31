@@ -42,27 +42,20 @@
     return `[${body?.constructor?.name || typeof body}]`;
   }
 
-  function add(entry) {
-    rows.push({ time:new Date().toISOString(), case:activeCase, ...entry });
+  function add(entry, caseName=activeCase) {
+    rows.push({ time:new Date().toISOString(), case:caseName, ...entry });
     if (rows.length > MAX) rows.splice(0, rows.length - MAX);
     render();
   }
 
   function markCase(value) {
-    if (activeCase !== 'UNSET') {
-      rows.push({ time:new Date().toISOString(), case:activeCase, kind:'CASE_END' });
-    }
+    if (activeCase !== 'UNSET') add({ kind:'CASE_END' }, activeCase);
     activeCase = value;
-    rows.push({ time:new Date().toISOString(), case:activeCase, kind:'CASE_START' });
-    if (rows.length > MAX) rows.splice(0, rows.length - MAX);
-    render();
+    add({ kind:'CASE_START' }, activeCase);
   }
 
   function stopCase() {
-    if (activeCase !== 'UNSET') {
-      rows.push({ time:new Date().toISOString(), case:activeCase, kind:'CASE_END' });
-      if (rows.length > MAX) rows.splice(0, rows.length - MAX);
-    }
+    if (activeCase !== 'UNSET') add({ kind:'CASE_END' }, activeCase);
     activeCase = 'UNSET';
     render();
   }
@@ -152,7 +145,8 @@
   window.fetch = async function(input, init) {
     const rawUrl = typeof input === 'string' ? input : input?.url || '';
     const path = apiPath(rawUrl);
-    if (activeCase === 'UNSET' || !path) return realFetch.apply(this, arguments);
+    const captureCase = activeCase;
+    if (captureCase === 'UNSET' || !path) return realFetch.apply(this, arguments);
 
     const method = clean(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
     const requestBody = parseBody(init?.body);
@@ -172,13 +166,13 @@
         kind:'NETWORK', transport:'fetch', method, path, url:String(rawUrl), requestBody,
         status:response.status, ok:response.ok,
         ms:Math.round(performance.now() - started), responseBody
-      });
+      }, captureCase);
       return response;
     } catch (error) {
       add({
         kind:'NETWORK', transport:'fetch', method, path, url:String(rawUrl), requestBody,
         error:error?.message || String(error), ms:Math.round(performance.now() - started)
-      });
+      }, captureCase);
       throw error;
     }
   };
@@ -206,14 +200,11 @@
       let responseBody = this.responseText;
       try { responseBody = JSON.parse(responseBody); } catch {}
 
-      const previousCase = activeCase;
-      activeCase = meta.captureCase;
       add({
         kind:'NETWORK', transport:'xhr', method:meta.method, path:meta.path, url:meta.url, requestBody,
         status:this.status, ok:this.status >= 200 && this.status < 300,
         ms:Math.round(performance.now() - started), responseBody
-      });
-      activeCase = previousCase;
+      }, meta.captureCase);
     }, { once:true });
 
     return send.apply(this, arguments);
