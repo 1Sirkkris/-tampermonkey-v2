@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.5 Sideline API Move TEST
+// @name         MAIN v0.3.6 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.5
+// @version      0.3.6
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.5';
+  const VERSION = '0.3.6';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -1402,7 +1402,9 @@
         } catch (error) {
           result = error?.name === 'AbortError'
             ? { kind:'aborted' }
-            : { kind:'error', error };
+            : isAllowedOverageResponse(error?.payload)
+              ? { kind:'response', response:error.payload, overage:true }
+              : { kind:'error', error };
         } finally {
           if (currentLiveRun(run)) {
             live.lookupActive = Math.max(0, live.lookupActive - 1);
@@ -2188,16 +2190,20 @@
       );
     } catch (error) {
       if (error?.name === 'AbortError') return;
-      const payloadReason = moveReason(error?.payload);
-      const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
-        ? payloadReason
-        : (error?.message || 'MOVE API ERROR');
-      showOneByOneError(
-        item,
-        reason,
-        hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
-      );
-      return;
+      if (isAllowedOverageResponse(error?.payload)) {
+        response = error.payload;
+      } else {
+        const payloadReason = moveReason(error?.payload);
+        const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
+          ? payloadReason
+          : (error?.message || 'MOVE API ERROR');
+        showOneByOneError(
+          item,
+          reason,
+          hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
+        );
+        return;
+      }
     }
 
     if (!currentLiveRun(run)) return;
@@ -2228,7 +2234,10 @@
     }
 
     if (moveOk(response)) {
+      item.acceptedOverage = isAllowedOverageResponse(response);
       finishOneByOneMoved(item);
+      if (item.acceptedOverage) live.note = 'OVERAGE OK — moved QTY 1 — ready for next scan';
+      renderLive();
       return;
     }
 
@@ -2247,8 +2256,12 @@
       response = await liveApi(API_SCAN_ITEM, scanItemPayload(live.src, item.code), run);
     } catch (error) {
       if (error?.name === 'AbortError') return;
-      showOneByOneError(item, error?.message || 'SCAN API ERROR', 'SCAN API ERROR');
-      return;
+      if (isAllowedOverageResponse(error?.payload)) {
+        response = error.payload;
+      } else {
+        showOneByOneError(item, error?.message || 'SCAN API ERROR', 'SCAN API ERROR');
+        return;
+      }
     }
 
     if (!currentLiveRun(run)) return;
@@ -2372,17 +2385,21 @@
 
       live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
 
-      const payloadReason = moveReason(error?.payload);
-      const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
-        ? payloadReason
-        : (error?.message || 'MOVE API ERROR');
-      failLiveItem(
-        item,
-        hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
-        reason,
-        ctx
-      );
-      return false;
+      if (isAllowedOverageResponse(error?.payload)) {
+        response = error.payload;
+      } else {
+        const payloadReason = moveReason(error?.payload);
+        const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
+          ? payloadReason
+          : (error?.message || 'MOVE API ERROR');
+        failLiveItem(
+          item,
+          hasHazmat(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR — ITEM NOT MOVED',
+          reason,
+          ctx
+        );
+        return false;
+      }
     }
 
     if (!currentLiveRun(run)) return false;
@@ -2412,7 +2429,12 @@
     }
 
     if (moveOk(response)) {
+      item.acceptedOverage = isAllowedOverageResponse(response);
       finishLiveMoved(item);
+      if (item.acceptedOverage) {
+        live.note = `OVERAGE OK — moved ${itemQty(item)} unit${itemQty(item) === 1 ? '' : 's'} — ready for next scan`;
+        renderLive();
+      }
       return true;
     }
 
@@ -3597,9 +3619,79 @@
     return postJson(path, body, lazy, run);
   }
 
+  function isOverageLabel(value) {
+    return /\boverage(?:s)?\b|\bitem\s+not\s+in\s+(?:source\s+)?container\b|\bnot\s+in\s+source\s+container\b/i.test(clean(value));
+  }
+
+  function isBenignOverageCompanion(value) {
+    const label = clean(value);
+    return !label || isOverageLabel(label) || /^(?:bad request|conflict|request failed|http\s*[45]\d\d|[45]\d\d)$/i.test(label);
+  }
+
+  function responseProblemLabels(response) {
+    return (Array.isArray(response?.problems) ? response.problems : [])
+      .filter(Boolean)
+      .map(problem => clean(
+        problem?.description ||
+        problem?.message ||
+        problem?.reason ||
+        problem?.code ||
+        problem?.['@type'] ||
+        ''
+      ))
+      .filter(Boolean);
+  }
+
+  function isAllowedOverageResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+
+    const type = clean(response?.['@type']);
+    if (type === 'InvalidBarcodeResponse' || type === 'RequestMultipleBarcodesResponse') return false;
+    if (hasHazmat(response) || hasPredicant(response) || isDamagedDestinationResponse(response)) return false;
+
+    const filter = response?.filterResult;
+    const filterReason = clean(
+      filter?.reason?.type ||
+      filter?.reason?.description ||
+      filter?.reason?.message ||
+      filter?.reason?.['@type'] ||
+      filter?.filterType ||
+      ''
+    );
+    if (filter?.compatible === false && !isOverageLabel(filterReason)) return false;
+
+    const problems = responseProblemLabels(response);
+    if (problems.some(label => !isOverageLabel(label))) return false;
+
+    const diagnosticLabels = [
+      response?.message,
+      response?.description,
+      response?.errorMessage,
+      response?.errorCode,
+      filterReason,
+      ...problems
+    ].map(clean).filter(Boolean);
+
+    const itemNotInSource = type === 'ItemNotInContainerResponse';
+    const explicitOverage = itemNotInSource || isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);
+    if (!explicitOverage) return false;
+
+    // Overage is the ONLY exception. A response that also carries another
+    // substantive problem stays fail-closed even if the word Overage appears.
+    if (diagnosticLabels.some(label => !isBenignOverageCompanion(label))) return false;
+
+    const fatalText = [type, ...diagnosticLabels].join(' ');
+    if (/hazmat|dangerous.?goods|invalid\s+barcode|incompatib|damaged|predicant|customer\s*bound/i.test(fatalText)) {
+      return false;
+    }
+
+    return true;
+  }
+
   function resolveItem(response, barcode) {
     const type = clean(response?.['@type']);
-    if (!response || type === 'InvalidBarcodeResponse' || response.success === false) {
+    const allowedOverage = isAllowedOverageResponse(response);
+    if (!response || type === 'InvalidBarcodeResponse' || (response.success === false && !allowedOverage)) {
       return { ok:false, invalid:type === 'InvalidBarcodeResponse', type:type || 'Unknown' };
     }
 
@@ -3625,6 +3717,7 @@
       fcsku:clean(sku.fcSku),
       dateType:clean(sku.datelotDetail?.expirationPromptType),
       dateDetail:sku.datelotDetail || {},
+      overage:allowedOverage,
       notInSource:type === 'ItemNotInContainerResponse' || records.every(record => Number(record.quantity) === 0)
     };
   }
@@ -3664,6 +3757,7 @@
   }
 
   function moveOk(response) {
+    if (isAllowedOverageResponse(response)) return true;
     if (!response || response.success !== true) return false;
     if (response.filterResult?.compatible === false) return false;
     if (hasHazmat(response)) return false;
@@ -3676,6 +3770,7 @@
   function moveReason(response) {
     if (!response) return 'EMPTY MOVE RESPONSE';
     if (hasHazmat(response)) return 'HAZMAT';
+    if (isAllowedOverageResponse(response)) return 'OVERAGE';
 
     const reason = response.filterResult?.reason;
     const reasonType = clean(reason?.['@type']).toLowerCase();
@@ -3819,12 +3914,16 @@
         response = await api(API_MOVE_ITEMS, payload, run);
       } catch (error) {
         if (runWasCancelled(error, run)) return false;
-        item.status = 'FAILED';
-        item.failReason = `MOVE API ERROR: ${error?.message || error}`;
-        lazy.errors++;
-        lazy.error = `${ctx.barcode} — ${item.failReason} — NOT MOVED`;
-        renderLazy();
-        return false;
+        if (isAllowedOverageResponse(error?.payload)) {
+          response = error.payload;
+        } else {
+          item.status = 'FAILED';
+          item.failReason = `MOVE API ERROR: ${error?.message || error}`;
+          lazy.errors++;
+          lazy.error = `${ctx.barcode} — ${item.failReason} — NOT MOVED`;
+          renderLazy();
+          return false;
+        }
       }
 
       if (hasPredicant(response) && !moveOk(response)) {
@@ -3864,7 +3963,9 @@
       }
 
       item.status = 'MOVED';
+      item.acceptedOverage = isAllowedOverageResponse(response);
       lazy.error = '';
+      if (item.acceptedOverage) lazy.note = `OVERAGE OK — moved ${totalQty} unit${totalQty === 1 ? '' : 's'} — continuing`;
       renderLazy();
       return true;
     }
@@ -3881,12 +3982,16 @@
       response = await api(API_SCAN_ITEM, scanItemPayload(lazy.src, item.code), run);
     } catch (error) {
       if (runWasCancelled(error, run)) return { kind:'aborted' };
-      item.status = 'FAILED';
-      item.failReason = 'SCAN API ERROR';
-      lazy.errors++;
-      lazy.error = `${item.code} — SCAN API ERROR — NOT MOVED`;
-      renderLazy();
-      return { kind:'failed' };
+      if (isAllowedOverageResponse(error?.payload)) {
+        response = error.payload;
+      } else {
+        item.status = 'FAILED';
+        item.failReason = 'SCAN API ERROR';
+        lazy.errors++;
+        lazy.error = `${item.code} — SCAN API ERROR — NOT MOVED`;
+        renderLazy();
+        return { kind:'failed' };
+      }
     }
 
     if (!currentLazyRun(run)) return { kind:'aborted' };
