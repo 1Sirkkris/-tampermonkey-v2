@@ -42,13 +42,15 @@
   }
 
   function columns(table) {
-    const hs = [...table?.querySelectorAll('thead th,thead td') || []].map(x => norm(x.textContent));
+    const wrapper = table?.closest('.dataTables_scroll,.dataTables_wrapper') || table?.parentElement;
+    const headerTable = wrapper?.querySelector('.dataTables_scrollHead table') || table;
+    const hs = [...headerTable?.querySelectorAll('thead th,thead td') || []].map(x => norm(x.textContent));
     const find = (...names) => hs.findIndex(h => names.some(n => h===norm(n) || h.startsWith(norm(n)+' ')));
     return { po:find('purchase order'), vendor:find('vendor code'), date:find('order date','date'), qty:find('quantity'), asin:find('asin') };
   }
 
   function latestPo() {
-    const table = tableWith('purchase order');
+    const table = document.querySelector('table#table-purchase-order-item') || tableWith('purchase order');
     if (!table) return {};
     const c = columns(table), rows=[...table.querySelectorAll('tbody tr')];
     const values = rows.map(row => {
@@ -62,7 +64,7 @@
   }
 
   function inventoryQty(asin) {
-    const table = tableWith('quantity');
+    const table = document.querySelector('table#table-inventory') || tableWith('quantity');
     if (!table) return 0;
     const c = columns(table); let sum=0;
     for (const row of table.querySelectorAll('tbody tr')) {
