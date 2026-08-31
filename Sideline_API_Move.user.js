@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.1 Sideline API Move TEST
+// @name         MAIN v0.3.2 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.1
+// @version      0.3.2
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.1';
+  const VERSION = '0.3.2';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -2166,11 +2166,6 @@
 
     if (!currentLiveRun(run)) return;
 
-    if (moveOk(response)) {
-      finishOneByOneMoved(item);
-      return;
-    }
-
     const reason = moveReason(response);
     if (live.issue?.kind === 'destination' && live.current !== item) {
       showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');
@@ -2182,13 +2177,22 @@
       return;
     }
 
-    if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
-      showOneByOneError(item, reason || 'HAZMAT', reason === 'HAZMAT' ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE');
+    if (reason === 'HAZMAT' || hasHazmat(response) || /destination incompatible/i.test(reason)) {
+      showOneByOneError(
+        item,
+        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
+        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'
+      );
       return;
     }
 
     if (hasPredicant(response)) {
       blockOneByOneDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);
+      return;
+    }
+
+    if (moveOk(response)) {
+      finishOneByOneMoved(item);
       return;
     }
 
@@ -2225,6 +2229,14 @@
     }
 
     item.ctx = ctx;
+
+    // Fail closed before any state-changing move request when scan metadata already
+    // identifies the item as Hazmat / dangerous goods.
+    if (hasHazmat(response)) {
+      showOneByOneError(item, 'HAZMAT', 'HAZMAT — ITEM NOT MOVED');
+      return;
+    }
+
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       live.oneInFlight.delete(item.id);
       parkLiveDateItem(item, ctx);
@@ -2341,11 +2353,6 @@
 
     live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
 
-    if (moveOk(response)) {
-      finishLiveMoved(item);
-      return true;
-    }
-
     const reason = moveReason(response);
 
     if (isDamagedDestinationResponse(response)) {
@@ -2353,11 +2360,11 @@
       return false;
     }
 
-    if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
+    if (reason === 'HAZMAT' || hasHazmat(response) || /destination incompatible/i.test(reason)) {
       failLiveItem(
         item,
-        reason === 'HAZMAT' ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE',
-        reason || 'DESTINATION INCOMPATIBLE',
+        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE',
+        reason === 'HAZMAT' || hasHazmat(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
         ctx
       );
       return false;
@@ -2366,6 +2373,11 @@
     if (hasPredicant(response)) {
       blockLiveDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);
       return false;
+    }
+
+    if (moveOk(response)) {
+      finishLiveMoved(item);
+      return true;
     }
 
     failLiveItem(item, 'MOVE REJECTED — ITEM NOT MOVED', reason || 'MOVE REJECTED', ctx);
@@ -2564,6 +2576,13 @@
     }
 
     item.ctx = ctx;
+
+    // Normal Live also fails closed before /api/move-items when scan metadata says
+    // Hazmat. The failed barcode is surfaced while the rest of Live can continue.
+    if (hasHazmat(response)) {
+      failLiveItem(item, 'HAZMAT — ITEM NOT MOVED', 'HAZMAT', ctx);
+      return;
+    }
 
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       parkLiveDateItem(item, ctx);
@@ -3574,13 +3593,33 @@
   }
 
   function hasHazmat(value) {
-    if (value == null) return false;
-    if (typeof value === 'string') return /(^|[^a-z])hazmat([^a-z]|$)/i.test(value);
-    if (Array.isArray(value)) return value.some(hasHazmat);
-    if (typeof value !== 'object') return false;
-    return Object.entries(value).some(([key, nested]) =>
-      /(^|[^a-z])hazmat([^a-z]|$)/i.test(key) || hasHazmat(nested)
-    );
+    const seen = new Set();
+    const hazardKey = key => /hazmat|dangerous.?goods/i.test(clean(key));
+    const negative = /^(?:false|no|none|null|unknown|not[_ -]?hazmat|non[_ -]?hazmat|not[_ -]?dangerous(?:[_ -]?goods)?|non[_ -]?dangerous(?:[_ -]?goods)?)$/i;
+
+    const walk = (node, key='') => {
+      if (node == null) return false;
+
+      if (typeof node === 'boolean') return hazardKey(key) && node === true;
+      if (typeof node === 'number') return hazardKey(key) && node > 0;
+
+      if (typeof node === 'string') {
+        const valueText = clean(node);
+        if (!valueText || negative.test(valueText)) return false;
+        if (/\bHAZMAT\b/i.test(valueText) && !/\b(?:NOT|NON)[ _-]?HAZMAT\b/i.test(valueText)) return true;
+        if (/\bDANGEROUS[ _-]?GOODS\b/i.test(valueText) && !/\b(?:NOT|NON)[ _-]?DANGEROUS[ _-]?GOODS\b/i.test(valueText)) return true;
+        return hazardKey(key);
+      }
+
+      if (typeof node !== 'object') return false;
+      if (seen.has(node)) return false;
+      seen.add(node);
+
+      if (Array.isArray(node)) return node.some(child => walk(child, key));
+      return Object.entries(node).some(([childKey, child]) => walk(child, childKey));
+    };
+
+    return walk(value);
   }
 
   function hasMoveProblems(response) {
