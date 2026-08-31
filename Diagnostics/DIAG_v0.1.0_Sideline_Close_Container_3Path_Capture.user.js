@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DIAG v0.1.1 Sideline Close Container 3-Path Capture
+// @name         DIAG v0.1.2 Sideline Close Container 3-Path Capture
 // @namespace    BWU2
-// @version      0.1.1
+// @version      0.1.2
 // @description  Read-only Sideline V3 close-container capture for inventory/NO, inventory/YES, and no-inventory direct-close paths.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @grant        none
@@ -17,8 +17,11 @@
   const MAX = 100;
   const rows = [];
   let box;
-  let pre;
+  let titleText;
+  let body;
+  let toggle;
   let activeCase = 'UNSET';
+  let collapsed = true;
 
   const clean = v => String(v ?? '').trim();
 
@@ -32,14 +35,14 @@
     }
   }
 
-  function parseBody(body) {
-    if (body == null) return null;
-    if (typeof body === 'string') {
-      try { return JSON.parse(body); } catch { return body; }
+  function parseBody(bodyValue) {
+    if (bodyValue == null) return null;
+    if (typeof bodyValue === 'string') {
+      try { return JSON.parse(bodyValue); } catch { return bodyValue; }
     }
-    if (body instanceof URLSearchParams) return Object.fromEntries(body.entries());
-    if (body instanceof FormData) return Object.fromEntries(body.entries());
-    return `[${body?.constructor?.name || typeof body}]`;
+    if (bodyValue instanceof URLSearchParams) return Object.fromEntries(bodyValue.entries());
+    if (bodyValue instanceof FormData) return Object.fromEntries(bodyValue.entries());
+    return `[${bodyValue?.constructor?.name || typeof bodyValue}]`;
   }
 
   function add(entry, caseName=activeCase) {
@@ -52,17 +55,26 @@
     if (activeCase !== 'UNSET') add({ kind:'CASE_END' }, activeCase);
     activeCase = value;
     add({ kind:'CASE_START' }, activeCase);
+    setCollapsed(true);
   }
 
   function stopCase() {
     if (activeCase !== 'UNSET') add({ kind:'CASE_END' }, activeCase);
     activeCase = 'UNSET';
     render();
+    setCollapsed(true);
+  }
+
+  function caseShort() {
+    if (activeCase === '1_INVENTORY_EMPTY_NO') return '1 NO';
+    if (activeCase === '2_INVENTORY_EMPTY_YES') return '2 YES';
+    if (activeCase === '3_NO_INVENTORY_DIRECT_CLOSE') return '3 EMPTY';
+    return 'OFF';
   }
 
   function output() {
     return [
-      'BWU2 SIDELINE CLOSE CONTAINER 3-PATH CAPTURE v0.1.1',
+      'BWU2 SIDELINE CLOSE CONTAINER 3-PATH CAPTURE v0.1.2',
       '',
       '1 = INVENTORY + EMPTY NO',
       '2 = INVENTORY + EMPTY YES',
@@ -78,15 +90,22 @@
   function makeButton(label, onClick) {
     const b = document.createElement('button');
     b.textContent = label;
-    b.style.cssText = 'padding:5px 8px;font-weight:800;border:1px solid #9ca3af;border-radius:5px;background:#fff;cursor:pointer';
+    b.style.cssText = 'padding:4px 7px;font:700 11px Arial,sans-serif;border:1px solid #9ca3af;border-radius:4px;background:#fff;color:#111827;cursor:pointer;white-space:nowrap';
     b.onclick = onClick;
     return b;
   }
 
+  function setCollapsed(value) {
+    collapsed = !!value;
+    if (body) body.style.display = collapsed ? 'none' : 'block';
+    if (toggle) toggle.textContent = collapsed ? '+' : '−';
+    render();
+  }
+
   function render() {
-    if (!pre || !box) return;
-    pre.textContent = output();
-    box.style.borderColor = rows.some(r => r.path === '/api/close-container') ? '#16a34a' : '#f59e0b';
+    if (!box) return;
+    if (titleText) titleText.textContent = `3P CLOSE • ${caseShort()} • ${rows.length}`;
+    box.style.borderColor = activeCase === 'UNSET' ? '#6b7280' : '#16a34a';
   }
 
   function mount() {
@@ -94,49 +113,57 @@
 
     box = document.createElement('div');
     box.style.cssText = [
-      'position:fixed','top:10px','right:10px','z-index:2147483647','width:540px','max-height:60vh',
-      'background:#fff','color:#111827','border:3px solid #f59e0b','border-radius:8px','box-shadow:0 8px 24px #0004',
-      'font:12px Arial,sans-serif','padding:8px'
+      'position:fixed','top:8px','right:8px','z-index:2147483647','background:#fff','color:#111827',
+      'border:2px solid #6b7280','border-radius:6px','box-shadow:0 3px 10px #0003','font:11px Arial,sans-serif',
+      'width:auto','max-width:360px','padding:4px'
     ].join(';');
 
-    const title = document.createElement('div');
-    title.textContent = 'SIDELINE CLOSE — 3 PATH CAPTURE';
-    title.style.cssText = 'font-weight:900;margin-bottom:6px';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:5px;min-width:118px';
+
+    titleText = document.createElement('span');
+    titleText.style.cssText = 'font-weight:900;white-space:nowrap;line-height:20px';
+
+    toggle = makeButton('+', () => setCollapsed(!collapsed));
+    toggle.title = 'Expand / minimise';
+    toggle.style.cssText += ';margin-left:auto;padding:1px 6px;font-size:14px;line-height:18px';
+
+    header.append(titleText, toggle);
+
+    body = document.createElement('div');
+    body.style.cssText = 'display:none;margin-top:4px;border-top:1px solid #d1d5db;padding-top:4px';
 
     const cases = document.createElement('div');
-    cases.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px';
+    cases.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
     cases.append(
-      makeButton('1 — Inventory / NO', () => markCase('1_INVENTORY_EMPTY_NO')),
-      makeButton('2 — Inventory / YES', () => markCase('2_INVENTORY_EMPTY_YES')),
-      makeButton('3 — No inventory', () => markCase('3_NO_INVENTORY_DIRECT_CLOSE')),
-      makeButton('Stop case', stopCase)
+      makeButton('1 — Inv / NO', () => markCase('1_INVENTORY_EMPTY_NO')),
+      makeButton('2 — Inv / YES', () => markCase('2_INVENTORY_EMPTY_YES')),
+      makeButton('3 — Empty', () => markCase('3_NO_INVENTORY_DIRECT_CLOSE'))
     );
 
     const controls = document.createElement('div');
-    controls.style.cssText = 'display:flex;gap:5px;margin-bottom:6px';
+    controls.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px';
 
+    const stop = makeButton('Stop', stopCase);
+    const clear = makeButton('Clear', () => {
+      rows.length = 0;
+      activeCase = 'UNSET';
+      render();
+    });
     const copy = makeButton('Copy', async () => {
       await navigator.clipboard.writeText(output());
       copy.textContent = 'Copied';
       setTimeout(() => copy.textContent = 'Copy', 900);
     });
 
-    const clear = makeButton('Clear', () => {
-      rows.length = 0;
-      activeCase = 'UNSET';
-      render();
-    });
-
-    controls.append(clear, copy);
+    controls.append(stop, clear, copy);
 
     const help = document.createElement('div');
-    help.style.cssText = 'margin-bottom:6px;line-height:1.35';
-    help.innerHTML = '<b>Use:</b> load the container, click the matching case, perform Close container normally, then click Stop case. Captures same-origin /api/ traffic only while a case is armed. It never sends or changes a request.';
+    help.textContent = 'Arm case → close normally → Stop → Copy.';
+    help.style.cssText = 'margin-top:4px;color:#374151;white-space:nowrap';
 
-    pre = document.createElement('pre');
-    pre.style.cssText = 'margin:0;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#f8fafc;padding:7px;border-radius:5px';
-
-    box.append(title, cases, controls, help, pre);
+    body.append(cases, controls, help);
+    box.append(header, body);
     document.body.appendChild(box);
     render();
   }
@@ -189,11 +216,11 @@
     return open.apply(this, arguments);
   };
 
-  XHR.prototype.send = function(body) {
+  XHR.prototype.send = function(bodyValue) {
     const meta = this.__bwu2Close3PathCapture;
     if (!meta) return send.apply(this, arguments);
 
-    const requestBody = parseBody(body);
+    const requestBody = parseBody(bodyValue);
     const started = performance.now();
 
     this.addEventListener('loadend', () => {
