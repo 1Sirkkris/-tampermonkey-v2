@@ -1,0 +1,164 @@
+name: Apply Sideline v0.3.1 1x1 hazmat guard once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-sideline-v031-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          test "$(git hash-object Sideline_API_Move.user.js)" = "fefa34f9f594d215e4bd30465df9283f6641e649"
+          cp Sideline_API_Move.user.js /tmp/sideline-base.js
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Sideline_API_Move.user.js')
+          s = p.read_text()
+
+          replacements = [
+              ('// @name         MAIN v0.3.0 Sideline API Move TEST', '// @name         MAIN v0.3.1 Sideline API Move TEST'),
+              ('// @version      0.3.0', '// @version      0.3.1'),
+              ("const VERSION = '0.3.0';", "const VERSION = '0.3.1';"),
+          ]
+          for old, new in replacements:
+              if s.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one: {old!r}; found {s.count(old)}')
+              s = s.replace(old, new, 1)
+
+          anchor = '''  async function moveOneByOneResolved(item, ctx, expirationMs=null, run=live.activeRun) {\n'''
+          helper = r'''  function oneByOneHazmatEvidence(value) {
+    const seen = new Set();
+    const negative = /^(?:false|no|none|null|unknown|not[_ -]?hazmat|non[_ -]?hazmat|not[_ -]?dangerous(?:[_ -]?goods)?|non[_ -]?dangerous(?:[_ -]?goods)?)$/i;
+
+    const walk = (node, key='') => {
+      if (node == null) return '';
+
+      if (typeof node === 'boolean') {
+        return /hazmat|dangerous.?goods/i.test(key) && node ? 'HAZMAT' : '';
+      }
+
+      if (typeof node === 'number') {
+        return /hazmat|dangerous.?goods/i.test(key) && node > 0 ? 'HAZMAT' : '';
+      }
+
+      if (typeof node === 'string') {
+        const text = clean(node);
+        if (!text || negative.test(text)) return '';
+        if (/\bHAZMAT\b/i.test(text) && !/\b(?:NOT|NON)[ _-]?HAZMAT\b/i.test(text)) return 'HAZMAT';
+        if (/\bDANGEROUS[ _-]?GOODS\b/i.test(text) && !/\b(?:NOT|NON)[ _-]?DANGEROUS[ _-]?GOODS\b/i.test(text)) return 'HAZMAT';
+        if (/hazmat|dangerous.?goods/i.test(key) && !negative.test(text)) return 'HAZMAT';
+        return '';
+      }
+
+      if (typeof node !== 'object') return '';
+      if (seen.has(node)) return '';
+      seen.add(node);
+
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const hit = walk(child, key);
+          if (hit) return hit;
+        }
+        return '';
+      }
+
+      for (const [childKey, child] of Object.entries(node)) {
+        const hit = walk(child, childKey);
+        if (hit) return hit;
+      }
+      return '';
+    };
+
+    return walk(value);
+  }
+
+'''
+          if s.count(anchor) != 1:
+              raise SystemExit('moveOneByOneResolved anchor missing/duplicated')
+          s = s.replace(anchor, helper + anchor, 1)
+
+          old_block = '''    if (moveOk(response)) {\n      finishOneByOneMoved(item);\n      return;\n    }\n\n    const reason = moveReason(response);\n    if (live.issue?.kind === 'destination' && live.current !== item) {\n      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');\n      return;\n    }\n\n    if (isDamagedDestinationResponse(response)) {\n      blockOneByOneDestination(item, 'DESTINATION BLOCKED', 'DESTINATION DAMAGED', ctx, expirationMs);\n      return;\n    }\n\n    if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {\n      showOneByOneError(item, reason || 'HAZMAT', reason === 'HAZMAT' ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE');\n      return;\n    }\n\n    if (hasPredicant(response)) {\n      blockOneByOneDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);\n      return;\n    }\n\n    showOneByOneError(item, reason || 'MOVE REJECTED', 'MOVE REJECTED');\n'''
+          new_block = '''    const reason = moveReason(response);\n    if (live.issue?.kind === 'destination' && live.current !== item) {\n      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');\n      return;\n    }\n\n    if (isDamagedDestinationResponse(response)) {\n      blockOneByOneDestination(item, 'DESTINATION BLOCKED', 'DESTINATION DAMAGED', ctx, expirationMs);\n      return;\n    }\n\n    const hazmatEvidence = oneByOneHazmatEvidence(response);\n    if (reason === 'HAZMAT' || hazmatEvidence || /destination incompatible/i.test(reason)) {\n      showOneByOneError(\n        item,\n        reason === 'HAZMAT' || hazmatEvidence ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),\n        reason === 'HAZMAT' || hazmatEvidence ? 'HAZMAT / DESTINATION ISSUE' : 'ITEM / DESTINATION INCOMPATIBLE'\n      );\n      return;\n    }\n\n    if (hasPredicant(response)) {\n      blockOneByOneDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);\n      return;\n    }\n\n    // Hard failures are evaluated before success. A response containing a Hazmat\n    // signal must never fall through the generic success path.\n    if (moveOk(response)) {\n      finishOneByOneMoved(item);\n      return;\n    }\n\n    showOneByOneError(item, reason || 'MOVE REJECTED', 'MOVE REJECTED');\n'''
+          if s.count(old_block) != 1:
+              raise SystemExit(f'Expected one old 1x1 move response block; found {s.count(old_block)}')
+          s = s.replace(old_block, new_block, 1)
+
+          old_scan = '''    item.ctx = ctx;\n    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {\n'''
+          new_scan = '''    item.ctx = ctx;\n\n    // Safety gate BEFORE /api/move-items: if scan metadata already identifies the\n    // item as Hazmat/dangerous goods, do not send any state-changing move request.\n    const preMoveHazmat = oneByOneHazmatEvidence(response);\n    if (preMoveHazmat) {\n      showOneByOneError(item, 'HAZMAT', 'HAZMAT / DESTINATION ISSUE');\n      return;\n    }\n\n    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {\n'''
+          if s.count(old_scan) != 1:
+              raise SystemExit(f'Expected one 1x1 post-resolve anchor; found {s.count(old_scan)}')
+          s = s.replace(old_scan, new_scan, 1)
+
+          p.write_text(s)
+
+          readme = Path('README.md')
+          r = readme.read_text()
+          old = '| Sideline API Move | 0.3.0 |'
+          new = '| Sideline API Move | 0.3.1 |'
+          if r.count(old) != 1:
+              raise SystemExit(f'Expected one README v0.3.0 row; found {r.count(old)}')
+          readme.write_text(r.replace(old, new, 1))
+          PY
+
+          node --check Sideline_API_Move.user.js
+          git diff --check
+
+          python - <<'PY'
+          from pathlib import Path
+          old = Path('/tmp/sideline-base.js').read_text()
+          new = Path('Sideline_API_Move.user.js').read_text()
+
+          def section(text, start, end):
+              return text[text.index(start):text.index(end)]
+
+          # Explicit isolation regression checks: normal Live move handling and all Lazy
+          # implementation code must remain byte-for-byte unchanged.
+          live_start = '  async function liveMoveCurrent(item, ctx, expirationMs=null) {'
+          live_end = '  async function retryLiveCurrentMove() {'
+          if section(old, live_start, live_end) != section(new, live_start, live_end):
+              raise SystemExit('Normal Live move path changed unexpectedly')
+
+          lazy_start = '  // Lazy\n'
+          if old[old.index(lazy_start):] != new[new.index(lazy_start):]:
+              raise SystemExit('Lazy implementation changed unexpectedly')
+
+          one_start = new.index('  async function moveOneByOneResolved')
+          one_end = new.index('  function finishLiveMoved', one_start)
+          one = new[one_start:one_end]
+          if one.index('const hazmatEvidence = oneByOneHazmatEvidence(response);') > one.index('if (moveOk(response))'):
+              raise SystemExit('Hazmat response guard is after success path')
+          if 'HAZMAT / DESTINATION ISSUE' not in one:
+              raise SystemExit('Requested Hazmat error title missing')
+
+          scan_start = new.index('  async function processOneByOneBarcode')
+          scan_end = new.index('  function enqueueOneByOneBarcode', scan_start)
+          scan = new[scan_start:scan_end]
+          if scan.index('const preMoveHazmat = oneByOneHazmatEvidence(response);') > scan.index('await moveOneByOneResolved'):
+              raise SystemExit('Pre-move Hazmat guard occurs after move call')
+          if "showOneByOneError(item, 'HAZMAT', 'HAZMAT / DESTINATION ISSUE');" not in scan:
+              raise SystemExit('Pre-move Hazmat failure path missing')
+
+          if "blockOneByOneDestination(item, 'HAZMAT / DESTINATION ISSUE'" in new:
+              raise SystemExit('Old blocking Hazmat path returned')
+          PY
+
+          git add Sideline_API_Move.user.js README.md
+          git diff --cached --check
+          git commit -m "fix(sideline): hard-stop 1x1 hazmat before success"
+          git push origin HEAD:main
