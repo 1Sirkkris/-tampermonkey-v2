@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.10
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.10
+// @version      0.3.11
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -13,13 +13,14 @@
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js
 // ==/UserScript==
 
+// Keep @name unchanged: Tampermonkey identifies updates by @name + @namespace.
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV0310) return;
-  window.__bwu2RiverAssistantV0310 = true;
+  if (window.__bwu2RiverAssistant) return;
+  window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.10';
+  const VERSION = '0.3.11';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -32,7 +33,7 @@
   const INFORMATION_NEXT_TIMEOUT_MS = 4000;
   const DOM_DEBOUNCE_MS = 120;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
-  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
+  const RIVER_WORKFLOW_ID = '0dbb253e-c43a-4a8b-a316-e32b8ab9be21'; // Australia
   const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -61,7 +62,6 @@
   function riverUrl(fc = warehouseId()) {
     const url = new URL(`https://river.amazon.com/${encodeURIComponent(fc)}/workflows`);
     url.searchParams.set('buildingType', 'fc');
-    url.searchParams.set('workflowId', 'undefined');
     url.searchParams.set('q0', RIVER_WORKFLOW_Q0);
     url.searchParams.set('q1', RIVER_WORKFLOW_ID);
     url.searchParams.set('id', RIVER_WORKFLOW_ID);
@@ -561,8 +561,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV0310 === '1') return;
-    badge.dataset.riverAssistantV0310 = '1';
+    if (!badge || badge.dataset.riverAssistantAttached === '1') return;
+    badge.dataset.riverAssistantAttached = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
