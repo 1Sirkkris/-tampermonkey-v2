@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.5
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.6
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.5
-// @description  Event-driven Hazmat/L0 RIVER capture using latest matching PO line data; no inventory-wide quantity hunt.
+// @version      0.3.6
+// @description  Event-driven Hazmat/L0 RIVER capture plus bounded step recognition/tracing; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
 // @run-at       document-start
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV035) return;
-  window.__bwu2RiverAssistantV035 = true;
+  if (window.__bwu2RiverAssistantV036) return;
+  window.__bwu2RiverAssistantV036 = true;
 
-  const VERSION = '0.3.5';
+  const VERSION = '0.3.6';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -28,7 +28,7 @@
   const DOM_GRACE_MS = 6000;
   const CORE_TIMEOUT_MS = 12000;
   const NAV_TIMEOUT_MS = 12000;
-  const DOM_DEBOUNCE_MS = 90;
+  const DOM_DEBOUNCE_MS = 150;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
   const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
   const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
@@ -601,8 +601,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV035 === '1') return;
-    badge.dataset.riverAssistantV035 = '1';
+    if (!badge || badge.dataset.riverAssistantV036 === '1') return;
+    badge.dataset.riverAssistantV036 = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
@@ -699,16 +699,33 @@
     return norm(element?.innerText || element?.textContent || element?.value || element?.getAttribute?.('aria-label') || '');
   }
 
+  function associatedLabel(element) {
+    if (!(element instanceof Element)) return '';
+    const explicit = clean(element.getAttribute('aria-label') || element.getAttribute('title') || '');
+    if (explicit) return explicit;
+    if (element.id) {
+      try {
+        const label = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+        if (label) return clean(label.textContent);
+      } catch {}
+    }
+    const wrapping = element.closest('label');
+    if (wrapping) return clean(wrapping.textContent);
+    const fieldset = element.closest('fieldset');
+    if (fieldset) return clean(fieldset.querySelector('legend')?.textContent || '');
+    return '';
+  }
+
   function field(aliases) {
     const wanted = aliases.map(norm);
     for (const element of document.querySelectorAll('input,textarea,select')) {
       if (!visible(element)) continue;
-      const id = element.id;
-      const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
       const context = norm([
-        element.name, element.placeholder, element.getAttribute('aria-label'), label?.textContent,
-        element.closest('fieldset')?.querySelector('legend')?.textContent,
-        element.closest('div')?.querySelector(':scope > label')?.textContent
+        element.name,
+        element.id,
+        element.placeholder,
+        element.getAttribute('aria-label'),
+        associatedLabel(element)
       ].filter(Boolean).join(' '));
       if (wanted.some(value => context.includes(value))) return element;
     }
@@ -781,19 +798,90 @@
     element.click();
   }
 
-  function pageKind() {
+  function controlSnapshot(element) {
+    const tag = element.tagName?.toLowerCase() || '';
+    const type = clean(element.getAttribute?.('type') || '');
+    const item = {
+      tag,
+      type,
+      id: clean(element.id || ''),
+      name: clean(element.getAttribute?.('name') || ''),
+      role: clean(element.getAttribute?.('role') || ''),
+      label: associatedLabel(element),
+      placeholder: clean(element.getAttribute?.('placeholder') || '')
+    };
+    if (tag === 'select') {
+      item.options = [...element.options].slice(0, 12).map(option => ({
+        text: clean(option.textContent),
+        value: clean(option.value),
+        disabled: !!option.disabled
+      }));
+    }
+    return item;
+  }
+
+  function riverDomSnapshot() {
+    const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
+    const headings = root
+      ? [...root.querySelectorAll('h1,h2,h3,h4,[role="heading"],legend')].filter(visible).slice(0, 16).map(node => clean(node.textContent)).filter(Boolean)
+      : [];
+    const controls = root
+      ? [...root.querySelectorAll('input:not([type="password"]):not([type="file"]),textarea,select,button,[role="button"],[role="radio"],[role="option"]')]
+        .filter(visible).slice(0, 40).map(controlSnapshot)
+      : [];
+    const stateAttrs = [];
+    if (root) {
+      for (const element of [root, ...root.querySelectorAll('[data-step],[data-step-id],[data-question],[data-question-id],[data-workflow],[data-workflow-id],[data-state],[data-screen]')].slice(0, 24)]) {
+        const attrs = {};
+        for (const attr of element.attributes || []) {
+          if (/^(?:data-)?(?:workflow|step|question|option|state|screen)(?:-|$)/i.test(attr.name)) attrs[attr.name] = clean(attr.value);
+        }
+        if (Object.keys(attrs).length) stateAttrs.push({ tag: element.tagName?.toLowerCase() || '', id: clean(element.id || ''), attrs });
+      }
+    }
+    return {
+      route: `${location.pathname}${location.search}${location.hash}`,
+      title: clean(document.title),
+      headings,
+      controls,
+      stateAttrs,
+      formCount: document.forms?.length || 0,
+      nextVisible: !!nextButton()
+    };
+  }
+
+  function recognitionText(snapshot = riverDomSnapshot()) {
+    const parts = [...snapshot.headings];
+    for (const control of snapshot.controls) {
+      parts.push(control.label, control.name, control.id, control.placeholder, control.role);
+      for (const option of control.options || []) parts.push(option.text, option.value);
+    }
+    return norm(parts.filter(Boolean).join(' ')).slice(0, 7000);
+  }
+
+  function pageKind(snapshot = null) {
     const route = `${location.pathname} ${location.search} ${location.hash}`.toLowerCase();
-    const root = document.querySelector('main,[role="main"],form') || document.body;
-    const text = norm(String(root?.innerText || root?.textContent || '').slice(0, 24000));
-    if (/create.?issue/.test(route) || text.includes('create issue')) return 'create';
-    if (/related.?tt/.test(route) || text.includes('related tt')) return 'related';
-    if (/sortab/.test(route) || text.includes('non sortable') || text.includes('non-sortable')) return 'sortability';
-    if (/severity/.test(route) || text.includes('units impacted')) return 'severity';
-    if (/image/.test(route) || text.includes('image')) return 'images';
-    if (/information/.test(route) || text.includes('vendor code') || text.includes('seller id')) return 'information';
-    if (/(^|\W)asin(\W|$)/.test(route) || text.includes('type asin here')) return 'asin';
-    if (/issue.?at.?fc/.test(route) || text.includes('inbound issue')) return 'issue';
-    if (/pandash|dangerous|dg review/.test(route) || text.includes('lacks dg information')) return 'pandash';
+    if (/create.?issue/.test(route)) return 'create';
+    if (/related.?tt/.test(route)) return 'related';
+    if (/sortab/.test(route)) return 'sortability';
+    if (/severity/.test(route)) return 'severity';
+    if (/image/.test(route)) return 'images';
+    if (/information/.test(route)) return 'information';
+    if (/(^|\W)asin(\W|$)/.test(route)) return 'asin';
+    if (/issue.?at.?fc/.test(route)) return 'issue';
+    if (/pandash|dangerous|dg review/.test(route)) return 'pandash';
+
+    const state = snapshot || riverDomSnapshot();
+    const text = recognitionText(state);
+    if (text.includes('create issue')) return 'create';
+    if (text.includes('related tt') || text.includes('related ticket')) return 'related';
+    if (text.includes('units impacted') || text.includes('shipments impacted')) return 'severity';
+    if (text.includes('physical location of the units') || text.includes('inventory cost per unit') || text.includes('vendor code seller id')) return 'information';
+    if (text.includes('type asin here') || state.controls.some(control => norm(`${control.label} ${control.name} ${control.placeholder}`) === 'asin')) return 'asin';
+    if (text.includes('non sortable') || text.includes('non-sortable')) return 'sortability';
+    if (text.includes('lacks dg information') || text.includes('dangerous goods')) return 'pandash';
+    if (text.includes('fc inbound issue') || text.includes('inbound issue')) return 'issue';
+    if (state.controls.some(control => control.tag === 'select' && (control.options || []).length >= 2) && /image/.test(text)) return 'images';
     return 'unknown';
   }
 
@@ -804,7 +892,8 @@
     return new Promise(resolve => {
       let settled = false;
       let debounce = 0;
-      const root = document.body || document.documentElement;
+      const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
+      if (!root) return resolve('unknown');
       const observer = new MutationObserver(() => {
         if (debounce || settled) return;
         debounce = setTimeout(check, DOM_DEBOUNCE_MS);
@@ -832,7 +921,12 @@
         if (current !== 'unknown' && current !== previous) finish(current);
       }
 
-      observer.observe(root, { childList: true, subtree: true });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['id', 'name', 'role', 'aria-label', 'data-step', 'data-step-id', 'data-question', 'data-question-id', 'data-workflow', 'data-workflow-id', 'data-state', 'data-screen']
+      });
       window.addEventListener('popstate', routeCheck, true);
       window.addEventListener('hashchange', routeCheck, true);
     });
@@ -845,49 +939,72 @@
 
   let riverGeneration = 0;
   let riverBusy = false;
+  let unknownObserver = null;
+  let unknownTimer = 0;
+  let unknownDebounce = 0;
+
+  function clearUnknownRecognition() {
+    unknownObserver?.disconnect();
+    unknownObserver = null;
+    clearTimeout(unknownTimer);
+    clearTimeout(unknownDebounce);
+    unknownTimer = 0;
+    unknownDebounce = 0;
+  }
 
   async function advanceAndContinue(ui, step, generation) {
     next(step);
     const nextPage = await waitForPageChange(step);
-    if (generation !== riverGeneration) return;
-    if (nextPage === 'unknown' || nextPage === step) throw new Error(`RIVER did not advance from ${step}.`);
-    await drive(ui, 'Page loaded', generation);
+    if (generation !== riverGeneration) return null;
+    if (nextPage === 'unknown' || nextPage === step) {
+      const snapshot = riverDomSnapshot();
+      emit('transition.unresolved', { from: step, detected: nextPage, snapshot });
+      ui.querySelector('[data-status]').textContent = 'WAITING • transition not identified yet; tracing active.';
+      return { waitForRecognition: true };
+    }
+    return drive(ui, 'Page loaded', generation);
   }
 
   async function drive(ui, reason = 'RUN', generation = riverGeneration) {
-    if (generation !== riverGeneration) return;
+    if (generation !== riverGeneration) return null;
     const payload = GM_getValue(KEY, null);
     if (!payload) {
       ui.querySelector('[data-status]').textContent = 'No saved FCResearch payload.';
-      return;
+      return null;
     }
 
     ui.querySelector('[data-id]').textContent = payload.fnsku !== 'N/A' ? payload.fnsku : payload.asin;
     const status = ui.querySelector('[data-status]');
     status.textContent = `${reason} • checking step…`;
-    const page = pageKind();
+    const snapshot = riverDomSnapshot();
+    const page = pageKind(snapshot);
     const stepNumber = { pandash: 1, issue: 2, asin: 3, related: 4, information: 5, sortability: 6, severity: 7, images: 8, create: 9 }[page] || 0;
     emit('step.detected', { step: page, stepNumber });
 
     if (page === 'pandash') {
       clickChoiceIndex(2, page);
       status.textContent = 'Option 2 selected • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'issue') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'issue') {
       clickChoiceIndex(1, page);
       status.textContent = 'Option 1 selected • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'asin') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'asin') {
       const asin = payloadValue(payload, 'asin');
       if (asin === 'N/A') throw new Error('Captured ASIN is unavailable; ASIN step remains manual.');
       if (!setValue(field(['type asin here', 'asin']), asin)) throw new Error('ASIN field not found/retained.');
       emit('automation.action', { step: page, action: 'fill', field: 'asin', available: true });
       status.textContent = 'ASIN entered • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'related') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'related') {
       emit('manual.pause', { step: page });
       status.textContent = 'PAUSED • manual review required. Complete this step, then click Next.';
-    } else if (page === 'information') {
+      return null;
+    }
+    if (page === 'information') {
       const values = [
         [['x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku')],
         [['asin title', 'product title', 'title'], payloadValue(payload, 'title')],
@@ -901,49 +1018,97 @@
       emit('automation.action', { step: page, action: 'fill-information', filled, expected: values.length });
       if (filled !== values.length) throw new Error(`Information W1 filled ${filled}/${values.length}; not advancing.`);
       status.textContent = 'Information W1 filled • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'sortability') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'sortability') {
       clickChoiceIndex(1, page);
       status.textContent = 'Option 1 selected • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'severity') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'severity') {
       const shipments = field(['shipments impacted', 'number of shipments impacted']);
       if (!Number.isFinite(Number(payload.inventoryQuantity)) || Number(payload.inventoryQuantity) <= 0) {
         if (shipments) setValue(shipments, 0);
         emit('manual.pause', { step: page, reason: payload.quantityMode || 'quantity-unavailable' });
         status.textContent = 'PAUSED • PO quantity is unavailable/0. Enter Units impacted manually, then click Next.';
-        return;
+        return null;
       }
       const units = field(['units impacted', 'number of units impacted']);
       if (!setValue(units, Number(payload.inventoryQuantity)) || !setValue(shipments, 0)) throw new Error('Quantity fields not found/retained.');
       emit('automation.action', { step: page, action: 'fill-severity', quantityAvailable: true, shipments: 0, source: 'latest-po-matching-line' });
       status.textContent = 'PO-line quantity + shipments filled • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'images') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'images') {
       selectDropdownIndex(2, page);
       status.textContent = 'Dropdown Option 2 selected • advancing…';
-      await advanceAndContinue(ui, page, generation);
-    } else if (page === 'create') {
+      return advanceAndContinue(ui, page, generation);
+    }
+    if (page === 'create') {
       emit('done', { finalSubmissionManual: true });
       status.textContent = 'DONE • final Create Issue submission remains manual.';
-    } else {
-      throw new Error('RIVER step not recognised.');
+      return null;
     }
+
+    emit('step.unknown', { snapshot });
+    status.textContent = 'WAITING • RIVER step not recognised yet; tracing active.';
+    return { waitForRecognition: true };
   }
 
   function installRiver() {
     const start = () => {
       const ui = panel();
+
+      const armUnknownRecognition = generation => {
+        if (generation !== riverGeneration || unknownObserver) return;
+        const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
+        if (!root) return;
+
+        const check = () => {
+          clearTimeout(unknownDebounce);
+          unknownDebounce = 0;
+          if (generation !== riverGeneration) {
+            clearUnknownRecognition();
+            return;
+          }
+          const snapshot = riverDomSnapshot();
+          const detected = pageKind(snapshot);
+          if (detected === 'unknown') return;
+          clearUnknownRecognition();
+          emit('step.recognised.after-wait', { step: detected });
+          void run('Step became available');
+        };
+
+        unknownObserver = new MutationObserver(() => {
+          if (unknownDebounce) return;
+          unknownDebounce = setTimeout(check, DOM_DEBOUNCE_MS);
+        });
+        unknownObserver.observe(root, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['id', 'name', 'role', 'aria-label', 'data-step', 'data-step-id', 'data-question', 'data-question-id', 'data-workflow', 'data-workflow-id', 'data-state', 'data-screen']
+        });
+        unknownTimer = setTimeout(() => {
+          clearUnknownRecognition();
+          emit('step.wait.timeout', { snapshot: riverDomSnapshot() });
+          ui.querySelector('[data-status]').textContent = 'WAITING • step still unknown; trace captured. Use RUN after the page changes.';
+        }, NAV_TIMEOUT_MS);
+      };
+
       const run = async reason => {
         if (riverBusy) return;
         riverBusy = true;
         const generation = riverGeneration;
         try {
-          await drive(ui, reason, generation);
+          const outcome = await drive(ui, reason, generation);
+          if (outcome?.waitForRecognition) armUnknownRecognition(generation);
+          else clearUnknownRecognition();
         } catch (error) {
           if (generation === riverGeneration) {
+            clearUnknownRecognition();
             ui.querySelector('[data-status]').textContent = `WAITING • ${clean(error?.message || error)}`;
-            emit('error', { message: clean(error?.message || error), step: pageKind() });
+            emit('error', { message: clean(error?.message || error), step: pageKind(), snapshot: riverDomSnapshot() });
           }
         } finally {
           riverBusy = false;
@@ -953,6 +1118,7 @@
       ui.querySelector('[data-run]').onclick = () => void run('Manual RUN');
       ui.querySelector('[data-clear]').onclick = () => {
         riverGeneration++;
+        clearUnknownRecognition();
         GM_setValue(KEY, null);
         ui.querySelector('[data-id]').textContent = '';
         ui.querySelector('[data-status]').textContent = 'STOPPED / CLEARED';
@@ -970,10 +1136,19 @@
         if (!button || button.closest('#bwu2-river-assistant') || button !== nextButton()) return;
         const generation = riverGeneration;
         void waitForPageChange(currentPage).then(nextPage => {
-          if (generation !== riverGeneration || nextPage === 'unknown' || nextPage === currentPage) return;
+          if (generation !== riverGeneration) return;
+          if (nextPage === 'unknown' || nextPage === currentPage) {
+            emit('transition.unresolved', { from: currentPage, detected: nextPage, snapshot: riverDomSnapshot() });
+            armUnknownRecognition(generation);
+            return;
+          }
           void run('Manual step completed');
         });
       }, true);
+
+      window.addEventListener('popstate', () => void run('Route changed'), true);
+      window.addEventListener('hashchange', () => void run('Route changed'), true);
+      window.addEventListener('pagehide', clearUnknownRecognition, { once: true });
 
       if (GM_getValue(KEY, null)) void run('Page loaded');
     };
