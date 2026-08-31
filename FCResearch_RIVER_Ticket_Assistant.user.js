@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.7
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.8
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.7
-// @description  Event-driven Hazmat/L0 RIVER capture plus bounded step recognition/tracing; no inventory-wide quantity hunt.
+// @version      0.3.8
+// @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
 // @run-at       document-start
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV037) return;
-  window.__bwu2RiverAssistantV037 = true;
+  if (window.__bwu2RiverAssistantV038) return;
+  window.__bwu2RiverAssistantV038 = true;
 
-  const VERSION = '0.3.7';
+  const VERSION = '0.3.8';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -28,7 +28,7 @@
   const DOM_GRACE_MS = 6000;
   const CORE_TIMEOUT_MS = 12000;
   const NAV_TIMEOUT_MS = 12000;
-  const DOM_DEBOUNCE_MS = 150;
+  const DOM_DEBOUNCE_MS = 120;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
   const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
   const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
@@ -122,21 +122,16 @@
   function parseFcrDate(value) {
     const text = clean(value);
     if (!text) return Number.NEGATIVE_INFINITY;
-
     const iso = text.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (iso) {
       const [, y, m, d, hh = '0', mm = '0', ss = '0'] = iso;
-      const timestamp = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
-      return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+      return Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
     }
-
     const dmy = text.match(/\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
     if (dmy) {
       const [, d, m, y, hh = '0', mm = '0', ss = '0'] = dmy;
-      const timestamp = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
-      return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+      return Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
     }
-
     const parsed = Date.parse(text);
     return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
   }
@@ -154,8 +149,7 @@
     const tokens = (text.match(/[A-Z0-9]+/gi) || []).map(token => token.toUpperCase());
     const preferred = tokens.find(token => token.length >= 2 && token.length <= 5 && token !== 'FBA');
     if (preferred) return preferred;
-    const six = tokens.find(token => token.length === 6 && token !== 'FBA');
-    return six || '';
+    return tokens.find(token => token.length === 6 && token !== 'FBA') || '';
   }
 
   function purchaseOrderDetails(root = document) {
@@ -165,7 +159,6 @@
     const poIndex = columnIndex(headers, 'purchase order', 'po');
     const placedIndex = columnIndex(headers, 'placed', 'confirmed', 'order date', 'date');
     if (poIndex < 0) return new Map();
-
     const details = new Map();
     for (const [rowIndex, row] of [...table.querySelectorAll('tbody tr')].entries()) {
       const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
@@ -174,9 +167,7 @@
       const placed = placedIndex >= 0 ? clean(cells[placedIndex]?.textContent) : '';
       const timestamp = parseFcrDate(placed);
       const previous = details.get(code(purchaseOrder));
-      if (!previous || timestamp > previous.timestamp) {
-        details.set(code(purchaseOrder), { purchaseOrder, placed, timestamp, rowIndex });
-      }
+      if (!previous || timestamp > previous.timestamp) details.set(code(purchaseOrder), { purchaseOrder, placed, timestamp, rowIndex });
     }
     return details;
   }
@@ -184,7 +175,6 @@
   function purchaseOrderItemRows(root = document) {
     const table = root.querySelector('#table-purchase-order-item');
     if (!table) return { state: 'pending', rows: [] };
-
     const headers = tableHeaders(table);
     const indexes = {
       po: columnIndex(headers, 'purchase order', 'po'),
@@ -197,7 +187,6 @@
       date: columnIndex(headers, 'order date', 'placed', 'date')
     };
     if (indexes.po < 0 || indexes.sku < 0) return { state: 'invalid', rows: [] };
-
     const rows = [];
     for (const [rowIndex, row] of [...table.querySelectorAll('tbody tr')].entries()) {
       const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
@@ -211,7 +200,6 @@
         cancelled: indexes.cancelled >= 0 ? numericCell(cells[indexes.cancelled]?.textContent) : null,
         received: indexes.received >= 0 ? numericCell(cells[indexes.received]?.textContent) : null,
         title: indexes.title >= 0 ? clean(cells[indexes.title]?.textContent) : '',
-        orderDate: indexes.date >= 0 ? clean(cells[indexes.date]?.textContent) : '',
         timestamp: indexes.date >= 0 ? parseFcrDate(cells[indexes.date]?.textContent) : Number.NEGATIVE_INFINITY,
         rowIndex,
         rowText: clean(row.textContent)
@@ -224,11 +212,9 @@
     const wanted = [identity.search, identity.asin, identity.fnsku].map(code).filter(Boolean);
     const sku = code(row.sku);
     if (sku && wanted.includes(sku)) return { matched: true, by: sku === code(identity.fnsku) ? 'fnsku' : sku === code(identity.asin) ? 'asin' : 'search', strength: 3 };
-
     const rowText = code(row.rowText);
     const embedded = wanted.find(value => value.length >= 8 && rowText.includes(value));
     if (embedded) return { matched: true, by: embedded === code(identity.fnsku) ? 'fnsku-row' : embedded === code(identity.asin) ? 'asin-row' : 'search-row', strength: 2 };
-
     if (identity.title && row.title && norm(row.title) === norm(identity.title)) return { matched: true, by: 'title-exact', strength: 1 };
     return { matched: false, by: '', strength: 0 };
   }
@@ -237,28 +223,21 @@
     const parsed = purchaseOrderItemRows(itemRoot);
     if (parsed.state === 'pending') return { state: 'pending', reason: 'po-items-not-loaded' };
     if (parsed.state !== 'available') return { state: 'unavailable', reason: 'po-items-empty' };
-
     const details = purchaseOrderDetails(detailRoot);
     const candidates = [];
     for (const row of parsed.rows) {
       const match = rowMatchStrength(row, identity);
       if (!match.matched) continue;
       const detail = details.get(code(row.purchaseOrder));
-      const rowTimestamp = row.timestamp;
       const detailTimestamp = detail?.timestamp ?? Number.NEGATIVE_INFINITY;
-      const timestamp = Math.max(rowTimestamp, detailTimestamp);
-      const dateSource = rowTimestamp >= detailTimestamp && Number.isFinite(rowTimestamp) ? 'po-item-order-date'
+      const timestamp = Math.max(row.timestamp, detailTimestamp);
+      const dateSource = row.timestamp >= detailTimestamp && Number.isFinite(row.timestamp) ? 'po-item-order-date'
         : Number.isFinite(detailTimestamp) ? 'po-placed-date' : 'none';
       candidates.push({ ...row, ...match, timestamp, dateSource });
     }
-
     if (!candidates.length) return { state: 'unavailable', reason: 'no-matching-item-line' };
-
     const dated = candidates.filter(candidate => Number.isFinite(candidate.timestamp) && candidate.timestamp !== Number.NEGATIVE_INFINITY);
-    if (!dated.length && candidates.length > 1) {
-      return { state: 'needs-po-dates', reason: 'multiple-matching-lines-without-date', candidates: candidates.length };
-    }
-
+    if (!dated.length && candidates.length > 1) return { state: 'needs-po-dates', reason: 'multiple-matching-lines-without-date', candidates: candidates.length };
     const pool = dated.length ? dated : candidates;
     pool.sort((a, b) => b.timestamp - a.timestamp || b.strength - a.strength || a.rowIndex - b.rowIndex);
     const selected = pool[0];
@@ -266,7 +245,6 @@
     const quantityParts = [selected.unfilled, selected.cancelled, selected.received];
     const quantityKnown = quantityParts.every(Number.isFinite);
     const quantityTotal = quantityKnown ? quantityParts.reduce((sum, value) => sum + value, 0) : null;
-
     return {
       state: 'available',
       purchaseOrder: selected.purchaseOrder,
@@ -322,9 +300,7 @@
 
   function cancelCoreCapture() {
     try {
-      window.dispatchEvent(new CustomEvent(CORE_CANCEL_EVENT, {
-        detail: JSON.stringify({ client: 'river-assistant', group: 'river-capture' })
-      }));
+      window.dispatchEvent(new CustomEvent(CORE_CANCEL_EVENT, { detail: JSON.stringify({ client: 'river-assistant', group: 'river-capture' }) }));
     } catch {}
   }
 
@@ -336,9 +312,7 @@
     if (!state[field] || state[field].state !== 'pending') return false;
     const numeric = field === 'quantity';
     const available = numeric ? Number.isFinite(Number(value)) && Number(value) > 0 : clean(value) !== '';
-    state[field] = available
-      ? { state: 'available', value: numeric ? Number(value) : clean(value) }
-      : { state: 'unavailable', value: unavailableValue };
+    state[field] = available ? { state: 'available', value: numeric ? Number(value) : clean(value) } : { state: 'unavailable', value: unavailableValue };
     return true;
   }
 
@@ -373,7 +347,6 @@
     const selected = selectLatestPoLine(itemRoot, detailRoot, capture.identity || {});
     capture.lastPoSelection = selected;
     if (selected.state !== 'available') return false;
-
     resolveField(capture.state, 'purchaseOrder', selected.purchaseOrder);
     resolveField(capture.state, 'vendorCode', selected.vendorCode);
     resolveField(capture.state, 'quantity', selected.quantity, null);
@@ -475,14 +448,11 @@
     clearTimeout(capture.domTimer);
     capture.observer?.disconnect();
     cancelCoreCapture();
-
     const payload = payloadFromState(capture);
     GM_setValue(KEY, payload);
     capture.payload = payload;
     const unavailable = Object.entries(payload.fieldStates).filter(([, value]) => value === 'unavailable').map(([key]) => key);
-    const detail = unavailable.length
-      ? `RIVER capture complete. Unavailable/manual: ${unavailable.join(', ')}. Click to open RIVER.`
-      : 'RIVER capture complete. Click to open RIVER.';
+    const detail = unavailable.length ? `RIVER capture complete. Unavailable/manual: ${unavailable.join(', ')}. Click to open RIVER.` : 'RIVER capture complete. Click to open RIVER.';
     renderCaptureState(capture.badge, capture.state, true, detail);
     emit('capture.ready', {
       resolved: CAPTURE_FIELDS.length,
@@ -512,9 +482,8 @@
     capture.requestedSections.add(endpoint);
     capture.fallbackRequests++;
     emit('capture.fallback.request', { endpoint });
-    try {
-      return await coreRequest('section', { endpoint, code: capture.search });
-    } catch (error) {
+    try { return await coreRequest('section', { endpoint, code: capture.search }); }
+    catch (error) {
       emit('capture.fallback.error', { endpoint, error: clean(error?.message || error) });
       return null;
     }
@@ -526,29 +495,22 @@
     capture.observer?.disconnect();
     refreshCaptureFromDom(capture);
     if (capture.done) return;
-
     let itemRoot = document;
     let detailRoot = document;
     const needsPo = ['purchaseOrder', 'vendorCode', 'quantity'].some(field => capture.state[field].state === 'pending');
-
     if (needsPo) {
       const itemResult = await fetchSectionOnce(capture, 'purchase-order-item');
       if (capture.done) return;
       if (itemResult?.html) itemRoot = parseDocument(itemResult.html);
       applyPoSelection(capture, itemRoot, detailRoot);
     }
-
-    if (['purchaseOrder', 'vendorCode', 'quantity'].some(field => capture.state[field].state === 'pending')
-      && capture.lastPoSelection?.state === 'needs-po-dates') {
+    if (['purchaseOrder', 'vendorCode', 'quantity'].some(field => capture.state[field].state === 'pending') && capture.lastPoSelection?.state === 'needs-po-dates') {
       const poResult = await fetchSectionOnce(capture, 'purchase-order');
       if (capture.done) return;
       if (poResult?.html) detailRoot = parseDocument(poResult.html);
       applyPoSelection(capture, itemRoot, detailRoot);
     }
-
-    for (const field of unresolvedFields(capture.state)) {
-      resolveField(capture.state, field, null, field === 'quantity' ? null : 'N/A');
-    }
+    for (const field of unresolvedFields(capture.state)) resolveField(capture.state, field, null, field === 'quantity' ? null : 'N/A');
     finishCapture(capture);
   }
 
@@ -557,12 +519,10 @@
     const search = currentSearch();
     if (!search) return;
     if (activeCapture?.search === search && activeCapture.badge === badge && !activeCapture.done) return;
-
-    const state = newCaptureState();
     const capture = {
       search,
       badge,
-      state,
+      state: newCaptureState(),
       identity: { search, asin: '', fnsku: '', title: '' },
       started: performance.now(),
       domPasses: 0,
@@ -584,10 +544,8 @@
     activeCapture = capture;
     GM_setValue(KEY, null);
     emit('capture.started', { fields: CAPTURE_FIELDS.length, quantitySource: 'latest-po-matching-line' });
-
     refreshCaptureFromDom(capture);
     if (capture.done) return;
-
     const root = document.querySelector('#results-content') || document.body || document.documentElement;
     capture.observer = new MutationObserver(records => {
       if (!captureMutationRelevant(records) || capture.done || capture.domTimer) return;
@@ -601,8 +559,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV037 === '1') return;
-    badge.dataset.riverAssistantV037 = '1';
+    if (!badge || badge.dataset.riverAssistantV038 === '1') return;
+    badge.dataset.riverAssistantV038 = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
@@ -620,7 +578,6 @@
       if (badge) attachBadge(badge);
     };
     attachExisting();
-
     const root = document.querySelector('#results-content') || document.documentElement;
     if (!root) return;
     const observer = new MutationObserver(records => {
@@ -644,7 +601,6 @@
     const start = () => discoverRiverBadge();
     if (document.documentElement) start();
     else document.addEventListener('DOMContentLoaded', start, { once: true });
-
     const openFromBadge = event => {
       if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
       const badge = event.target instanceof Element ? event.target.closest('.fc-hazmat.fc-river-l0') : null;
@@ -652,7 +608,6 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-
       if (badge.dataset.riverCaptureState !== 'ready' || !activeCapture?.payload) {
         emit('open.blocked', { reason: 'capture-not-ready' });
         return;
@@ -668,7 +623,6 @@
       const tab = GM_openInTab(target, { active: true, insert: true, setParent: true });
       if (!tab) location.assign(target);
     };
-
     document.addEventListener('click', openFromBadge, true);
     document.addEventListener('keydown', openFromBadge, true);
     window.addEventListener('pagehide', () => {
@@ -695,10 +649,6 @@
     return element;
   }
 
-  function textOf(element) {
-    return norm(element?.innerText || element?.textContent || element?.value || element?.getAttribute?.('aria-label') || '');
-  }
-
   function associatedLabel(element) {
     if (!(element instanceof Element)) return '';
     const explicit = clean(element.getAttribute('aria-label') || element.getAttribute('title') || '');
@@ -709,24 +659,14 @@
         if (label) return clean(label.textContent);
       } catch {}
     }
-    const wrapping = element.closest('label');
-    if (wrapping) return clean(wrapping.textContent);
-    const fieldset = element.closest('fieldset');
-    if (fieldset) return clean(fieldset.querySelector('legend')?.textContent || '');
-    return '';
+    return clean(element.closest('label')?.textContent || element.closest('fieldset')?.querySelector('legend')?.textContent || '');
   }
 
   function field(aliases) {
     const wanted = aliases.map(norm);
     for (const element of document.querySelectorAll('input,textarea,select')) {
       if (!visible(element)) continue;
-      const context = norm([
-        element.name,
-        element.id,
-        element.placeholder,
-        element.getAttribute('aria-label'),
-        associatedLabel(element)
-      ].filter(Boolean).join(' '));
+      const context = norm([element.name, element.id, element.placeholder, element.getAttribute('aria-label'), associatedLabel(element)].filter(Boolean).join(' '));
       if (wanted.some(value => context.includes(value))) return element;
     }
     return null;
@@ -766,7 +706,7 @@
     const element = choices[index - 1];
     if (!element) throw new Error(`Option ${index} not found (${choices.length} choices visible).`);
     const input = element.matches?.('input[type="radio"]') ? element : element.querySelector?.('input[type="radio"]');
-    emit('automation.action', { step, action: 'choice', option: index, choices: choices.length });
+    emit('automation.action', { step, action: 'choice', option: index, choices: choices.length, controlId: clean((input || element).id || '') });
     (input || element).click();
   }
 
@@ -788,7 +728,7 @@
   function nextButton() {
     return [...document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]')]
       .filter(visible)
-      .find(candidate => textOf(candidate) === 'next' || textOf(candidate).startsWith('next ')) || null;
+      .find(candidate => norm(candidate.innerText || candidate.textContent || candidate.value || candidate.getAttribute('aria-label') || '') === 'next') || null;
   }
 
   function next(step) {
@@ -798,69 +738,31 @@
     element.click();
   }
 
-  function controlSnapshot(element) {
-    const tag = element.tagName?.toLowerCase() || '';
-    const type = clean(element.getAttribute?.('type') || '');
-    const item = {
-      tag,
-      type,
-      id: clean(element.id || ''),
-      name: clean(element.getAttribute?.('name') || ''),
-      role: clean(element.getAttribute?.('role') || ''),
-      label: associatedLabel(element),
-      placeholder: clean(element.getAttribute?.('placeholder') || '')
-    };
-    if (tag === 'select') {
-      item.options = [...element.options].slice(0, 12).map(option => ({
-        text: clean(option.textContent),
-        value: clean(option.value),
-        disabled: !!option.disabled
-      }));
-    }
-    return item;
+  function workflowLabel() {
+    const info = document.querySelector('page-info[label]');
+    if (info) return clean(info.getAttribute('label'));
+    const heading = [...document.querySelectorAll('h1,h2,h3,h4,[role="heading"],legend')].find(visible);
+    return clean(heading?.textContent || '');
   }
 
-  function riverDomSnapshot() {
-    const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
-    const headings = root
-      ? [...root.querySelectorAll('h1,h2,h3,h4,[role="heading"],legend')].filter(visible).slice(0, 16).map(node => clean(node.textContent)).filter(Boolean)
-      : [];
-    const controls = root
-      ? [...root.querySelectorAll('input:not([type="password"]):not([type="file"]),textarea,select,button,[role="button"],[role="radio"],[role="option"]')]
-        .filter(visible).slice(0, 40).map(controlSnapshot)
-      : [];
-    const stateAttrs = [];
-    if (root) {
-      const stateElements = [root, ...root.querySelectorAll('[data-step],[data-step-id],[data-question],[data-question-id],[data-workflow],[data-workflow-id],[data-state],[data-screen]')].slice(0, 24);
-      for (const element of stateElements) {
-        const attrs = {};
-        for (const attr of element.attributes || []) {
-          if (/^(?:data-)?(?:workflow|step|question|option|state|screen)(?:-|$)/i.test(attr.name)) attrs[attr.name] = clean(attr.value);
-        }
-        if (Object.keys(attrs).length) stateAttrs.push({ tag: element.tagName?.toLowerCase() || '', id: clean(element.id || ''), attrs });
-      }
-    }
-    return {
-      route: `${location.pathname}${location.search}${location.hash}`,
-      title: clean(document.title),
-      headings,
-      controls,
-      stateAttrs,
-      formCount: document.forms?.length || 0,
-      nextVisible: !!nextButton()
-    };
+  function pageKindFromLabel(label) {
+    const text = norm(label);
+    if (!text) return 'unknown';
+    if (text.includes('pandash')) return 'pandash';
+    if (text.includes('related') && (text.includes('tt') || text.includes('ticket'))) return 'related';
+    if (text.includes('information') || text === 'information w1' || text.includes('information w1')) return 'information';
+    if (text.includes('sortab')) return 'sortability';
+    if (text.includes('severity')) return 'severity';
+    if (text.includes('image')) return 'images';
+    if (text.includes('create issue') || text.includes('create ticket')) return 'create';
+    if (text === 'asin' || text.includes('asin check') || text.includes('enter asin')) return 'asin';
+    if (text.includes('issue') && text.includes('fc')) return 'issue';
+    return 'unknown';
   }
 
-  function recognitionText(snapshot = riverDomSnapshot()) {
-    const parts = [...snapshot.headings];
-    for (const control of snapshot.controls) {
-      parts.push(control.label, control.name, control.id, control.placeholder, control.role);
-      for (const option of control.options || []) parts.push(option.text, option.value);
-    }
-    return norm(parts.filter(Boolean).join(' ')).slice(0, 7000);
-  }
-
-  function pageKind(snapshot = null) {
+  function pageKind() {
+    const labelKind = pageKindFromLabel(workflowLabel());
+    if (labelKind !== 'unknown') return labelKind;
     const route = `${location.pathname} ${location.search} ${location.hash}`.toLowerCase();
     if (/create.?issue/.test(route)) return 'create';
     if (/related.?tt/.test(route)) return 'related';
@@ -871,66 +773,43 @@
     if (/(^|\W)asin(\W|$)/.test(route)) return 'asin';
     if (/issue.?at.?fc/.test(route)) return 'issue';
     if (/pandash|dangerous|dg review/.test(route)) return 'pandash';
-
-    const state = snapshot || riverDomSnapshot();
-    const text = recognitionText(state);
-    if (text.includes('create issue')) return 'create';
-    if (text.includes('related tt') || text.includes('related ticket')) return 'related';
-    if (text.includes('units impacted') || text.includes('shipments impacted')) return 'severity';
-    if (text.includes('physical location of the units') || text.includes('inventory cost per unit') || text.includes('vendor code seller id')) return 'information';
-    if (text.includes('type asin here') || state.controls.some(control => norm(`${control.label} ${control.name} ${control.placeholder}`) === 'asin')) return 'asin';
-    if (text.includes('non sortable') || text.includes('non-sortable')) return 'sortability';
-    if (text.includes('lacks dg information') || text.includes('dangerous goods')) return 'pandash';
-    if (text.includes('fc inbound issue') || text.includes('inbound issue')) return 'issue';
-    if (state.controls.some(control => control.tag === 'select' && (control.options || []).length >= 2) && /image/.test(text)) return 'images';
+    if (field(['units impacted', 'shipments impacted'])) return 'severity';
+    if (field(['physical location of the units', 'inventory cost per unit', 'vendor code / seller id'])) return 'information';
+    if (field(['type asin here', 'asin'])) return 'asin';
+    if (choiceCandidates().some(element => /lacks dg information|dangerous goods/i.test(associatedLabel(element) || element.textContent || ''))) return 'pandash';
     return 'unknown';
   }
 
-  function waitForPageChange(previous) {
-    const immediate = pageKind();
-    if (immediate !== 'unknown' && immediate !== previous) return Promise.resolve(immediate);
+  function controlSnapshot(element) {
+    const tag = element.tagName?.toLowerCase() || '';
+    const item = {
+      tag,
+      type: clean(element.getAttribute?.('type') || ''),
+      id: clean(element.id || ''),
+      name: clean(element.getAttribute?.('name') || ''),
+      role: clean(element.getAttribute?.('role') || ''),
+      label: associatedLabel(element),
+      placeholder: clean(element.getAttribute?.('placeholder') || '')
+    };
+    if (tag === 'input' && ['radio', 'checkbox'].includes(item.type)) {
+      item.value = clean(element.value || '');
+      item.checked = !!element.checked;
+    }
+    if (tag === 'select') item.options = [...element.options].slice(0, 12).map(option => ({ text: clean(option.textContent), value: clean(option.value), disabled: !!option.disabled }));
+    return item;
+  }
 
-    return new Promise(resolve => {
-      let settled = false;
-      let debounce = 0;
-      const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
-      if (!root) return resolve('unknown');
-      const observer = new MutationObserver(() => {
-        if (debounce || settled) return;
-        debounce = setTimeout(check, DOM_DEBOUNCE_MS);
-      });
-      const timeout = setTimeout(() => finish(pageKind()), NAV_TIMEOUT_MS);
-      const routeCheck = () => check();
-
-      function cleanup() {
-        observer.disconnect();
-        clearTimeout(debounce);
-        clearTimeout(timeout);
-        window.removeEventListener('popstate', routeCheck, true);
-        window.removeEventListener('hashchange', routeCheck, true);
-      }
-      function finish(value) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(value);
-      }
-      function check() {
-        clearTimeout(debounce);
-        debounce = 0;
-        const current = pageKind();
-        if (current !== 'unknown' && current !== previous) finish(current);
-      }
-
-      observer.observe(root, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['id', 'name', 'role', 'aria-label', 'data-step', 'data-step-id', 'data-question', 'data-question-id', 'data-workflow', 'data-workflow-id', 'data-state', 'data-screen']
-      });
-      window.addEventListener('popstate', routeCheck, true);
-      window.addEventListener('hashchange', routeCheck, true);
-    });
+  function riverDomSnapshot() {
+    const root = document.body || document.documentElement;
+    const controls = root ? [...root.querySelectorAll('input:not([type="password"]):not([type="file"]),textarea,select,button,[role="button"],[role="radio"],[role="option"]')].filter(visible).slice(0, 40).map(controlSnapshot) : [];
+    return {
+      route: `${location.pathname}${location.search}${location.hash}`,
+      title: clean(document.title),
+      workflowLabel: workflowLabel(),
+      controls,
+      formCount: document.forms?.length || 0,
+      nextVisible: !!nextButton()
+    };
   }
 
   function payloadValue(payload, key, fallback = 'N/A') {
@@ -940,57 +819,89 @@
 
   let riverGeneration = 0;
   let riverBusy = false;
-  let unknownObserver = null;
-  let unknownTimer = 0;
-  let unknownDebounce = 0;
+  let stepObserver = null;
+  let stepTimer = 0;
+  let stepDebounce = 0;
 
-  function clearUnknownRecognition() {
-    unknownObserver?.disconnect();
-    unknownObserver = null;
-    clearTimeout(unknownTimer);
-    clearTimeout(unknownDebounce);
-    unknownTimer = 0;
-    unknownDebounce = 0;
+  function clearStepWatch() {
+    stepObserver?.disconnect();
+    stepObserver = null;
+    clearTimeout(stepTimer);
+    clearTimeout(stepDebounce);
+    stepTimer = 0;
+    stepDebounce = 0;
   }
 
-  async function advanceAndContinue(ui, step, generation) {
-    next(step);
-    const nextPage = await waitForPageChange(step);
-    if (generation !== riverGeneration) return null;
-    if (nextPage === 'unknown' || nextPage === step) {
-      const snapshot = riverDomSnapshot();
-      emit('transition.unresolved', { from: step, detected: nextPage, snapshot });
-      ui.querySelector('[data-status]').textContent = 'WAITING • transition not identified yet; tracing active.';
-      return { waitForRecognition: true };
-    }
-    return drive(ui, 'Page loaded', generation);
+  function armStepWatch(ui, previous, generation, run) {
+    clearStepWatch();
+    if (generation !== riverGeneration) return;
+    const root = document.body || document.documentElement;
+    if (!root) return;
+    const check = () => {
+      clearTimeout(stepDebounce);
+      stepDebounce = 0;
+      if (generation !== riverGeneration) return clearStepWatch();
+      const current = pageKind();
+      if (current === 'unknown' || current === previous) return;
+      clearStepWatch();
+      emit('step.recognised.after-wait', { from: previous, step: current, workflowLabel: workflowLabel() });
+      void run('Workflow state changed');
+    };
+    stepObserver = new MutationObserver(() => {
+      if (stepDebounce) return;
+      stepDebounce = setTimeout(check, DOM_DEBOUNCE_MS);
+    });
+    stepObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['label', 'id', 'name', 'role', 'aria-label', 'data-step', 'data-step-id', 'data-question', 'data-question-id', 'data-state', 'data-screen']
+    });
+    stepTimer = setTimeout(() => {
+      const current = pageKind();
+      if (current !== 'unknown' && current !== previous) {
+        clearStepWatch();
+        void run('Workflow state became available');
+        return;
+      }
+      emit('step.wait.timeout', { previous, snapshot: riverDomSnapshot() });
+      ui.querySelector('[data-status]').textContent = 'WAITING • workflow state still unknown; trace captured.';
+      clearStepWatch();
+    }, NAV_TIMEOUT_MS);
+    check();
   }
 
   async function drive(ui, reason = 'RUN', generation = riverGeneration) {
-    if (generation !== riverGeneration) return null;
+    if (generation !== riverGeneration) return { wait: false };
     const payload = GM_getValue(KEY, null);
     if (!payload) {
       ui.querySelector('[data-status]').textContent = 'No saved FCResearch payload.';
-      return null;
+      return { wait: false };
     }
-
     ui.querySelector('[data-id]').textContent = payload.fnsku !== 'N/A' ? payload.fnsku : payload.asin;
     const status = ui.querySelector('[data-status]');
-    status.textContent = `${reason} • checking step…`;
-    const snapshot = riverDomSnapshot();
-    const page = pageKind(snapshot);
+    const page = pageKind();
+    const label = workflowLabel();
     const stepNumber = { pandash: 1, issue: 2, asin: 3, related: 4, information: 5, sortability: 6, severity: 7, images: 8, create: 9 }[page] || 0;
-    emit('step.detected', { step: page, stepNumber });
+    emit('step.detected', { step: page, stepNumber, workflowLabel: label });
+    status.textContent = `${reason} • ${label || page}`;
 
+    if (page === 'unknown') {
+      emit('step.unknown', { snapshot: riverDomSnapshot() });
+      status.textContent = 'WAITING • workflow is loading; watching state change.';
+      return { wait: true, previous: 'unknown' };
+    }
     if (page === 'pandash') {
       clickChoiceIndex(2, page);
-      status.textContent = 'Option 2 selected • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      status.textContent = 'PANDASH • Option 2 selected • advancing…';
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'issue') {
       clickChoiceIndex(1, page);
-      status.textContent = 'Option 1 selected • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      status.textContent = 'ISSUE • Option 1 selected • advancing…';
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'asin') {
       const asin = payloadValue(payload, 'asin');
@@ -998,12 +909,13 @@
       if (!setValue(field(['type asin here', 'asin']), asin)) throw new Error('ASIN field not found/retained.');
       emit('automation.action', { step: page, action: 'fill', field: 'asin', available: true });
       status.textContent = 'ASIN entered • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'related') {
-      emit('manual.pause', { step: page });
+      emit('manual.pause', { step: page, workflowLabel: label });
       status.textContent = 'PAUSED • manual review required. Complete this step, then click Next.';
-      return null;
+      return { wait: false };
     }
     if (page === 'information') {
       const values = [
@@ -1019,97 +931,61 @@
       emit('automation.action', { step: page, action: 'fill-information', filled, expected: values.length });
       if (filled !== values.length) throw new Error(`Information W1 filled ${filled}/${values.length}; not advancing.`);
       status.textContent = 'Information W1 filled • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'sortability') {
       clickChoiceIndex(1, page);
-      status.textContent = 'Option 1 selected • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      status.textContent = 'SORTABILITY • Option 1 selected • advancing…';
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'severity') {
       const shipments = field(['shipments impacted', 'number of shipments impacted']);
       if (!Number.isFinite(Number(payload.inventoryQuantity)) || Number(payload.inventoryQuantity) <= 0) {
         if (shipments) setValue(shipments, 0);
         emit('manual.pause', { step: page, reason: payload.quantityMode || 'quantity-unavailable' });
-        status.textContent = 'PAUSED • PO quantity is unavailable/0. Enter Units impacted manually, then click Next.';
-        return null;
+        status.textContent = 'PAUSED • PO quantity unavailable/0. Enter Units impacted manually, then click Next.';
+        return { wait: false };
       }
       const units = field(['units impacted', 'number of units impacted']);
       if (!setValue(units, Number(payload.inventoryQuantity)) || !setValue(shipments, 0)) throw new Error('Quantity fields not found/retained.');
       emit('automation.action', { step: page, action: 'fill-severity', quantityAvailable: true, shipments: 0, source: 'latest-po-matching-line' });
       status.textContent = 'PO-line quantity + shipments filled • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'images') {
       selectDropdownIndex(2, page);
       status.textContent = 'Dropdown Option 2 selected • advancing…';
-      return advanceAndContinue(ui, page, generation);
+      next(page);
+      return { wait: true, previous: page };
     }
     if (page === 'create') {
       emit('done', { finalSubmissionManual: true });
       status.textContent = 'DONE • final Create Issue submission remains manual.';
-      return null;
+      return { wait: false };
     }
-
-    emit('step.unknown', { snapshot });
-    status.textContent = 'WAITING • RIVER step not recognised yet; tracing active.';
-    return { waitForRecognition: true };
+    return { wait: false };
   }
 
   function installRiver() {
     const start = () => {
       const ui = panel();
-
-      const armUnknownRecognition = generation => {
-        if (generation !== riverGeneration || unknownObserver) return;
-        const root = document.querySelector('main,[role="main"],form') || document.body || document.documentElement;
-        if (!root) return;
-
-        const check = () => {
-          clearTimeout(unknownDebounce);
-          unknownDebounce = 0;
-          if (generation !== riverGeneration) {
-            clearUnknownRecognition();
-            return;
-          }
-          const snapshot = riverDomSnapshot();
-          const detected = pageKind(snapshot);
-          if (detected === 'unknown') return;
-          clearUnknownRecognition();
-          emit('step.recognised.after-wait', { step: detected });
-          void run('Step became available');
-        };
-
-        unknownObserver = new MutationObserver(() => {
-          if (unknownDebounce) return;
-          unknownDebounce = setTimeout(check, DOM_DEBOUNCE_MS);
-        });
-        unknownObserver.observe(root, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['id', 'name', 'role', 'aria-label', 'data-step', 'data-step-id', 'data-question', 'data-question-id', 'data-workflow', 'data-workflow-id', 'data-state', 'data-screen']
-        });
-        unknownTimer = setTimeout(() => {
-          clearUnknownRecognition();
-          emit('step.wait.timeout', { snapshot: riverDomSnapshot() });
-          ui.querySelector('[data-status]').textContent = 'WAITING • step still unknown; trace captured. Use RUN after the page changes.';
-        }, NAV_TIMEOUT_MS);
-      };
-
       const run = async reason => {
         if (riverBusy) return;
         riverBusy = true;
         const generation = riverGeneration;
         try {
           const outcome = await drive(ui, reason, generation);
-          if (outcome?.waitForRecognition) armUnknownRecognition(generation);
-          else clearUnknownRecognition();
+          if (generation !== riverGeneration) return;
+          if (outcome?.wait) armStepWatch(ui, outcome.previous, generation, run);
+          else clearStepWatch();
         } catch (error) {
           if (generation === riverGeneration) {
-            clearUnknownRecognition();
+            clearStepWatch();
             ui.querySelector('[data-status]').textContent = `WAITING • ${clean(error?.message || error)}`;
-            emit('error', { message: clean(error?.message || error), step: pageKind(), snapshot: riverDomSnapshot() });
+            emit('error', { message: clean(error?.message || error), step: pageKind(), workflowLabel: workflowLabel(), snapshot: riverDomSnapshot() });
           }
         } finally {
           riverBusy = false;
@@ -1119,7 +995,7 @@
       ui.querySelector('[data-run]').onclick = () => void run('Manual RUN');
       ui.querySelector('[data-clear]').onclick = () => {
         riverGeneration++;
-        clearUnknownRecognition();
+        clearStepWatch();
         GM_setValue(KEY, null);
         ui.querySelector('[data-id]').textContent = '';
         ui.querySelector('[data-status]').textContent = 'STOPPED / CLEARED';
@@ -1131,26 +1007,18 @@
         const payload = GM_getValue(KEY, null);
         const manualSeverity = currentPage === 'severity' && (!Number.isFinite(Number(payload?.inventoryQuantity)) || Number(payload?.inventoryQuantity) <= 0);
         if (currentPage !== 'related' && !manualSeverity) return;
-        const button = event.target instanceof Element
-          ? event.target.closest('button,a,[role="button"],input[type="button"],input[type="submit"]')
-          : null;
+        const button = event.target instanceof Element ? event.target.closest('button,a,[role="button"],input[type="button"],input[type="submit"]') : null;
         if (!button || button.closest('#bwu2-river-assistant') || button !== nextButton()) return;
         const generation = riverGeneration;
-        void waitForPageChange(currentPage).then(nextPage => {
+        setTimeout(() => {
           if (generation !== riverGeneration) return;
-          if (nextPage === 'unknown' || nextPage === currentPage) {
-            emit('transition.unresolved', { from: currentPage, detected: nextPage, snapshot: riverDomSnapshot() });
-            armUnknownRecognition(generation);
-            return;
-          }
-          void run('Manual step completed');
-        });
+          armStepWatch(ui, currentPage, generation, run);
+        }, 0);
       }, true);
 
       window.addEventListener('popstate', () => void run('Route changed'), true);
       window.addEventListener('hashchange', () => void run('Route changed'), true);
-      window.addEventListener('pagehide', clearUnknownRecognition, { once: true });
-
+      window.addEventListener('pagehide', clearStepWatch, { once: true });
       if (GM_getValue(KEY, null)) void run('Page loaded');
     };
 
