@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.5 Sideline API Move TEST
+// @name         MAIN v0.2.6 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.5
+// @version      0.2.6
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.5';
+  const VERSION = '0.2.6';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -545,8 +545,6 @@
 #sh-live .sh-live-scan{font:900 18px Consolas,monospace;padding:12px;border:2px solid #146eb4}
 #sh-live .sh-live-scan:disabled{background:#f3f4f6;border-color:#cbd5e1;color:#64748b}
 #sh-live .sh-live-ready{margin:7px 0;padding:7px 9px;border:1px solid #bfdbfe;border-left:5px solid #146eb4;background:#eff6ff;color:#0f3d73;font-weight:900}
-#sh-live .sh-live-one-banner{display:none;margin:7px 0;padding:11px 12px;border:4px solid #111827;border-radius:5px;background:#fde047;color:#111827;text-align:center;font:1000 18px/1.2 Arial,sans-serif;letter-spacing:.8px;animation:shLiveOneFlash .52s steps(2,end) infinite}
-#sh-live .sh-live-one-banner.show{display:block}
 #sh-dock button.sh-live-one-mode{background:#fde047!important;color:#111827!important;border:3px solid #111827!important;padding:6px 4px!important;animation:shLiveOneFlash .52s steps(2,end) infinite}
 @keyframes shLiveOneFlash{0%,100%{background:#fde047;color:#111827;box-shadow:0 0 0 2px #111827}50%{background:#111827;color:#fff;box-shadow:0 0 0 4px #fde047}}
 #sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
@@ -1051,7 +1049,6 @@
 
   const livePanel = panel('sh-live', `Live Lazy QTY 1 v${VERSION}`, 'live');
   livePanel.insertAdjacentHTML('beforeend',
-    '<div class="sh-live-one-banner">1×1 ACTIVE — IMMEDIATE QTY 1 — NO QUEUE</div>' +
     '<div class="sh-row">' +
       '<input class="sh-input" data-f="live-src" placeholder="1. Scan SOURCE (csX / tsX)">' +
       '<input class="sh-input" data-f="live-dest" placeholder="2. Scan DESTINATION" disabled>' +
@@ -1084,7 +1081,6 @@
   const liveStatus = $('[data-live-status]', livePanel);
   const liveError = $('[data-live-error]', livePanel);
   const liveTransientError = $('[data-live-transient-error]', livePanel);
-  const liveOneBanner = $('.sh-live-one-banner', livePanel);
   const liveReady = $('.sh-live-ready', livePanel);
   const liveQueueLabel = $('[data-live-queue-label]', livePanel);
   const liveIssue = $('.sh-live-issue', livePanel);
@@ -1099,7 +1095,6 @@
     const dockButton = dockButtons.find(button => button.dataset.key === 'live');
     const title = $('.sh-title', livePanel);
 
-    liveOneBanner.classList.toggle('show', live.oneByOne);
     dockButton?.classList.toggle('sh-live-one-mode', live.oneByOne);
     if (dockButton) dockButton.textContent = live.oneByOne ? 'Live 1×1' : 'Live';
     if (title) title.textContent = live.oneByOne
