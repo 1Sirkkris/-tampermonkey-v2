@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.3
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.4
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.3
-// @description  Lightweight event-driven Hazmat/L0 RIVER capture and approved workflow automation.
+// @version      0.3.4
+// @description  Event-driven Hazmat/L0 RIVER capture using latest matching PO line data; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
 // @run-at       document-start
@@ -16,22 +16,26 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.3';
+  if (window.__bwu2RiverAssistantV034) return;
+  window.__bwu2RiverAssistantV034 = true;
+
+  const VERSION = '0.3.4';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
   const CORE_CANCEL_EVENT = 'fcr-data-core:cancel';
-  const CAPTURE_FIELDS = ['asin', 'fnsku', 'title', 'purchaseOrder', 'inventoryQuantity', 'inventoryCost', 'vendorCode'];
+  const CAPTURE_FIELDS = ['asin', 'fnsku', 'title', 'purchaseOrder', 'quantity', 'inventoryCost', 'vendorCode'];
   const DOM_GRACE_MS = 6000;
   const CORE_TIMEOUT_MS = 12000;
   const NAV_TIMEOUT_MS = 12000;
   const DOM_DEBOUNCE_MS = 90;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
-  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
-  const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-inventory';
+  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-84c3-87927cdb4d0c';
+  const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const norm = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const code = value => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
   const visible = element => !!element && element.isConnected && (() => {
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -89,12 +93,17 @@
     return match ? `AUD ${match[0].replace(/,/g, '')}` : text;
   }
 
-  function productSnapshot(root = document) {
+  function productSnapshot(root = document, search = currentSearch()) {
     const rawAsin = labelValue(root, ['ASIN', 'ISBN']);
     const rawFnsku = labelValue(root, ['FNSKU', 'FNSku']);
+    const searchCode = code(search);
+    const asin = (rawAsin.match(/\b[A-Z0-9]{10}\b/i) || [])[0]?.toUpperCase()
+      || (/^[A-Z0-9]{10}$/.test(searchCode) && !searchCode.startsWith('X0') ? searchCode : '');
+    const fnsku = (rawFnsku.match(/\bX0[A-Z0-9]{8}\b/i) || [])[0]?.toUpperCase()
+      || (/^X0[A-Z0-9]{8}$/.test(searchCode) ? searchCode : '');
     return {
-      asin: (rawAsin.match(/\b[A-Z0-9]{10}\b/i) || [])[0]?.toUpperCase() || '',
-      fnsku: (rawFnsku.match(/\bX0[A-Z0-9]{8}\b/i) || [])[0]?.toUpperCase() || '',
+      asin,
+      fnsku,
       title: labelValue(root, ['Title']),
       inventoryCost: formatCost(labelValue(root, ['List Price', 'Price']))
     };
@@ -110,72 +119,168 @@
     return headers.findIndex(header => names.some(name => header === norm(name) || header.startsWith(`${norm(name)} `)));
   }
 
-  function purchaseOrderSnapshot(root = document) {
-    const table = root.querySelector('#table-purchase-order-item');
-    if (!table) return { state: 'pending' };
+  function parseFcrDate(value) {
+    const text = clean(value);
+    if (!text) return Number.NEGATIVE_INFINITY;
 
-    const headers = tableHeaders(table);
-    const poIndex = columnIndex(headers, 'purchase order', 'po');
-    const vendorIndex = columnIndex(headers, 'vendor code', 'seller id');
-    const dateIndex = columnIndex(headers, 'order date', 'date');
-    if (poIndex < 0 || vendorIndex < 0) return { state: 'unavailable', purchaseOrder: 'N/A', vendorCode: 'N/A' };
+    const iso = text.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (iso) {
+      const [, y, m, d, hh = '0', mm = '0', ss = '0'] = iso;
+      const timestamp = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+      return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+    }
 
-    const rows = [...table.querySelectorAll('tbody tr')].map((row, rowIndex) => {
-      const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
-      const purchaseOrder = clean(cells[poIndex]?.textContent);
-      const vendorCode = clean(cells[vendorIndex]?.textContent);
-      const orderDate = dateIndex >= 0 ? clean(cells[dateIndex]?.textContent) : '';
-      const timestamp = Date.parse(orderDate);
-      return {
-        purchaseOrder,
-        vendorCode,
-        orderDate,
-        timestamp: Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY,
-        rowIndex
-      };
-    }).filter(row => row.purchaseOrder && !/no matching records/i.test(row.purchaseOrder));
+    const dmy = text.match(/\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (dmy) {
+      const [, d, m, y, hh = '0', mm = '0', ss = '0'] = dmy;
+      const timestamp = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+      return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+    }
 
-    if (!rows.length) return { state: 'unavailable', purchaseOrder: 'N/A', vendorCode: 'N/A' };
-    rows.sort((a, b) => b.timestamp - a.timestamp || a.rowIndex - b.rowIndex);
-    const latest = rows[0];
-    return {
-      state: 'available',
-      purchaseOrder: latest.purchaseOrder,
-      vendorCode: latest.vendorCode || 'N/A',
-      orderDate: latest.orderDate
-    };
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
   }
 
-  function inventorySnapshot(root = document) {
-    const table = root.querySelector('#table-inventory');
-    if (!table) return { state: 'pending' };
+  function numericCell(value) {
+    const text = clean(value).replace(/,/g, '');
+    if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
+    const number = Number(text);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
 
-    const wrapper = table.closest('.dataTables_wrapper,.dataTables_scroll') || table.parentElement;
-    const headers = [
-      ...table.querySelectorAll('thead th,thead td'),
-      ...(wrapper ? [...wrapper.querySelectorAll('.dataTables_scrollHead th,.dataTables_scrollHead td')] : [])
-    ];
-    for (const header of headers) {
-      const match = clean(header.textContent).match(/^quantity\s*\(([\d,]+)\)/i);
-      if (match) return { state: 'available', inventoryQuantity: Number(match[1].replace(/,/g, '')) };
-    }
+  function shortVendorCode(value) {
+    const text = clean(value);
+    if (!text) return '';
+    const tokens = (text.match(/[A-Z0-9]+/gi) || []).map(token => token.toUpperCase());
+    const preferred = tokens.find(token => token.length >= 2 && token.length <= 5 && token !== 'FBA');
+    if (preferred) return preferred;
+    const six = tokens.find(token => token.length === 6 && token !== 'FBA');
+    return six || '';
+  }
 
-    const names = tableHeaders(table);
-    const quantityIndex = columnIndex(names, 'quantity');
-    if (quantityIndex < 0) return { state: 'unavailable', inventoryQuantity: null };
+  function purchaseOrderDetails(root = document) {
+    const table = root.querySelector('#table-purchase-order');
+    if (!table) return new Map();
+    const headers = tableHeaders(table);
+    const poIndex = columnIndex(headers, 'purchase order', 'po');
+    const placedIndex = columnIndex(headers, 'placed', 'confirmed', 'order date', 'date');
+    if (poIndex < 0) return new Map();
 
-    let total = 0;
-    let found = false;
-    for (const row of table.querySelectorAll('tbody tr')) {
+    const details = new Map();
+    for (const [rowIndex, row] of [...table.querySelectorAll('tbody tr')].entries()) {
       const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
-      const raw = clean(cells[quantityIndex]?.textContent);
-      if (!raw || /no matching records/i.test(raw)) continue;
-      const value = Number(raw.replace(/[^0-9.-]/g, ''));
-      if (!Number.isFinite(value)) continue;
-      total += value;
-      found = true;
+      const purchaseOrder = clean(cells[poIndex]?.textContent);
+      if (!purchaseOrder || /no matching records/i.test(purchaseOrder)) continue;
+      const placed = placedIndex >= 0 ? clean(cells[placedIndex]?.textContent) : '';
+      const timestamp = parseFcrDate(placed);
+      const previous = details.get(code(purchaseOrder));
+      if (!previous || timestamp > previous.timestamp) {
+        details.set(code(purchaseOrder), { purchaseOrder, placed, timestamp, rowIndex });
+      }
     }
-    return { state: 'available', inventoryQuantity: found ? total : 0 };
+    return details;
+  }
+
+  function purchaseOrderItemRows(root = document) {
+    const table = root.querySelector('#table-purchase-order-item');
+    if (!table) return { state: 'pending', rows: [] };
+
+    const headers = tableHeaders(table);
+    const indexes = {
+      po: columnIndex(headers, 'purchase order', 'po'),
+      sku: columnIndex(headers, 'sku', 'fnsku', 'asin'),
+      vendor: columnIndex(headers, 'vendor code', 'seller id'),
+      unfilled: columnIndex(headers, 'unfilled'),
+      cancelled: columnIndex(headers, 'canceled', 'cancelled'),
+      received: columnIndex(headers, 'received'),
+      title: columnIndex(headers, 'title'),
+      date: columnIndex(headers, 'order date', 'placed', 'date')
+    };
+    if (indexes.po < 0 || indexes.sku < 0) return { state: 'invalid', rows: [] };
+
+    const rows = [];
+    for (const [rowIndex, row] of [...table.querySelectorAll('tbody tr')].entries()) {
+      const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
+      const purchaseOrder = clean(cells[indexes.po]?.textContent);
+      if (!purchaseOrder || /no matching records/i.test(purchaseOrder)) continue;
+      rows.push({
+        purchaseOrder,
+        sku: clean(cells[indexes.sku]?.textContent),
+        vendorRaw: indexes.vendor >= 0 ? clean(cells[indexes.vendor]?.textContent) : '',
+        unfilled: indexes.unfilled >= 0 ? numericCell(cells[indexes.unfilled]?.textContent) : null,
+        cancelled: indexes.cancelled >= 0 ? numericCell(cells[indexes.cancelled]?.textContent) : null,
+        received: indexes.received >= 0 ? numericCell(cells[indexes.received]?.textContent) : null,
+        title: indexes.title >= 0 ? clean(cells[indexes.title]?.textContent) : '',
+        orderDate: indexes.date >= 0 ? clean(cells[indexes.date]?.textContent) : '',
+        timestamp: indexes.date >= 0 ? parseFcrDate(cells[indexes.date]?.textContent) : Number.NEGATIVE_INFINITY,
+        rowIndex,
+        rowText: clean(row.textContent)
+      });
+    }
+    return { state: rows.length ? 'available' : 'empty', rows };
+  }
+
+  function rowMatchStrength(row, identity) {
+    const wanted = [identity.search, identity.asin, identity.fnsku].map(code).filter(Boolean);
+    const sku = code(row.sku);
+    if (sku && wanted.includes(sku)) return { matched: true, by: sku === code(identity.fnsku) ? 'fnsku' : sku === code(identity.asin) ? 'asin' : 'search', strength: 3 };
+
+    const rowText = code(row.rowText);
+    const embedded = wanted.find(value => value.length >= 8 && rowText.includes(value));
+    if (embedded) return { matched: true, by: embedded === code(identity.fnsku) ? 'fnsku-row' : embedded === code(identity.asin) ? 'asin-row' : 'search-row', strength: 2 };
+
+    if (identity.title && row.title && norm(row.title) === norm(identity.title)) return { matched: true, by: 'title-exact', strength: 1 };
+    return { matched: false, by: '', strength: 0 };
+  }
+
+  function selectLatestPoLine(itemRoot, detailRoot, identity) {
+    const parsed = purchaseOrderItemRows(itemRoot);
+    if (parsed.state === 'pending') return { state: 'pending', reason: 'po-items-not-loaded' };
+    if (parsed.state !== 'available') return { state: 'unavailable', reason: 'po-items-empty' };
+
+    const details = purchaseOrderDetails(detailRoot);
+    const candidates = [];
+    for (const row of parsed.rows) {
+      const match = rowMatchStrength(row, identity);
+      if (!match.matched) continue;
+      const detail = details.get(code(row.purchaseOrder));
+      const rowTimestamp = row.timestamp;
+      const detailTimestamp = detail?.timestamp ?? Number.NEGATIVE_INFINITY;
+      const timestamp = Math.max(rowTimestamp, detailTimestamp);
+      const dateSource = rowTimestamp >= detailTimestamp && Number.isFinite(rowTimestamp) ? 'po-item-order-date'
+        : Number.isFinite(detailTimestamp) ? 'po-placed-date' : 'none';
+      candidates.push({ ...row, ...match, timestamp, dateSource });
+    }
+
+    if (!candidates.length) return { state: 'unavailable', reason: 'no-matching-item-line' };
+
+    const dated = candidates.filter(candidate => Number.isFinite(candidate.timestamp) && candidate.timestamp !== Number.NEGATIVE_INFINITY);
+    if (!dated.length && candidates.length > 1) {
+      return { state: 'needs-po-dates', reason: 'multiple-matching-lines-without-date', candidates: candidates.length };
+    }
+
+    const pool = dated.length ? dated : candidates;
+    pool.sort((a, b) => b.timestamp - a.timestamp || b.strength - a.strength || a.rowIndex - b.rowIndex);
+    const selected = pool[0];
+    const vendorCode = shortVendorCode(selected.vendorRaw);
+    const quantityParts = [selected.unfilled, selected.cancelled, selected.received];
+    const quantityKnown = quantityParts.every(Number.isFinite);
+    const quantityTotal = quantityKnown ? quantityParts.reduce((sum, value) => sum + value, 0) : null;
+
+    return {
+      state: 'available',
+      purchaseOrder: selected.purchaseOrder,
+      vendorCode: vendorCode || 'N/A',
+      quantity: quantityKnown && quantityTotal > 0 ? quantityTotal : null,
+      quantityMode: quantityKnown && quantityTotal > 0 ? 'po-line-total' : quantityKnown ? 'manual-zero-total' : 'manual-missing-components',
+      unfilled: selected.unfilled,
+      cancelled: selected.cancelled,
+      received: selected.received,
+      matchBy: selected.by,
+      dateSource: selected.dateSource,
+      candidateCount: candidates.length,
+      vendorShort: !!vendorCode
+    };
   }
 
   const corePending = new Map();
@@ -193,11 +298,22 @@
   function coreRequest(type, payload = {}) {
     const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return new Promise((resolve, reject) => {
+      const started = performance.now();
       const timer = setTimeout(() => {
         corePending.delete(id);
         reject(new Error(`${type} timed out`));
       }, CORE_TIMEOUT_MS);
-      corePending.set(id, { resolve, reject, timer });
+      corePending.set(id, {
+        timer,
+        resolve: data => {
+          emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: true });
+          resolve(data);
+        },
+        reject: error => {
+          emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: false });
+          reject(error);
+        }
+      });
       window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
         detail: JSON.stringify({ id, type, payload, client: 'river-assistant', group: 'river-capture' })
       }));
@@ -218,11 +334,10 @@
 
   function resolveField(state, field, value, unavailableValue = 'N/A') {
     if (!state[field] || state[field].state !== 'pending') return false;
-    const available = field === 'inventoryQuantity'
-      ? Number.isFinite(Number(value))
-      : clean(value) !== '';
+    const numeric = field === 'quantity';
+    const available = numeric ? Number.isFinite(Number(value)) && Number(value) > 0 : clean(value) !== '';
     state[field] = available
-      ? { state: 'available', value: field === 'inventoryQuantity' ? Number(value) : clean(value) }
+      ? { state: 'available', value: numeric ? Number(value) : clean(value) }
       : { state: 'unavailable', value: unavailableValue };
     return true;
   }
@@ -239,28 +354,39 @@
     return CAPTURE_FIELDS.filter(field => state[field].state === 'pending');
   }
 
-  function applyProduct(state, root = document) {
-    const product = productSnapshot(root);
-    resolveField(state, 'asin', product.asin);
-    resolveField(state, 'fnsku', product.fnsku);
-    resolveField(state, 'title', product.title);
-    resolveField(state, 'inventoryCost', product.inventoryCost);
+  function applyProduct(capture, root = document) {
+    const product = productSnapshot(root, capture.search);
+    resolveField(capture.state, 'asin', product.asin);
+    resolveField(capture.state, 'fnsku', product.fnsku);
+    resolveField(capture.state, 'title', product.title);
+    resolveField(capture.state, 'inventoryCost', product.inventoryCost);
+    capture.identity = {
+      search: capture.search,
+      asin: capture.state.asin.state === 'available' ? capture.state.asin.value : product.asin,
+      fnsku: capture.state.fnsku.state === 'available' ? capture.state.fnsku.value : product.fnsku,
+      title: capture.state.title.state === 'available' ? capture.state.title.value : product.title
+    };
   }
 
-  function applyPurchaseOrder(state, root = document) {
-    if (state.purchaseOrder.state !== 'pending' && state.vendorCode.state !== 'pending') return false;
-    const po = purchaseOrderSnapshot(root);
-    if (po.state === 'pending') return false;
-    resolveField(state, 'purchaseOrder', po.purchaseOrder);
-    resolveField(state, 'vendorCode', po.vendorCode);
-    return true;
-  }
+  function applyPoSelection(capture, itemRoot = document, detailRoot = document) {
+    if (capture.state.purchaseOrder.state !== 'pending' && capture.state.vendorCode.state !== 'pending' && capture.state.quantity.state !== 'pending') return true;
+    const selected = selectLatestPoLine(itemRoot, detailRoot, capture.identity || {});
+    capture.lastPoSelection = selected;
+    if (selected.state !== 'available') return false;
 
-  function applyInventory(state, root = document) {
-    if (state.inventoryQuantity.state !== 'pending') return false;
-    const inventory = inventorySnapshot(root);
-    if (inventory.state === 'pending') return false;
-    resolveField(state, 'inventoryQuantity', inventory.inventoryQuantity, null);
+    resolveField(capture.state, 'purchaseOrder', selected.purchaseOrder);
+    resolveField(capture.state, 'vendorCode', selected.vendorCode);
+    resolveField(capture.state, 'quantity', selected.quantity, null);
+    capture.quantityMode = selected.quantityMode;
+    emit('capture.po.selected', {
+      matchBy: selected.matchBy,
+      dateSource: selected.dateSource,
+      candidateCount: selected.candidateCount,
+      vendorShort: selected.vendorShort,
+      quantityMode: selected.quantityMode,
+      quantityTotal: selected.quantity,
+      componentsKnown: [selected.unfilled, selected.cancelled, selected.received].every(Number.isFinite)
+    });
     return true;
   }
 
@@ -307,17 +433,19 @@
     indicator.title = badge.title;
   }
 
-  function payloadFromState(state, search) {
+  function payloadFromState(capture) {
+    const { state, search } = capture;
     return {
       asin: state.asin.value || 'N/A',
       fnsku: state.fnsku.value || 'N/A',
       title: state.title.value || 'N/A',
       purchaseOrder: state.purchaseOrder.value || 'N/A',
-      inventoryQuantity: Number.isFinite(Number(state.inventoryQuantity.value)) ? Number(state.inventoryQuantity.value) : null,
+      inventoryQuantity: state.quantity.state === 'available' ? Number(state.quantity.value) : null,
       inventoryCost: state.inventoryCost.value || 'N/A',
       vendorCode: state.vendorCode.value || 'N/A',
       shipmentsImpacted: 0,
       physicalLocation: 'TBD',
+      quantityMode: capture.quantityMode || 'manual-unavailable',
       fieldStates: fieldStates(state),
       sourceSearch: search,
       sourceUrl: location.href,
@@ -348,12 +476,12 @@
     capture.observer?.disconnect();
     cancelCoreCapture();
 
-    const payload = payloadFromState(capture.state, capture.search);
+    const payload = payloadFromState(capture);
     GM_setValue(KEY, payload);
     capture.payload = payload;
     const unavailable = Object.entries(payload.fieldStates).filter(([, value]) => value === 'unavailable').map(([key]) => key);
     const detail = unavailable.length
-      ? `RIVER capture complete. Unavailable: ${unavailable.join(', ')}. Click to open RIVER.`
+      ? `RIVER capture complete. Unavailable/manual: ${unavailable.join(', ')}. Click to open RIVER.`
       : 'RIVER capture complete. Click to open RIVER.';
     renderCaptureState(capture.badge, capture.state, true, detail);
     emit('capture.ready', {
@@ -361,7 +489,8 @@
       unavailable,
       elapsedMs: Math.round(performance.now() - capture.started),
       domPasses: capture.domPasses,
-      fallbackRequests: capture.fallbackRequests
+      fallbackRequests: capture.fallbackRequests,
+      quantityMode: payload.quantityMode
     });
     emit('payload.saved', {
       hasAsin: payload.asin !== 'N/A', hasFnsku: payload.fnsku !== 'N/A', hasPo: payload.purchaseOrder !== 'N/A', hasTitle: payload.title !== 'N/A',
@@ -372,54 +501,54 @@
   function refreshCaptureFromDom(capture) {
     if (!capture || capture.done) return;
     capture.domPasses++;
-    applyProduct(capture.state);
-    applyPurchaseOrder(capture.state);
-    applyInventory(capture.state);
+    applyProduct(capture);
+    applyPoSelection(capture);
     renderCaptureState(capture.badge, capture.state);
     if (!unresolvedFields(capture.state).length) finishCapture(capture);
   }
 
+  async function fetchSectionOnce(capture, endpoint) {
+    if (capture.requestedSections.has(endpoint)) return null;
+    capture.requestedSections.add(endpoint);
+    capture.fallbackRequests++;
+    emit('capture.fallback.request', { endpoint });
+    try {
+      return await coreRequest('section', { endpoint, code: capture.search });
+    } catch (error) {
+      emit('capture.fallback.error', { endpoint, error: clean(error?.message || error) });
+      return null;
+    }
+  }
+
   async function fallbackCapture(capture) {
-    if (!capture || capture.done) return;
+    if (!capture || capture.done || capture.fallbackStarted) return;
+    capture.fallbackStarted = true;
     capture.observer?.disconnect();
     refreshCaptureFromDom(capture);
     if (capture.done) return;
 
-    const jobs = [];
-    if (capture.state.purchaseOrder.state === 'pending' || capture.state.vendorCode.state === 'pending') {
-      capture.fallbackRequests++;
-      jobs.push(coreRequest('section', { endpoint: 'purchase-order-item', code: capture.search }).then(result => {
-        const snapshot = purchaseOrderSnapshot(parseDocument(result?.html || ''));
-        if (snapshot.state === 'available') {
-          resolveField(capture.state, 'purchaseOrder', snapshot.purchaseOrder);
-          resolveField(capture.state, 'vendorCode', snapshot.vendorCode);
-        } else {
-          resolveField(capture.state, 'purchaseOrder', null);
-          resolveField(capture.state, 'vendorCode', null);
-        }
-        emit('capture.fallback.result', { section: 'purchase-order-item', ok: true });
-      }).catch(error => {
-        resolveField(capture.state, 'purchaseOrder', null);
-        resolveField(capture.state, 'vendorCode', null);
-        emit('capture.fallback.result', { section: 'purchase-order-item', ok: false, error: clean(error?.message || error) });
-      }));
+    let itemRoot = document;
+    let detailRoot = document;
+    const needsPo = ['purchaseOrder', 'vendorCode', 'quantity'].some(field => capture.state[field].state === 'pending');
+
+    if (needsPo) {
+      const itemResult = await fetchSectionOnce(capture, 'purchase-order-item');
+      if (capture.done) return;
+      if (itemResult?.html) itemRoot = parseDocument(itemResult.html);
+      applyPoSelection(capture, itemRoot, detailRoot);
     }
 
-    if (capture.state.inventoryQuantity.state === 'pending') {
-      capture.fallbackRequests++;
-      jobs.push(coreRequest('section', { endpoint: 'inventory', code: capture.search }).then(result => {
-        const total = result?.complete !== false && Number.isFinite(Number(result?.totalQuantity)) ? Number(result.totalQuantity) : null;
-        resolveField(capture.state, 'inventoryQuantity', total, null);
-        emit('capture.fallback.result', { section: 'inventory', ok: Number.isFinite(total) });
-      }).catch(error => {
-        resolveField(capture.state, 'inventoryQuantity', null, null);
-        emit('capture.fallback.result', { section: 'inventory', ok: false, error: clean(error?.message || error) });
-      }));
+    if (['purchaseOrder', 'vendorCode', 'quantity'].some(field => capture.state[field].state === 'pending')
+      && capture.lastPoSelection?.state === 'needs-po-dates') {
+      const poResult = await fetchSectionOnce(capture, 'purchase-order');
+      if (capture.done) return;
+      if (poResult?.html) detailRoot = parseDocument(poResult.html);
+      applyPoSelection(capture, itemRoot, detailRoot);
     }
 
-    emit('capture.fallback', { sections: jobs.length, unresolved: unresolvedFields(capture.state) });
-    if (jobs.length) await Promise.allSettled(jobs);
-    for (const field of unresolvedFields(capture.state)) resolveField(capture.state, field, null, field === 'inventoryQuantity' ? null : 'N/A');
+    for (const field of unresolvedFields(capture.state)) {
+      resolveField(capture.state, field, null, field === 'quantity' ? null : 'N/A');
+    }
     finishCapture(capture);
   }
 
@@ -431,15 +560,30 @@
 
     const state = newCaptureState();
     const capture = {
-      search, badge, state, started: performance.now(), domPasses: 0, fallbackRequests: 0,
-      observer: null, domTimer: 0, fallbackTimer: 0, done: false, payload: null
+      search,
+      badge,
+      state,
+      identity: { search, asin: '', fnsku: '', title: '' },
+      started: performance.now(),
+      domPasses: 0,
+      fallbackRequests: 0,
+      fallbackStarted: false,
+      requestedSections: new Set(),
+      observer: null,
+      domTimer: 0,
+      fallbackTimer: 0,
+      done: false,
+      payload: null,
+      lastPoSelection: null,
+      quantityMode: ''
     };
     activeCapture?.observer?.disconnect();
     clearTimeout(activeCapture?.fallbackTimer || 0);
     clearTimeout(activeCapture?.domTimer || 0);
+    cancelCoreCapture();
     activeCapture = capture;
     GM_setValue(KEY, null);
-    emit('capture.started', { fields: CAPTURE_FIELDS.length });
+    emit('capture.started', { fields: CAPTURE_FIELDS.length, quantitySource: 'latest-po-matching-line' });
 
     refreshCaptureFromDom(capture);
     if (capture.done) return;
@@ -457,36 +601,41 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV033 === '1') return;
-    badge.dataset.riverAssistantV033 = '1';
+    if (!badge || badge.dataset.riverAssistantV034 === '1') return;
+    badge.dataset.riverAssistantV034 = '1';
     renderCaptureState(badge, newCaptureState());
     startCapture(badge);
   }
 
+  function riverBadgeFromNode(node) {
+    if (!(node instanceof Element)) return null;
+    if (node.matches?.('.fc-hazmat.fc-river-l0')) return node;
+    return node.querySelector?.('.fc-hazmat.fc-river-l0') || null;
+  }
+
   function discoverRiverBadge() {
-    const existing = document.querySelector('.fc-hazmat.fc-river-l0');
-    if (existing) {
-      attachBadge(existing);
-      return;
-    }
+    const attachExisting = () => {
+      const badge = document.querySelector('.fc-hazmat.fc-river-l0');
+      if (badge) attachBadge(badge);
+    };
+    attachExisting();
 
     const root = document.querySelector('#results-content') || document.documentElement;
     if (!root) return;
     const observer = new MutationObserver(records => {
       for (const record of records) {
+        if (record.type === 'attributes') {
+          const badge = riverBadgeFromNode(record.target);
+          if (badge) attachBadge(badge);
+          continue;
+        }
         for (const node of record.addedNodes || []) {
-          if (!(node instanceof Element)) continue;
-          const badge = node.matches?.('.fc-hazmat.fc-river-l0')
-            ? node
-            : node.querySelector?.('.fc-hazmat.fc-river-l0');
-          if (!badge) continue;
-          observer.disconnect();
-          attachBadge(badge);
-          return;
+          const badge = riverBadgeFromNode(node);
+          if (badge) attachBadge(badge);
         }
       }
     });
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
   }
 
@@ -511,7 +660,8 @@
       GM_setValue(KEY, payload);
       emit('open', {
         unavailable: Object.values(payload.fieldStates || {}).filter(value => value === 'unavailable').length,
-        quantityAvailable: Number.isFinite(payload.inventoryQuantity)
+        quantityAvailable: Number.isFinite(payload.inventoryQuantity),
+        quantityMode: payload.quantityMode
       });
       const target = payload.riverUrl || riverUrl(payload.warehouseId);
       const tab = GM_openInTab(target, { active: true, insert: true, setParent: true });
@@ -756,12 +906,17 @@
       status.textContent = 'Option 1 selected • advancing…';
       await advanceAndContinue(ui, page, generation);
     } else if (page === 'severity') {
-      if (!Number.isFinite(Number(payload.inventoryQuantity))) throw new Error('Captured quantity is unavailable; quantity step remains manual.');
-      const units = field(['units impacted', 'number of units impacted']);
       const shipments = field(['shipments impacted', 'number of shipments impacted']);
+      if (!Number.isFinite(Number(payload.inventoryQuantity)) || Number(payload.inventoryQuantity) <= 0) {
+        if (shipments) setValue(shipments, 0);
+        emit('manual.pause', { step: page, reason: payload.quantityMode || 'quantity-unavailable' });
+        status.textContent = 'PAUSED • PO quantity is unavailable/0. Enter Units impacted manually, then click Next.';
+        return;
+      }
+      const units = field(['units impacted', 'number of units impacted']);
       if (!setValue(units, Number(payload.inventoryQuantity)) || !setValue(shipments, 0)) throw new Error('Quantity fields not found/retained.');
-      emit('automation.action', { step: page, action: 'fill-severity', quantityAvailable: true, shipments: 0 });
-      status.textContent = 'Quantity + shipments filled • advancing…';
+      emit('automation.action', { step: page, action: 'fill-severity', quantityAvailable: true, shipments: 0, source: 'latest-po-matching-line' });
+      status.textContent = 'PO-line quantity + shipments filled • advancing…';
       await advanceAndContinue(ui, page, generation);
     } else if (page === 'images') {
       selectDropdownIndex(2, page);
@@ -803,14 +958,18 @@
       };
 
       document.addEventListener('click', event => {
-        if (!event.isTrusted || pageKind() !== 'related') return;
+        if (!event.isTrusted) return;
+        const currentPage = pageKind();
+        const payload = GM_getValue(KEY, null);
+        const manualSeverity = currentPage === 'severity' && (!Number.isFinite(Number(payload?.inventoryQuantity)) || Number(payload?.inventoryQuantity) <= 0);
+        if (currentPage !== 'related' && !manualSeverity) return;
         const button = event.target instanceof Element
           ? event.target.closest('button,a,[role="button"],input[type="button"],input[type="submit"]')
           : null;
         if (!button || button.closest('#bwu2-river-assistant') || button !== nextButton()) return;
         const generation = riverGeneration;
-        void waitForPageChange('related').then(nextPage => {
-          if (generation !== riverGeneration || nextPage === 'unknown' || nextPage === 'related') return;
+        void waitForPageChange(currentPage).then(nextPage => {
+          if (generation !== riverGeneration || nextPage === 'unknown' || nextPage === currentPage) return;
           void run('Manual step completed');
         });
       }, true);
