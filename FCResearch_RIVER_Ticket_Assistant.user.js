@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.0
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.1
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.0
+// @version      0.3.1
 // @description  Capture FCResearch ticket data and drive the Hazmat RIVER workflow to manual checkpoints.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -15,12 +15,14 @@
 
 (() => {
   'use strict';
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const RIVER = 'https://river.amazon.com/BWU2/workflows?buildingType=fc&workflowId=undefined&q0=3654ec14-7232-4f65-84c3-87927cdb4d0c&q1=f2738dec-7f6f-4c2e-a85a-db7228de25f1&id=f2738dec-7f6f-4c2e-a85a-db7228de25f1';
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
   const norm = v => clean(v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const formatCost = v => { const t=clean(v); if(!t) return 'n/a'; if(/^aud\b/i.test(t)) return t; const m=t.match(/\d+(?:,\d{3})*(?:\.\d+)?/); return m?`AUD ${m[0].replace(/,/g,'')}`:t; };
+  const parseBoolean = v => { const t=norm(v); return ['true','yes','y','1'].includes(t)?true:['false','no','n','0'].includes(t)?false:null; };
   const visible = el => !!el && el.isConnected && (() => { const r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; })();
   const emit = (type, data={}) => { try { window.dispatchEvent(new CustomEvent('bwu2-observability:event',{detail:JSON.stringify({type:`river.${type}`,data})})); } catch {} };
 
@@ -78,13 +80,14 @@
 
   function capture() {
     const asin = (labelValue(['ASIN','ISBN']).match(/\b[A-Z0-9]{10}\b/i)||[])[0]?.toUpperCase() || '';
-    const fnsku = (labelValue(['FNSKU','FNSku']).match(/\b(?:X0|ZZ)[A-Z0-9]{8}\b/i)||[])[0]?.toUpperCase() || '';
+    const fnsku = (labelValue(['FNSKU','FNSku']).match(/\bX0[A-Z0-9]{8}\b/i)||[])[0]?.toUpperCase() || '';
     const title = labelValue(['Title']);
-    const sortable = /true|yes/i.test(labelValue(['Sortable']));
+    const inventoryCost = formatCost(labelValue(['List Price']));
+    const sortable = parseBoolean(labelValue(['Sortable']));
     const po = latestPo();
     const inventoryQuantity = inventoryQty(asin);
-    const payload = { asin, fnsku, processingId:fnsku||asin, title, sortable, inventoryQuantity, shipmentsImpacted:0, physicalLocation:'N/A', ...po, sourceUrl:location.href, capturedAt:Date.now() };
-    if (!asin || !title) throw new Error('FCResearch product data is not ready yet.');
+    const payload = { asin, fnsku, processingId:fnsku||asin, title, inventoryCost, sortable, inventoryQuantity, shipmentsImpacted:0, physicalLocation:'N/A', ...po, vendorCode:po.vendorCode||'n/a', sourceUrl:location.href, capturedAt:Date.now() };
+    if (!asin || !title || sortable === null) throw new Error('FCResearch product data is not ready yet.');
     return payload;
   }
 
@@ -146,7 +149,7 @@
     else if(p==='asin'){ if(!setValue(field(['type asin here','asin']),payload.asin)) throw new Error('ASIN field not found/retained.'); next(); status.textContent='ASIN entered • advancing…'; }
     else if(p==='related'){ status.textContent='PAUSED • related-ticket decision is manual.'; }
     else if(p==='information'){
-      const vals=[ [['fnsku','x0 asin','asin/fnsku'],payload.fnsku||payload.asin], [['title','product title'],payload.title], [['purchase order','po'],payload.purchaseOrder], [['vendor code','seller id'],payload.vendorCode], [['inventory cost','cost per unit'],payload.inventoryCost], [['physical location','location'],payload.physicalLocation||'N/A'] ];
+      const vals=[ [['fnsku','x0 asin','asin/fnsku'],payload.fnsku||'n/a'], [['title','product title'],payload.title], [['purchase order','po'],payload.purchaseOrder||'n/a'], [['vendor code','seller id'],payload.vendorCode||'n/a'], [['inventory cost','cost per unit'],payload.inventoryCost||'n/a'], [['physical location','location'],payload.physicalLocation||'N/A'] ];
       let n=0; for(const [a,v] of vals){ const el=field(a); if(el&&setValue(el,v??'')) n++; } status.textContent=`Information filled ${n}/6 • verify, then click Next.`; if(n<6) emit('information.partial',{filled:n});
     }
     else if(p==='sortability'){ const a=payload.sortable?['asin is sortable','sortable']:['asin is non sortable','asin is non-sortable','non-sortable']; if(!clickChoice(a)) throw new Error('Sortability option not found.'); next(); status.textContent='Sortability selected • advancing…'; }
