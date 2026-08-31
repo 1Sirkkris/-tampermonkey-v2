@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.4
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.5
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.4
+// @version      0.3.5
 // @description  Event-driven Hazmat/L0 RIVER capture using latest matching PO line data; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV034) return;
-  window.__bwu2RiverAssistantV034 = true;
+  if (window.__bwu2RiverAssistantV035) return;
+  window.__bwu2RiverAssistantV035 = true;
 
-  const VERSION = '0.3.4';
+  const VERSION = '0.3.5';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -30,7 +30,7 @@
   const NAV_TIMEOUT_MS = 12000;
   const DOM_DEBOUNCE_MS = 90;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
-  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-84c3-87927cdb4d0c';
+  const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
   const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -601,9 +601,10 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV034 === '1') return;
-    badge.dataset.riverAssistantV034 = '1';
+    if (!badge || badge.dataset.riverAssistantV035 === '1') return;
+    badge.dataset.riverAssistantV035 = '1';
     renderCaptureState(badge, newCaptureState());
+    emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
   }
 
