@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.7 Sideline API Move TEST
+// @name         MAIN v0.3.8 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.7
+// @version      0.3.8
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.7';
+  const VERSION = '0.3.8';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -1334,8 +1334,8 @@
     item.ctx = ctx;
     item.preflightIssue = null;
 
-    // Product hazard metadata is informational here. Expiry/manual requirements
-    // are resolved first; a real Hazmat rejection is decided only by the move response.
+    // Expiry/manual requirements win first. After that, mirror native Sideline's
+    // scan-stage UNDER_REVIEW stop before any state-changing move request.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       item.preflightStatus = 'DATE';
 
@@ -1350,6 +1350,16 @@
       }
 
       renderLive();
+      return;
+    }
+
+    const scanIssue = scanStageIssue(ctx);
+    if (scanIssue) {
+      if (!autoSkipQueuedLiveItem(item, scanIssue.title, scanIssue.reason)) {
+        item.preflightStatus = 'ISSUE';
+        item.preflightIssue = { kind:scanIssue.kind, title:scanIssue.title, reason:scanIssue.reason };
+        renderLive();
+      }
       return;
     }
 
@@ -2269,11 +2279,17 @@
 
     item.ctx = ctx;
 
-    // Expiry/manual data requirements take precedence over product Hazmat metadata.
-    // A Hazmat hard failure is only raised if the move/workflow response rejects for Hazmat.
+    // Expiry/manual data requirements take precedence. Then honor native Sideline's
+    // scan-stage UNDER_REVIEW stop; Hazmat metadata alone is not a blocker.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       live.oneInFlight.delete(item.id);
       parkLiveDateItem(item, ctx);
+      return;
+    }
+
+    const scanIssue = scanStageIssue(ctx);
+    if (scanIssue) {
+      showOneByOneError(item, scanIssue.reason, scanIssue.title);
       return;
     }
 
@@ -2615,10 +2631,16 @@
 
     item.ctx = ctx;
 
-    // Product Hazmat metadata alone is not a rejection. Handle expiry first and
-    // let the actual move/workflow response decide whether Hazmat blocks processing.
+    // Product Hazmat metadata alone is not a rejection. Handle expiry first, then
+    // honor native Sideline's scan-stage UNDER_REVIEW stop before moving.
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
       parkLiveDateItem(item, ctx);
+      return;
+    }
+
+    const scanIssue = scanStageIssue(ctx);
+    if (scanIssue) {
+      failLiveItem(item, scanIssue.title, scanIssue.reason, ctx);
       return;
     }
 
@@ -3647,8 +3669,7 @@
       ...problems
     ].map(clean).filter(Boolean);
 
-    const itemNotInSource = type === 'ItemNotInContainerResponse';
-    const explicitOverage = itemNotInSource || isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);
+    const explicitOverage = isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);
     if (!explicitOverage) return false;
 
     // Overage is the ONLY exception. A response that also carries another
@@ -3692,8 +3713,22 @@
       fcsku:clean(sku.fcSku),
       dateType:clean(sku.datelotDetail?.expirationPromptType),
       dateDetail:sku.datelotDetail || {},
+      hazmat:sku.hazmat === true,
+      permissionLevel:clean(sku.itemDropzoneRecommendation?.permissionLevel).toUpperCase(),
       overage:allowedOverage,
       notInSource:type === 'ItemNotInContainerResponse' || records.every(record => Number(record.quantity) === 0)
+    };
+  }
+
+  function scanStageIssue(ctx) {
+    const permissionLevel = clean(ctx?.permissionLevel).toUpperCase();
+    if (permissionLevel !== 'UNDER_REVIEW') return null;
+
+    const hazmat = ctx?.hazmat === true;
+    return {
+      kind:hazmat ? 'hazmat' : 'under-review',
+      title:hazmat ? 'HAZMAT — ITEM NOT MOVED' : 'ASIN UNDER REVIEW — ITEM NOT MOVED',
+      reason:hazmat ? 'HAZMAT / UNDER REVIEW — RIVER REQUIRED' : 'ASIN UNDER REVIEW — RIVER REQUIRED'
     };
   }
 
@@ -3771,16 +3806,11 @@
     );
   }
 
-  function hasMoveProblems(response) {
-    return Array.isArray(response?.problems) && response.problems.some(Boolean);
-  }
-
   function moveOk(response) {
     if (isAllowedOverageResponse(response)) return true;
     if (!response || response.success !== true) return false;
     if (response.filterResult?.compatible === false) return false;
     if (isHazmatRejectionResponse(response)) return false;
-    if (hasMoveProblems(response)) return false;
     if (hasPredicant(response)) return false;
 
     return true;
@@ -4043,6 +4073,16 @@
       item.status = 'DATE';
       renderLazy();
       return { kind:'date', ctx };
+    }
+
+    const scanIssue = scanStageIssue(ctx);
+    if (scanIssue) {
+      item.status = 'FAILED';
+      item.failReason = scanIssue.reason;
+      lazy.errors++;
+      lazy.error = `${item.code} — ${scanIssue.reason} — NOT MOVED`;
+      renderLazy();
+      return { kind:'failed' };
     }
 
     item.status = 'READY';
