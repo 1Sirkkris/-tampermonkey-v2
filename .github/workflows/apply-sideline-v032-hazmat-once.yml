@@ -1,5 +1,6 @@
 name: Apply Sideline v0.3.2 hazmat safety patch once
 
+# trigger after workflow registration
 on:
   push:
     paths:
@@ -81,7 +82,6 @@ jobs:
           def section(text, start, end):
               return text[text.index(start):text.index(end)]
 
-          # Lazy implementation is intentionally untouched by the pre-move mode guards.
           lazy_start = '  // Lazy\n'
           if old[old.index(lazy_start):] != new[new.index(lazy_start):]:
               raise SystemExit('Lazy implementation changed unexpectedly')
