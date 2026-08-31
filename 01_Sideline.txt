@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.8 Sideline API Move TEST
+// @name         MAIN v0.3.11 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.8
+// @version      0.3.11
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.8';
+  const VERSION = '0.3.11';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -25,6 +25,7 @@
   const PANEL_STATE_KEY = 'sidelineClean.panelStates.v1';
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
   const API_SCAN_SOURCE = '/api/scan-source-container';
+  const API_CLOSE_CONTAINER = '/api/close-container';
   const API_SCAN_ITEM = '/api/scanitem';
   const API_MOVE_ITEMS = '/api/move-items';
 
@@ -502,33 +503,37 @@
     return false;
   }
 
-  async function runExactPredicantRecovery(sourceCode, destinationCode, status) {
+  async function runExactPredicantRecovery(sourceCode, destinationCode, status, run) {
+    let closeCommitted = false;
 
-    status('Predicant recovery 1/4 — preparing native Sideline...');
-
-    let sourceOpen = await nativeReturnToOriginalSource(sourceCode);
-
-    if (!sourceOpen) {
-      const ready = await normalizeNativeToSourceScan(status);
-      if (!ready) {
-        throw new Error('Could not return native Sideline to Scan Source.');
+    try {
+      status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
+      const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
+      if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
+        throw new Error('Original source API validation failed during Predicant recovery.');
       }
 
-      status(`Predicant recovery 1/4 — opening source ${sourceCode}...`);
-      await nativeOpenSourceContainer(sourceCode, 'original source');
-      sourceOpen = true;
+      status('Predicant recovery 2/4 — closing original source with NO by API...');
+      await closeContainerDirect(sourceCode, false);
+      closeCommitted = true;
+      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
+
+      status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
+      const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
+      if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
+        throw new Error('Destination API validation failed during Predicant recovery.');
+      }
+
+      status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
+      await closeContainerDirect(destinationCode, true);
+      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
+
+      return true;
+    } catch (error) {
+      if (error?.outcomeUnknown) throw error;
+      if (closeCommitted) error.recoveryNoRetry = true;
+      throw error;
     }
-
-    status('Predicant recovery 2/4 — closing original source with NO...');
-    await nativeCloseLoadedContainer('original source', false);
-
-    status(`Predicant recovery 3/4 — opening destination ${destinationCode}...`);
-    await nativeOpenSourceContainer(destinationCode, 'destination');
-
-    status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES...`);
-    await nativeCloseLoadedContainer('destination', true);
-
-    return true;
   }
 
   // UI
@@ -553,6 +558,7 @@
 #sh-live .sh-live-scan{font:900 18px Consolas,monospace;padding:12px;border:2px solid #146eb4}
 #sh-live .sh-live-scan:disabled{background:#f3f4f6;border-color:#cbd5e1;color:#64748b}
 #sh-live .sh-live-ready{margin:7px 0;padding:7px 9px;border:1px solid #bfdbfe;border-left:5px solid #146eb4;background:#eff6ff;color:#0f3d73;font-weight:900}
+#sh-live .sh-live-delay{padding:5px 9px;min-width:90px;font-size:11px}
 #sh-dock button.sh-live-one-mode{background:#fde047!important;color:#111827!important;border:3px solid #111827!important;padding:6px 4px!important;animation:shLiveOneFlash .52s steps(2,end) infinite}
 @keyframes shLiveOneFlash{0%,100%{background:#fde047;color:#111827;box-shadow:0 0 0 2px #111827}50%{background:#111827;color:#fff;box-shadow:0 0 0 4px #fde047}}
 #sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
@@ -1114,6 +1120,7 @@
     lookupActive:0,
     lookupWait:[],
     nextMoveAt:0,
+    delayEnabled:true,
     datePending:[],
     activeDateItem:null
   };
@@ -1126,6 +1133,7 @@
     '</div>' +
     '<input class="sh-input sh-live-scan" data-f="live-scan" placeholder="3. Scan item barcode — QTY always 1" disabled>' +
     '<div class="sh-live-ready">QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.</div>' +
+    '<div style="display:flex;justify-content:flex-end;margin:-2px 0 7px"><button class="sh-btn sh-live-delay" data-live-a="delay" data-live-delay>Delay: YES</button></div>' +
     '<div class="sh-grid4">' +
       '<button class="sh-btn sh-stop" data-live-a="stop">Stop</button>' +
       '<button class="sh-btn" data-live-a="reset">Reset</button>' +
@@ -1153,6 +1161,7 @@
   const liveError = $('[data-live-error]', livePanel);
   const liveOneResult = $('[data-live-one-result]', livePanel);
   const liveReady = $('.sh-live-ready', livePanel);
+  const liveDelay = $('[data-live-delay]', livePanel);
   const liveQueueLabel = $('[data-live-queue-label]', livePanel);
   const liveIssue = $('.sh-live-issue', livePanel);
   const liveCurrent = $('[data-live-current]', livePanel);
@@ -1172,11 +1181,21 @@
       ? `Live 1×1 Immediate v${VERSION}`
       : `Live Lazy QTY 1 v${VERSION}`;
     setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
+    if (liveDelay) {
+      liveDelay.style.display = live.oneByOne ? 'none' : '';
+      liveDelay.textContent = `Delay: ${live.delayEnabled ? 'YES' : 'NO'}`;
+      liveDelay.classList.toggle('sh-on', live.delayEnabled);
+      liveDelay.title = live.delayEnabled
+        ? 'Artificial Live move pacing is ON (5–11 seconds).'
+        : 'Artificial Live move pacing is OFF.';
+    }
     setTextIfChanged(
       liveReady,
       live.oneByOne
         ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
-        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+        : live.delayEnabled
+          ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+          : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'
     );
   }
 
@@ -1265,14 +1284,21 @@
 
   async function waitForLiveMovePace(item, run=live.activeRun) {
     if (!currentLiveRun(run) || !live.running) return false;
+    if (!live.delayEnabled) return true;
 
-    const waitMs = Math.max(0, live.nextMoveAt - Date.now());
+    let waitMs = Math.max(0, live.nextMoveAt - Date.now());
     if (!waitMs) return true;
 
     live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;
     renderLive();
 
-    return await waitLiveMs(waitMs, run);
+    while (live.delayEnabled) {
+      waitMs = Math.max(0, live.nextMoveAt - Date.now());
+      if (!waitMs) return true;
+      if (!await waitLiveMs(Math.min(waitMs, 200), run)) return false;
+    }
+
+    return currentLiveRun(run) && live.running;
   }
 
   function resetLiveLookupPool() {
@@ -1872,46 +1898,30 @@
     }
 
     const sourceCode = live.src;
-    const wasRunning = live.running;
 
     live.running = false;
     liveScan.disabled = true;
     live.error = '';
-    live.note = `clearing source ${sourceCode}`;
+    live.note = `clearing source ${sourceCode} by API`;
     renderLive();
 
     shared.owner = 'live';
 
     try {
-      const sourceLoaded = () =>
-        norm(loadedSourceContainer()) === norm(sourceCode) && !!changeButton();
-
-      if (sourceLoaded()) {
-        await nativeCloseLoadedContainer('live source', true);
-      }
-      else if (await waitForNativeSourceScan(2500)) {
-        await nativeOpenSourceContainer(sourceCode, 'live source');
-        await nativeCloseLoadedContainer('live source', true);
-      }
-      else {
-        const returned = await nativeReturnToOriginalSource(sourceCode);
-        if (returned === true || sourceLoaded()) {
-          await nativeCloseLoadedContainer('live source', true);
-        } else {
-          throw new Error('Could not safely reach the Live source container.');
-        }
-      }
-
+      await closeContainerDirect(sourceCode, true);
       resetLive(`SOURCE CLEARED — ${sourceCode} — scan next source`);
     } catch (error) {
-      live.running = wasRunning;
-      live.error = `SOURCE CLEAR FAILED — ${error?.message || error}`;
-      live.note = 'retry Clear source or handle manually';
-      liveScan.disabled = !wasRunning;
+      live.running = false;
+      live.error = error?.outcomeUnknown
+        ? `SOURCE CLEAR UNKNOWN — ${error?.message || error}`
+        : `SOURCE CLEAR FAILED — ${error?.message || error}`;
+      live.note = error?.outcomeUnknown
+        ? 'VERIFY SOURCE STATE MANUALLY — no automatic close retry was sent'
+        : 'handle source manually';
+      liveScan.disabled = true;
       liveDest.disabled = true;
       shared.owner = 'live';
       renderLive();
-      if (wasRunning) setTimeout(() => liveScan.focus(), 0);
     }
   }
 
@@ -2384,7 +2394,7 @@
     } catch (error) {
       if (error?.name === 'AbortError') return false;
 
-      live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
+      live.nextMoveAt = live.delayEnabled ? Date.now() + randomLiveMoveDelayMs() : 0;
 
       if (isAllowedOverageResponse(error?.payload)) {
         response = error.payload;
@@ -2405,7 +2415,7 @@
 
     if (!currentLiveRun(run)) return false;
 
-    live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
+    live.nextMoveAt = live.delayEnabled ? Date.now() + randomLiveMoveDelayMs() : 0;
 
     const reason = moveReason(response);
 
@@ -2848,6 +2858,17 @@
 
     if (action === 'clear-source') {
       clearLiveSource();
+      return;
+    }
+
+    if (action === 'delay') {
+      if (live.oneByOne) return;
+      live.delayEnabled = !live.delayEnabled;
+      if (!live.delayEnabled) live.nextMoveAt = 0;
+      live.note = live.delayEnabled
+        ? 'move delay ON — 5–11s pacing'
+        : 'move delay OFF — no artificial pacing';
+      renderLive();
       return;
     }
 
@@ -3592,6 +3613,66 @@
     return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
   }
 
+  function closeContainerPayload(container, containerEmpty) {
+    return {
+      containerScannableId:container,
+      containerEmpty:containerEmpty === true,
+      directedLabel:false,
+      processPath:'UNDETERMINED',
+      requestId:requestId(),
+      tool:TOOL
+    };
+  }
+
+  async function closeContainerDirect(container, containerEmpty) {
+    const code = clean(container);
+    if (!validContainer(code)) throw new Error('Direct close requires a valid csX/tsX container.');
+
+    let response;
+    try {
+      response = await fetch(API_CLOSE_CONTAINER, {
+        method:'POST',
+        credentials:'same-origin',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify(closeContainerPayload(code, containerEmpty))
+      });
+    } catch (cause) {
+      const error = new Error(`Close outcome UNKNOWN for ${code} — verify container state manually before retrying.`);
+      error.name = 'CloseOutcomeUnknownError';
+      error.outcomeUnknown = true;
+      error.cause = cause;
+      throw error;
+    }
+
+    let raw = '';
+    try {
+      raw = await response.text();
+    } catch (cause) {
+      const error = new Error(`Close outcome UNKNOWN for ${code} — response could not be read. Verify container state manually before retrying.`);
+      error.name = 'CloseOutcomeUnknownError';
+      error.outcomeUnknown = true;
+      error.cause = cause;
+      throw error;
+    }
+
+    let payload = raw;
+    try { payload = raw ? JSON.parse(raw) : null; } catch {}
+
+    if (
+      !response.ok ||
+      clean(payload?.['@type']) !== 'CloseContainerResponse' ||
+      payload?.success !== true
+    ) {
+      const error = new Error(`Close NOT CONFIRMED for ${code}${response.ok ? '' : ` — HTTP ${response.status}`} — verify state before retrying.`);
+      error.name = 'CloseNotConfirmedError';
+      error.outcomeUnknown = true;
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  }
+
   function beginLazyRun() {
     return beginRun(lazy);
   }
@@ -3915,8 +3996,11 @@
       renderLazy();
     };
 
+    let recoveryApplied = false;
+
     try {
-      await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery);
+      await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery, run);
+      recoveryApplied = true;
 
       setRecovery(`Destination reset — revalidating ${lazy.src}...`);
 
@@ -3936,7 +4020,25 @@
       await sleep(180);
       return true;
     } catch (error) {
+      const noRetry = error?.outcomeUnknown || error?.recoveryNoRetry || recoveryApplied;
+
+      if (noRetry) {
+        cancelLazyRun();
+        lazy.running = false;
+        lazy.predicant = false;
+        lazy.paused = false;
+        lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
+        lazy.note = error?.outcomeUnknown
+          ? 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent'
+          : 'RECOVERY STATE CHANGED — verify source/destination manually; no automatic close retry was sent';
+        shared.owner = '';
+        setLazyRunningIndicator(false);
+        renderLazy();
+        return false;
+      }
+
       if (runWasCancelled(error, run)) return false;
+
       lazy.predicant = true;
       lazy.paused = true;
       lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
@@ -4567,34 +4669,17 @@
 
     const previousOwner = shared.owner;
     shared.owner = 'lazy-clear';
-    lazy.note = `clearing source ${lazy.src}`;
+    lazy.note = `clearing source ${lazy.src} by API`;
     lazy.error = '';
     renderLazy();
 
     try {
-      const sourceLoaded = () =>
-        norm(loadedSourceContainer()) === norm(lazy.src) && !!changeButton();
-
-      if (sourceLoaded()) {
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      if (await waitForNativeSourceScan(2500)) {
-        await nativeOpenSourceContainer(lazy.src, 'source');
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      const returned = await nativeReturnToOriginalSource(lazy.src);
-      if (returned === true || sourceLoaded()) {
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      throw new Error('Could not safely reach original source in native Sideline.');
+      await closeContainerDirect(lazy.src, true);
+      return true;
     } catch (error) {
-      lazy.error = `Moves complete — source clear failed: ${error?.message || error}`;
+      lazy.error = error?.outcomeUnknown
+        ? `Moves complete — source clear UNKNOWN: ${error?.message || error}`
+        : `Moves complete — source clear failed: ${error?.message || error}`;
       return false;
     } finally {
       shared.owner = previousOwner;

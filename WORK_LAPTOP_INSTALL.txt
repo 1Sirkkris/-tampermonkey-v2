@@ -3,7 +3,7 @@ WORK LAPTOP PACK
 Install these 10 scripts in Tampermonkey and enable all 10.
 Disable older copies first.
 
-01 Sideline v0.2.4
+01 Sideline v0.3.11
 02 AFT Edit-SKU-Move v0.9.12
 03 FCR Data Core v0.2.11
 04 FCResearch Master v0.1.21
@@ -14,6 +14,6 @@ Disable older copies first.
 10 BWU2 Observability Core v0.1.8
 11 Calm Code v1.3.1
 
-Updater-enabled sources: main a24e939.
+Updater-enabled sources: main a10f8e7.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.
