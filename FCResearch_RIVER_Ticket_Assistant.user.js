@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.10
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.9
+// @version      0.3.10
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV039) return;
-  window.__bwu2RiverAssistantV039 = true;
+  if (window.__bwu2RiverAssistantV0310) return;
+  window.__bwu2RiverAssistantV0310 = true;
 
-  const VERSION = '0.3.9';
+  const VERSION = '0.3.10';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -28,6 +28,8 @@
   const DOM_GRACE_MS = 6000;
   const CORE_TIMEOUT_MS = 12000;
   const NAV_TIMEOUT_MS = 12000;
+  const INFORMATION_READY_TIMEOUT_MS = 8000;
+  const INFORMATION_NEXT_TIMEOUT_MS = 4000;
   const DOM_DEBOUNCE_MS = 120;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
   const RIVER_WORKFLOW_ID = 'f2738dec-7f6f-4c2e-a85a-db7228de25f1';
@@ -559,8 +561,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV039 === '1') return;
-    badge.dataset.riverAssistantV039 = '1';
+    if (!badge || badge.dataset.riverAssistantV0310 === '1') return;
+    badge.dataset.riverAssistantV0310 = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
@@ -680,6 +682,106 @@
     else element.value = nextValue;
     for (const type of ['input', 'change', 'blur']) element.dispatchEvent(new Event(type, { bubbles: true }));
     return clean(element.value) === clean(nextValue);
+  }
+
+  function nativeValueSetter(element) {
+    let prototype = element;
+    while ((prototype = Object.getPrototypeOf(prototype))) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+      if (descriptor?.set) return descriptor.set;
+    }
+    return null;
+  }
+
+  function controlDisabled(element) {
+    if (!element) return true;
+    return element.matches?.(':disabled')
+      || element.getAttribute?.('aria-disabled') === 'true'
+      || element.getAttribute?.('data-disabled') === 'true';
+  }
+
+  function nextPaint(frames = 1) {
+    return new Promise(resolve => {
+      const step = remaining => requestAnimationFrame(() => remaining > 1 ? step(remaining - 1) : resolve());
+      step(Math.max(1, frames));
+    });
+  }
+
+  function waitForDomState(check, timeoutMs, timeoutMessage) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const root = document.body || document.documentElement;
+      const finish = value => {
+        if (done) return;
+        done = true;
+        observer?.disconnect();
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const fail = () => {
+        if (done) return;
+        done = true;
+        observer?.disconnect();
+        reject(new Error(timeoutMessage));
+      };
+      const assess = () => {
+        if (done) return;
+        let value = null;
+        try { value = check(); } catch {}
+        if (value) finish(value);
+      };
+      const observer = root ? new MutationObserver(assess) : null;
+      if (observer) observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['disabled', 'readonly', 'aria-disabled', 'data-disabled', 'value', 'class']
+      });
+      const timer = setTimeout(fail, timeoutMs);
+      assess();
+    });
+  }
+
+  async function setInformationValue(element, value) {
+    if (!element || !visible(element) || controlDisabled(element) || element.readOnly) return false;
+    const nextValue = String(value ?? '');
+    element.focus({ preventScroll: true });
+    await nextPaint(1);
+    const setter = nativeValueSetter(element);
+    if (setter) setter.call(element, nextValue);
+    else element.value = nextValue;
+    const inputEvent = typeof InputEvent === 'function'
+      ? new InputEvent('input', { bubbles: true, composed: true, data: nextValue, inputType: 'insertText' })
+      : new Event('input', { bubbles: true, composed: true });
+    element.dispatchEvent(inputEvent);
+    element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    await nextPaint(1);
+    element.blur();
+    await nextPaint(1);
+    return clean(element.value) === clean(nextValue);
+  }
+
+  async function waitForInformationReady(values) {
+    const state = await waitForDomState(() => {
+      const fields = values.map(([aliases]) => field(aliases));
+      if (fields.some(element => !element || !visible(element) || controlDisabled(element) || element.readOnly)) return null;
+      const nextElement = nextButton();
+      if (!nextElement) return null;
+      return { fields, nextElement };
+    }, INFORMATION_READY_TIMEOUT_MS, 'Information W1 did not become ready; leaving it untouched.');
+    await nextPaint(2);
+    const stable = values.map(([aliases]) => field(aliases));
+    if (stable.some((element, index) => element !== state.fields[index] || !visible(element) || controlDisabled(element) || element.readOnly)) {
+      return waitForInformationReady(values);
+    }
+    return state;
+  }
+
+  async function waitForNextEnabled() {
+    return waitForDomState(() => {
+      const element = nextButton();
+      return element && !controlDisabled(element) ? element : null;
+    }, INFORMATION_NEXT_TIMEOUT_MS, 'Information W1 values were entered, but RIVER did not enable Next.');
   }
 
   function choiceCandidates() {
@@ -920,19 +1022,30 @@
     }
     if (page === 'information') {
       const values = [
-        [['x0 asin', 'x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku')],
-        [['asin title', 'product title', 'title'], payloadValue(payload, 'title')],
-        [['purchase order', 'po'], payloadValue(payload, 'purchaseOrder')],
-        [['vendor code / seller id', 'vendor code', 'seller id'], payloadValue(payload, 'vendorCode')],
-        [['inventory cost per unit', 'inventory cost', 'cost per unit'], payloadValue(payload, 'inventoryCost')],
-        [['physical location of the units', 'physical location', 'location'], 'TBD']
+        [['x0 asin', 'x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku'), 'fnsku'],
+        [['asin title', 'product title', 'title'], payloadValue(payload, 'title'), 'title'],
+        [['purchase order', 'po'], payloadValue(payload, 'purchaseOrder'), 'purchaseOrder'],
+        [['vendor code / seller id', 'vendor code', 'seller id'], payloadValue(payload, 'vendorCode'), 'vendorCode'],
+        [['inventory cost per unit', 'inventory cost', 'cost per unit'], payloadValue(payload, 'inventoryCost'), 'inventoryCost'],
+        [['physical location of the units', 'physical location', 'location'], 'TBD', 'physicalLocation']
       ];
+      status.textContent = 'Information W1 • waiting for form readiness…';
+      await waitForInformationReady(values);
+      if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
+      status.textContent = 'Information W1 ready • filling…';
       let filled = 0;
-      for (const [aliases, value] of values) if (setValue(field(aliases), value)) filled++;
+      for (const [aliases, value, fieldName] of values) {
+        const element = field(aliases);
+        if (!await setInformationValue(element, value)) throw new Error(`Information W1 ${fieldName} did not retain.`);
+        filled++;
+        emit('automation.action', { step: page, action: 'fill-field', field: fieldName, available: clean(value) !== 'N/A' });
+      }
       emit('automation.action', { step: page, action: 'fill-information', filled, expected: values.length, fnskuAvailable: payloadValue(payload, 'fnsku') !== 'N/A' });
-      if (filled !== values.length) throw new Error(`Information W1 filled ${filled}/${values.length}; not advancing.`);
-      status.textContent = 'Information W1 filled • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
+      status.textContent = 'Information W1 committed • advancing…';
+      emit('automation.action', { step: page, action: 'next-enabled', enabled: true });
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'sortability') {
