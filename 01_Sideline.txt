@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.2.9 Sideline API Move TEST
+// @name         MAIN v0.3.0 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.9
+// @version      0.3.0
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.2.9';
+  const VERSION = '0.3.0';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -555,6 +555,10 @@
 #sh-live .sh-live-issue-title{font-size:16px;font-weight:1000;margin-bottom:6px}
 #sh-live .sh-live-issue-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 7px;font-size:12px;line-height:1.3}
 #sh-live .sh-live-issue-grid b{font-weight:1000}
+#sh-live .sh-live-failure-body{display:grid;grid-template-columns:86px minmax(0,1fr);gap:10px;align-items:start}
+#sh-live .sh-live-failure-body.no-image{grid-template-columns:1fr}
+#sh-live .sh-live-failure-img{width:86px;height:86px;object-fit:contain;background:#fff;border:1px solid #fecaca;border-radius:4px}
+#sh-live .sh-live-failure-title{margin:0 0 6px;font-size:13px;font-weight:1000;line-height:1.25;color:#7f1d1d}
 #sh-live .sh-live-action{margin-top:8px;padding:8px;background:#fff;border:1px solid #fecaca;border-radius:4px;font-weight:900;text-align:center}
 #sh-live .sh-live-issue-buttons{display:flex;gap:7px;margin-top:8px}
 #sh-live .sh-live-issue-buttons button{flex:1}
@@ -717,26 +721,49 @@
       b.dataset.key = key;
       if (key === 'live') b.title = 'Click: show/hide Live | Ctrl+click: toggle immediate 1×1 mode';
       b.onclick = event => {
-        if (key === 'live' && (event.ctrlKey || live.oneByOne)) {
-          const nextMode = toggleLiveOneByOneMode();
-          if (nextMode == null) {
+        if (key === 'live') {
+          if (event.ctrlKey) {
+            stopLazyForModeSwitch('switched to 1×1');
+            feature.lazy = false;
+            const nextMode = toggleLiveOneByOneMode();
+            feature.live = !!nextMode;
+            savePanelStates();
+            applyPanels();
+            if (nextMode) setTimeout(() => liveSrc.focus(), 0);
+            return;
+          }
+
+          if (live.oneByOne) {
+            toggleLiveOneByOneMode();
+            stopLazyForModeSwitch('switched to Live');
+            feature.lazy = false;
             feature.live = true;
             savePanelStates();
             applyPanels();
+            setTimeout(() => liveSrc.focus(), 0);
             return;
           }
-          feature.live = nextMode;
+
+          const opening = !feature.live;
+          if (opening) {
+            stopLazyForModeSwitch('switched to Live');
+            feature.lazy = false;
+          }
+          feature.live = opening;
           savePanelStates();
           applyPanels();
-          if (nextMode) setTimeout(() => live.sourceReady ? liveScan.focus() : liveSrc.focus(), 0);
+          if (opening) setTimeout(() => live.sourceReady ? liveScan.focus() : liveSrc.focus(), 0);
           return;
         }
+
+        if (key === 'lazy' && !feature.lazy) {
+          deactivateLiveForModeSwitch('switched to Lazy');
+          feature.live = false;
+        }
+
         feature[key] = !feature[key];
         savePanelStates();
         applyPanels();
-        if (key === 'live' && feature.live) {
-          setTimeout(() => $('#sh-live [data-f="live-src"]')?.focus(), 0);
-        }
       };
       dockButtons.push(b);
       dock.appendChild(b);
@@ -1037,6 +1064,9 @@
     oneResult:null,
     oneErrorToken:0,
     oneErrorTimer:0,
+    failureNotice:null,
+    failureToken:0,
+    failureTimer:0,
     running:false,
     sourceReady:false,
     processing:false,
@@ -1123,35 +1153,20 @@
     );
   }
 
+  function deactivateLiveForModeSwitch(note='mode switched') {
+    live.oneByOne = false;
+    resetLive(note, false);
+  }
+
   function toggleLiveOneByOneMode() {
     if (live.oneByOne) {
-      if (live.oneInFlight.size || live.processing) {
-        live.error = `WAIT — ${live.oneInFlight.size || 1} item still sending.`;
-        renderLive();
-        return null;
-      }
-
-      live.oneByOne = false;
-      resetLive('1×1 stopped', false);
+      deactivateLiveForModeSwitch('1×1 off');
       return false;
     }
 
-    const hasActiveWork = !!(
-      live.sourceReady ||
-      live.running ||
-      live.processing ||
-      live.current ||
-      live.queue.length ||
-      live.oneInFlight.size ||
-      live.datePending.length
-    );
-
-    if (hasActiveWork) {
-      live.error = 'RESET LIVE before changing 1×1 mode.';
-      renderLive();
-      return null;
-    }
-
+    // Switching policy: abort/reset any normal Live session first. Lazy state is handled
+    // separately and is never reset here.
+    resetLive('switching to 1×1', false);
     live.oneByOne = true;
     live.error = '';
     live.note = '1×1 selected — scan source';
@@ -1167,6 +1182,10 @@
     clearTimeout(live.oneErrorTimer);
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
+    clearTimeout(live.failureTimer);
+    live.failureTimer = 0;
+    live.failureToken++;
+    live.failureNotice = null;
     resetLiveLookupPool();
     live.nextMoveAt = 0;
     return beginRun(live);
@@ -1255,41 +1274,33 @@
     if (!result || result.kind === 'aborted') return;
 
     if (result.kind === 'error') {
-      item.preflightStatus = 'ISSUE';
-      item.preflightIssue = {
-        kind:'generic',
-        title:'SCAN CHECK FAILED',
-        reason:result.error?.message || 'SCAN API ERROR'
-      };
-      renderLive();
+      const reason = result.error?.message || 'SCAN API ERROR';
+      if (!autoSkipQueuedLiveItem(item, 'SCAN API ERROR', reason)) {
+        item.preflightStatus = 'ISSUE';
+        item.preflightIssue = { kind:'generic', title:'SCAN API ERROR', reason };
+        renderLive();
+      }
       return;
     }
 
     const ctx = resolveItem(result.response, item.code);
     if (!ctx.ok) {
-      item.preflightStatus = 'ISSUE';
+      const title = ctx.invalid
+        ? 'INVALID BARCODE'
+        : ctx.type === 'RequestMultipleBarcodesResponse'
+          ? 'MULTIPLE BARCODE MATCHES'
+          : 'BARCODE NOT RESOLVED';
+      const reason = ctx.invalid
+        ? 'INVALID BARCODE'
+        : ctx.type === 'RequestMultipleBarcodesResponse'
+          ? 'SCAN A MORE SPECIFIC BARCODE / FNSKU'
+          : ctx.type || 'NO ITEM DETAILS';
 
-      if (ctx.invalid) {
-        item.preflightIssue = {
-          kind:'barcode',
-          title:'INVALID BARCODE AHEAD',
-          reason:'INVALID BARCODE'
-        };
-      } else if (ctx.type === 'RequestMultipleBarcodesResponse') {
-        item.preflightIssue = {
-          kind:'barcode',
-          title:'MULTIPLE BARCODE MATCHES AHEAD',
-          reason:'SCAN A MORE SPECIFIC BARCODE / FNSKU'
-        };
-      } else {
-        item.preflightIssue = {
-          kind:'generic',
-          title:'BARCODE ISSUE AHEAD',
-          reason:ctx.type || 'NO ITEM DETAILS'
-        };
+      if (!autoSkipQueuedLiveItem(item, title, reason)) {
+        item.preflightStatus = 'ISSUE';
+        item.preflightIssue = { kind:'barcode', title, reason };
+        renderLive();
       }
-
-      renderLive();
       return;
     }
 
@@ -1457,29 +1468,76 @@
     };
   }
 
+  function liveProductMeta(item=live.current) {
+    const ctx = item?.ctx;
+    return {
+      title:clean(ctx?.sku?.title || ctx?.sku?.normalizedTitle || ''),
+      imageUrl:productImageUrl(ctx)
+    };
+  }
+
+  function setLiveFailureNotice(item, title, reason, mode=live.oneByOne ? '1x1' : 'live') {
+    const meta = liveItemMeta(item);
+    const product = liveProductMeta(item);
+    const token = ++live.failureToken;
+    clearTimeout(live.failureTimer);
+    live.failureNotice = {
+      mode,
+      title:clean(title) || 'ITEM NOT MOVED',
+      reason:clean(reason) || 'NOT MOVED',
+      scan:meta.scan,
+      asin:meta.asin,
+      fnsku:meta.fnsku,
+      qty:itemQty(item),
+      productTitle:product.title,
+      imageUrl:product.imageUrl
+    };
+
+    live.failureTimer = setTimeout(() => {
+      if (live.failureToken !== token) return;
+      live.failureTimer = 0;
+      live.failureNotice = null;
+      renderLive();
+    }, mode === '1x1' ? 8000 : 12000);
+  }
+
+  function liveFailureHtml() {
+    const notice = live.failureNotice;
+    if (!notice) return '';
+
+    const image = notice.imageUrl
+      ? `<img class="sh-live-failure-img" src="${esc(notice.imageUrl)}" alt="">`
+      : '';
+    const productTitle = notice.productTitle
+      ? `<div class="sh-live-failure-title">${esc(notice.productTitle)}</div>`
+      : '';
+    const action = notice.mode === '1x1'
+      ? '<b>AUTO-SKIPPED — NOTHING WAS FORCED.</b><br>Scan the next item.'
+      : '<b>AUTO-SKIPPED — NOTHING WAS FORCED.</b><br>Live queue continues automatically.';
+
+    return (
+      `<div class="sh-live-issue-title">⚠ ${esc(notice.title)}</div>` +
+      `<div class="sh-live-failure-body${image ? '' : ' no-image'}">` +
+        image +
+        `<div>${productTitle}<div class="sh-live-issue-grid">` +
+          `<b>SCAN:</b><span>${esc(notice.scan)}</span>` +
+          `<b>ASIN:</b><span>${esc(notice.asin)}</span>` +
+          `<b>FNSKU:</b><span>${esc(notice.fnsku)}</span>` +
+          `<b>Qty:</b><span>${esc(String(notice.qty || 1))}</span>` +
+          `<b>Issue:</b><span>${esc(notice.reason)}</span>` +
+        `</div></div>` +
+      `</div>` +
+      `<div class="sh-live-action">${action}</div>`
+    );
+  }
+
   function liveIssueHtml() {
-    if (!live.issue || !live.current) return '';
+    if (!live.issue || !live.current || live.issue.kind !== 'destination') return '';
 
     const meta = liveItemMeta();
     const issue = live.issue;
-    let action = '';
-    let buttons = '';
-
-    if (issue.kind === 'barcode') {
-      action = '<b>SCAN THE CORRECT BARCODE NOW</b><br>The next scan replaces this barcode and retries QTY 1.';
-      buttons = '<button class="sh-btn sh-stop" data-live-a="skip">Skip item</button>';
-    } else if (issue.kind === 'destination') {
-      action = '<b>SCAN A NEW DESTINATION ABOVE</b><br>Current item stays blocked and retries first.';
-      buttons = '<button class="sh-btn sh-stop" data-live-a="skip">Skip item</button>';
-    } else if (issue.kind === 'generic') {
-      action = '<b>FIX THE ISSUE, THEN RETRY</b><br>No later queued item will move until this is resolved.';
-      buttons =
-        '<button class="sh-btn sh-on" data-live-a="retry">Retry item</button>' +
-        '<button class="sh-btn sh-stop" data-live-a="skip">Skip item</button>';
-    }
-
     return (
-      `<div class="sh-live-issue-title">⚠ ${esc(issue.title || 'ACTION REQUIRED')}</div>` +
+      `<div class="sh-live-issue-title">⚠ ${esc(issue.title || 'DESTINATION ACTION REQUIRED')}</div>` +
       `<div class="sh-live-issue-grid">` +
         `<b>SCAN:</b><span>${esc(meta.scan)}</span>` +
         `<b>ASIN:</b><span>${esc(meta.asin)}</span>` +
@@ -1487,8 +1545,8 @@
         `<b>Qty:</b><span>${esc(String(live.current?.qty || 1))}</span>` +
         `<b>Issue:</b><span>${esc(issue.reason || issue.title || 'BLOCKED')}</span>` +
       `</div>` +
-      `<div class="sh-live-action">${action}</div>` +
-      (buttons ? `<div class="sh-live-issue-buttons">${buttons}</div>` : '')
+      `<div class="sh-live-action"><b>SCAN A NEW DESTINATION ABOVE</b><br>Current item stays blocked and retries first.</div>` +
+      `<div class="sh-live-issue-buttons"><button class="sh-btn sh-stop" data-live-a="skip">Skip item</button></div>`
     );
   }
 
@@ -1515,7 +1573,7 @@
         `<b>Issue:</b><span>${esc(issue.reason || issue.title || 'CHECK REQUIRED')}</span>` +
       `</div>` +
       `<div class="sh-live-action"><b>EARLY WARNING — NO MOVE HAS BEEN SENT FOR THIS ITEM.</b><br>` +
-      `You can stop scanning / set it aside now. Earlier clean items may continue; this item will hard-block when it reaches the front.</div>` +
+      `Live will auto-skip this barcode if it reaches processing unchanged; other queued items continue.</div>` +
       extra
     );
   }
@@ -1608,7 +1666,8 @@
     }
 
     const hardIssueHtml = liveIssueHtml();
-    const issueHtml = hardIssueHtml || livePreflightIssueHtml(preflightIssues);
+    const failureHtml = liveFailureHtml();
+    const issueHtml = hardIssueHtml || failureHtml || livePreflightIssueHtml(preflightIssues);
     if (issueHtml) {
       if (liveIssue.dataset.html !== issueHtml) {
         liveIssue.dataset.html = issueHtml;
@@ -1619,7 +1678,7 @@
       if (liveIssue.innerHTML) liveIssue.innerHTML = '';
     }
     liveIssue.classList.toggle('show', !!issueHtml);
-    liveIssue.classList.toggle('sh-live-blocked', !!issueHtml);
+    liveIssue.classList.toggle('sh-live-blocked', !!hardIssueHtml);
 
     if (live.current) {
       const meta = liveItemMeta();
@@ -1678,6 +1737,10 @@
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
     live.oneResult = null;
+    clearTimeout(live.failureTimer);
+    live.failureTimer = 0;
+    live.failureToken++;
+    live.failureNotice = null;
     live.oneInFlight.clear();
 
     live.running = false;
@@ -1726,6 +1789,10 @@
     live.oneErrorTimer = 0;
     live.oneErrorToken++;
     live.oneResult = null;
+    clearTimeout(live.failureTimer);
+    live.failureTimer = 0;
+    live.failureToken++;
+    live.failureNotice = null;
     live.oneInFlight.clear();
 
     live.running = false;
@@ -1927,17 +1994,39 @@
     setTimeout(() => liveScan.focus(), 0);
   }
 
-  function blockLiveBarcode(item, title, reason) {
-    item.status = 'BLOCKED';
-    live.issue = { kind:'barcode', title, reason };
+  function failLiveItem(item, title, reason, ctx=null) {
+    if (!item || item.status === 'SKIPPED' || item.status === 'MOVED') return;
+    if (ctx && !item.ctx) item.ctx = ctx;
+    item.status = 'SKIPPED';
+    item.failReason = clean(reason) || clean(title) || 'NOT MOVED';
+    live.skipped += itemQty(item);
+    if (live.current === item) live.current = null;
     live.error = '';
-    live.note = 'waiting for corrected barcode';
-    liveScan.disabled = false;
+    live.note = 'item not moved — queue continuing';
+    setLiveFailureNotice(item, title, item.failReason, 'live');
     renderLive();
-    setTimeout(() => liveScan.focus(), 0);
+    setTimeout(() => {
+      if (!live.running || live.oneByOne || live.issue) return;
+      liveScan.disabled = false;
+      liveScan.focus();
+      pumpLive();
+    }, 0);
+  }
+
+  function autoSkipQueuedLiveItem(item, title, reason) {
+    if (!item || live.oneByOne || live.current === item) return false;
+    const index = live.queue.indexOf(item);
+    if (index < 0) return false;
+    live.queue.splice(index, 1);
+    failLiveItem(item, title, reason, item.ctx || null);
+    return true;
   }
 
   function blockLiveDestination(item, title, reason, ctx, expirationMs) {
+    clearTimeout(live.failureTimer);
+    live.failureTimer = 0;
+    live.failureToken++;
+    live.failureNotice = null;
     item.status = 'BLOCKED';
     item.retryCtx = ctx;
     item.retryExpirationMs = expirationMs;
@@ -1954,20 +2043,16 @@
     }, 0);
   }
 
-  function blockLiveGeneric(item, title, reason, ctx=null, expirationMs=null) {
-    item.status = 'BLOCKED';
-    item.retryCtx = ctx;
-    item.retryExpirationMs = expirationMs;
-    live.issue = { kind:'generic', title, reason };
-    live.error = '';
-    live.note = 'current item blocked';
-    renderLive();
-  }
-
   function setOneByOneResult(item, ok, reason='') {
     const meta = liveItemMeta(item);
     const token = ++live.oneErrorToken;
     clearTimeout(live.oneErrorTimer);
+    if (ok) {
+      clearTimeout(live.failureTimer);
+      live.failureTimer = 0;
+      live.failureToken++;
+      live.failureNotice = null;
+    }
     live.oneResult = {
       ok:!!ok,
       scan:meta.scan,
@@ -1995,20 +2080,28 @@
       live.issue = null;
     }
     if (!live.issue) live.note = 'moved QTY 1 — ready for next scan';
+    if (!live.issue && !live.datePending.length) liveScan.disabled = false;
     renderLive();
+    if (!live.issue && !live.datePending.length) setTimeout(() => liveScan.focus(), 0);
     if (!live.oneInFlight.size && !live.datePending.length && !live.issue) {
       finishMoveCorner('live', true);
     }
   }
 
-  function showOneByOneError(item, reason) {
+  function showOneByOneError(item, reason, title='ITEM NOT MOVED') {
     live.oneInFlight.delete(item.id);
     item.status = 'SKIPPED';
+    item.failReason = clean(reason) || 'NOT MOVED';
     live.skipped += 1;
-    live.note = 'item skipped — scan next item';
-    setOneByOneResult(item, false, reason);
+    live.oneResult = null;
+    live.note = 'item not moved — scan next item';
+    setLiveFailureNotice(item, title, item.failReason, '1x1');
+    liveScan.disabled = false;
     renderLive();
     finishMoveCorner('live', false);
+    setTimeout(() => {
+      if (live.running && live.oneByOne && !live.issue && !live.datePending.length) liveScan.focus();
+    }, 0);
   }
 
   function blockOneByOneDestination(item, title, reason, ctx, expirationMs) {
@@ -2082,7 +2175,7 @@
     }
 
     if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
-      showOneByOneError(item, reason || 'HAZMAT');
+      showOneByOneError(item, reason || 'HAZMAT', reason === 'HAZMAT' ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE');
       return;
     }
 
@@ -2091,7 +2184,7 @@
       return;
     }
 
-    showOneByOneError(item, reason || 'MOVE REJECTED');
+    showOneByOneError(item, reason || 'MOVE REJECTED', 'MOVE REJECTED');
   }
 
   async function processOneByOneBarcode(item) {
@@ -2106,7 +2199,7 @@
       response = await liveApi(API_SCAN_ITEM, scanItemPayload(live.src, item.code), run);
     } catch (error) {
       if (error?.name === 'AbortError') return;
-      showOneByOneError(item, error?.message || 'SCAN API ERROR');
+      showOneByOneError(item, error?.message || 'SCAN API ERROR', 'SCAN API ERROR');
       return;
     }
 
@@ -2119,7 +2212,7 @@
         : ctx.type === 'RequestMultipleBarcodesResponse'
           ? 'MULTIPLE BARCODE MATCHES'
           : ctx.type || 'BARCODE NOT RESOLVED';
-      showOneByOneError(item, reason);
+      showOneByOneError(item, reason, ctx.invalid ? 'INVALID BARCODE' : ctx.type === 'RequestMultipleBarcodesResponse' ? 'MULTIPLE BARCODE MATCHES' : 'BARCODE NOT RESOLVED');
       return;
     }
 
@@ -2134,6 +2227,14 @@
   }
 
   function enqueueOneByOneBarcode(code) {
+    if (live.oneInFlight.size || live.current || live.datePending.length || live.activeDateItem) {
+      live.error = live.datePending.length || live.activeDateItem
+        ? 'EXPIRY REQUIRED — finish the current 1×1 item before scanning another.'
+        : '1×1 BUSY — wait for the current item result, then rescan.';
+      renderLive();
+      return;
+    }
+
     const item = {
       id:`live-one-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       code,
@@ -2144,6 +2245,7 @@
     };
 
     live.oneInFlight.set(item.id, item);
+    liveScan.disabled = true;
     live.error = '';
     live.note = `sent ${code} ×1`;
     renderLive();
@@ -2155,7 +2257,7 @@
     item.destination = live.dest;
     live.current = null;
     live.oneInFlight.set(item.id, item);
-    liveScan.disabled = false;
+    liveScan.disabled = true;
     renderLive();
     moveOneByOneResolved(item, item.retryCtx, item.retryExpirationMs ?? null);
     setTimeout(() => liveScan.focus(), 0);
@@ -2214,7 +2316,7 @@
 
       live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
 
-      blockLiveGeneric(item, 'MOVE API ERROR', error?.message || 'MOVE API ERROR', ctx, expirationMs);
+      failLiveItem(item, 'MOVE API ERROR — ITEM NOT MOVED', error?.message || 'MOVE API ERROR', ctx);
       return false;
     }
 
@@ -2235,7 +2337,12 @@
     }
 
     if (reason === 'HAZMAT' || /destination incompatible/i.test(reason)) {
-      blockLiveDestination(item, 'HAZMAT / DESTINATION ISSUE', reason || 'HAZMAT', ctx, expirationMs);
+      failLiveItem(
+        item,
+        reason === 'HAZMAT' ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE',
+        reason || 'DESTINATION INCOMPATIBLE',
+        ctx
+      );
       return false;
     }
 
@@ -2244,7 +2351,7 @@
       return false;
     }
 
-    blockLiveGeneric(item, 'MOVE BLOCKED', reason || 'MOVE REJECTED', ctx, expirationMs);
+    failLiveItem(item, 'MOVE REJECTED — ITEM NOT MOVED', reason || 'MOVE REJECTED', ctx);
     return false;
   }
 
@@ -2331,15 +2438,18 @@
     live.note = unitCount > 1
       ? `parked ${ctx.asin || item.code} ×${unitCount} — date required; split to individual units`
       : live.oneByOne
-        ? `parked ${ctx.asin || item.code} — date required; 1×1 remains ready`
+        ? `expiry required for ${ctx.asin || item.code} — finish this item first`
         : `parked ${ctx.asin || item.code} — date required; continuing queue`;
+    if (live.oneByOne) liveScan.disabled = true;
     renderLive();
 
-    openNextLiveDatePicker();
+    if (live.oneByOne) openNextLiveDatePicker();
+    else setTimeout(openNextLiveDatePicker, 0);
   }
 
   function openNextLiveDatePicker() {
     if (!live.running || live.activeDateItem || $('#sh-og-expiry')) return;
+    if (!live.oneByOne && (live.processing || live.current || live.queue.length)) return;
 
     const item = live.datePending.find(candidate => candidate.status === 'DATE_PENDING');
     if (!item?.ctx) return;
@@ -2352,6 +2462,7 @@
 
       if (!chosen || !live.running || !currentLiveRun()) {
         renderLive();
+        if (live.oneByOne && live.running && currentLiveRun()) setTimeout(openNextLiveDatePicker, 0);
         return;
       }
 
@@ -2371,8 +2482,8 @@
         moveOneByOneResolved(item, item.ctx, chosen.finalExpirationMs);
       } else {
         item.status = 'QUEUED_DATE';
-        live.queue.unshift(item);
-        live.note = `date saved for ${item.ctx.asin || item.code} — queued to move`;
+        live.queue.push(item);
+        live.note = `date saved for ${item.ctx.asin || item.code} — queued after normal work`;
         renderLive();
         pumpLive();
       }
@@ -2413,11 +2524,7 @@
     if (!lookup || lookup.kind === 'aborted') return;
 
     if (lookup.kind === 'error') {
-      blockLiveGeneric(
-        item,
-        'SCAN API ERROR',
-        lookup.error?.message || 'SCAN API ERROR'
-      );
+      failLiveItem(item, 'SCAN API ERROR — ITEM NOT MOVED', lookup.error?.message || 'SCAN API ERROR');
       return;
     }
 
@@ -2426,16 +2533,16 @@
 
     if (!ctx.ok) {
       if (ctx.invalid) {
-        blockLiveBarcode(item, 'INVALID BARCODE', 'INVALID BARCODE');
+        failLiveItem(item, 'INVALID BARCODE — ITEM NOT MOVED', 'INVALID BARCODE');
         return;
       }
 
       if (ctx.type === 'RequestMultipleBarcodesResponse') {
-        blockLiveBarcode(item, 'MULTIPLE BARCODE MATCHES', 'SCAN A MORE SPECIFIC BARCODE / FNSKU');
+        failLiveItem(item, 'MULTIPLE BARCODE MATCHES — ITEM NOT MOVED', 'SCAN A MORE SPECIFIC BARCODE / FNSKU');
         return;
       }
 
-      blockLiveBarcode(item, 'BARCODE NOT RESOLVED', ctx.type || 'NO ITEM DETAILS');
+      failLiveItem(item, 'BARCODE NOT RESOLVED — ITEM NOT MOVED', ctx.type || 'NO ITEM DETAILS');
       return;
     }
 
@@ -2452,8 +2559,12 @@
   async function pumpLive() {
     if (!live.running || live.processing || live.issue || live.current) return;
     if (!live.queue.length) {
-      live.note = 'ready — scan next item';
+      live.note = live.datePending.length
+        ? `normal queue clear — ${live.datePending.length} expiry item${live.datePending.length === 1 ? '' : 's'} waiting`
+        : 'ready — scan next item';
       renderLive();
+      if (live.datePending.length) setTimeout(openNextLiveDatePicker, 0);
+      liveScan.disabled = false;
       liveScan.focus();
       return;
     }
@@ -2494,24 +2605,17 @@
         renderLive();
         return;
       }
+      if (live.datePending.length || live.activeDateItem) {
+        live.error = 'EXPIRY REQUIRED — finish the current 1×1 item before scanning another.';
+        renderLive();
+        return;
+      }
       enqueueOneByOneBarcode(code);
       return;
     }
 
-    if (live.issue?.kind === 'barcode' && live.current) {
-      live.current.code = code;
-      live.current.status = 'QUEUED';
-      live.issue = null;
-      live.error = '';
-      live.note = `corrected barcode → ${code}`;
-      restartLiveLookup(live.current);
-      renderLive();
-      retryLiveCurrentFromScan();
-      return;
-    }
-
     if (live.issue) {
-      live.error = 'Current item is BLOCKED — resolve it before scanning another item.';
+      live.error = 'DESTINATION ACTION REQUIRED — resolve it before scanning more items.';
       renderLive();
       return;
     }
@@ -2644,9 +2748,8 @@
     }
 
     if (action === 'focus') {
-      if (live.running && !live.issue) liveScan.focus();
+      if (live.running && !live.issue && !(live.oneByOne && live.datePending.length)) liveScan.focus();
       else if (live.issue?.kind === 'destination') liveDest.focus();
-      else if (live.issue?.kind === 'barcode') liveScan.focus();
       else if (!live.sourceReady) liveSrc.focus();
       else liveDest.focus();
       return;
@@ -2662,16 +2765,6 @@
       return;
     }
 
-    if (action === 'retry' && live.current && live.issue?.kind === 'generic') {
-      const hasMoveContext = !!(live.current.retryCtx || live.current.ctx);
-      live.issue = null;
-      live.error = '';
-      live.note = 'retrying current item';
-      renderLive();
-
-      if (hasMoveContext) retryLiveCurrentMove();
-      else retryLiveCurrentFromScan();
-    }
   });
 
   renderLive();
@@ -3067,6 +3160,30 @@
 
     setLazyRunningIndicator(false);
     startDamageAttention(lazy.dest);
+    renderLazy();
+  }
+
+  function stopLazyForModeSwitch(note='mode switched') {
+    const hadLazyWork = !!(lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve);
+    if (!hadLazyWork) return;
+
+    cancelLazyRun();
+    clearMoveCorner('lazy');
+    lazy.running = false;
+    lazy.paused = false;
+    lazy.predicant = false;
+    lazy.damagePaused = false;
+    lazy.damagedDest = '';
+    stopDamageAttention();
+    if (lPause) lPause.textContent = 'Pause';
+    lazy.predicantResolve?.();
+    lazy.predicantResolve = null;
+    lazy.dateResolve?.(null);
+    lazy.dateResolve = null;
+    $('#sh-og-expiry')?.remove();
+    setLazyRunningIndicator(false);
+    if (shared.owner === 'lazy') shared.owner = '';
+    lazy.note = note;
     renderLazy();
   }
 
