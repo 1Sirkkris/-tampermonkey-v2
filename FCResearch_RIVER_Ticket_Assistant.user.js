@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.8
+// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.8
+// @version      0.3.9
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2RiverAssistantV038) return;
-  window.__bwu2RiverAssistantV038 = true;
+  if (window.__bwu2RiverAssistantV039) return;
+  window.__bwu2RiverAssistantV039 = true;
 
-  const VERSION = '0.3.8';
+  const VERSION = '0.3.9';
   const KEY = 'bwu2_ticket_assistant_payload_v3';
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
   const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
@@ -559,8 +559,8 @@
   }
 
   function attachBadge(badge) {
-    if (!badge || badge.dataset.riverAssistantV038 === '1') return;
-    badge.dataset.riverAssistantV038 = '1';
+    if (!badge || badge.dataset.riverAssistantV039 === '1') return;
+    badge.dataset.riverAssistantV039 = '1';
     renderCaptureState(badge, newCaptureState());
     emit('capture.badge.attached', { source: clean(badge.textContent) || 'hazmat' });
     startCapture(badge);
@@ -751,7 +751,7 @@
     if (text.includes('pandash')) return 'pandash';
     if (text.includes('related') && (text.includes('tt') || text.includes('ticket'))) return 'related';
     if (text.includes('information') || text === 'information w1' || text.includes('information w1')) return 'information';
-    if (text.includes('sortab')) return 'sortability';
+    if (text.includes('sortab') || (text.includes('sort') && text.includes('non sort'))) return 'sortability';
     if (text.includes('severity')) return 'severity';
     if (text.includes('image')) return 'images';
     if (text.includes('create issue') || text.includes('create ticket')) return 'create';
@@ -776,6 +776,7 @@
     if (field(['units impacted', 'shipments impacted'])) return 'severity';
     if (field(['physical location of the units', 'inventory cost per unit', 'vendor code / seller id'])) return 'information';
     if (field(['type asin here', 'asin'])) return 'asin';
+    if (choiceCandidates().some(element => /the asin is sortable|the asin is non-sortable/i.test(associatedLabel(element) || element.textContent || ''))) return 'sortability';
     if (choiceCandidates().some(element => /lacks dg information|dangerous goods/i.test(associatedLabel(element) || element.textContent || ''))) return 'pandash';
     return 'unknown';
   }
@@ -919,7 +920,7 @@
     }
     if (page === 'information') {
       const values = [
-        [['x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku')],
+        [['x0 asin', 'x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku')],
         [['asin title', 'product title', 'title'], payloadValue(payload, 'title')],
         [['purchase order', 'po'], payloadValue(payload, 'purchaseOrder')],
         [['vendor code / seller id', 'vendor code', 'seller id'], payloadValue(payload, 'vendorCode')],
@@ -928,7 +929,7 @@
       ];
       let filled = 0;
       for (const [aliases, value] of values) if (setValue(field(aliases), value)) filled++;
-      emit('automation.action', { step: page, action: 'fill-information', filled, expected: values.length });
+      emit('automation.action', { step: page, action: 'fill-information', filled, expected: values.length, fnskuAvailable: payloadValue(payload, 'fnsku') !== 'N/A' });
       if (filled !== values.length) throw new Error(`Information W1 filled ${filled}/${values.length}; not advancing.`);
       status.textContent = 'Information W1 filled • advancing…';
       next(page);
