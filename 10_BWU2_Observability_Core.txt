@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         CORE v0.1.9 BWU2 Observability Core
+// @name         CORE v0.1.10 BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.9
+// @version      0.1.10
 // @description  Lightweight cross-tool observability core. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -26,7 +26,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.9';
+  const VERSION = '0.1.10';
   const PREFIX = 'bwu2:observability:v1:';
   const META_KEY = `${PREFIX}meta`;
   const PAGE_PREFIX = `${PREFIX}page:`;
@@ -343,11 +343,9 @@
     const url = parsedUrl(rawUrl);
     if (SIM_HOST.test(location.hostname)) return false;
     if (url && FCR_HOST.test(url.hostname)) return false;
-    if (
-      (CARTON_HOST.test(location.hostname) || RIVER_HOST.test(location.hostname)) &&
-      url?.origin === location.origin &&
-      !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname)
-    ) return true;
+    const isStatic = !!url && /\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname);
+    if (RIVER_HOST.test(location.hostname) && url && !isStatic) return true;
+    if (CARTON_HOST.test(location.hostname) && url?.origin === location.origin && !isStatic) return true;
     if (url) return DETAILED_PATH.test(url.pathname);
     return DETAILED_PATH.test(String(rawUrl || ''));
   }
