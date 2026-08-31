@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.8 Sideline API Move TEST
+// @name         MAIN v0.3.9 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.8
+// @version      0.3.9
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.8';
+  const VERSION = '0.3.9';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -25,6 +25,7 @@
   const PANEL_STATE_KEY = 'sidelineClean.panelStates.v1';
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
   const API_SCAN_SOURCE = '/api/scan-source-container';
+  const API_CLOSE_CONTAINER = '/api/close-container';
   const API_SCAN_ITEM = '/api/scanitem';
   const API_MOVE_ITEMS = '/api/move-items';
 
@@ -502,31 +503,26 @@
     return false;
   }
 
-  async function runExactPredicantRecovery(sourceCode, destinationCode, status) {
-
-    status('Predicant recovery 1/4 — preparing native Sideline...');
-
-    let sourceOpen = await nativeReturnToOriginalSource(sourceCode);
-
-    if (!sourceOpen) {
-      const ready = await normalizeNativeToSourceScan(status);
-      if (!ready) {
-        throw new Error('Could not return native Sideline to Scan Source.');
-      }
-
-      status(`Predicant recovery 1/4 — opening source ${sourceCode}...`);
-      await nativeOpenSourceContainer(sourceCode, 'original source');
-      sourceOpen = true;
+  async function runExactPredicantRecovery(sourceCode, destinationCode, status, run) {
+    status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
+    const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
+    if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
+      throw new Error('Original source API validation failed during Predicant recovery.');
     }
 
-    status('Predicant recovery 2/4 — closing original source with NO...');
-    await nativeCloseLoadedContainer('original source', false);
+    status('Predicant recovery 2/4 — closing original source with NO by API...');
+    await closeContainerDirect(sourceCode, false);
+    if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
 
-    status(`Predicant recovery 3/4 — opening destination ${destinationCode}...`);
-    await nativeOpenSourceContainer(destinationCode, 'destination');
+    status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
+    const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
+    if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
+      throw new Error('Destination API validation failed during Predicant recovery.');
+    }
 
-    status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES...`);
-    await nativeCloseLoadedContainer('destination', true);
+    status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
+    await closeContainerDirect(destinationCode, true);
+    if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
 
     return true;
   }
@@ -1872,46 +1868,30 @@
     }
 
     const sourceCode = live.src;
-    const wasRunning = live.running;
 
     live.running = false;
     liveScan.disabled = true;
     live.error = '';
-    live.note = `clearing source ${sourceCode}`;
+    live.note = `clearing source ${sourceCode} by API`;
     renderLive();
 
     shared.owner = 'live';
 
     try {
-      const sourceLoaded = () =>
-        norm(loadedSourceContainer()) === norm(sourceCode) && !!changeButton();
-
-      if (sourceLoaded()) {
-        await nativeCloseLoadedContainer('live source', true);
-      }
-      else if (await waitForNativeSourceScan(2500)) {
-        await nativeOpenSourceContainer(sourceCode, 'live source');
-        await nativeCloseLoadedContainer('live source', true);
-      }
-      else {
-        const returned = await nativeReturnToOriginalSource(sourceCode);
-        if (returned === true || sourceLoaded()) {
-          await nativeCloseLoadedContainer('live source', true);
-        } else {
-          throw new Error('Could not safely reach the Live source container.');
-        }
-      }
-
+      await closeContainerDirect(sourceCode, true);
       resetLive(`SOURCE CLEARED — ${sourceCode} — scan next source`);
     } catch (error) {
-      live.running = wasRunning;
-      live.error = `SOURCE CLEAR FAILED — ${error?.message || error}`;
-      live.note = 'retry Clear source or handle manually';
-      liveScan.disabled = !wasRunning;
+      live.running = false;
+      live.error = error?.outcomeUnknown
+        ? `SOURCE CLEAR UNKNOWN — ${error?.message || error}`
+        : `SOURCE CLEAR FAILED — ${error?.message || error}`;
+      live.note = error?.outcomeUnknown
+        ? 'VERIFY SOURCE STATE MANUALLY — no automatic close retry was sent'
+        : 'handle source manually';
+      liveScan.disabled = true;
       liveDest.disabled = true;
       shared.owner = 'live';
       renderLive();
-      if (wasRunning) setTimeout(() => liveScan.focus(), 0);
     }
   }
 
@@ -3592,6 +3572,66 @@
     return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
   }
 
+  function closeContainerPayload(container, containerEmpty) {
+    return {
+      containerScannableId:container,
+      containerEmpty:containerEmpty === true,
+      directedLabel:false,
+      processPath:'UNDETERMINED',
+      requestId:requestId(),
+      tool:TOOL
+    };
+  }
+
+  async function closeContainerDirect(container, containerEmpty) {
+    const code = clean(container);
+    if (!validContainer(code)) throw new Error('Direct close requires a valid csX/tsX container.');
+
+    let response;
+    try {
+      response = await fetch(API_CLOSE_CONTAINER, {
+        method:'POST',
+        credentials:'same-origin',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify(closeContainerPayload(code, containerEmpty))
+      });
+    } catch (cause) {
+      const error = new Error(`Close outcome UNKNOWN for ${code} — verify container state manually before retrying.`);
+      error.name = 'CloseOutcomeUnknownError';
+      error.outcomeUnknown = true;
+      error.cause = cause;
+      throw error;
+    }
+
+    let raw = '';
+    try {
+      raw = await response.text();
+    } catch (cause) {
+      const error = new Error(`Close outcome UNKNOWN for ${code} — response could not be read. Verify container state manually before retrying.`);
+      error.name = 'CloseOutcomeUnknownError';
+      error.outcomeUnknown = true;
+      error.cause = cause;
+      throw error;
+    }
+
+    let payload = raw;
+    try { payload = raw ? JSON.parse(raw) : null; } catch {}
+
+    if (
+      !response.ok ||
+      clean(payload?.['@type']) !== 'CloseContainerResponse' ||
+      payload?.success !== true
+    ) {
+      const error = new Error(`Close NOT CONFIRMED for ${code}${response.ok ? '' : ` — HTTP ${response.status}`} — verify state before retrying.`);
+      error.name = 'CloseNotConfirmedError';
+      error.outcomeUnknown = true;
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  }
+
   function beginLazyRun() {
     return beginRun(lazy);
   }
@@ -3916,7 +3956,7 @@
     };
 
     try {
-      await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery);
+      await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery, run);
 
       setRecovery(`Destination reset — revalidating ${lazy.src}...`);
 
@@ -3937,6 +3977,20 @@
       return true;
     } catch (error) {
       if (runWasCancelled(error, run)) return false;
+
+      if (error?.outcomeUnknown) {
+        cancelLazyRun();
+        lazy.running = false;
+        lazy.predicant = false;
+        lazy.paused = false;
+        lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
+        lazy.note = 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent';
+        shared.owner = '';
+        setLazyRunningIndicator(false);
+        renderLazy();
+        return false;
+      }
+
       lazy.predicant = true;
       lazy.paused = true;
       lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
@@ -4567,34 +4621,17 @@
 
     const previousOwner = shared.owner;
     shared.owner = 'lazy-clear';
-    lazy.note = `clearing source ${lazy.src}`;
+    lazy.note = `clearing source ${lazy.src} by API`;
     lazy.error = '';
     renderLazy();
 
     try {
-      const sourceLoaded = () =>
-        norm(loadedSourceContainer()) === norm(lazy.src) && !!changeButton();
-
-      if (sourceLoaded()) {
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      if (await waitForNativeSourceScan(2500)) {
-        await nativeOpenSourceContainer(lazy.src, 'source');
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      const returned = await nativeReturnToOriginalSource(lazy.src);
-      if (returned === true || sourceLoaded()) {
-        await nativeCloseLoadedContainer('source', true);
-        return true;
-      }
-
-      throw new Error('Could not safely reach original source in native Sideline.');
+      await closeContainerDirect(lazy.src, true);
+      return true;
     } catch (error) {
-      lazy.error = `Moves complete — source clear failed: ${error?.message || error}`;
+      lazy.error = error?.outcomeUnknown
+        ? `Moves complete — source clear UNKNOWN: ${error?.message || error}`
+        : `Moves complete — source clear failed: ${error?.message || error}`;
       return false;
     } finally {
       shared.owner = previousOwner;
