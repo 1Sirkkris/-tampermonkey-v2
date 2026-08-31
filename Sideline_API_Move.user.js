@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.10 Sideline API Move TEST
+// @name         MAIN v0.3.11 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.10
+// @version      0.3.11
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.10';
+  const VERSION = '0.3.11';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 3;
@@ -558,6 +558,7 @@
 #sh-live .sh-live-scan{font:900 18px Consolas,monospace;padding:12px;border:2px solid #146eb4}
 #sh-live .sh-live-scan:disabled{background:#f3f4f6;border-color:#cbd5e1;color:#64748b}
 #sh-live .sh-live-ready{margin:7px 0;padding:7px 9px;border:1px solid #bfdbfe;border-left:5px solid #146eb4;background:#eff6ff;color:#0f3d73;font-weight:900}
+#sh-live .sh-live-delay{padding:5px 9px;min-width:90px;font-size:11px}
 #sh-dock button.sh-live-one-mode{background:#fde047!important;color:#111827!important;border:3px solid #111827!important;padding:6px 4px!important;animation:shLiveOneFlash .52s steps(2,end) infinite}
 @keyframes shLiveOneFlash{0%,100%{background:#fde047;color:#111827;box-shadow:0 0 0 2px #111827}50%{background:#111827;color:#fff;box-shadow:0 0 0 4px #fde047}}
 #sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
@@ -1119,6 +1120,7 @@
     lookupActive:0,
     lookupWait:[],
     nextMoveAt:0,
+    delayEnabled:true,
     datePending:[],
     activeDateItem:null
   };
@@ -1131,6 +1133,7 @@
     '</div>' +
     '<input class="sh-input sh-live-scan" data-f="live-scan" placeholder="3. Scan item barcode — QTY always 1" disabled>' +
     '<div class="sh-live-ready">QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.</div>' +
+    '<div style="display:flex;justify-content:flex-end;margin:-2px 0 7px"><button class="sh-btn sh-live-delay" data-live-a="delay" data-live-delay>Delay: YES</button></div>' +
     '<div class="sh-grid4">' +
       '<button class="sh-btn sh-stop" data-live-a="stop">Stop</button>' +
       '<button class="sh-btn" data-live-a="reset">Reset</button>' +
@@ -1158,6 +1161,7 @@
   const liveError = $('[data-live-error]', livePanel);
   const liveOneResult = $('[data-live-one-result]', livePanel);
   const liveReady = $('.sh-live-ready', livePanel);
+  const liveDelay = $('[data-live-delay]', livePanel);
   const liveQueueLabel = $('[data-live-queue-label]', livePanel);
   const liveIssue = $('.sh-live-issue', livePanel);
   const liveCurrent = $('[data-live-current]', livePanel);
@@ -1177,11 +1181,21 @@
       ? `Live 1×1 Immediate v${VERSION}`
       : `Live Lazy QTY 1 v${VERSION}`;
     setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
+    if (liveDelay) {
+      liveDelay.style.display = live.oneByOne ? 'none' : '';
+      liveDelay.textContent = `Delay: ${live.delayEnabled ? 'YES' : 'NO'}`;
+      liveDelay.classList.toggle('sh-on', live.delayEnabled);
+      liveDelay.title = live.delayEnabled
+        ? 'Artificial Live move pacing is ON (5–11 seconds).'
+        : 'Artificial Live move pacing is OFF.';
+    }
     setTextIfChanged(
       liveReady,
       live.oneByOne
         ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
-        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+        : live.delayEnabled
+          ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+          : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'
     );
   }
 
@@ -1270,14 +1284,21 @@
 
   async function waitForLiveMovePace(item, run=live.activeRun) {
     if (!currentLiveRun(run) || !live.running) return false;
+    if (!live.delayEnabled) return true;
 
-    const waitMs = Math.max(0, live.nextMoveAt - Date.now());
+    let waitMs = Math.max(0, live.nextMoveAt - Date.now());
     if (!waitMs) return true;
 
     live.note = `paced wait ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;
     renderLive();
 
-    return await waitLiveMs(waitMs, run);
+    while (live.delayEnabled) {
+      waitMs = Math.max(0, live.nextMoveAt - Date.now());
+      if (!waitMs) return true;
+      if (!await waitLiveMs(Math.min(waitMs, 200), run)) return false;
+    }
+
+    return currentLiveRun(run) && live.running;
   }
 
   function resetLiveLookupPool() {
@@ -2373,7 +2394,7 @@
     } catch (error) {
       if (error?.name === 'AbortError') return false;
 
-      live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
+      live.nextMoveAt = live.delayEnabled ? Date.now() + randomLiveMoveDelayMs() : 0;
 
       if (isAllowedOverageResponse(error?.payload)) {
         response = error.payload;
@@ -2394,7 +2415,7 @@
 
     if (!currentLiveRun(run)) return false;
 
-    live.nextMoveAt = Date.now() + randomLiveMoveDelayMs();
+    live.nextMoveAt = live.delayEnabled ? Date.now() + randomLiveMoveDelayMs() : 0;
 
     const reason = moveReason(response);
 
@@ -2837,6 +2858,17 @@
 
     if (action === 'clear-source') {
       clearLiveSource();
+      return;
+    }
+
+    if (action === 'delay') {
+      if (live.oneByOne) return;
+      live.delayEnabled = !live.delayEnabled;
+      if (!live.delayEnabled) live.nextMoveAt = 0;
+      live.note = live.delayEnabled
+        ? 'move delay ON — 5–11s pacing'
+        : 'move delay OFF — no artificial pacing';
+      renderLive();
       return;
     }
 
