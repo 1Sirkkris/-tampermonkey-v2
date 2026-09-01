@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.15 Sideline API Move TEST
+// @name         MAIN v0.3.16 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.15
+// @version      0.3.16
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,11 +15,12 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.15';
+  const VERSION = '0.3.16';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 5;
   const LIVE_LOOKUP_CONCURRENCY = 3;
+  const SCRUB_VALIDATE_CONCURRENCY = 3;
   const LIVE_MOVE_DELAY_MIN_MS = 5000;
   const LIVE_MOVE_DELAY_MAX_MS = 11000;
   const PANEL_STATE_KEY = 'sidelineClean.panelStates.v1';
@@ -100,8 +101,7 @@
   }
 
   const helperSelector = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast,#sh-lazy-running-indicator,#sh-move-corner';
-  const shared = { owner:'', scrubBusy:false, queueBusy:false, expiryBusy:false };
-  let escapeEpoch = 0;
+  const shared = { owner:'', queueBusy:false, expiryBusy:false };
   let returnSourceBusy = false;
   let expiryRequestSeq = 0;
   let nativeExpirySuppressedUntil = 0;
@@ -371,81 +371,8 @@
     return match ? match[1] : '';
   }
 
-  function customerBoundSourceMessage() {
-    const text = nativePageText();
-    return (
-      text.includes('cannot be used due to customer bound shipment') ||
-      text.includes('customer bound shipment')
-    );
-  }
-
   async function waitForNativeSourceScan(timeout=12000) {
     return !!await waitFor(() => screen() === 'SOURCE' && scanInput(), timeout, 50);
-  }
-
-  async function waitForNativeLoadedSource(code, timeout=12000) {
-    const expected = norm(code);
-    return !!await waitFor(() =>
-      norm(loadedSourceContainer()) === expected &&
-      screen() !== 'SOURCE' &&
-      !!changeButton(),
-      timeout,
-      50
-    );
-  }
-
-  async function nativeOpenSourceContainer(code, label) {
-    if (!await waitForNativeSourceScan(12000)) {
-      throw new Error(`Scan source was not ready for ${label}.`);
-    }
-
-    if (!await fillAndConfirm(code, 'SOURCE')) {
-      throw new Error(`Could not scan ${label} ${code}.`);
-    }
-
-    if (!await waitForNativeLoadedSource(code, 12000)) {
-      throw new Error(`${label} ${code} did not open as source.`);
-    }
-  }
-
-  async function nativeCloseLoadedContainer(label, emptyChoice) {
-    const wanted = emptyChoice ? 'yes' : 'no';
-    const change = await waitFor(changeButton, 5000, 40);
-    if (!change) throw new Error(`Could not find Change container for ${label}.`);
-
-    click(change);
-
-    let outcome = await waitFor(() => {
-      if (screen() === 'SOURCE' && scanInput()) return { type:'closed' };
-      const choice = modalButton(wanted);
-      if (choice) return { type:'choice', choice };
-      return null;
-    }, 2200, 45);
-
-    if (!outcome) {
-      const retryChange = changeButton();
-      if (retryChange) {
-        click(retryChange);
-        outcome = await waitFor(() => {
-          if (screen() === 'SOURCE' && scanInput()) return { type:'closed' };
-          const choice = modalButton(wanted);
-          if (choice) return { type:'choice', choice };
-          return null;
-        }, 2200, 45);
-      }
-    }
-
-    if (!outcome) {
-      throw new Error(`Could not close ${label}: no ${emptyChoice ? 'YES/NO prompt' : 'NO prompt'} and did not return to Scan Source.`);
-    }
-
-    if (outcome.type === 'closed') return;
-
-    click(outcome.choice);
-
-    if (!await waitForNativeSourceScan(12000)) {
-      throw new Error(`Timed out after closing ${label} with ${emptyChoice ? 'YES' : 'NO'}.`);
-    }
   }
 
   async function nativeReturnToOriginalSource(sourceCode) {
@@ -471,69 +398,6 @@
 
     if (!ready) return false;
     return true;
-  }
-
-  async function normalizeNativeToSourceScan(status) {
-    if (await waitForNativeSourceScan(700)) return true;
-
-    const back = backToSourceButton();
-    if (back) {
-      status('Predicant recovery — returning to source screen...');
-      click(back);
-      await sleep(120);
-
-      if (await waitForNativeSourceScan(900)) return true;
-    }
-
-    const change = changeButton();
-    if (change) {
-      status('Predicant recovery — closing current native container with NO...');
-      click(change);
-
-      const no = await waitFor(() => modalButton('no'), 5000, 35);
-      if (!no) throw new Error('Could not find NO while resetting native Sideline screen.');
-
-      click(no);
-
-      if (await waitForNativeSourceScan(12000)) return true;
-    }
-
-    if (await waitForNativeSourceScan(2500)) return true;
-
-    return false;
-  }
-
-  async function runExactPredicantRecovery(sourceCode, destinationCode, status, run) {
-    let closeCommitted = false;
-
-    try {
-      status(`Predicant recovery 1/4 — validating source ${sourceCode} by API...`);
-      const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(sourceCode), run);
-      if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
-        throw new Error('Original source API validation failed during Predicant recovery.');
-      }
-
-      status('Predicant recovery 2/4 — closing original source with NO by API...');
-      await closeContainerDirect(sourceCode, false);
-      closeCommitted = true;
-      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after source close.');
-
-      status(`Predicant recovery 3/4 — validating destination ${destinationCode} by API...`);
-      const destinationResponse = await api(API_SCAN_SOURCE, scanSourcePayload(destinationCode), run);
-      if (!currentLazyRun(run) || !destinationResponse || destinationResponse.success !== true) {
-        throw new Error('Destination API validation failed during Predicant recovery.');
-      }
-
-      status(`Predicant recovery 4/4 — emptying destination ${destinationCode} with YES by API...`);
-      await closeContainerDirect(destinationCode, true);
-      if (!currentLazyRun(run)) throw makeAbortError('Predicant recovery cancelled after destination close.');
-
-      return true;
-    } catch (error) {
-      if (error?.outcomeUnknown) throw error;
-      if (closeCommitted) error.recoveryNoRetry = true;
-      throw error;
-    }
   }
 
   // UI
@@ -741,6 +605,16 @@
           return;
         }
 
+        if (key === 'scrub') {
+          const opening = !feature.scrub;
+          feature.scrub = opening;
+          if (opening) startScrubSession();
+          else stopScrubSession('off');
+          savePanelStates();
+          applyPanels();
+          return;
+        }
+
         if (key === 'lazy' && !feature.lazy) {
           deactivateLiveForModeSwitch('switched to Lazy');
           feature.live = false;
@@ -783,54 +657,239 @@
   }
 
   const scrubPanel = panel('sh-scrub', `Tote Scrubber v${VERSION}`, 'scrub');
-  const scrubStatus = document.createElement('div');
-  scrubStatus.className = 'sh-status';
-  scrubPanel.appendChild(scrubStatus);
+  scrubPanel.insertAdjacentHTML('beforeend',
+    '<input class="sh-input" data-scrub-scan placeholder="Scan tote — API empty ASAP" disabled>' +
+    '<div class="sh-status"></div><div class="sh-error"></div>'
+  );
 
-  let scrubTimer = 0;
+  const scrubScan = $('[data-scrub-scan]', scrubPanel);
+  const scrubStatus = $('.sh-status', scrubPanel);
+  const scrubError = $('.sh-error', scrubPanel);
+  const scrub = {
+    session:0,
+    items:[],
+    closeIndex:0,
+    validating:0,
+    closeInFlight:false,
+    cleared:0,
+    skipped:0,
+    failed:0,
+    halted:false,
+    note:'',
+    error:''
+  };
 
-  function syncScrubTimer() {
-    if (feature.scrub) {
-      if (!scrubTimer) {
-        scrubTimer = setInterval(scrubTick, 120);
-        scrubTick();
-      }
-      return;
-    }
-    if (scrubTimer) clearInterval(scrubTimer);
-    scrubTimer = 0;
+  function scrubPendingCount() {
+    return scrub.items.reduce((count, item) =>
+      ['CLEARED','SKIPPED','FAILED'].includes(item.state) ? count : count + 1,
+    0);
   }
 
   function renderScrub() {
-    setTextIfChanged(scrubStatus, feature.scrub ? 'ACTIVE — Change container → Yes' : 'OFF');
+    const active = feature.scrub && !scrub.halted;
+    const state = !feature.scrub
+      ? 'OFF'
+      : scrub.halted
+        ? 'STOPPED — VERIFY'
+        : 'ACTIVE — API';
+
+    scrubScan.disabled = !active;
+    setTextIfChanged(
+      scrubStatus,
+      `${state} | Cleared ${scrub.cleared} | Pending ${scrubPendingCount()} | Checking ${scrub.validating}` +
+      (scrub.note ? ` | ${scrub.note}` : '')
+    );
+    setTextIfChanged(scrubError, scrub.error);
+
     let w = $('#sh-scrub-warning');
-    if (feature.scrub && !w) {
+    const showWarning = feature.scrub || scrub.halted;
+    if (showWarning && !w) {
       w = document.createElement('div');
       w.id = 'sh-scrub-warning';
-      w.textContent = '⚠ TOTE SCRUBBER ACTIVE — OPENED CONTAINERS WILL BE EMPTIED ⚠';
       document.body.appendChild(w);
     }
-    if (!feature.scrub && w) w.remove();
-    syncScrubTimer();
+    if (w) {
+      w.textContent = scrub.halted
+        ? '⚠ SCRUB STOPPED — CLOSE OUTCOME UNKNOWN — VERIFY TOTE STATE ⚠'
+        : '⚠ TOTE SCRUBBER ACTIVE — SCANNED TOTES WILL BE EMPTIED ⚠';
+    }
+    if (!showWarning && w) w.remove();
   }
 
-  async function scrubTick() {
-    if (!feature.scrub || shared.scrubBusy || shared.owner === 'queue' || shared.owner === 'lazy' || shared.owner === 'live') return;
-    const epoch = escapeEpoch;
-    const change = changeButton();
-    if (!change) return;
-    shared.scrubBusy = true;
+  function startScrubSession() {
+    scrub.session++;
+    scrub.items = [];
+    scrub.closeIndex = 0;
+    scrub.validating = 0;
+    scrub.cleared = 0;
+    scrub.skipped = 0;
+    scrub.failed = 0;
+    scrub.halted = false;
+    scrub.note = 'scanner ready';
+    scrub.error = '';
+
+    const blocked = !!(
+      q.running ||
+      lazy.running ||
+      live.running ||
+      live.sourceReady ||
+      (shared.owner && shared.owner !== 'scrub')
+    );
+
+    if (blocked) {
+      scrub.halted = true;
+      scrub.note = 'another Sideline workflow is active';
+      scrub.error = 'STOP OTHER SIDELINE WORK FIRST';
+      renderScrub();
+      return;
+    }
+
     shared.owner = 'scrub';
-    try {
-      if (epoch !== escapeEpoch || !feature.scrub) return;
-      click(change);
-      const yes = await waitFor(() => epoch === escapeEpoch && feature.scrub && modalButton('yes'), 3000, 20);
-      if (yes && epoch === escapeEpoch && feature.scrub) click(yes);
-    } finally {
-      shared.scrubBusy = false;
-      if (shared.owner === 'scrub') shared.owner = '';
+    renderScrub();
+    setTimeout(() => {
+      if (feature.scrub && !scrub.halted) scrubScan.focus();
+    }, 0);
+  }
+
+  function stopScrubSession(note='off') {
+    scrub.session++;
+    scrub.items = [];
+    scrub.closeIndex = 0;
+    scrub.validating = 0;
+    scrub.halted = false;
+    scrub.note = note;
+    scrub.error = '';
+    scrubScan.disabled = true;
+    if (shared.owner === 'scrub') shared.owner = '';
+    renderScrub();
+  }
+
+  function pumpScrubValidation(session=scrub.session) {
+    if (!feature.scrub || scrub.halted || session !== scrub.session) return;
+
+    while (scrub.validating < SCRUB_VALIDATE_CONCURRENCY) {
+      const item = scrub.items.find(candidate => candidate.state === 'QUEUED');
+      if (!item) break;
+
+      item.state = 'VALIDATING';
+      scrub.validating++;
+      renderScrub();
+
+      (async () => {
+        try {
+          item.sourceMeta = await scanSourceDirect(item.code);
+          if (session !== scrub.session) return;
+          item.state = 'READY';
+          item.reason = '';
+        } catch (error) {
+          if (session !== scrub.session) return;
+          if (error?.customerBound) {
+            item.state = 'SKIPPED';
+            item.reason = 'CUSTOMER-BOUND — SKIPPED';
+            scrub.skipped++;
+            scrub.note = `${item.code} customer-bound — skipped`;
+          } else {
+            item.state = 'FAILED';
+            item.reason = error?.message || 'SOURCE VALIDATION FAILED';
+            scrub.failed++;
+            scrub.error = `${item.code} — ${item.reason}`;
+          }
+        } finally {
+          if (session === scrub.session) {
+            scrub.validating = Math.max(0, scrub.validating - 1);
+            renderScrub();
+            pumpScrubValidation(session);
+            pumpScrubClose(session);
+          }
+        }
+      })();
     }
   }
+
+  async function pumpScrubClose(session=scrub.session) {
+    if (
+      !feature.scrub ||
+      scrub.halted ||
+      session !== scrub.session ||
+      scrub.closeInFlight
+    ) return;
+
+    while (scrub.closeIndex < scrub.items.length) {
+      const item = scrub.items[scrub.closeIndex];
+      if (!item) return;
+
+      if (item.state === 'SKIPPED' || item.state === 'FAILED') {
+        scrub.closeIndex++;
+        continue;
+      }
+
+      if (item.state !== 'READY') return;
+
+      scrub.closeInFlight = true;
+      item.state = 'CLOSING';
+      scrub.note = `emptying ${item.code}`;
+      renderScrub();
+
+      try {
+        await closeContainerDirect(item.code, true);
+        if (session === scrub.session) {
+          item.state = 'CLEARED';
+          scrub.cleared++;
+          scrub.closeIndex++;
+          scrub.note = `${item.code} cleared`;
+        }
+      } catch (error) {
+        if (error?.outcomeUnknown) {
+          item.state = 'UNKNOWN';
+          scrub.halted = true;
+          scrub.error = `CLOSE UNKNOWN — ${item.code} — VERIFY TOTE STATE MANUALLY`;
+          scrub.note = 'no automatic retry sent';
+          scrubScan.disabled = true;
+        } else if (session === scrub.session) {
+          item.state = 'FAILED';
+          item.reason = error?.message || 'CLOSE FAILED';
+          scrub.failed++;
+          scrub.closeIndex++;
+          scrub.error = `${item.code} — ${item.reason}`;
+        }
+      } finally {
+        scrub.closeInFlight = false;
+        renderScrub();
+        if (feature.scrub && !scrub.halted) {
+          pumpScrubValidation(scrub.session);
+          queueMicrotask(() => pumpScrubClose(scrub.session));
+        }
+      }
+      return;
+    }
+  }
+
+  scrubScan.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const code = clean(scrubScan.value);
+    scrubScan.value = '';
+
+    if (!feature.scrub || scrub.halted || !code) return;
+    if (!validContainer(code)) {
+      scrub.error = 'Tote must start with csX or tsX.';
+      scrub.note = `${code} rejected`;
+      renderScrub();
+      setTimeout(() => scrubScan.focus(), 0);
+      return;
+    }
+
+    scrub.items.push({ code, state:'QUEUED', reason:'', sourceMeta:null });
+    scrub.note = `${code} queued`;
+    renderScrub();
+    pumpScrubValidation(scrub.session);
+    pumpScrubClose(scrub.session);
+    setTimeout(() => {
+      if (feature.scrub && !scrub.halted) scrubScan.focus();
+    }, 0);
+  });
 
   const q = { running:false, paused:false, index:0, list:[], failed:[], runSeq:0 };
   const queuePanel = panel('sh-queue', `Tote Queue v${VERSION}`, 'queue');
@@ -863,7 +922,7 @@
     if (!active() || q.paused || shared.queueBusy) return;
     if (q.index >= q.list.length) {
       q.running = false;
-      shared.owner = '';
+      if (shared.owner === 'queue') shared.owner = '';
       renderQueue('done');
       return;
     }
@@ -873,80 +932,86 @@
     const code = q.list[q.index];
 
     try {
-      if (screen() !== 'SOURCE' && changeButton()) {
-        const r = await closeOpenContainer('yes', active);
+      renderQueue('validating by API');
+      try {
+        await scanSourceDirect(code);
+      } catch (error) {
         if (!active()) return;
-        if (r !== 'closed') throw new Error(r);
+        if (error?.customerBound) {
+          q.index++;
+          renderQueue('customer-bound — skipped');
+          return;
+        }
+        throw error;
       }
-      renderQueue('scanning source');
-      if (!await fillAndConfirm(code, 'SOURCE', active)) {
-        if (!active()) return;
-        throw new Error('scan timeout');
-      }
 
-      const openedOrBlocked = await waitFor(() => {
-        if (!active()) return 'cancelled';
-        if (customerBoundSourceMessage()) return 'customer-bound';
-        if (changeButton()) return 'opened';
-        return null;
-      }, 4500, 40);
+      if (!active()) return;
+      renderQueue('emptying by API');
+      await closeContainerDirect(code, true);
+      if (!active()) return;
 
-      if (!active() || openedOrBlocked === 'cancelled') return;
+      q.index++;
+      renderQueue('cleared');
+    } catch (error) {
+      if (!active()) return;
 
-      if (openedOrBlocked === 'customer-bound') {
-        q.index++;
-        renderQueue('customer-bound — skipped');
+      if (error?.outcomeUnknown) {
+        q.failed.push(`${code} (CLOSE UNKNOWN — VERIFY)`);
+        q.running = false;
+        q.paused = false;
+        qError.textContent = `CLOSE UNKNOWN — ${code} — VERIFY TOTE STATE MANUALLY`;
+        renderQueue('STOPPED — no automatic retry');
         return;
       }
 
-      if (openedOrBlocked !== 'opened') {
-        throw new Error('source did not open');
-      }
-
-      const result = await closeOpenContainer('yes', active);
-      if (!active()) return;
-      if (result !== 'closed') throw new Error(result);
+      q.failed.push(`${code} (${error?.message || error})`);
       q.index++;
-      renderQueue('cleared');
-    } catch (e) {
-      q.failed.push(`${code} (${e.message})`);
-      q.index++;
-      renderQueue(e.message);
+      renderQueue(error?.message || String(error));
     } finally {
       shared.queueBusy = false;
-      if (shared.owner === 'queue') shared.owner = '';
-      if (active() && !q.paused) setTimeout(() => queuePump(run), 40);
+      if (!q.running && shared.owner === 'queue') shared.owner = '';
+      if (active() && !q.paused) queueMicrotask(() => queuePump(run));
     }
   }
 
-  queuePanel.onclick = e => {
-    const a = e.target.dataset.a;
-    if (!a) return;
-    if (a === 'start') {
+  queuePanel.onclick = event => {
+    const action = event.target.dataset.a;
+    if (!action) return;
+
+    if (action === 'start') {
+      if (feature.scrub && !scrub.halted) {
+        qError.textContent = 'Scrub is active — turn Scrub OFF first.';
+        return;
+      }
       if (live.running || live.sourceReady) {
         qError.textContent = 'Live Lazy is active — stop/reset Live first.';
         return;
       }
+
       q.runSeq++;
       q.list = parseContainers(qText.value);
       q.index = 0;
       q.failed = [];
       q.running = !!q.list.length;
       q.paused = false;
-      renderQueue(q.running ? 'starting' : 'no containers');
+      renderQueue(q.running ? 'starting API queue' : 'no containers');
       queuePump(q.runSeq);
+      return;
     }
-    if (a === 'pause') {
+
+    if (action === 'pause') {
       q.paused = !q.paused;
-      e.target.textContent = q.paused ? 'Resume' : 'Pause';
+      event.target.textContent = q.paused ? 'Resume' : 'Pause';
       renderQueue();
-      if (!q.paused) queuePump();
+      if (!q.paused) queuePump(q.runSeq);
+      return;
     }
-    if (a === 'stop') {
+
+    if (action === 'stop') {
       q.runSeq++;
       q.running = false;
       q.paused = false;
-      shared.owner = '';
+      if (shared.owner === 'queue') shared.owner = '';
       renderQueue('stopped');
     }
   };
@@ -1385,22 +1450,6 @@
     }
   }
 
-  function restartLiveLookup(item) {
-    if (!item) return;
-
-    item.resolvePromise = null;
-    item.resolveSettle = null;
-    item.lookupQueued = false;
-    item.lookupStarted = false;
-    item.ctx = null;
-    item.retryCtx = null;
-    item.retryExpirationMs = null;
-    item.preflightStatus = '';
-    item.preflightIssue = null;
-
-    scheduleLiveLookup(item);
-  }
-
   function scanSourcePayload(container) {
     return { containerScannableId:container, requestId:requestId(), tool:TOOL };
   }
@@ -1476,13 +1525,12 @@
     };
   }
 
-  function setLiveFailureNotice(item, title, reason, mode='live') {
+  function setLiveFailureNotice(item, title, reason) {
     const meta = liveItemMeta(item);
     const product = liveProductMeta(item);
     const token = ++live.failureToken;
     clearTimeout(live.failureTimer);
     live.failureNotice = {
-      mode,
       title:clean(title) || 'ITEM NOT MOVED',
       reason:clean(reason) || 'NOT MOVED',
       scan:meta.scan,
@@ -2520,7 +2568,6 @@
   // completed/in-flight scan-item responses. Movement still begins only inside startLazy().
   const lazyPreResolve = {
     sourceKey:'',
-    sourceCode:'',
     generation:0,
     queue:[],
     entries:new Map(),
@@ -2548,7 +2595,6 @@
     lazyPreResolve.entries.clear();
 
     const code = validContainer(source) ? clean(source) : '';
-    lazyPreResolve.sourceCode = code;
     lazyPreResolve.sourceKey = code ? norm(code) : '';
   }
 
@@ -3403,6 +3449,76 @@
     return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
   }
 
+  function payloadHasCustomerBound(value, seen=new Set()) {
+    if (value == null) return false;
+    if (typeof value === 'string') return /customer\s*bound\s*shipment/i.test(value);
+    if (typeof value !== 'object') return false;
+    if (seen.has(value)) return false;
+    seen.add(value);
+
+    if (Array.isArray(value)) return value.some(child => payloadHasCustomerBound(child, seen));
+    return Object.entries(value).some(([key, child]) =>
+      /customer\s*bound\s*shipment/i.test(key) || payloadHasCustomerBound(child, seen)
+    );
+  }
+
+  async function scanSourceDirect(container) {
+    const code = clean(container);
+    if (!validContainer(code)) throw new Error('Source scan requires a valid csX/tsX container.');
+
+    let response;
+    try {
+      response = await fetch(API_SCAN_SOURCE, {
+        method:'POST',
+        credentials:'same-origin',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify(scanSourcePayload(code))
+      });
+    } catch (cause) {
+      const error = new Error(`Source scan failed for ${code}: ${cause?.message || cause}`);
+      error.cause = cause;
+      throw error;
+    }
+
+    let raw = '';
+    try {
+      raw = await response.text();
+    } catch (cause) {
+      const error = new Error(`Source response could not be read for ${code}.`);
+      error.cause = cause;
+      throw error;
+    }
+
+    let payload = raw;
+    try { payload = raw ? JSON.parse(raw) : null; } catch {}
+
+    if (payloadHasCustomerBound(payload)) {
+      const error = new Error('CUSTOMER-BOUND SHIPMENT');
+      error.customerBound = true;
+      error.payload = payload;
+      throw error;
+    }
+
+    if (
+      !response.ok ||
+      clean(payload?.['@type']) !== 'ScanSourceContainerResponse' ||
+      payload?.success !== true
+    ) {
+      const reason = clean(
+        payload?.message ||
+        payload?.description ||
+        payload?.errorMessage ||
+        payload?.['@type'] ||
+        (response.ok ? 'SOURCE VALIDATION FAILED' : `HTTP ${response.status}`)
+      );
+      const error = new Error(reason || 'SOURCE VALIDATION FAILED');
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  }
+
   function closeContainerPayload(container, containerEmpty) {
     return {
       containerScannableId:container,
@@ -3603,36 +3719,6 @@
     };
   }
 
-  function hasHazmat(value) {
-    const seen = new Set();
-    const hazardKey = key => /hazmat|dangerous.?goods/i.test(clean(key));
-    const negative = /^(?:false|no|none|null|unknown|not[_ -]?hazmat|non[_ -]?hazmat|not[_ -]?dangerous(?:[_ -]?goods)?|non[_ -]?dangerous(?:[_ -]?goods)?)$/i;
-
-    const walk = (node, key='') => {
-      if (node == null) return false;
-
-      if (typeof node === 'boolean') return hazardKey(key) && node === true;
-      if (typeof node === 'number') return hazardKey(key) && node > 0;
-
-      if (typeof node === 'string') {
-        const valueText = clean(node);
-        if (!valueText || negative.test(valueText)) return false;
-        if (/\bHAZMAT\b/i.test(valueText) && !/\b(?:NOT|NON)[ _-]?HAZMAT\b/i.test(valueText)) return true;
-        if (/\bDANGEROUS[ _-]?GOODS\b/i.test(valueText) && !/\b(?:NOT|NON)[ _-]?DANGEROUS[ _-]?GOODS\b/i.test(valueText)) return true;
-        return hazardKey(key);
-      }
-
-      if (typeof node !== 'object') return false;
-      if (seen.has(node)) return false;
-      seen.add(node);
-
-      if (Array.isArray(node)) return node.some(child => walk(child, key));
-      return Object.entries(node).some(([childKey, child]) => walk(child, childKey));
-    };
-
-    return walk(value);
-  }
-
   function isHazmatRejectionResponse(response) {
     if (!response || typeof response !== 'object') return false;
 
@@ -3786,41 +3872,27 @@
       renderLazy();
     };
 
-    let recoveryApplied = false;
-
     try {
-      await runExactPredicantRecovery(lazy.src, lazy.dest, setRecovery, run);
-      recoveryApplied = true;
+      setRecovery(`Predicant — emptying destination ${lazy.dest} by API...`);
+      await closeContainerDirect(lazy.dest, true);
 
-      setRecovery(`Destination reset — revalidating ${lazy.src}...`);
+      if (!currentLazyRun(run) || !lazy.running) return false;
 
-      const sourceResponse = await api(API_SCAN_SOURCE, scanSourcePayload(lazy.src), run);
-
-      if (!currentLazyRun(run) || !sourceResponse || sourceResponse.success !== true) {
-        throw new Error('Source revalidation failed after Predicant recovery.');
-      }
-
-      lazy.sourceMeta = sourceResponse;
       lazy.predicant = false;
       lazy.paused = false;
       lazy.error = '';
-      lazy.note = `Destination reset — retrying ${item.code} ×${item.qty}`;
+      lazy.note = `Destination emptied — retrying ${item.code} ×${item.qty}`;
       shared.owner = 'lazy';
       renderLazy();
-      await sleep(180);
       return true;
     } catch (error) {
-      const noRetry = error?.outcomeUnknown || error?.recoveryNoRetry || recoveryApplied;
-
-      if (noRetry) {
+      if (error?.outcomeUnknown) {
         cancelLazyRun();
         lazy.running = false;
         lazy.predicant = false;
         lazy.paused = false;
         lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
-        lazy.note = error?.outcomeUnknown
-          ? 'VERIFY CONTAINER STATE MANUALLY — no automatic close retry was sent'
-          : 'RECOVERY STATE CHANGED — verify source/destination manually; no automatic close retry was sent';
+        lazy.note = 'VERIFY DESTINATION STATE MANUALLY — no automatic close retry was sent';
         shared.owner = '';
         setLazyRunningIndicator(false);
         renderLazy();
@@ -5001,10 +5073,8 @@
       q.paused = false;
       renderQueue('returned to source');
     } else if (mode === 'scrub') {
-      escapeEpoch++;
       feature.scrub = false;
-      shared.scrubBusy = false;
-      renderScrub();
+      stopScrubSession('returned to source');
     } else if (mode === 'qty') {
       qtyRequestSeq++;
       qtyClear.disabled = false;
@@ -5088,6 +5158,7 @@
     mountDock();
     applyPanels();
     renderScrub();
+    if (feature.scrub) startScrubSession();
     refreshItems();
 
     const isHelperMutationTarget = node => {

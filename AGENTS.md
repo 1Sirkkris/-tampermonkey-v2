@@ -189,13 +189,13 @@ Changing shared logic requires checking every affected mode.
 
 ### SIDELINE INVARIANTS
 
-Lazy Sideline, Live and 1x1 are separate workflows.
+Lazy Sideline and Live are separate workflows.
 
 Changes to one must not alter another unless explicitly required.
 
 Switching between them must not leave hidden state from the previous mode active.
 
-Lazy, Live and 1x1 must preserve a safe **Return to Source / escape path** from applicable manual-intervention states without requiring a page refresh.
+Lazy and Live must preserve a safe **Return to Source / escape path** from applicable manual-intervention states without requiring a page refresh.
 
 Do not generalize this requirement to unrelated tools or modes.
 
