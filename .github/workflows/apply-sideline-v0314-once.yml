@@ -1,0 +1,285 @@
+name: Apply Sideline v0.3.14 resume skip guard once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-sideline-v0314-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply narrow v0.3.14 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
+          test "$(git hash-object Sideline_API_Move.user.js)" = "cb51183b65b87f6ede322fdf5233227df8a6b923"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('Sideline_API_Move.user.js')
+          text = path.read_text()
+          before_move_refs = text.count('API_MOVE_ITEMS')
+          before_close_refs = text.count('API_CLOSE_CONTAINER')
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once('// @name         MAIN v0.3.13 Sideline API Move TEST', '// @name         MAIN v0.3.14 Sideline API Move TEST', 'name version')
+          replace_once('// @version      0.3.13', '// @version      0.3.14', 'metadata version')
+          replace_once("  const VERSION = '0.3.13';", "  const VERSION = '0.3.14';", 'runtime version')
+
+          replace_once(
+          """  function refreshItems() {
+""",
+          """  function markLazyRemovedItemsOnResume() {
+    const wanted = new Set(parseItems(lItems.value).map(item => clean(item.code).toUpperCase()));
+    let skippedUnits = 0;
+
+    for (const item of lazy.items) {
+      if (['MOVED','FAILED','INVALID','SKIPPED'].includes(item.status)) continue;
+      if (wanted.has(clean(item.code).toUpperCase())) continue;
+
+      skippedUnits += itemQty(item);
+      item.skipRequested = true;
+      item.status = 'SKIPPED';
+      item.failReason = 'REMOVED WHILE PAUSED — NOT MOVED';
+    }
+
+    if (skippedUnits) renderLazy();
+    return skippedUnits;
+  }
+
+  function lazyItemShouldSkip(item) {
+    return !!(item?.skipRequested || item?.status === 'SKIPPED');
+  }
+
+  function markLazyItemSkipped(item) {
+    if (!item) return;
+    item.skipRequested = true;
+    item.status = 'SKIPPED';
+    item.failReason = item.failReason || 'REMOVED WHILE PAUSED — NOT MOVED';
+    renderLazy();
+  }
+
+  function refreshItems() {
+""",
+          'resume reconciliation helpers')
+
+          replace_once(
+          """    let failedUnits = 0;
+    const movedItems = [];
+    const failedItems = [];
+""",
+          """    let failedUnits = 0;
+    let skippedUnits = 0;
+    const movedItems = [];
+    const failedItems = [];
+""",
+          'render skipped counter')
+
+          replace_once(
+          """      } else if (item.status === 'INVALID' || item.status === 'FAILED') {
+        failedUnits += qty;
+        failedItems.push(item);
+      }
+    }
+
+    const remainingUnits = Math.max(0, total - movedUnits - failedUnits);
+""",
+          """      } else if (item.status === 'INVALID' || item.status === 'FAILED') {
+        failedUnits += qty;
+        failedItems.push(item);
+      } else if (item.status === 'SKIPPED') {
+        skippedUnits += qty;
+      }
+    }
+
+    const remainingUnits = Math.max(0, total - movedUnits - failedUnits - skippedUnits);
+""",
+          'render remaining excludes skipped')
+
+          replace_once(
+          """  async function moveResolved(item, ctx, expirationMs=null, run=lazy.activeRun) {
+    const totalQty = itemQty(item);
+
+    item.status = 'MOVING';
+""",
+          """  async function moveResolved(item, ctx, expirationMs=null, run=lazy.activeRun) {
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return false;
+    }
+
+    const totalQty = itemQty(item);
+
+    item.status = 'MOVING';
+""",
+          'move entry skip guard')
+
+          replace_once(
+          """    while (lazy.running && currentLazyRun(run)) {
+      let response;
+
+      try {
+        response = await api(API_MOVE_ITEMS, payload, run);
+""",
+          """    while (lazy.running && currentLazyRun(run)) {
+      if (lazyItemShouldSkip(item)) {
+        markLazyItemSkipped(item);
+        return false;
+      }
+
+      let response;
+
+      try {
+        response = await api(API_MOVE_ITEMS, payload, run);
+""",
+          'move retry skip guard')
+
+          replace_once(
+          """  async function resolveOnly(item, run=lazy.activeRun) {
+    item.status = 'RESOLVING';
+    renderLazy();
+""",
+          """  async function resolveOnly(item, run=lazy.activeRun) {
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return { kind:'skipped' };
+    }
+
+    item.status = 'RESOLVING';
+    renderLazy();
+""",
+          'resolve entry skip guard')
+
+          replace_once(
+          """    if (!currentLazyRun(run)) return { kind:'aborted' };
+
+    const ctx = resolveItem(response,item.code);
+""",
+          """    if (!currentLazyRun(run)) return { kind:'aborted' };
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return { kind:'skipped' };
+    }
+
+    const ctx = resolveItem(response,item.code);
+""",
+          'resolve post-response skip guard')
+
+          replace_once(
+          """    if (lazy.errors) {
+      const movedUnits = lazy.items
+        .filter(item => item.status === 'MOVED')
+        .reduce((sum,item) => sum + item.qty, 0);
+
+      lazy.error = '';
+      lazy.note = `complete | moved ${movedUnits} qty to ${lazy.dest}`;
+      finishLazyRun(run);
+      finishMoveCorner('lazy', false);
+      renderLazy();
+      return;
+    }
+""",
+          """    const skippedUnits = lazy.items
+      .filter(item => item.status === 'SKIPPED')
+      .reduce((sum,item) => sum + itemQty(item), 0);
+
+    if (lazy.errors || skippedUnits) {
+      const movedUnits = lazy.items
+        .filter(item => item.status === 'MOVED')
+        .reduce((sum,item) => sum + item.qty, 0);
+
+      lazy.error = '';
+      lazy.note = skippedUnits
+        ? `complete | moved ${movedUnits} qty | skipped ${skippedUnits} removed qty | source left open`
+        : `complete | moved ${movedUnits} qty to ${lazy.dest}`;
+      finishLazyRun(run);
+      finishMoveCorner('lazy', false);
+      renderLazy();
+      return;
+    }
+""",
+          'completion skipped source-open guard')
+
+          replace_once(
+          """        lazy.dest = nextDest;
+        lazy.damagePaused = false;
+        lazy.damagedDest = '';
+        lazy.paused = false;
+        lazy.error = '';
+        lazy.note = `resumed with new destination ${lazy.dest}`;
+""",
+          """        const skippedUnits = markLazyRemovedItemsOnResume();
+        lazy.dest = nextDest;
+        lazy.damagePaused = false;
+        lazy.damagedDest = '';
+        lazy.paused = false;
+        lazy.error = '';
+        lazy.note = skippedUnits
+          ? `resumed with new destination ${lazy.dest} | skipped ${skippedUnits} removed qty`
+          : `resumed with new destination ${lazy.dest}`;
+""",
+          'damaged resume reconciliation')
+
+          replace_once(
+          """      lazy.paused = !lazy.paused;
+      actionTarget.textContent = lazy.paused ? 'Resume' : 'Pause';
+      lazy.note = lazy.paused ? 'paused' : 'resumed';
+      if (!lazy.paused) setLazyRunningIndicator(true);
+      renderLazy();
+""",
+          """      if (lazy.paused) {
+        const skippedUnits = markLazyRemovedItemsOnResume();
+        lazy.paused = false;
+        actionTarget.textContent = 'Pause';
+        lazy.note = skippedUnits ? `resumed | skipped ${skippedUnits} removed qty` : 'resumed';
+        setLazyRunningIndicator(true);
+      } else {
+        lazy.paused = true;
+        actionTarget.textContent = 'Resume';
+        lazy.note = 'paused';
+      }
+      renderLazy();
+""",
+          'normal resume reconciliation')
+
+          if text.count('API_MOVE_ITEMS') != before_move_refs:
+              raise SystemExit('API_MOVE_ITEMS reference count changed unexpectedly')
+          if text.count('API_CLOSE_CONTAINER') != before_close_refs:
+              raise SystemExit('API_CLOSE_CONTAINER reference count changed unexpectedly')
+          if text.count("@version      0.3.14") != 1 or text.count("const VERSION = '0.3.14';") != 1:
+              raise SystemExit('v0.3.14 version markers invalid')
+
+          path.write_text(text)
+          PY
+
+          node --check Sideline_API_Move.user.js
+          git diff --check
+          grep -q "const LOOKUP_CONCURRENCY = 5;" Sideline_API_Move.user.js
+          grep -q "REMOVED WHILE PAUSED — NOT MOVED" Sideline_API_Move.user.js
+          grep -q "source left open" Sideline_API_Move.user.js
+          grep -q "if (lazyItemShouldSkip(item))" Sideline_API_Move.user.js
+
+          git add Sideline_API_Move.user.js
+          git diff --cached --check
+          git commit -m "feat(sideline): v0.3.14 skip removed items on resume"
+          git push origin HEAD:main
