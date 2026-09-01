@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         TEST v0.1.0 AFT Super Overlay
-// @name:en      TEST v0.1.0 AFT Super Overlay
+// @name         TEST v0.1.1 AFT Super Overlay
+// @name:en      TEST v0.1.1 AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.0
+// @version      0.1.1
 // @description  TEST: one adaptive Edit/Move launcher across AFT EditItems, FcSkuFlip, MoveItems and MoveContainer. Does not submit inventory actions.
-// @include      *://aft-qt-*.corp.amazon.com/app/*
+// @include      *://aft-qt-*.corp.amazon.com/*
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @run-at       document-start
 // @noframes
@@ -19,7 +19,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
