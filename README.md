@@ -10,7 +10,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | SIM Markdown Toolbar | 5.1.5 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.3.3-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
 | Sideline API Move | 0.3.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
-| AFT Edit/SKU/Move | 0.9.12 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
+| AFT Edit/SKU/Move | 0.9.13 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
 | FCR Data Core | 0.2.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
 | FCResearch Master | 0.1.21 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
 | FC-Lite | 0.1.59 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
@@ -27,6 +27,7 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 
 | Script | Version | Purpose | Install/update |
 | --- | --- | --- | --- |
+| AFT Super Overlay | 0.1.0 | One-tab adaptive Edit/Move mode launcher. Routes to the existing stable helpers and reveals dependent options only when relevant; it does not submit inventory actions. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_Super_Overlay_TEST.user.js) |
 | Amazon AU ASIN Variation Finder | 0.1.1-test | Right-click current Amazon inline/classic variation swatches and reveal matching child ASINs from the loaded page, including unavailable options when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
 | FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
 | FCResearch → RIVER Ticket Assistant | 0.3.9 | Event-driven Hazmat N/A/L0 capture. Information W1 now recognises the actual `X0 ASIN` field and fills `N/A` when no X0 FNSKU exists; `Sort/Non-Sort Identification` is recognised as the sortability step so Option 1 + Next can continue automatically. Latest matching PO/vendor/quantity rules remain unchanged. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |
