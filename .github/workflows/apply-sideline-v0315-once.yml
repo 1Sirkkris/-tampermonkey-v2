@@ -23,6 +23,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
           test "$(git hash-object Sideline_API_Move.user.js)" = "b0ce9fa6383b9cac63fd86ee702dcacf7588ebd6"
+          sed -i "s/rep(cleanup, '', 'reset\/stop cleanup', count=2)/rep(cleanup, '', 'reset\/stop cleanup', count=3)/" .github/scripts/apply_sideline_v0315.py
           python .github/scripts/apply_sideline_v0315.py
           node --check Sideline_API_Move.user.js
           git diff --check
