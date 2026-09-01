@@ -1,0 +1,83 @@
+name: Apply Sideline v0.3.16 once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/apply_sideline_v0316.py'
+      - '.github/workflows/apply-sideline-v0316-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify exact baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object Sideline_API_Move.user.js)" = "90bfcea006f9557d553956aed067d6c907d5f64c"
+          test "$(git hash-object AGENTS.md)" = "19efb9d3cbb9383a5e705614ea169012b3350a07"
+
+      - name: Apply approved Sideline package
+        run: python3 .github/apply_sideline_v0316.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check Sideline_API_Move.user.js
+          git diff --check
+          grep -Fq '// @version      0.3.16' Sideline_API_Move.user.js
+          grep -Fq "const VERSION = '0.3.16';" Sideline_API_Move.user.js
+          grep -Fq 'const LOOKUP_CONCURRENCY = 5;' Sideline_API_Move.user.js
+          grep -Fq 'const LIVE_LOOKUP_CONCURRENCY = 3;' Sideline_API_Move.user.js
+          grep -Fq 'const SCRUB_VALIDATE_CONCURRENCY = 3;' Sideline_API_Move.user.js
+          grep -Fq 'data-scrub-scan' Sideline_API_Move.user.js
+          grep -Fq 'await closeContainerDirect(lazy.dest, true);' Sideline_API_Move.user.js
+          grep -Fq "const result = await closeOpenContainer('yes');" Sideline_API_Move.user.js
+          ! grep -Fq 'Predicant recovery 1/4' Sideline_API_Move.user.js
+          ! grep -Fq 'Destination reset — revalidating' Sideline_API_Move.user.js
+          ! grep -Fqi '1x1' AGENTS.md
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('Sideline_API_Move.user.js').read_text()
+          dead = [
+              'restartLiveLookup(', 'nativeOpenSourceContainer(',
+              'nativeCloseLoadedContainer(', 'normalizeNativeToSourceScan(',
+              'hasHazmat(', 'customerBoundSourceMessage(',
+              'waitForNativeLoadedSource(', 'scrubTick(', 'scrubTimer',
+              'shared.scrubBusy', 'escapeEpoch'
+          ]
+          for token in dead:
+              assert token not in s, token
+          assert s.count('API_MOVE_ITEMS') == 4, s.count('API_MOVE_ITEMS')
+          assert s.count('API_SCAN_ITEM') == 4, s.count('API_SCAN_ITEM')
+          PY
+
+      - name: Remove one-shot helpers
+        shell: bash
+        run: |
+          rm .github/apply_sideline_v0316.py
+          rm .github/workflows/apply-sideline-v0316-once.yml
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Sideline_API_Move.user.js AGENTS.md .github/apply_sideline_v0316.py .github/workflows/apply-sideline-v0316-once.yml
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat(sideline): v0.3.16 API scrub and tote'
+          git push origin main
