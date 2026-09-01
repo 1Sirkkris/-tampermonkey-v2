@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.14 Sideline API Move TEST
+// @name         MAIN v0.3.15 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.14
+// @version      0.3.15
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.14';
+  const VERSION = '0.3.15';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 5;
@@ -559,8 +559,6 @@
 #sh-live .sh-live-scan:disabled{background:#f3f4f6;border-color:#cbd5e1;color:#64748b}
 #sh-live .sh-live-ready{margin:7px 0;padding:7px 9px;border:1px solid #bfdbfe;border-left:5px solid #146eb4;background:#eff6ff;color:#0f3d73;font-weight:900}
 #sh-live .sh-live-delay{padding:5px 9px;min-width:90px;font-size:11px}
-#sh-dock button.sh-live-one-mode{background:#fde047!important;color:#111827!important;border:3px solid #111827!important;padding:6px 4px!important;animation:shLiveOneFlash .52s steps(2,end) infinite}
-@keyframes shLiveOneFlash{0%,100%{background:#fde047;color:#111827;box-shadow:0 0 0 2px #111827}50%{background:#111827;color:#fff;box-shadow:0 0 0 4px #fde047}}
 #sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0}
 #sh-live .sh-live-metric{border:1px solid #c7d0dd;background:#f8fafc;padding:7px 4px;text-align:center}
 #sh-live .sh-live-metric b{display:block;font-size:22px;line-height:1}
@@ -581,13 +579,6 @@
 #sh-live .sh-live-current{padding:6px 8px;margin-top:7px;border:2px solid #f59e0b;background:#fff7ed;color:#9a3412;border-radius:4px;font-weight:900}
 #sh-live .sh-live-blocked{animation:shLiveBlocked .65s ease-in-out infinite alternate}
 @keyframes shLiveBlocked{from{box-shadow:0 0 0 0 rgba(239,68,68,.12)}to{box-shadow:0 0 0 6px rgba(239,68,68,.18)}}
-#sh-live .sh-live-one-result{display:none;margin:8px 0;padding:10px;border:3px solid;border-left-width:8px;border-radius:5px;font-weight:900}
-#sh-live .sh-live-one-result.show{display:block}
-#sh-live .sh-live-one-result.ok{border-color:#16a34a;background:#dcfce7;color:#14532d}
-#sh-live .sh-live-one-result.bad{border-color:#dc2626;background:#fff1f2;color:#7f1d1d}
-#sh-live .sh-live-one-result-title{font-size:16px;font-weight:1000;margin-bottom:6px}
-#sh-live .sh-live-one-result-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 7px;font-size:12px;line-height:1.3}
-#sh-live .sh-live-one-result-grid b{font-weight:1000}
 #sh-live .sh-live-idle-pulse{border-width:3px!important;animation:shLiveIdlePulse .8s steps(2,end) infinite!important}
 @keyframes shLiveIdlePulse{
   0%,100%{border-color:#146eb4!important;box-shadow:0 0 0 3px rgba(20,110,180,.24)}
@@ -736,31 +727,8 @@
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.key = key;
-      if (key === 'live') b.title = 'Click: show/hide Live | Ctrl+click: toggle immediate 1×1 mode';
-      b.onclick = event => {
+      b.onclick = () => {
         if (key === 'live') {
-          if (event.ctrlKey) {
-            stopLazyForModeSwitch('switched to 1×1');
-            feature.lazy = false;
-            const nextMode = toggleLiveOneByOneMode();
-            feature.live = !!nextMode;
-            savePanelStates();
-            applyPanels();
-            if (nextMode) setTimeout(() => liveSrc.focus(), 0);
-            return;
-          }
-
-          if (live.oneByOne) {
-            toggleLiveOneByOneMode();
-            stopLazyForModeSwitch('switched to Live');
-            feature.lazy = false;
-            feature.live = true;
-            savePanelStates();
-            applyPanels();
-            setTimeout(() => liveSrc.focus(), 0);
-            return;
-          }
-
           const opening = !feature.live;
           if (opening) {
             stopLazyForModeSwitch('switched to Live');
@@ -1092,11 +1060,6 @@
 
   // Live
   const live = {
-    oneByOne:false,
-    oneInFlight:new Map(),
-    oneResult:null,
-    oneErrorToken:0,
-    oneErrorTimer:0,
     failureNotice:null,
     failureToken:0,
     failureTimer:0,
@@ -1149,7 +1112,6 @@
     '<div class="sh-live-issue"></div>' +
     '<div class="sh-status" data-live-status></div>' +
     '<div class="sh-error" data-live-error></div>' +
-    '<div class="sh-live-one-result" data-live-one-result></div>' +
     '<div class="sh-live-current" data-live-current style="display:none"></div>' +
     '<div class="sh-live-history"></div>'
   );
@@ -1159,7 +1121,6 @@
   const liveScan = $('[data-f="live-scan"]', livePanel);
   const liveStatus = $('[data-live-status]', livePanel);
   const liveError = $('[data-live-error]', livePanel);
-  const liveOneResult = $('[data-live-one-result]', livePanel);
   const liveReady = $('.sh-live-ready', livePanel);
   const liveDelay = $('[data-live-delay]', livePanel);
   const liveQueueLabel = $('[data-live-queue-label]', livePanel);
@@ -1175,14 +1136,11 @@
     const dockButton = dockButtons.find(button => button.dataset.key === 'live');
     const title = $('.sh-title', livePanel);
 
-    dockButton?.classList.toggle('sh-live-one-mode', live.oneByOne);
-    if (dockButton) dockButton.textContent = live.oneByOne ? '1×1' : 'Live';
-    if (title) title.textContent = live.oneByOne
-      ? `Live 1×1 Immediate v${VERSION}`
-      : `Live Lazy QTY 1 v${VERSION}`;
-    setTextIfChanged(liveQueueLabel, live.oneByOne ? 'Active' : 'Queued');
+    if (dockButton) dockButton.textContent = 'Live';
+    if (title) title.textContent = `Live Lazy QTY 1 v${VERSION}`;
+    setTextIfChanged(liveQueueLabel, 'Queued');
     if (liveDelay) {
-      liveDelay.style.display = live.oneByOne ? 'none' : '';
+      liveDelay.style.display = '';
       liveDelay.textContent = `Delay: ${live.delayEnabled ? 'YES' : 'NO'}`;
       liveDelay.classList.toggle('sh-on', live.delayEnabled);
       liveDelay.title = live.delayEnabled
@@ -1191,43 +1149,18 @@
     }
     setTextIfChanged(
       liveReady,
-      live.oneByOne
-        ? 'NO QUEUE — EVERY SCAN SENDS ITS OWN QTY 1 MOVE IMMEDIATELY. Item errors clear after 5 seconds; expiry uses the date panel.'
-        : live.delayEnabled
-          ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
-          : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'
+      live.delayEnabled
+        ? 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; moves pace 5–11s apart.'
+        : 'QTY = 1 PER SCAN — PRECHECK snoops queued items immediately; duplicates merge; NO ARTIFICIAL MOVE DELAY.'
     );
   }
 
   function deactivateLiveForModeSwitch(note='mode switched') {
-    live.oneByOne = false;
     resetLive(note, false);
-  }
-
-  function toggleLiveOneByOneMode() {
-    if (live.oneByOne) {
-      deactivateLiveForModeSwitch('1×1 off');
-      return false;
-    }
-
-    // Switching policy: abort/reset any normal Live session first. Lazy state is handled
-    // separately and is never reset here.
-    resetLive('switching to 1×1', false);
-    live.oneByOne = true;
-    live.error = '';
-    live.note = '1×1 selected — scan source';
-    syncLiveModeUi();
-    renderLive();
-    return true;
   }
 
   function beginLiveRun() {
     live.lookupWait = [];
-    live.oneInFlight.clear();
-    live.oneResult = null;
-    clearTimeout(live.oneErrorTimer);
-    live.oneErrorTimer = 0;
-    live.oneErrorToken++;
     clearTimeout(live.failureTimer);
     live.failureTimer = 0;
     live.failureToken++;
@@ -1543,7 +1476,7 @@
     };
   }
 
-  function setLiveFailureNotice(item, title, reason, mode=live.oneByOne ? '1x1' : 'live') {
+  function setLiveFailureNotice(item, title, reason, mode='live') {
     const meta = liveItemMeta(item);
     const product = liveProductMeta(item);
     const token = ++live.failureToken;
@@ -1565,7 +1498,7 @@
       live.failureTimer = 0;
       live.failureNotice = null;
       renderLive();
-    }, mode === '1x1' ? 8000 : 12000);
+    }, 12000);
   }
 
   function liveFailureHtml() {
@@ -1578,9 +1511,7 @@
     const productTitle = notice.productTitle
       ? `<div class="sh-live-failure-title">${esc(notice.productTitle)}</div>`
       : '';
-    const action = notice.mode === '1x1'
-      ? '<b>AUTO-SKIPPED — NOTHING WAS FORCED.</b><br>Scan the next item.'
-      : '<b>AUTO-SKIPPED — NOTHING WAS FORCED.</b><br>Live queue continues automatically.';
+    const action = '<b>AUTO-SKIPPED — NOTHING WAS FORCED.</b><br>Live queue continues automatically.';
 
     return (
       `<div class="sh-live-issue-title">⚠ ${esc(notice.title)}</div>` +
@@ -1650,7 +1581,7 @@
   function renderLive() {
     syncLiveModeUi();
 
-    const queuedUnits = live.oneByOne ? live.oneInFlight.size : sumQty(live.queue);
+    const queuedUnits = sumQty(live.queue);
     const expiryUnits = sumQty(live.datePending);
     const currentUnits = live.current && !['MOVED','SKIPPED'].includes(live.current.status)
       ? itemQty(live.current)
@@ -1661,14 +1592,14 @@
     setTextIfChanged(liveExpiry, expiryUnits);
     setTextIfChanged(liveSkipped, live.skipped);
 
-    const precheckedQueuedUnits = live.oneByOne ? 0 : live.queue.reduce(
+    const precheckedQueuedUnits = live.queue.reduce(
       (sum, item) => sum + (item.preflightStatus ? itemQty(item) : 0),
       0
     );
-    const precheckedCurrentUnits = !live.oneByOne && live.current?.preflightStatus ? itemQty(live.current) : 0;
+    const precheckedCurrentUnits = live.current?.preflightStatus ? itemQty(live.current) : 0;
     const precheckedUnits = precheckedQueuedUnits + precheckedCurrentUnits + expiryUnits;
-    const precheckTotalUnits = live.oneByOne ? 0 : queuedUnits + currentUnits + expiryUnits;
-    const preflightIssues = live.oneByOne ? [] : liveQueuedPreflightIssues();
+    const precheckTotalUnits = queuedUnits + currentUnits + expiryUnits;
+    const preflightIssues = liveQueuedPreflightIssues();
     const issueAheadUnits = sumQty(preflightIssues);
 
     const liveIdle = !!(
@@ -1679,7 +1610,6 @@
       !live.issue &&
       !live.current &&
       live.queue.length === 0 &&
-      live.oneInFlight.size === 0 &&
       live.datePending.length === 0
     );
     liveSrc.classList.toggle('sh-live-idle-pulse', liveIdle);
@@ -1687,15 +1617,13 @@
 
     const state = live.issue
       ? 'BLOCKED — ACTION REQUIRED'
-      : live.oneByOne && live.oneInFlight.size
-        ? `1×1 SENDING ${live.oneInFlight.size}`
-        : live.processing
-          ? 'PROCESSING'
-          : live.running
-            ? live.oneByOne ? '1×1 READY — SCAN ITEM' : 'READY — SCAN ITEM'
-            : live.sourceReady
-              ? 'SOURCE READY — SCAN DESTINATION'
-              : live.oneByOne ? '1×1 — SCAN SOURCE' : 'SCAN SOURCE';
+      : live.processing
+        ? 'PROCESSING'
+        : live.running
+          ? 'READY — SCAN ITEM'
+          : live.sourceReady
+            ? 'SOURCE READY — SCAN DESTINATION'
+            : 'SCAN SOURCE';
 
     const expirySuffix = live.datePending.length
       ? ` | EXPIRY PENDING ${live.datePending.length}`
@@ -1708,29 +1636,6 @@
       : '';
     setTextIfChanged(liveStatus, `${state}${live.note ? ` | ${live.note}` : ''}${precheckSuffix}${expirySuffix}${issueAheadSuffix}`);
     setTextIfChanged(liveError, live.error || '');
-
-    const oneResult = live.oneByOne ? live.oneResult : null;
-    if (oneResult) {
-      const resultHtml =
-        `<div class="sh-live-one-result-title">${oneResult.ok ? '✓ MOVED — QTY 1' : '⚠ NOT MOVED — AUTO-SKIPPED'}</div>` +
-        `<div class="sh-live-one-result-grid">` +
-          `<b>SCAN:</b><span>${esc(oneResult.scan || '—')}</span>` +
-          `<b>ASIN:</b><span>${esc(oneResult.asin || '—')}</span>` +
-          `<b>FNSKU:</b><span>${esc(oneResult.fnsku || '—')}</span>` +
-          (!oneResult.ok ? `<b>Issue:</b><span>${esc(oneResult.reason || 'NOT MOVED')}</span>` : '') +
-        `</div>`;
-      if (liveOneResult.dataset.html !== resultHtml) {
-        liveOneResult.dataset.html = resultHtml;
-        liveOneResult.innerHTML = resultHtml;
-      }
-      liveOneResult.classList.toggle('ok', !!oneResult.ok);
-      liveOneResult.classList.toggle('bad', !oneResult.ok);
-      liveOneResult.classList.add('show');
-    } else {
-      if (liveOneResult.dataset.html !== '') liveOneResult.dataset.html = '';
-      if (liveOneResult.innerHTML) liveOneResult.innerHTML = '';
-      liveOneResult.classList.remove('show','ok','bad');
-    }
 
     const hardIssueHtml = liveIssueHtml();
     const failureHtml = liveFailureHtml();
@@ -1759,27 +1664,21 @@
       if (liveCurrent.innerHTML) liveCurrent.innerHTML = '';
     }
 
-    if (live.oneByOne) {
-      if (liveHistory.style.display !== 'none') liveHistory.style.display = 'none';
-      if (liveHistory.innerHTML) liveHistory.innerHTML = '';
-      liveHistoryToken = '';
-    } else {
-      if (liveHistory.style.display !== '') liveHistory.style.display = '';
-      const historyToken = `${live.history.length}:${live.history[0]?.id || ''}`;
-      if (historyToken !== liveHistoryToken) {
-        liveHistoryToken = historyToken;
-        liveHistory.innerHTML = live.history.slice(0, 14).map(item => {
-          const ctx = item.ctx;
-          return `<div class="sh-live-history-row">✓ ${esc(item.code)} ×${esc(String(item.qty || 1))}` +
-            (ctx?.fnsku ? ` &nbsp; | &nbsp; ${esc(ctx.fnsku)}` : '') +
-            ` → ${esc(item.destination || live.dest)}</div>`;
-        }).join('');
-      }
+    if (liveHistory.style.display !== '') liveHistory.style.display = '';
+    const historyToken = `${live.history.length}:${live.history[0]?.id || ''}`;
+    if (historyToken !== liveHistoryToken) {
+      liveHistoryToken = historyToken;
+      liveHistory.innerHTML = live.history.slice(0, 14).map(item => {
+        const ctx = item.ctx;
+        return `<div class="sh-live-history-row">✓ ${esc(item.code)} ×${esc(String(item.qty || 1))}` +
+          (ctx?.fnsku ? ` &nbsp; | &nbsp; ${esc(ctx.fnsku)}` : '') +
+          ` → ${esc(item.destination || live.dest)}</div>`;
+      }).join('');
     }
 
     const liveWorking = !!(
       live.running &&
-      (live.processing || live.current || live.queue.length || live.oneInFlight.size)
+      (live.processing || live.current || live.queue.length)
     );
     const liveWaiting = !!(
       live.running &&
@@ -1800,15 +1699,10 @@
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
     clearLiveDateScanBuffer();
-    clearTimeout(live.oneErrorTimer);
-    live.oneErrorTimer = 0;
-    live.oneErrorToken++;
-    live.oneResult = null;
     clearTimeout(live.failureTimer);
     live.failureTimer = 0;
     live.failureToken++;
     live.failureNotice = null;
-    live.oneInFlight.clear();
 
     live.running = false;
     live.sourceReady = false;
@@ -1852,15 +1746,10 @@
     live.dateResolve = null;
     $('#sh-og-expiry')?.remove();
     clearLiveDateScanBuffer();
-    clearTimeout(live.oneErrorTimer);
-    live.oneErrorTimer = 0;
-    live.oneErrorToken++;
-    live.oneResult = null;
     clearTimeout(live.failureTimer);
     live.failureTimer = 0;
     live.failureToken++;
     live.failureNotice = null;
-    live.oneInFlight.clear();
 
     live.running = false;
     live.processing = false;
@@ -1885,7 +1774,6 @@
 
     const pending =
       sumQty(live.queue) +
-      live.oneInFlight.size +
       (live.current ? itemQty(live.current) : 0) +
       sumQty(live.datePending);
     if (live.processing || live.issue || pending) {
@@ -2028,15 +1916,14 @@
       live.note = `destination changed → retrying ${live.current.code}`;
       live.issue = null;
       renderLive();
-      if (live.oneByOne) retryOneByOneBlockedMove(live.current);
-      else retryLiveCurrentMove();
+      retryLiveCurrentMove();
       return;
     }
 
     live.dest = code;
     live.running = true;
     live.error = '';
-    live.note = live.oneByOne ? '1×1 immediate ready' : 'ready';
+    live.note = 'ready';
     liveDest.classList.remove('bad');
     liveDest.classList.add('good');
     liveDest.disabled = true;
@@ -2057,7 +1944,7 @@
     setLiveFailureNotice(item, title, item.failReason, 'live');
     renderLive();
     setTimeout(() => {
-      if (!live.running || live.oneByOne || live.issue) return;
+      if (!live.running || live.issue) return;
       liveScan.disabled = false;
       liveScan.focus();
       pumpLive();
@@ -2065,7 +1952,7 @@
   }
 
   function autoSkipQueuedLiveItem(item, title, reason) {
-    if (!item || live.oneByOne || live.current === item) return false;
+    if (!item || live.current === item) return false;
     const index = live.queue.indexOf(item);
     if (index < 0) return false;
     live.queue.splice(index, 1);
@@ -2094,255 +1981,6 @@
     }, 0);
   }
 
-  function setOneByOneResult(item, ok, reason='') {
-    const meta = liveItemMeta(item);
-    const token = ++live.oneErrorToken;
-    clearTimeout(live.oneErrorTimer);
-    if (ok) {
-      clearTimeout(live.failureTimer);
-      live.failureTimer = 0;
-      live.failureToken++;
-      live.failureNotice = null;
-    }
-    live.oneResult = {
-      ok:!!ok,
-      scan:meta.scan,
-      asin:meta.asin,
-      fnsku:meta.fnsku,
-      reason:clean(reason)
-    };
-
-    live.oneErrorTimer = setTimeout(() => {
-      if (live.oneErrorToken !== token) return;
-      live.oneErrorTimer = 0;
-      live.oneResult = null;
-      renderLive();
-    }, 5000);
-  }
-
-  function finishOneByOneMoved(item) {
-    live.oneInFlight.delete(item.id);
-    item.status = 'MOVED';
-    item.destination = item.destination || live.dest;
-    live.moved += 1;
-    setOneByOneResult(item, true);
-    if (live.current === item) {
-      live.current = null;
-      live.issue = null;
-    }
-    if (!live.issue) live.note = 'moved QTY 1 — ready for next scan';
-    if (!live.issue && !live.datePending.length) liveScan.disabled = false;
-    renderLive();
-    if (!live.issue && !live.datePending.length) setTimeout(() => liveScan.focus(), 0);
-    if (!live.oneInFlight.size && !live.datePending.length && !live.issue) {
-      finishMoveCorner('live', true);
-    }
-  }
-
-  function showOneByOneError(item, reason, title='ITEM NOT MOVED') {
-    live.oneInFlight.delete(item.id);
-    item.status = 'SKIPPED';
-    item.failReason = clean(reason) || 'NOT MOVED';
-    live.skipped += 1;
-    live.oneResult = null;
-    live.note = 'item not moved — scan next item';
-    setLiveFailureNotice(item, title, item.failReason, '1x1');
-    liveScan.disabled = false;
-    renderLive();
-    finishMoveCorner('live', false);
-    setTimeout(() => {
-      if (live.running && live.oneByOne && !live.issue && !live.datePending.length) liveScan.focus();
-    }, 0);
-  }
-
-  function blockOneByOneDestination(item, title, reason, ctx, expirationMs) {
-    live.oneInFlight.delete(item.id);
-    item.status = 'BLOCKED';
-    item.retryCtx = ctx;
-    item.retryExpirationMs = expirationMs;
-    live.current = item;
-    live.issue = { kind:'destination', title, reason };
-    live.error = '';
-    live.note = '1×1 stopped — scan a new destination';
-    liveScan.disabled = true;
-    liveDest.disabled = false;
-    liveDest.classList.remove('good');
-    liveDest.classList.add('bad');
-    renderLive();
-    setTimeout(() => {
-      liveDest.focus();
-      liveDest.select?.();
-    }, 0);
-  }
-
-  async function moveOneByOneResolved(item, ctx, expirationMs=null, run=live.activeRun) {
-    if (!currentLiveRun(run) || !live.running || !live.oneByOne) return;
-
-    if (live.issue?.kind === 'destination' && live.current !== item) {
-      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');
-      return;
-    }
-
-    if (norm(item.destination) !== norm(live.dest)) {
-      showOneByOneError(item, 'DESTINATION CHANGED — RESCAN ITEM');
-      return;
-    }
-
-    item.ctx = ctx;
-    item.status = 'MOVING';
-    item.retryCtx = ctx;
-    item.retryExpirationMs = expirationMs;
-    renderLive();
-
-    let response;
-    try {
-      response = await liveApi(
-        API_MOVE_ITEMS,
-        buildMovePayload(live.src, item.destination, live.sourceMeta, ctx, 1, expirationMs),
-        run
-      );
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      if (isAllowedOverageResponse(error?.payload)) {
-        response = error.payload;
-      } else {
-        const payloadReason = moveReason(error?.payload);
-        const reason = payloadReason !== 'EMPTY MOVE RESPONSE'
-          ? payloadReason
-          : (error?.message || 'MOVE API ERROR');
-        showOneByOneError(
-          item,
-          reason,
-          isHazmatRejectionResponse(error?.payload) ? 'HAZMAT — ITEM NOT MOVED' : 'MOVE API ERROR'
-        );
-        return;
-      }
-    }
-
-    if (!currentLiveRun(run)) return;
-
-    const reason = moveReason(response);
-    if (live.issue?.kind === 'destination' && live.current !== item) {
-      showOneByOneError(item, 'DESTINATION BLOCKED — RESCAN AFTER FIX');
-      return;
-    }
-
-    if (isDamagedDestinationResponse(response)) {
-      blockOneByOneDestination(item, 'DESTINATION BLOCKED', 'DESTINATION DAMAGED', ctx, expirationMs);
-      return;
-    }
-
-    if (reason === 'HAZMAT' || isHazmatRejectionResponse(response) || /destination incompatible/i.test(reason)) {
-      showOneByOneError(
-        item,
-        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT' : (reason || 'DESTINATION INCOMPATIBLE'),
-        reason === 'HAZMAT' || isHazmatRejectionResponse(response) ? 'HAZMAT — ITEM NOT MOVED' : 'ITEM / DESTINATION INCOMPATIBLE'
-      );
-      return;
-    }
-
-    if (hasPredicant(response)) {
-      blockOneByOneDestination(item, 'DESTINATION NEEDS ATTENTION', 'PREDICANT — USE/RESET A DIFFERENT DESTINATION', ctx, expirationMs);
-      return;
-    }
-
-    if (moveOk(response)) {
-      finishOneByOneMoved(item);
-      return;
-    }
-
-    showOneByOneError(item, reason || 'MOVE REJECTED', 'MOVE REJECTED');
-  }
-
-  async function processOneByOneBarcode(item) {
-    const run = live.activeRun;
-    if (!currentLiveRun(run) || !live.running || !live.oneByOne) return;
-
-    item.status = 'CHECKING';
-    renderLive();
-
-    let response;
-    try {
-      response = await liveApi(API_SCAN_ITEM, scanItemPayload(live.src, item.code), run);
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      if (isAllowedOverageResponse(error?.payload)) {
-        response = error.payload;
-      } else {
-        showOneByOneError(item, error?.message || 'SCAN API ERROR', 'SCAN API ERROR');
-        return;
-      }
-    }
-
-    if (!currentLiveRun(run)) return;
-
-    const ctx = resolveItem(response, item.code);
-    if (!ctx.ok) {
-      const reason = ctx.invalid
-        ? 'INVALID BARCODE'
-        : ctx.type === 'RequestMultipleBarcodesResponse'
-          ? 'MULTIPLE BARCODE MATCHES'
-          : ctx.type || 'BARCODE NOT RESOLVED';
-      showOneByOneError(item, reason, ctx.invalid ? 'INVALID BARCODE' : ctx.type === 'RequestMultipleBarcodesResponse' ? 'MULTIPLE BARCODE MATCHES' : 'BARCODE NOT RESOLVED');
-      return;
-    }
-
-    item.ctx = ctx;
-
-    // Expiry/manual data requirements take precedence. Then honor native Sideline's
-    // scan-stage UNDER_REVIEW stop; Hazmat metadata alone is not a blocker.
-    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
-      live.oneInFlight.delete(item.id);
-      parkLiveDateItem(item, ctx);
-      return;
-    }
-
-    const scanIssue = scanStageIssue(ctx);
-    if (scanIssue) {
-      showOneByOneError(item, scanIssue.reason, scanIssue.title);
-      return;
-    }
-
-    await moveOneByOneResolved(item, ctx, null, run);
-  }
-
-  function enqueueOneByOneBarcode(code) {
-    if (live.oneInFlight.size || live.current || live.datePending.length || live.activeDateItem) {
-      live.error = live.datePending.length || live.activeDateItem
-        ? 'EXPIRY REQUIRED — finish the current 1×1 item before scanning another.'
-        : '1×1 BUSY — wait for the current item result, then rescan.';
-      renderLive();
-      return;
-    }
-
-    const item = {
-      id:`live-one-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      code,
-      qty:1,
-      destination:live.dest,
-      status:'SCANNED',
-      ctx:null
-    };
-
-    live.oneInFlight.set(item.id, item);
-    liveScan.disabled = true;
-    live.error = '';
-    live.note = `sent ${code} ×1`;
-    renderLive();
-    processOneByOneBarcode(item);
-  }
-
-  function retryOneByOneBlockedMove(item) {
-    if (!item?.retryCtx || !live.running || !live.oneByOne) return;
-    item.destination = live.dest;
-    live.current = null;
-    live.oneInFlight.set(item.id, item);
-    liveScan.disabled = true;
-    renderLive();
-    moveOneByOneResolved(item, item.retryCtx, item.retryExpirationMs ?? null);
-    setTimeout(() => liveScan.focus(), 0);
-  }
-
   function finishLiveMoved(item) {
     item.status = 'MOVED';
     item.destination = live.dest;
@@ -2364,13 +2002,13 @@
     live.current = null;
     live.issue = null;
     live.error = '';
-    live.note = live.oneByOne ? 'item skipped — 1×1 ready' : 'item skipped — queue continuing';
+    live.note = 'item skipped — queue continuing';
     liveDest.disabled = !!live.running;
     liveScan.disabled = !live.running;
     renderLive();
     setTimeout(() => {
       liveScan.focus();
-      if (!live.oneByOne) pumpLive();
+      pumpLive();
     }, 0);
   }
 
@@ -2530,19 +2168,15 @@
     live.error = '';
     live.note = unitCount > 1
       ? `parked ${ctx.asin || item.code} ×${unitCount} — date required; split to individual units`
-      : live.oneByOne
-        ? `expiry required for ${ctx.asin || item.code} — finish this item first`
-        : `parked ${ctx.asin || item.code} — date required; continuing queue`;
-    if (live.oneByOne) liveScan.disabled = true;
+      : `parked ${ctx.asin || item.code} — date required; continuing queue`;
     renderLive();
 
-    if (live.oneByOne) openNextLiveDatePicker();
-    else setTimeout(openNextLiveDatePicker, 0);
+    setTimeout(openNextLiveDatePicker, 0);
   }
 
   function openNextLiveDatePicker() {
     if (!live.running || live.activeDateItem || $('#sh-og-expiry')) return;
-    if (!live.oneByOne && (live.processing || live.current || live.queue.length)) return;
+    if (live.processing || live.current || live.queue.length) return;
 
     const item = live.datePending.find(candidate => candidate.status === 'DATE_PENDING');
     if (!item?.ctx) return;
@@ -2555,7 +2189,6 @@
 
       if (!chosen || !live.running || !currentLiveRun()) {
         renderLive();
-        if (live.oneByOne && live.running && currentLiveRun()) setTimeout(openNextLiveDatePicker, 0);
         return;
       }
 
@@ -2567,19 +2200,11 @@
       item.retryExpirationMs = chosen.finalExpirationMs;
       live.error = '';
 
-      if (live.oneByOne) {
-        item.status = 'MOVING_DATE';
-        live.oneInFlight.set(item.id, item);
-        live.note = `date saved for ${item.ctx.asin || item.code} — sending QTY 1`;
-        renderLive();
-        moveOneByOneResolved(item, item.ctx, chosen.finalExpirationMs);
-      } else {
-        item.status = 'QUEUED_DATE';
-        live.queue.push(item);
-        live.note = `date saved for ${item.ctx.asin || item.code} — queued after normal work`;
-        renderLive();
-        pumpLive();
-      }
+      item.status = 'QUEUED_DATE';
+      live.queue.push(item);
+      live.note = `date saved for ${item.ctx.asin || item.code} — queued after normal work`;
+      renderLive();
+      pumpLive();
 
       setTimeout(openNextLiveDatePicker, 0);
     });
@@ -2697,21 +2322,6 @@
     if (!live.running || !live.sourceReady || !live.dest) {
       live.error = 'Scan SOURCE then DESTINATION first.';
       renderLive();
-      return;
-    }
-
-    if (live.oneByOne) {
-      if (live.issue) {
-        live.error = '1×1 is BLOCKED — resolve the destination before scanning another item.';
-        renderLive();
-        return;
-      }
-      if (live.datePending.length || live.activeDateItem) {
-        live.error = 'EXPIRY REQUIRED — finish the current 1×1 item before scanning another.';
-        renderLive();
-        return;
-      }
-      enqueueOneByOneBarcode(code);
       return;
     }
 
@@ -2849,7 +2459,7 @@
     }
 
     if (action === 'focus') {
-      if (live.running && !live.issue && !(live.oneByOne && live.datePending.length)) liveScan.focus();
+      if (live.running && !live.issue) liveScan.focus();
       else if (live.issue?.kind === 'destination') liveDest.focus();
       else if (!live.sourceReady) liveSrc.focus();
       else liveDest.focus();
@@ -2862,7 +2472,6 @@
     }
 
     if (action === 'delay') {
-      if (live.oneByOne) return;
       live.delayEnabled = !live.delayEnabled;
       if (!live.delayEnabled) live.nextMoveAt = 0;
       live.note = live.delayEnabled
@@ -5239,7 +4848,6 @@
 
     mark(live.current);
     mark(live.activeDateItem);
-    for (const item of live.oneInFlight.values()) mark(item);
     for (const item of live.datePending) mark(item);
 
     live.skipped += abandoned;
@@ -5252,17 +4860,12 @@
     live.dateResolve?.(null);
     live.dateResolve = null;
     clearLiveDateScanBuffer();
-    clearTimeout(live.oneErrorTimer);
-    live.oneErrorTimer = 0;
-    live.oneErrorToken++;
-    live.oneResult = null;
     clearTimeout(live.failureTimer);
     live.failureTimer = 0;
     live.failureToken++;
     live.failureNotice = null;
 
     const abandoned = abandonLiveForReturn();
-    live.oneInFlight.clear();
     live.running = false;
     live.sourceReady = false;
     live.processing = false;
@@ -5359,7 +4962,7 @@
     const expiryRoot = button.closest?.('#sh-og-expiry');
     if (expiryRoot) {
       if (expiryRoot.dataset.owner === 'live' || expiryRoot.dataset.owner === 'lazy') return expiryRoot.dataset.owner;
-      if (live.running || live.sourceReady || live.current || live.datePending.length || live.issue || live.oneInFlight.size) return 'live';
+      if (live.running || live.sourceReady || live.current || live.datePending.length || live.issue) return 'live';
       if (lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve) return 'lazy';
       if (shared.owner === 'qty' || shared.owner === 'qty-clear') return 'qty';
       return 'native';
