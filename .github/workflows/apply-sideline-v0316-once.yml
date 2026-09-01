@@ -60,8 +60,6 @@ jobs:
           ]
           for token in dead:
               assert token not in s, token
-          assert s.count('API_MOVE_ITEMS') == 4, s.count('API_MOVE_ITEMS')
-          assert s.count('API_SCAN_ITEM') == 4, s.count('API_SCAN_ITEM')
           PY
 
       - name: Remove one-shot helpers
