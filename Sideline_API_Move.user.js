@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         MAIN v0.3.13 Sideline API Move TEST
+// @name         MAIN v0.3.14 Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.13
+// @version      0.3.14
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.13';
+  const VERSION = '0.3.14';
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 5;
@@ -3129,6 +3129,36 @@
     return [...map.values()];
   }
 
+  function markLazyRemovedItemsOnResume() {
+    const wanted = new Set(parseItems(lItems.value).map(item => clean(item.code).toUpperCase()));
+    let skippedUnits = 0;
+
+    for (const item of lazy.items) {
+      if (['MOVED','FAILED','INVALID','SKIPPED'].includes(item.status)) continue;
+      if (wanted.has(clean(item.code).toUpperCase())) continue;
+
+      skippedUnits += itemQty(item);
+      item.skipRequested = true;
+      item.status = 'SKIPPED';
+      item.failReason = 'REMOVED WHILE PAUSED — NOT MOVED';
+    }
+
+    if (skippedUnits) renderLazy();
+    return skippedUnits;
+  }
+
+  function lazyItemShouldSkip(item) {
+    return !!(item?.skipRequested || item?.status === 'SKIPPED');
+  }
+
+  function markLazyItemSkipped(item) {
+    if (!item) return;
+    item.skipRequested = true;
+    item.status = 'SKIPPED';
+    item.failReason = item.failReason || 'REMOVED WHILE PAUSED — NOT MOVED';
+    renderLazy();
+  }
+
   function refreshItems() {
     if (!lazy.running) {
       lazy.items = parseItems(lItems.value);
@@ -3217,6 +3247,7 @@
     let total = 0;
     let movedUnits = 0;
     let failedUnits = 0;
+    let skippedUnits = 0;
     const movedItems = [];
     const failedItems = [];
 
@@ -3230,10 +3261,12 @@
       } else if (item.status === 'INVALID' || item.status === 'FAILED') {
         failedUnits += qty;
         failedItems.push(item);
+      } else if (item.status === 'SKIPPED') {
+        skippedUnits += qty;
       }
     }
 
-    const remainingUnits = Math.max(0, total - movedUnits - failedUnits);
+    const remainingUnits = Math.max(0, total - movedUnits - failedUnits - skippedUnits);
 
     const uniqueItems = lazy.items.length;
     setTextIfChanged(mTotal, total);
@@ -4198,6 +4231,11 @@
   }
 
   async function moveResolved(item, ctx, expirationMs=null, run=lazy.activeRun) {
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return false;
+    }
+
     const totalQty = itemQty(item);
 
     item.status = 'MOVING';
@@ -4207,6 +4245,11 @@
     const payload = buildMovePayload(lazy.src, lazy.dest, lazy.sourceMeta, ctx, totalQty, expirationMs);
 
     while (lazy.running && currentLazyRun(run)) {
+      if (lazyItemShouldSkip(item)) {
+        markLazyItemSkipped(item);
+        return false;
+      }
+
       let response;
 
       try {
@@ -4271,6 +4314,11 @@
   }
 
   async function resolveOnly(item, run=lazy.activeRun) {
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return { kind:'skipped' };
+    }
+
     item.status = 'RESOLVING';
     renderLazy();
 
@@ -4296,6 +4344,10 @@
     }
 
     if (!currentLazyRun(run)) return { kind:'aborted' };
+    if (lazyItemShouldSkip(item)) {
+      markLazyItemSkipped(item);
+      return { kind:'skipped' };
+    }
 
     const ctx = resolveItem(response,item.code);
 
@@ -4991,13 +5043,19 @@
     shared.owner = '';
     setLazyRunningIndicator(false);
 
-    if (lazy.errors) {
+    const skippedUnits = lazy.items
+      .filter(item => item.status === 'SKIPPED')
+      .reduce((sum,item) => sum + itemQty(item), 0);
+
+    if (lazy.errors || skippedUnits) {
       const movedUnits = lazy.items
         .filter(item => item.status === 'MOVED')
         .reduce((sum,item) => sum + item.qty, 0);
 
       lazy.error = '';
-      lazy.note = `complete | moved ${movedUnits} qty to ${lazy.dest}`;
+      lazy.note = skippedUnits
+        ? `complete | moved ${movedUnits} qty | skipped ${skippedUnits} removed qty | source left open`
+        : `complete | moved ${movedUnits} qty to ${lazy.dest}`;
       finishLazyRun(run);
       finishMoveCorner('lazy', false);
       renderLazy();
@@ -5111,12 +5169,15 @@
           return;
         }
 
+        const skippedUnits = markLazyRemovedItemsOnResume();
         lazy.dest = nextDest;
         lazy.damagePaused = false;
         lazy.damagedDest = '';
         lazy.paused = false;
         lazy.error = '';
-        lazy.note = `resumed with new destination ${lazy.dest}`;
+        lazy.note = skippedUnits
+          ? `resumed with new destination ${lazy.dest} | skipped ${skippedUnits} removed qty`
+          : `resumed with new destination ${lazy.dest}`;
         lDest.classList.remove('bad');
         lDest.classList.add('good');
         actionTarget.textContent = 'Pause';
@@ -5126,10 +5187,17 @@
         return;
       }
 
-      lazy.paused = !lazy.paused;
-      actionTarget.textContent = lazy.paused ? 'Resume' : 'Pause';
-      lazy.note = lazy.paused ? 'paused' : 'resumed';
-      if (!lazy.paused) setLazyRunningIndicator(true);
+      if (lazy.paused) {
+        const skippedUnits = markLazyRemovedItemsOnResume();
+        lazy.paused = false;
+        actionTarget.textContent = 'Pause';
+        lazy.note = skippedUnits ? `resumed | skipped ${skippedUnits} removed qty` : 'resumed';
+        setLazyRunningIndicator(true);
+      } else {
+        lazy.paused = true;
+        actionTarget.textContent = 'Resume';
+        lazy.note = 'paused';
+      }
       renderLazy();
     }
 
