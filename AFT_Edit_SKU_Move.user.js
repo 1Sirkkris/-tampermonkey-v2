@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MAIN v0.9.12 AFT Edit/SKU/Move master
-// @name:en      MAIN v0.9.12 AFT Edit/SKU/Move master
+// @name         MAIN v0.9.13 AFT Edit/SKU/Move master
+// @name:en      MAIN v0.9.13 AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.12
+// @version      0.9.13
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.12';
+  const VERSION = '0.9.13';
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -372,6 +372,15 @@
       #aftm-datelot{right:12px;bottom:12px;width:420px}#aftm-datelot .exp-grid-head,#aftm-datelot .exp-row{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;min-width:0;width:100%}#aftm-datelot .exp-grid-head{padding:0 2px;font-size:10px;font-weight:800;color:#617078}#aftm-datelot .exp-grid-head span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-datelot .exp-rows{display:grid;gap:6px;max-height:205px;overflow-y:auto;overflow-x:hidden;padding-right:2px;min-width:0}#aftm-datelot .exp-row{min-width:0;width:100%;overflow:hidden}#aftm-datelot .exp-row input{min-width:0;max-width:100%;width:100%;padding:6px}#aftm-datelot .exp-row [data-code]{font-family:Consolas,monospace;font-size:12px}#aftm-datelot .exp-row [data-date]{min-width:0;width:100%}#aftm-datelot .exp-add{background:#edf1f2;color:#263238;border:1px solid #a8b4ba;padding:6px;border-radius:5px}#aftm-datelot .exp-busy{position:absolute;inset:39px 0 0;z-index:20;background:rgba(236,240,242,.86);backdrop-filter:blur(1px);display:grid;place-items:center;padding:18px}#aftm-datelot .exp-busy-card{min-width:210px;max-width:300px;padding:16px 18px;border:1px solid #94a3aa;border-radius:8px;background:#fff;box-shadow:0 5px 18px #0003;text-align:center}#aftm-datelot .exp-spinner{width:34px;height:34px;margin:0 auto 10px;border:4px solid #c7d0d4;border-top-color:#2f6f63;border-radius:50%;animation:aftm-exp-spin .75s linear infinite}#aftm-datelot .exp-busy-title{font-size:14px;font-weight:900;letter-spacing:.4px;color:#24343a}#aftm-datelot .exp-busy-status{margin-top:5px;min-height:16px;font-size:11px;font-weight:700;color:#54646b}#aftm-datelot .exp-busy-stop{margin-top:11px;width:100%;padding:7px;border:1px solid #a8b4ba;border-radius:5px;background:#e8ecee;color:#182126;font-weight:800}@keyframes aftm-exp-spin{to{transform:rotate(360deg)}}#aftm-move{border-color:#225d67}#aftm-move .move-head{background:#225d67}#aftm-move .move-items{height:104px;resize:vertical;font:11px Consolas,monospace}#aftm-move .move-note{font-size:10px;color:#68757b}#aftm-move .move-status{font-weight:700}
       #aftm-fcsku{top:86px;left:10px;width:320px;border-color:#002e36}#aftm-fcsku .fcsku-head{background:#002e36}#aftm-fcsku .fcsku-status{padding:5px 6px;border:1px solid #9bb;border-radius:4px;background:#fff;font-weight:700}#aftm-fcsku .fcsku-metrics{padding:4px 6px;background:#e9f6ff;border:1px solid #9bb;border-radius:4px;font-size:11px;font-weight:600}#aftm-fcsku .fcsku-label{font-weight:bold;margin-top:3px}#aftm-fcsku .fcsku-locations{height:120px;font:11px Consolas,monospace;resize:vertical}
       #aftm-control{top:76px;right:10px;width:174px;font-size:11px}#aftm-control .ctrl-head{width:100%;border:0;border-radius:0;background:#36545c;color:#fff;padding:6px 8px;display:flex;justify-content:space-between}#aftm-control .ctrl-body{padding:6px;display:grid;gap:5px;background:#eef1f2}#aftm-control[data-open="0"]{width:auto;min-width:102px}#aftm-control[data-open="0"] .ctrl-body{display:none}.ctrl-toggle{border:1px solid #9ca9ae;border-radius:5px;padding:5px 7px;background:#fff;color:#263238;text-align:left}.ctrl-toggle[data-on="1"]{background:#2f6f63;color:#fff;border-color:#25594f}.ctrl-toggle[data-on="0"]{background:#e8ecee;color:#59656b}.ctrl-toggle[data-active="1"]{box-shadow:inset 0 0 0 1px #fff8,0 0 0 1px #25594f}.ctrl-note{font-size:10px;color:#68757b;padding:0 2px}
+    `;
+    style.textContent += `
+      #aftm-move .move-qty{display:grid;gap:5px;padding:7px;border:1px solid #b3c0c5;border-radius:6px;background:#eaf1f3}
+      #aftm-move .move-qty-title{font-size:11px;font-weight:800;color:#30444c}
+      #aftm-move .move-qty-row{display:grid;grid-template-columns:64px 64px minmax(0,1fr);gap:6px}
+      #aftm-move .move-qty-btn{padding:6px;border:1px solid #8fa2aa;border-radius:5px;background:#fff;color:#26343a}
+      #aftm-move .move-qty-btn[data-active="1"]{background:#2f6f63;color:#fff;border-color:#25594f}
+      #aftm-move .move-user-qty{text-align:center;font-weight:800}
+      #aftm-move .move-qty-note{font-size:10px;color:#56666d}
     `;
     document.documentElement.appendChild(style);
   }
@@ -1871,6 +1880,10 @@
     tracker: null,
     statusEl: null,
     modeNoteEl: null,
+    qtyControlsEl: null,
+    qtyNoteEl: null,
+    userQtyEl: null,
+    qtyModeButtons: [],
     sourceEl: null,
     destEl: null,
     itemsEl: null,
@@ -1885,6 +1898,8 @@
     nextObjectId: null,
     primePromise: null,
     runMode: null,
+    runQtyMode: 'all',
+    runRequestedQty: null,
     runItems: [],
     runSource: '',
     runDest: '',
@@ -1893,6 +1908,8 @@
       source: 'aftm_move_source',
       dest: 'aftm_move_dest',
       items: 'aftm_move_items',
+      qtyMode: 'aftm_move_qty_mode',
+      userQty: 'aftm_move_user_qty',
       min: 'aftm_move_min'
     },
 
@@ -1914,6 +1931,43 @@
         mode === 'multi' ? 'Multi • native QualityTools API' :
         mode === 'each' ? 'Each • native QualityTools API' :
         'Waiting for native Multi / Each mode…';
+      if (this.qtyControlsEl) this.qtyControlsEl.hidden = mode !== 'multi';
+      this.paintQtyControls();
+    },
+
+    getQtyMode() {
+      return localStorage.getItem(this.keys.qtyMode) === 'user' ? 'user' : 'all';
+    },
+
+    readUserQty() {
+      const raw = norm(this.userQtyEl?.value);
+      if (!/^\d+$/.test(raw)) return null;
+      const qty = Number(raw);
+      return Number.isSafeInteger(qty) && qty >= 1 && qty <= 999999 ? qty : null;
+    },
+
+    setQtyMode(mode) {
+      if (this.busy) return;
+      localStorage.setItem(this.keys.qtyMode, mode === 'user' ? 'user' : 'all');
+      this.paintQtyControls();
+      if (mode === 'user') {
+        this.userQtyEl?.focus();
+        this.userQtyEl?.select();
+      }
+    },
+
+    paintQtyControls() {
+      const qtyMode = this.getQtyMode();
+      for (const button of this.qtyModeButtons) {
+        button.dataset.active = button.dataset.qtyMode === qtyMode ? '1' : '0';
+        button.disabled = this.busy;
+      }
+      if (this.userQtyEl) this.userQtyEl.disabled = this.busy || qtyMode !== 'user';
+      if (this.qtyNoteEl) {
+        this.qtyNoteEl.textContent = qtyMode === 'user'
+          ? 'Same entered quantity for every barcode.'
+          : 'Moves all available quantity for each barcode.';
+      }
     },
 
     status(text) {
@@ -1953,7 +2007,8 @@
       this.panel?.remove();
       this.panel = null;
       this.tracker = null;
-      this.statusEl = this.modeNoteEl = null;
+      this.statusEl = this.modeNoteEl = this.qtyControlsEl = this.qtyNoteEl = this.userQtyEl = null;
+      this.qtyModeButtons = [];
       this.sourceEl = this.destEl = this.itemsEl = null;
       this.runBtn = this.stopBtn = this.clearBtn = null;
     },
@@ -1988,6 +2043,15 @@
             <textarea class="move-items" data-items placeholder="X001...&#10;X001..."></textarea>
           </label>
           <div class="move-note" data-mode-note>Native QualityTools API</div>
+          <div class="move-qty" data-qty-controls hidden>
+            <div class="move-qty-title">Multi quantity</div>
+            <div class="move-qty-row">
+              <button type="button" class="move-qty-btn" data-qty-mode="all">ALL</button>
+              <button type="button" class="move-qty-btn" data-qty-mode="user">USER</button>
+              <input class="move-user-qty" data-user-qty type="number" min="1" max="999999" step="1" inputmode="numeric" placeholder="Qty" disabled>
+            </div>
+            <div class="move-qty-note" data-qty-note></div>
+          </div>
           <textarea class="aftm-stepbox" data-steps readonly></textarea>
           <div class="move-status" data-status>Idle</div>
           <div class="aftm-row">
@@ -2007,6 +2071,10 @@
       const dest = this.destEl = $('[data-dest]', panel);
       const items = this.itemsEl = $('[data-items]', panel);
       this.modeNoteEl = $('[data-mode-note]', panel);
+      this.qtyControlsEl = $('[data-qty-controls]', panel);
+      this.qtyNoteEl = $('[data-qty-note]', panel);
+      this.userQtyEl = $('[data-user-qty]', panel);
+      this.qtyModeButtons = $$('[data-qty-mode]', panel);
       const run = this.runBtn = $('[data-run]', panel);
       const stop = this.stopBtn = $('[data-stop]', panel);
       const clear = this.clearBtn = $('[data-clear]', panel);
@@ -2016,10 +2084,15 @@
       source.value = localStorage.getItem(this.keys.source) || '';
       dest.value = localStorage.getItem(this.keys.dest) || '';
       items.value = localStorage.getItem(this.keys.items) || '';
+      this.userQtyEl.value = localStorage.getItem(this.keys.userQty) || '';
 
       source.oninput = debounce(() => localStorage.setItem(this.keys.source, norm(source.value)));
       dest.oninput = debounce(() => localStorage.setItem(this.keys.dest, norm(dest.value)));
       items.oninput = debounce(() => localStorage.setItem(this.keys.items, items.value));
+      this.userQtyEl.oninput = debounce(() => localStorage.setItem(this.keys.userQty, norm(this.userQtyEl.value)));
+      for (const button of this.qtyModeButtons) {
+        button.onclick = () => this.setQtyMode(button.dataset.qtyMode);
+      }
 
       source.addEventListener('keydown', event => {
         if (event.key !== 'Enter' || this.busy) return;
@@ -2053,6 +2126,7 @@
       };
 
       this.updateModeNote();
+      this.paintQtyControls();
       this.paintRun();
       queueMicrotask(() => source.focus());
     },
@@ -2082,6 +2156,7 @@
       if (this.runBtn) this.runBtn.disabled = this.busy;
       if (this.stopBtn) this.stopBtn.disabled = !this.busy;
       if (this.clearBtn) this.clearBtn.disabled = this.busy;
+      this.paintQtyControls();
       if (!this.tracker) return;
 
       const items = barcodes || this.runItems;
@@ -2090,6 +2165,11 @@
         `${this.runSource} → ${this.runDest}`,
         `Mode: ${String(this.runMode || '').toUpperCase()}`
       ];
+      if (this.runMode === 'multi') {
+        lines.push(this.runQtyMode === 'user'
+          ? `Quantity: USER ${this.runRequestedQty}`
+          : 'Quantity: ALL');
+      }
 
       const compact = items.length > 30;
       const anchor = this.currentIndex >= 0 ? this.currentIndex : Math.min(this.doneCount, items.length - 1);
@@ -2106,6 +2186,13 @@
       lines.push(`API: ${this.currentStage}`);
       this.tracker.value = lines.join('\n');
       this.tracker.scrollTop = this.tracker.scrollHeight;
+    },
+
+    keepRemainingItems(barcodes) {
+      if (!this.itemsEl) return;
+      const remaining = barcodes.join('\n');
+      this.itemsEl.value = remaining;
+      localStorage.setItem(this.keys.items, remaining);
     },
 
     quantityInfoFromHtml(html) {
@@ -2297,12 +2384,18 @@
       const dest = norm(this.destEl?.value);
       const barcodes = this.parseItems(this.itemsEl?.value);
       const mode = this.detectMode();
+      const qtyMode = this.getQtyMode();
+      const requestedQty = qtyMode === 'user' ? this.readUserQty() : null;
 
       if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(source)) return this.status('Invalid source container');
       if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(dest)) return this.status('Invalid destination container');
       if (low(source) === low(dest)) return this.status('Source and destination cannot match');
       if (!barcodes.length) return this.status('Scan/paste at least one item barcode');
       if (mode !== 'multi' && mode !== 'each') return this.status('Cannot detect Multi / Each mode');
+      if (mode === 'multi' && qtyMode === 'user' && requestedQty == null) {
+        this.userQtyEl?.focus();
+        return this.status('Enter a whole user quantity of 1 or more');
+      }
 
       this.stopRequested = false;
       this.busy = true;
@@ -2310,6 +2403,8 @@
       this.currentIndex = 0;
       this.currentStage = 'Starting';
       this.runMode = mode;
+      this.runQtyMode = mode === 'multi' ? qtyMode : 'all';
+      this.runRequestedQty = mode === 'multi' ? requestedQty : null;
       this.runItems = barcodes;
       this.runSource = source;
       this.runDest = dest;
@@ -2356,9 +2451,16 @@
 
           if (mode === 'multi') {
             this.status(`${i + 1}/${barcodes.length} Reading qty`);
-            const qty = await this.getNativeQuantity(workflowId, `Quantity page ${i + 1}`);
+            const availableQty = await this.getNativeQuantity(workflowId, `Quantity page ${i + 1}`);
+            const qty = this.runQtyMode === 'user' ? this.runRequestedQty : availableQty;
 
-            this.status(`${i + 1}/${barcodes.length} Qty ${qty}`);
+            if (qty > availableQty) {
+              throw new Error(
+                `QTY UNAVAILABLE • ${barcode} • requested ${qty} • available ${availableQty}`
+              );
+            }
+
+            this.status(`${i + 1}/${barcodes.length} Qty ${qty}/${availableQty}`);
             await this.moveInput(workflowId, String(qty), `Quantity ${i + 1}`);
           }
 
@@ -2390,7 +2492,12 @@
             if (primeToken === this.primeToken) this.primePromise = null;
           });
       } catch (error) {
-        const message = String(error?.message || error);
+        let message = String(error?.message || error);
+
+        if (this.doneCount > 0 && this.doneCount < barcodes.length) {
+          this.keepRemainingItems(barcodes.slice(this.doneCount));
+          message += ` • ${this.doneCount} already moved • remaining queue kept`;
+        }
 
         this.busy = false;
         this.nextObjectId = null;
