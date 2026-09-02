@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.15 FCR Data Core — MADCAT Session Keepalive
+// @name         TEST v0.2.16 FCR Data Core — MADCAT ASIN/FNSKU Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.15
-// @description  Strict binDescription plus 30-day raw MADCAT with Item Measurement session keepalive and automatic Inventory History fallback.
+// @version      0.2.16
+// @description  Strict binDescription plus 30-day raw MADCAT using FNSKU when available, ASIN otherwise, with automatic Inventory History fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -34,7 +34,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.15';
+  const VERSION = '0.2.16';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -1181,7 +1181,7 @@
       madcat: history.madcat === true,
       eventsChecked: 0,
       pages: 0,
-      source: 'history-fallback-auth',
+      source: 'history-fallback',
       windowDays: null,
       fallback: 'inventory-history',
       fallbackReason: reason,
@@ -1189,17 +1189,21 @@
     };
   }
 
-  async function fetchRecentMadcat(fnskuValue, force = false) {
-    const fnsku = upper(fnskuValue);
-    if (!fnsku) throw new Error('Measurement FNSKU unavailable');
+  async function fetchRecentMadcat(inputValue, force = false) {
+    const input = inputValue && typeof inputValue === 'object' ? inputValue : { fnsku: inputValue };
+    const fnsku = upper(input?.fnsku);
+    const asin = upper(input?.asin || (!fnsku ? input?.code : ''));
+    const identifier = fnsku || asin;
+    const identifierType = fnsku ? 'FNSKU' : 'ASIN';
+    if (!identifier) throw new Error('Measurement item unavailable');
 
     const auth = readMeasurementAuth();
     if (!auth) {
       stats.madcatAuthRequired++;
-      return fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-login-required');
+      return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-login-required');
     }
 
-    const key = `madcat30:${fnsku}:${force ? 'force' : 'normal'}`;
+    const key = `madcat30:${identifierType}:${identifier}:${force ? 'force' : 'normal'}`;
     if (inFlight.has(key)) {
       stats.dedupeHits++;
       try {
@@ -1207,11 +1211,12 @@
         return { ...data, source: 'dedupe' };
       } catch (error) {
         const message = clean(error?.message || error || 'Measurement request failed');
-        if (/measurement login required/i.test(message)) {
-          stats.madcatAuthRequired++;
-          return fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-token-expired');
-        }
-        throw error;
+        if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
+        return fallbackMadcatToInventoryHistory(
+          identifier,
+          force,
+          /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed'
+        );
       }
     }
 
@@ -1219,7 +1224,7 @@
       stats.madcatNetwork++;
       const before = new Date();
       const after = new Date(before.getTime() - MEASUREMENT_LOOKBACK_MS);
-      const url = new URL(`${MEASUREMENT_API}/${encodeURIComponent(fnsku)}/FNSKU`);
+      const url = new URL(`${MEASUREMENT_API}/${encodeURIComponent(identifier)}/${identifierType}`);
       url.searchParams.set('effectiveAfter', after.toISOString());
       url.searchParams.set('effectiveBefore', before.toISOString());
 
@@ -1248,14 +1253,14 @@
           return Number.isFinite(instant) && instant >= after.getTime() && instant <= before.getTime();
         });
         if (hasRecentMadcat) {
-          return { madcat: true, eventsChecked, pages, source: 'network', windowDays: 30 };
+          return { madcat: true, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
         }
 
         nextToken = clean(payload.nextToken);
       } while (nextToken && pages < MEASUREMENT_MAX_PAGES);
 
       if (nextToken) throw new Error('Measurement history incomplete');
-      return { madcat: false, eventsChecked, pages, source: 'network', windowDays: 30 };
+      return { madcat: false, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
     })();
 
     inFlight.set(key, work);
@@ -1263,11 +1268,12 @@
       return await work;
     } catch (error) {
       const message = clean(error?.message || error || 'Measurement request failed');
-      if (/measurement login required/i.test(message)) {
-        stats.madcatAuthRequired++;
-        return await fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-token-expired');
-      }
-      throw error;
+      if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
+      return await fallbackMadcatToInventoryHistory(
+        identifier,
+        force,
+        /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed'
+      );
     } finally {
       if (inFlight.get(key) === work) inFlight.delete(key);
     }
@@ -1432,7 +1438,7 @@
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
-      else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload.fnsku || payload.code, payload.force === true);
+      else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
