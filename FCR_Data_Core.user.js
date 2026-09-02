@@ -1,16 +1,20 @@
 // ==UserScript==
-// @name         TEST v0.2.11 FCR Data Core
+// @name         TEST v0.2.12 FCR Data Core — 30-Day MADCAT
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.11
-// @description  Shared modular FCResearch data engine with bounded recovery for transient inventory failures.
+// @version      0.2.12
+// @description  Shared modular FCResearch data engine with fast authenticated 30-day MADCAT measurement checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
+// @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        unsafeWindow
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @connect      pandash.amazon.com
+// @connect      o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js
 // ==/UserScript==
@@ -18,10 +22,19 @@
 (() => {
   'use strict';
 
+  const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
+  const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
+  const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
+
+  if (location.hostname === MEASUREMENT_SITE_HOST) {
+    installMeasurementAuthBridge();
+    return;
+  }
+
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.11';
+  const VERSION = '0.2.12';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -37,6 +50,10 @@
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
+  const MEASUREMENT_TIMEOUT_MS = 6000;
+  const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+  const MEASUREMENT_MAX_PAGES = 10;
+  const MEASUREMENT_API = `https://${MEASUREMENT_API_HOST}/prod/measurementEvents`;
   const INVENTORY_RETRY_DELAYS_MS = [250, 400, 650, 1000, 1500];
   const SIDELINE_API = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
   const MARKETPLACE = 'AU';
@@ -75,6 +92,8 @@
     inventoryNetwork: 0,
     historyNetwork: 0,
     historyCacheHits: 0,
+    madcatNetwork: 0,
+    madcatAuthRequired: 0,
     hazNetwork: 0,
     hazCacheHits: 0,
     binNetwork: 0,
@@ -85,6 +104,113 @@
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
+
+  function decodeJwtPayload(token) {
+    try {
+      const part = String(token || '').split('.')[1];
+      if (!part) return null;
+      const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+      return JSON.parse(atob(padded));
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeMeasurementToken(value) {
+    const token = String(value || '').trim().replace(/^Bearer\s+/i, '');
+    const payload = decodeJwtPayload(token);
+    if (!payload || payload.token_use !== 'id' || !Number(payload.exp)) return null;
+    if (Number(payload.exp) * 1000 <= Date.now() + 10_000) return null;
+    return { token, exp: Number(payload.exp) * 1000 };
+  }
+
+  function installMeasurementAuthBridge() {
+    if (window.__fcrMeasurementAuthBridge_v1) return;
+    window.__fcrMeasurementAuthBridge_v1 = true;
+
+    const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+    const bridgeLaunch = new URLSearchParams(location.search).get('fcrMadcatBridge') === '1';
+    let closeTimer = 0;
+
+    const saveToken = raw => {
+      const pack = normalizeMeasurementToken(raw);
+      if (!pack) return false;
+      try {
+        GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt: Date.now() }));
+      } catch {
+        return false;
+      }
+      if (bridgeLaunch && !closeTimer) {
+        closeTimer = setTimeout(() => {
+          try { pageWindow.close(); } catch {}
+        }, 700);
+      }
+      return true;
+    };
+
+    const inspectText = value => {
+      const matches = String(value || '').match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g) || [];
+      return matches.some(saveToken);
+    };
+
+    for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
+      try {
+        for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
+      } catch {}
+    }
+
+    const authFromHeaders = headers => {
+      if (!headers) return '';
+      try {
+        if (typeof headers.get === 'function') return headers.get('Authorization') || headers.get('authorization') || '';
+        if (Array.isArray(headers)) {
+          const pair = headers.find(entry => Array.isArray(entry) && /^authorization$/i.test(String(entry[0])));
+          return pair?.[1] || '';
+        }
+        for (const [name, value] of Object.entries(headers)) {
+          if (/^authorization$/i.test(name)) return value;
+        }
+      } catch {}
+      return '';
+    };
+
+    try {
+      const originalFetch = pageWindow.fetch;
+      if (typeof originalFetch === 'function') {
+        pageWindow.fetch = function(input, init) {
+          try {
+            const url = String(input?.url || input || '');
+            if (url.includes(MEASUREMENT_API_HOST)) saveToken(authFromHeaders(init?.headers) || authFromHeaders(input?.headers));
+          } catch {}
+          return originalFetch.apply(this, arguments);
+        };
+      }
+    } catch {}
+
+    try {
+      const XHR = pageWindow.XMLHttpRequest;
+      const originalOpen = XHR?.prototype?.open;
+      const originalSetHeader = XHR?.prototype?.setRequestHeader;
+      const originalSend = XHR?.prototype?.send;
+      if (originalOpen && originalSetHeader && originalSend) {
+        XHR.prototype.open = function(method, url) {
+          this.__fcrMeasurementUrl = String(url || '');
+          this.__fcrMeasurementAuth = '';
+          return originalOpen.apply(this, arguments);
+        };
+        XHR.prototype.setRequestHeader = function(name, value) {
+          if (/^authorization$/i.test(String(name))) this.__fcrMeasurementAuth = String(value || '');
+          return originalSetHeader.apply(this, arguments);
+        };
+        XHR.prototype.send = function() {
+          try {
+            if (this.__fcrMeasurementUrl?.includes(MEASUREMENT_API_HOST)) saveToken(this.__fcrMeasurementAuth);
+          } catch {}
+          return originalSend.apply(this, arguments);
+        };
+      }
+    } catch {}
+  }
 
 
   function requestGroupKey(client, group) {
@@ -987,6 +1113,117 @@
     });
   }
 
+  function clearMeasurementAuth() {
+    try { GM_deleteValue(MEASUREMENT_AUTH_KEY); } catch {}
+  }
+
+  function readMeasurementAuth() {
+    try {
+      const raw = GM_getValue(MEASUREMENT_AUTH_KEY, '');
+      const stored = raw ? JSON.parse(raw) : null;
+      const pack = normalizeMeasurementToken(stored?.token || '');
+      if (pack) return pack;
+    } catch {}
+    clearMeasurementAuth();
+    return null;
+  }
+
+  function requestMeasurementPage(url, token) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        timeout: MEASUREMENT_TIMEOUT_MS,
+        headers: {
+          Accept: 'application/json',
+          Authorization: token
+        },
+        onload: response => {
+          if (response.status === 401 || response.status === 403) {
+            clearMeasurementAuth();
+            reject(new Error('Measurement login required'));
+            return;
+          }
+          if (response.status < 200 || response.status >= 300) {
+            reject(new Error(`Measurement HTTP ${response.status}`));
+            return;
+          }
+          resolve(response);
+        },
+        onerror: () => reject(new Error('Measurement request failed')),
+        ontimeout: () => reject(new Error('Measurement request timed out'))
+      });
+    });
+  }
+
+  async function fetchRecentMadcat(fnskuValue, force = false) {
+    const fnsku = upper(fnskuValue);
+    if (!fnsku) throw new Error('Measurement FNSKU unavailable');
+
+    const auth = readMeasurementAuth();
+    if (!auth) {
+      stats.madcatAuthRequired++;
+      throw new Error('Measurement login required');
+    }
+
+    const key = `madcat30:${fnsku}:${force ? 'force' : 'normal'}`;
+    if (inFlight.has(key)) {
+      stats.dedupeHits++;
+      const data = await inFlight.get(key);
+      return { ...data, source: 'dedupe' };
+    }
+
+    const work = (async () => {
+      stats.madcatNetwork++;
+      const before = new Date();
+      const after = new Date(before.getTime() - MEASUREMENT_LOOKBACK_MS);
+      const url = new URL(`${MEASUREMENT_API}/${encodeURIComponent(fnsku)}/FNSKU`);
+      url.searchParams.set('effectiveAfter', after.toISOString());
+      url.searchParams.set('effectiveBefore', before.toISOString());
+
+      let pages = 0;
+      let eventsChecked = 0;
+      let nextToken = '';
+
+      do {
+        if (nextToken) url.searchParams.set('nextToken', nextToken);
+        else url.searchParams.delete('nextToken');
+
+        const response = await requestMeasurementPage(url.href, auth.token);
+        let payload;
+        try {
+          payload = JSON.parse(response.responseText || '{}');
+        } catch {
+          throw new Error('Measurement response invalid');
+        }
+
+        pages++;
+        const events = Array.isArray(payload.measurementEvents) ? payload.measurementEvents : [];
+        eventsChecked += events.length;
+        const hasRecentMadcat = events.some(event => {
+          if (upper(event?.measurementSource) !== 'MADCAT') return false;
+          const instant = Date.parse(event?.measurementInstant || '');
+          return Number.isFinite(instant) && instant >= after.getTime() && instant <= before.getTime();
+        });
+        if (hasRecentMadcat) {
+          return { madcat: true, eventsChecked, pages, source: 'network', windowDays: 30 };
+        }
+
+        nextToken = clean(payload.nextToken);
+      } while (nextToken && pages < MEASUREMENT_MAX_PAGES);
+
+      if (nextToken) throw new Error('Measurement history incomplete');
+      return { madcat: false, eventsChecked, pages, source: 'network', windowDays: 30 };
+    })();
+
+    inFlight.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (inFlight.get(key) === work) inFlight.delete(key);
+    }
+  }
+
   async function fetchBinSize(container, item, aliases = []) {
     const source = clean(container);
     const code = clean(item);
@@ -1143,10 +1380,11 @@
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
+      else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload.fnsku || payload.code, payload.force === true);
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
