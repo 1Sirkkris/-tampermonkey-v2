@@ -5,8 +5,8 @@ Disable older copies first.
 
 01 Sideline v0.3.11
 02 AFT Edit-SKU-Move v0.9.12
-03 FCR Data Core v0.2.16
-04 FCResearch Master v0.1.24
+03 FCR Data Core v0.2.17
+04 FCResearch Master v0.1.25
 05 FC-Lite v0.1.63
 06 Stow Andons v5.5.1
 07 Bin Check Overlay v7.4.3
@@ -14,6 +14,6 @@ Disable older copies first.
 10 BWU2 Observability Core v0.1.8
 11 Calm Code v1.3.1
 
-Updater-enabled sources: main 5a4ab7e.
+Updater-enabled sources: main de7c6ee.
 
 09 Unified Live Evidence was retired because BWU2 Observability Core is the sole always-on capture.
