@@ -1,0 +1,88 @@
+name: Apply MADCAT accessible green once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-madcat-green-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch green and sync pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              s = p.read_text(encoding='utf-8')
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          replace_once('FCResearch_Master.user.js', '// @name         TEST v0.1.26 FCResearch Master — MADCAT Auto Auth', '// @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green', 'master name')
+          replace_once('FCResearch_Master.user.js', '// @version      0.1.26', '// @version      0.1.27', 'master version')
+          replace_once('FCResearch_Master.user.js', "  const VERSION = '0.1.26';", "  const VERSION = '0.1.27';", 'master VERSION')
+          replace_once('FCResearch_Master.user.js', '.fcrm-madcat-yes { background:#16a34a; color:#fff; }', '.fcrm-madcat-yes { background:#4ade80; color:#111827; }', 'master green')
+
+          replace_once('FC_Lite.user.js', '// @name        TEST v0.1.64 FC-Lite — MADCAT Auto Auth', '// @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green', 'fcl name')
+          replace_once('FC_Lite.user.js', '// @version      0.1.64', '// @version      0.1.65', 'fcl version')
+          replace_once('FC_Lite.user.js', "  const VERSION = '0.1.64';", "  const VERSION = '0.1.65';", 'fcl VERSION')
+          replace_once('FC_Lite.user.js', '.madcat-pill.yes { border-color:#15803d; background:#16a34a; color:#fff; }', '.madcat-pill.yes { border-color:#15803d; background:#4ade80; color:#111827; }', 'fcl green')
+
+          replace_once('README.md', '| FCResearch Master | 0.1.26 |', '| FCResearch Master | 0.1.27 |', 'README master')
+          replace_once('README.md', '| FC-Lite | 0.1.64 |', '| FC-Lite | 0.1.65 |', 'README fcl')
+          PY
+
+          node --check FCResearch_Master.user.js
+          node --check FC_Lite.user.js
+          grep -q '#4ade80' FCResearch_Master.user.js
+          grep -q '#4ade80' FC_Lite.user.js
+          grep -q '@version      0.1.27' FCResearch_Master.user.js
+          grep -q '@version      0.1.65' FC_Lite.user.js
+          git diff --check
+
+          git add FCResearch_Master.user.js FC_Lite.user.js README.md
+          git rm .github/workflows/apply-madcat-green-once.yml
+          git diff --cached --check
+          git commit -m "style: brighten RAW MADCAT yes green"
+          git push origin HEAD:main
+
+          main_short="$(git rev-parse --short HEAD)"
+          git fetch origin work-laptop-pack
+          worktree="$(mktemp -d)"
+          git worktree add -b madcat-green-pack-sync "$worktree" origin/work-laptop-pack
+          cp FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
+          cp FC_Lite.user.js "$worktree/05_FC-Lite.txt"
+          sed -i -E 's/^04 FCResearch Master v.*/04 FCResearch Master v0.1.27/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^05 FC-Lite v.*/05 FC-Lite v0.1.65/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E "s/^Updater-enabled sources: main [0-9a-f]+\.$/Updater-enabled sources: main ${main_short}./" "$worktree/WORK_LAPTOP_INSTALL.txt"
+
+          cmp -s FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
+          cmp -s FC_Lite.user.js "$worktree/05_FC-Lite.txt"
+          cp "$worktree/04_FCResearch_Master.txt" /tmp/master.js
+          cp "$worktree/05_FC-Lite.txt" /tmp/fclite.js
+          node --check /tmp/master.js
+          node --check /tmp/fclite.js
+          git -C "$worktree" diff --check
+          git -C "$worktree" config user.name "github-actions[bot]"
+          git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$worktree" add 04_FCResearch_Master.txt 05_FC-Lite.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" diff --cached --check
+          git -C "$worktree" commit -m "sync: accessible MADCAT green"
+          git -C "$worktree" push origin HEAD:work-laptop-pack
