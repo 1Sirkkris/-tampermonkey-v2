@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.61 FC-Lite — Strict Bin + 30-Day MADCAT
+// @name        TEST v0.1.62 FC-Lite — MADCAT FNSKU Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.61
+// @version      0.1.62
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.61';
+  const VERSION = '0.1.62';
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
@@ -694,8 +694,8 @@
 
     if (value === 'error') {
       button.addEventListener('click', () => {
-        const needsLogin = /login required/i.test(message);
-        checkMadcat(row, row._fcratcMadcatFnsku, true, needsLogin);
+        const fnsku = clean(row._fcratcMadcatFnsku);
+        checkMadcat(row, fnsku, true, Boolean(fnsku));
       }, { once: true });
     }
 
@@ -837,10 +837,12 @@
       }
 
       registerRowAliases(row, rawScan, product);
-      checkMadcat(row, product.fnsku, false, false);
 
       const matches = matchContainer(product, rawScan);
       const found = matches.length > 0;
+      const matchedFnsku = clean(matches.find(match => clean(match?.fnsku))?.fnsku || '');
+      const measurementFnsku = matchedFnsku || clean(product?.fnsku || '');
+      checkMadcat(row, measurementFnsku, false, false);
       usage(found ? 'item.in' : 'item.out');
 
       completed++;
