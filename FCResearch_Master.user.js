@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.26 FCResearch Master — MADCAT Auto Auth
+// @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.26
+// @version      0.1.27
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,7 +21,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.26';
+  const VERSION = '0.1.27';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -363,7 +363,7 @@
       .fc-hazmat.fc-river-l0[aria-busy="true"] { cursor:wait; opacity:.72; }
       .fc-badge { margin-left:6px; user-select:none; pointer-events:none; }
       .fc-madcat-badge { margin-left:8px; border:0; user-select:none; }
-      .fcrm-madcat-yes { background:#16a34a; color:#fff; }
+      .fcrm-madcat-yes { background:#4ade80; color:#111827; }
       .fcrm-madcat-no,.fcrm-madcat-history-no { background:#ef4444; color:#111827; }
       .fcrm-madcat-history-yes { background:#2563eb; color:#fff; cursor:pointer; }
       .fcrm-madcat-history-no { cursor:pointer; }
