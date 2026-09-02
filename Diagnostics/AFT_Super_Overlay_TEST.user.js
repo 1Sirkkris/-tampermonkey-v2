@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         TEST v0.4.0 AFT Super Overlay
-// @name:en      TEST v0.4.0 AFT Super Overlay
+// @name         TEST v0.4.1 AFT Super Overlay
+// @name:en      TEST v0.4.1 AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.4.0
-// @description  TEST: API-first AFT Edit/Move mode controller. Switches workflow through /action, /status and /end without waiting for native page rendering; native page may remain stale until SYNC PAGE.
+// @version      0.4.1
+// @description  TEST: API-first AFT Edit/Move mode controller. Backend workflow is authoritative; native page may stay stale until SYNC PAGE.
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @run-at       document-start
 // @noframes
@@ -18,26 +18,36 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
   const POLL_MS = 100;
+  const REQUEST_TIMEOUT_MS = 6000;
   const STATUS_TIMEOUT_MS = 8000;
-  const BOOTSTRAP_TIMEOUT_MS = 5000;
+  const FRESH_WORKFLOW_TIMEOUT_MS = 2500;
+
   const STATES = ['Sellable', 'Pending Research', 'Unsellable'];
   const DISPOSITIONS = ['Amazon Damage', 'Defective', 'Distributor Damage', 'Expired'];
-  const VALID_EDIT_MODES = ['each', 'sku', 'date', 'fcsku'];
-  const VALID_MOVE_MODES = ['each', 'multi', 'container'];
+  const EDIT_MODES = ['each', 'sku', 'date', 'fcsku'];
+  const MOVE_MODES = ['each', 'multi', 'container'];
+
+  const HELPER_KEYS = {
+    eachState: 'aftm_each_state',
+    eachDisposition: 'aftm_each_disp',
+    skuCurrentState: 'aftm_sku_current_state',
+    skuCurrentDisposition: 'aftm_sku_current_damage',
+    skuDesiredState: 'aftm_sku_desired_state',
+    skuDesiredDisposition: 'aftm_sku_desired_damage',
+    moveQtyMode: 'aftm_move_qty_mode',
+    moveUserQty: 'aftm_move_user_qty'
+  };
 
   const DEFAULTS = {
     area: 'edit',
     editMode: 'each',
     moveMode: 'each',
     minimized: false,
-    aftOrigin: '',
-    backendMode: '',
-    backendConfirmedAt: 0,
     eachState: 'Unsellable',
     eachDisposition: 'Amazon Damage',
     skuCurrentState: 'Sellable',
@@ -50,75 +60,54 @@
 
   const DEFINITIONS = {
     'edit:each': {
-      title: 'Edit • Each',
-      area: 'edit', mode: 'each', path: '/app/edititems',
-      instructionId: 'EditItems', tool: 'edititems', input: 'EACH', nativeMode: 'each',
-      needsSelectMode: true
+      title: 'Edit • Each', area: 'edit', mode: 'each', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'EACH'
     },
     'edit:sku': {
-      title: 'Edit • SKU',
-      area: 'edit', mode: 'sku', path: '/app/edititems',
-      instructionId: 'EditItems', tool: 'edititems', input: 'SKU', nativeMode: 'sku',
-      needsSelectMode: true
+      title: 'Edit • SKU', area: 'edit', mode: 'sku', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'SKU'
     },
     'edit:date': {
-      title: 'Edit • Date',
-      area: 'edit', mode: 'date', path: '/app/edititems',
-      instructionId: 'EditItems', tool: 'edititems', input: 'DATELOT', nativeMode: 'datelot',
-      needsSelectMode: true
+      title: 'Edit • Date', area: 'edit', mode: 'date', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'DATELOT'
     },
     'edit:fcsku': {
-      title: 'Edit • FCSKU',
-      area: 'edit', mode: 'fcsku', path: '/app/fcskuflip',
-      instructionId: 'FcSkuFlip', tool: 'fcskuflip', input: 'SKU', nativeMode: 'sku',
-      needsSelectMode: false
+      title: 'Edit • FCSKU', area: 'edit', mode: 'fcsku', path: '/app/fcskuflip',
+      instructionId: 'FcSkuFlip', tool: 'fcskuflip', input: 'SKU'
     },
     'move:each': {
-      title: 'Move • Each',
-      area: 'move', mode: 'each', path: '/app/moveitems',
-      instructionId: 'MoveItems', tool: 'moveitems', input: 'EACH', nativeMode: 'each',
-      needsSelectMode: true
+      title: 'Move • Each', area: 'move', mode: 'each', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'EACH'
     },
     'move:multi': {
-      title: 'Move • Multi',
-      area: 'move', mode: 'multi', path: '/app/moveitems',
-      instructionId: 'MoveItems', tool: 'moveitems', input: 'MULTI', nativeMode: 'multi',
-      needsSelectMode: true
+      title: 'Move • Multi', area: 'move', mode: 'multi', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'MULTI'
     },
     'move:container': {
-      title: 'Move • Container',
-      area: 'move', mode: 'container', path: '/app/moveitems',
-      instructionId: 'MoveItems', tool: 'moveitems', input: 'CONTAINER', nativeMode: 'container',
-      needsSelectMode: true
+      title: 'Move • Container', area: 'move', mode: 'container', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'CONTAINER'
     }
   };
 
   let state = loadState();
   let root = null;
   let statusEl = null;
-  let switchBusy = false;
+  let statusMessage = 'Backend controller ready';
+  let statusKind = '';
+  let activeModeKey = '';
+  let switchingKey = '';
   let queuedModeKey = '';
-  let switchSerial = 0;
-
-  function norm(value) {
-    return String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  }
-
-  function low(value) {
-    return norm(value).toLowerCase();
-  }
-
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+  let switchRunnerActive = false;
 
   function loadState() {
-    try {
-      const saved = GM_getValue(STORE_KEY, {});
-      return { ...DEFAULTS, ...(saved && typeof saved === 'object' ? saved : {}) };
-    } catch {
-      return { ...DEFAULTS };
+    let saved = {};
+    try { saved = GM_getValue(STORE_KEY, {}) || {}; } catch {}
+
+    const clean = { ...DEFAULTS };
+    for (const key of Object.keys(DEFAULTS)) {
+      if (Object.prototype.hasOwnProperty.call(saved, key)) clean[key] = saved[key];
     }
+    return clean;
   }
 
   function saveState() {
@@ -127,10 +116,8 @@
 
   function normalizeRules() {
     if (!['edit', 'move'].includes(state.area)) state.area = 'edit';
-    if (!VALID_EDIT_MODES.includes(state.editMode)) state.editMode = 'each';
-    if (!VALID_MOVE_MODES.includes(state.moveMode)) state.moveMode = 'each';
-    if (state.backendMode && !DEFINITIONS[state.backendMode]) state.backendMode = '';
-
+    if (!EDIT_MODES.includes(state.editMode)) state.editMode = 'each';
+    if (!MOVE_MODES.includes(state.moveMode)) state.moveMode = 'each';
     if (!STATES.includes(state.eachState)) state.eachState = 'Unsellable';
     if (!DISPOSITIONS.includes(state.eachDisposition)) state.eachDisposition = 'Amazon Damage';
     if (!STATES.includes(state.skuCurrentState)) state.skuCurrentState = 'Sellable';
@@ -142,7 +129,6 @@
     if (state.skuCurrentState !== 'Unsellable' && state.skuDesiredState === state.skuCurrentState) {
       state.skuDesiredState = state.skuCurrentState === 'Sellable' ? 'Unsellable' : 'Sellable';
     }
-
     if (
       state.skuCurrentState === 'Unsellable' &&
       state.skuDesiredState === 'Unsellable' &&
@@ -150,22 +136,6 @@
     ) {
       state.skuDesiredDisposition = DISPOSITIONS.find(value => value !== state.skuCurrentDisposition) || 'Defective';
     }
-  }
-
-  function isAftQt() {
-    return /^aft-qt-/i.test(location.hostname) && /\.corp\.amazon\.com$/i.test(location.hostname);
-  }
-
-  function rememberOrigin() {
-    if (!isAftQt()) return;
-    if (state.aftOrigin === location.origin) return;
-    state.aftOrigin = location.origin;
-    saveState();
-  }
-
-  function routeFor(definition) {
-    if (!definition || !state.aftOrigin) return '';
-    return `${state.aftOrigin}${definition.path}?experience=Desktop`;
   }
 
   function modeKey(area = state.area, mode = area === 'edit' ? state.editMode : state.moveMode) {
@@ -176,27 +146,36 @@
     return DEFINITIONS[modeKey()];
   }
 
+  function routeFor(definition) {
+    return definition ? `${location.origin}${definition.path}?experience=Desktop` : '';
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   function setStatus(message, kind = '') {
+    statusMessage = message;
+    statusKind = kind;
     if (!statusEl) return;
     statusEl.textContent = message;
     statusEl.dataset.kind = kind;
   }
 
-  function writeLocalSetting(key, value) {
-    if (!isAftQt()) return;
-    try { localStorage.setItem(key, String(value)); } catch {}
+  function writeHelperSetting(stateKey) {
+    const storageKey = HELPER_KEYS[stateKey];
+    if (!storageKey) return;
+    try { localStorage.setItem(storageKey, String(state[stateKey] ?? '')); } catch {}
   }
 
-  function syncStableHelperSettings() {
-    if (!isAftQt()) return;
-    writeLocalSetting('aftm_each_state', state.eachState);
-    writeLocalSetting('aftm_each_disp', state.eachDisposition);
-    writeLocalSetting('aftm_sku_current_state', state.skuCurrentState);
-    writeLocalSetting('aftm_sku_current_damage', state.skuCurrentDisposition);
-    writeLocalSetting('aftm_sku_desired_state', state.skuDesiredState);
-    writeLocalSetting('aftm_sku_desired_damage', state.skuDesiredDisposition);
-    writeLocalSetting('aftm_move_qty_mode', state.moveQtyMode);
-    writeLocalSetting('aftm_move_user_qty', state.moveUserQty);
+  function syncAllHelperSettings() {
+    for (const stateKey of Object.keys(HELPER_KEYS)) writeHelperSetting(stateKey);
+  }
+
+  function syncChangedHelperSettings(before) {
+    for (const stateKey of Object.keys(HELPER_KEYS)) {
+      if (before[stateKey] !== state[stateKey]) writeHelperSetting(stateKey);
+    }
   }
 
   function escapeAttr(value) {
@@ -207,40 +186,28 @@
       .replace(/>/g, '&gt;');
   }
 
-  function currentNativeModeKey() {
-    if (!document.body || !isAftQt()) return '';
-    const path = location.pathname.toLowerCase();
-    const copy = document.body.cloneNode(true);
-    copy.querySelectorAll(`#${ROOT_ID},.aftm`).forEach(el => el.remove());
-    const text = norm(copy.textContent || '');
-    const match = text.match(/\bMode\s*:\s*(Datelot|Container|Multi|Each|Sku|LPN)/i);
-    const native = match ? low(match[1]) : '';
-
-    if (path.startsWith('/app/fcskuflip') && native === 'sku') return 'edit:fcsku';
-    if (path.startsWith('/app/edititems')) {
-      if (native === 'datelot') return 'edit:date';
-      if (native === 'each' || native === 'sku') return `edit:${native}`;
-    }
-    if (path.startsWith('/app/moveitems') && ['each', 'multi', 'container'].includes(native)) return `move:${native}`;
-    return '';
-  }
-
-  function pageHints(html) {
+  async function requestText(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-      doc.querySelectorAll('script,style,noscript').forEach(node => node.remove());
-      const text = norm(doc.body?.textContent || '');
-      const match = text.match(/\bMode\s*:\s*(Datelot|Container|Multi|Each|Sku|LPN)/i);
-      return {
-        pageMode: match ? low(match[1]) : '',
-        selector: /\bSelect\s+mode\b/i.test(text)
-      };
-    } catch {
-      return { pageMode: '', selector: false };
+      const response = await fetch(url, {
+        credentials: 'include',
+        cache: 'no-store',
+        ...options,
+        signal: controller.signal
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`${new URL(url).pathname} ${response.status}`);
+      return text;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw new Error(`${new URL(url).pathname} timeout`);
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  function extractWorkflow(html, fallbackDefinition = null) {
+  function extractWorkflow(html, definition) {
     const source = String(html || '')
       .replace(/&quot;/gi, '"')
       .replace(/&#34;/gi, '"')
@@ -248,77 +215,42 @@
       .replace(/\\"/g, '"')
       .replace(/&amp;/gi, '&');
 
-    let scope = source;
-    if (fallbackDefinition?.instructionId) {
-      const anchorRx = new RegExp(`"instructionId"\\s*:\\s*"${fallbackDefinition.instructionId}"`, 'i');
-      const match = anchorRx.exec(source);
-      if (match) scope = source.slice(match.index, match.index + 2400);
-    }
+    const anchorRx = new RegExp(`"instructionId"\\s*:\\s*"${definition.instructionId}"`, 'i');
+    const anchor = anchorRx.exec(source);
+    if (!anchor) return null;
+    const scope = source.slice(anchor.index, anchor.index + 2400);
 
     const grab = name => {
-      const rx = new RegExp(`"${name}"\\s*:\\s*"([^"]+)"`, 'i');
-      return scope.match(rx)?.[1] || '';
+      const match = scope.match(new RegExp(`"${name}"\\s*:\\s*"([^"]+)"`, 'i'));
+      return match?.[1] || '';
     };
 
-    const hints = pageHints(html);
     const workflow = {
       instructionId: grab('instructionId'),
-      tool: low(grab('tool')),
+      tool: grab('tool').toLowerCase(),
       objectId: grab('objectId'),
       status: grab('status').toUpperCase(),
-      pageMode: hints.pageMode,
-      selector: hints.selector
+      selector: /<input\b[^>]*\bname\s*=\s*["']options["']/i.test(source)
     };
 
-    if (!workflow.instructionId && fallbackDefinition) workflow.instructionId = fallbackDefinition.instructionId;
-    if (!workflow.tool && fallbackDefinition) workflow.tool = fallbackDefinition.tool;
-
-    if (!workflow.objectId) return null;
-    if (fallbackDefinition && workflow.instructionId !== fallbackDefinition.instructionId) return null;
-    if (fallbackDefinition && workflow.tool && workflow.tool !== fallbackDefinition.tool) return null;
+    if (!workflow.objectId || workflow.instructionId !== definition.instructionId) return null;
+    if (workflow.tool && workflow.tool !== definition.tool) return null;
     return workflow;
   }
 
-  async function readTextResponse(response) {
-    try { return await response.text(); }
-    catch { return ''; }
-  }
-
   async function bootstrapWorkflow(definition) {
-    const route = routeFor(definition);
-    if (!route) throw new Error('AFT origin unavailable');
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), BOOTSTRAP_TIMEOUT_MS);
-    try {
-      const response = await fetch(route, {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-        redirect: 'follow',
-        signal: controller.signal
-      });
-      const text = await readTextResponse(response);
-      if (!response.ok) throw new Error(`AFT page ${response.status}`);
-      const workflow = extractWorkflow(text, definition);
-      if (!workflow) throw new Error('AFT workflow not found in page response');
-      return workflow;
-    } finally {
-      clearTimeout(timer);
-    }
+    const html = await requestText(routeFor(definition), { method: 'GET', redirect: 'follow' });
+    const workflow = extractWorkflow(html, definition);
+    if (!workflow) throw new Error('AFT workflow not found');
+    return workflow;
   }
 
   async function workflowPost(path, payload) {
-    const response = await fetch(`${state.aftOrigin}${path}`, {
+    return requestText(`${location.origin}${path}`, {
       method: 'POST',
-      credentials: 'include',
-      cache: 'no-store',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify(payload)
     });
-    const text = await readTextResponse(response);
-    if (!response.ok) throw new Error(`${path} ${response.status}`);
-    return text;
   }
 
   function workflowId(workflow, definition) {
@@ -330,80 +262,43 @@
 
   async function getStatus(workflow, definition) {
     const text = await workflowPost('/status', { id: workflowId(workflow, definition) });
-    try {
-      const parsed = JSON.parse(text || '{}');
-      return String(parsed.status || '').toUpperCase();
-    } catch {
-      return '';
-    }
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch { throw new Error('Invalid /status response'); }
+
+    const status = String(parsed?.status || '').toUpperCase();
+    if (!status) throw new Error('Missing AFT status');
+    return status;
   }
 
   async function waitForStatus(workflow, definition, accepted, timeoutMs = STATUS_TIMEOUT_MS) {
     const wanted = new Set(accepted);
-    const started = Date.now();
+    const deadline = Date.now() + timeoutMs;
     let last = workflow.status || '';
 
-    while (Date.now() - started < timeoutMs) {
+    while (Date.now() < deadline) {
       last = await getStatus(workflow, definition);
       if (wanted.has(last)) return last;
-      if (['ERROR', 'FAILED', 'CLOSED'].includes(last)) throw new Error(`AFT workflow ${last}`);
+      if (!['READY', 'PROCESSING', 'COMPLETE'].includes(last)) throw new Error(`AFT workflow ${last}`);
       await sleep(POLL_MS);
     }
     throw new Error(`AFT workflow timeout (${last || 'unknown'})`);
   }
 
-  async function endWorkflow(workflow, definition) {
-    await workflowPost('/end', {
-      id: workflowId(workflow, definition),
-      tool: definition.tool
-    });
-  }
+  async function waitForSelectorReady(workflow, definition) {
+    const deadline = Date.now() + STATUS_TIMEOUT_MS;
 
-  async function bootstrapAfterEnd(definition, endedObjectId) {
-    const started = Date.now();
-    let workflow = null;
-    while (Date.now() - started < 1500) {
-      workflow = await bootstrapWorkflow(definition);
-      if (workflow.objectId !== endedObjectId || workflow.status !== 'COMPLETE') return workflow;
-      await sleep(50);
+    while (Date.now() < deadline) {
+      const status = await getStatus(workflow, definition);
+      if (status === 'READY') {
+        const refreshed = await bootstrapWorkflow(definition);
+        if (refreshed.objectId === workflow.objectId && refreshed.selector) return refreshed;
+      } else if (status !== 'PROCESSING') {
+        throw new Error(`AFT workflow ${status}`);
+      }
+      await sleep(POLL_MS);
     }
-    throw new Error('AFT did not create a fresh workflow');
-  }
-
-  async function getReadyWorkflow(definition) {
-    let workflow = await bootstrapWorkflow(definition);
-
-    for (let pass = 0; pass < 4; pass += 1) {
-      if (workflow.status === 'READY') return workflow;
-
-      if (workflow.status === 'PROCESSING') {
-        const status = await waitForStatus(workflow, definition, ['READY', 'COMPLETE']);
-        workflow.status = status;
-        if (status === 'READY') {
-          await sleep(25);
-          const refreshed = await bootstrapWorkflow(definition);
-          if (refreshed.objectId === workflow.objectId) return refreshed;
-          workflow = refreshed;
-          continue;
-        }
-      }
-
-      if (workflow.status === 'COMPLETE') {
-        const endedObjectId = workflow.objectId;
-        await endWorkflow(workflow, definition);
-        workflow = await bootstrapAfterEnd(definition, endedObjectId);
-        continue;
-      }
-
-      if (!workflow.status) {
-        workflow.status = await getStatus(workflow, definition);
-        continue;
-      }
-
-      throw new Error(`Unexpected AFT state ${workflow.status}`);
-    }
-
-    throw new Error('Could not obtain READY workflow');
+    throw new Error('AFT mode selector timeout');
   }
 
   async function sendAction(workflow, definition, action, input) {
@@ -414,102 +309,135 @@
     });
   }
 
-  async function finalizeModeChange(workflow, definition) {
-    const status = await waitForStatus(workflow, definition, ['COMPLETE', 'READY']);
-    if (status === 'READY') {
-      await sleep(25);
-      return bootstrapWorkflow(definition);
+  async function endWorkflow(workflow, definition) {
+    await workflowPost('/end', {
+      id: workflowId(workflow, definition),
+      tool: definition.tool
+    });
+  }
+
+  async function waitForFreshWorkflow(definition, endedObjectId) {
+    const deadline = Date.now() + FRESH_WORKFLOW_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const workflow = await bootstrapWorkflow(definition);
+      if (workflow.objectId !== endedObjectId) return workflow;
+      await sleep(POLL_MS);
+    }
+    throw new Error('Fresh AFT workflow not created');
+  }
+
+  async function ensureReadyWorkflow(definition, workflow = null) {
+    let current = workflow || await bootstrapWorkflow(definition);
+
+    for (let pass = 0; pass < 4; pass += 1) {
+      if (current.status === 'READY') return current;
+
+      if (current.status === 'PROCESSING') {
+        current.status = await waitForStatus(current, definition, ['READY', 'COMPLETE']);
+        if (current.status === 'READY') {
+          current = await bootstrapWorkflow(definition);
+          continue;
+        }
+      }
+
+      if (current.status === 'COMPLETE') {
+        const endedObjectId = current.objectId;
+        await endWorkflow(current, definition);
+        current = await waitForFreshWorkflow(definition, endedObjectId);
+        continue;
+      }
+
+      throw new Error(`Unexpected AFT state ${current.status || 'unknown'}`);
     }
 
-    const endedObjectId = workflow.objectId;
-    await endWorkflow(workflow, definition);
-    const fresh = await bootstrapAfterEnd(definition, endedObjectId);
-    if (fresh.status === 'READY') return fresh;
-    return getReadyWorkflow(definition);
+    throw new Error('Could not obtain READY workflow');
   }
 
-  function workflowAlreadyInMode(workflow, definition) {
-    return workflow.status === 'READY' && workflow.pageMode === definition.nativeMode;
-  }
-
+  // API state is authoritative. Native AFT can remain visually stale.
   async function directSwitch(definition) {
-    let workflow = await getReadyWorkflow(definition);
+    let workflow = await ensureReadyWorkflow(definition);
 
-    if (workflowAlreadyInMode(workflow, definition)) return workflow;
+    if (definition.mode === 'fcsku' && !workflow.selector) return;
 
     if (!workflow.selector) {
-      if (!workflow.pageMode && definition.tool === 'fcskuflip') {
-        throw new Error('FCSKU workflow state unclear');
-      }
       setStatus(`${definition.title} • opening mode…`);
       await sendAction(workflow, definition, 'SelectMode', 'SelectMode');
-      const selectorState = await waitForStatus(workflow, definition, ['READY']);
-      workflow.status = selectorState;
-      workflow.selector = true;
-      workflow.pageMode = '';
+      workflow = await waitForSelectorReady(workflow, definition);
     }
 
     setStatus(`${definition.title} • selecting…`);
     await sendAction(workflow, definition, 'Input', definition.input);
-    workflow = await finalizeModeChange(workflow, definition);
+    workflow.status = await waitForStatus(workflow, definition, ['COMPLETE']);
 
-    if (!workflowAlreadyInMode(workflow, definition)) {
-      throw new Error(`AFT did not confirm ${definition.title}`);
-    }
-
-    return workflow;
+    const endedObjectId = workflow.objectId;
+    await endWorkflow(workflow, definition);
+    workflow = await waitForFreshWorkflow(definition, endedObjectId);
+    await ensureReadyWorkflow(definition, workflow);
   }
 
-  async function performSwitch(key) {
-    const definition = DEFINITIONS[key];
-    if (!definition) return;
+  async function runSwitchQueue() {
+    if (switchRunnerActive) return;
+    switchRunnerActive = true;
 
-    syncStableHelperSettings();
+    try {
+      while (queuedModeKey) {
+        const key = queuedModeKey;
+        queuedModeKey = '';
+        switchingKey = key;
+        const definition = DEFINITIONS[key];
+        if (!definition) continue;
 
-    if (switchBusy) {
-      queuedModeKey = key;
-      setStatus(`${definition.title} queued…`, 'warn');
+        render();
+        setStatus(`${definition.title} • backend switch…`);
+
+        try {
+          await directSwitch(definition);
+          activeModeKey = key;
+          if (!queuedModeKey) setStatus(`${definition.title} active • page may be stale`, 'ok');
+        } catch (error) {
+          activeModeKey = '';
+          const message = String(error?.message || error || 'unknown error');
+          if (!queuedModeKey) setStatus(`Backend switch failed • ${message} • SYNC PAGE`, 'warn');
+        } finally {
+          switchingKey = '';
+          render();
+        }
+      }
+    } finally {
+      switchingKey = '';
+      switchRunnerActive = false;
+      render();
+    }
+  }
+
+  function requestModeSwitch(area, mode) {
+    state.area = area;
+    if (area === 'edit') state.editMode = mode;
+    else state.moveMode = mode;
+    saveState();
+
+    const key = `${area}:${mode}`;
+    if (switchRunnerActive && switchingKey === key) {
+      queuedModeKey = '';
+      render();
+      setStatus(`${DEFINITIONS[key].title} • backend switch…`);
       return;
     }
 
-    switchBusy = true;
-    queuedModeKey = '';
-    const serial = ++switchSerial;
+    queuedModeKey = key;
     render();
-    setStatus(`${definition.title} • backend switch…`);
-
-    let finalMessage = '';
-    let finalKind = '';
-    try {
-      await directSwitch(definition);
-      if (serial !== switchSerial) return;
-      state.backendMode = key;
-      state.backendConfirmedAt = Date.now();
-      state.area = definition.area;
-      if (definition.area === 'edit') state.editMode = definition.mode;
-      else state.moveMode = definition.mode;
-      saveState();
-      finalMessage = `${definition.title} active • page may be stale`;
-      finalKind = 'ok';
-    } catch (error) {
-      console.error('[AFT SUPER]', error);
-      state.backendMode = '';
-      state.backendConfirmedAt = 0;
-      saveState();
-      const message = String(error?.message || error || 'unknown error');
-      finalMessage = `Backend switch failed • ${message} • SYNC PAGE`;
-      finalKind = 'warn';
-    } finally {
-      switchBusy = false;
-      render();
-      if (finalMessage) setStatus(finalMessage, finalKind);
-      const next = queuedModeKey;
-      queuedModeKey = '';
-      if (next && next !== key) setTimeout(() => performSwitch(next), 0);
+    if (switchRunnerActive) {
+      setStatus(`${DEFINITIONS[key].title} queued…`, 'warn');
+      return;
     }
+    runSwitchQueue();
   }
 
   function syncPage() {
+    if (switchRunnerActive) {
+      setStatus('Backend switch in progress • wait before SYNC PAGE', 'warn');
+      return;
+    }
     const definition = selectedDefinition();
     const target = routeFor(definition);
     if (!target) return;
@@ -527,22 +455,20 @@
   }
 
   function makeModeButtons(area, values, labelMap) {
-    const active = state.backendMode || currentNativeModeKey();
     return values.map(value => {
       const key = `${area}:${value}`;
-      const isActive = key === active;
-      const isPending = switchBusy && modeKey() === key && !isActive;
+      const active = key === activeModeKey;
+      const pending = !active && (key === switchingKey || key === queuedModeKey);
       const label = labelMap[value] || value;
-      return `<button type="button" class="aso-choice" data-${area}-mode="${value}" data-active="${isActive ? '1' : '0'}" data-pending="${isPending ? '1' : '0'}" aria-pressed="${isActive ? 'true' : 'false'}">${isActive ? '✓ ' : isPending ? '… ' : ''}${label}</button>`;
+      return `<button type="button" class="aso-choice" data-${area}-mode="${value}" data-active="${active ? '1' : '0'}" data-pending="${pending ? '1' : '0'}" aria-pressed="${active ? 'true' : 'false'}">${active ? '✓ ' : pending ? '… ' : ''}${label}</button>`;
     }).join('');
   }
 
   function adaptiveHtml() {
     const mode = modeKey();
-    const active = state.backendMode || currentNativeModeKey();
 
-    if (switchBusy && active !== mode) {
-      return `<div class="aso-note">BACKEND SWITCH IN PROGRESS… native page does not need to catch up.</div>`;
+    if (switchingKey && activeModeKey !== mode) {
+      return '<div class="aso-note">BACKEND SWITCH IN PROGRESS… native page does not need to catch up.</div>';
     }
 
     if (mode === 'edit:each') {
@@ -552,7 +478,7 @@
           <div class="aso-label">Inventory state</div>
           <div class="aso-grid aso-grid-3">${makeChoiceButtons(STATES, state.eachState, 'each-state', { 'Pending Research': 'Pending' })}</div>
         </div>
-        <div class="aso-group" data-adaptive ${showDisposition ? '' : 'hidden'}>
+        <div class="aso-group" ${showDisposition ? '' : 'hidden'}>
           <div class="aso-label">Disposition</div>
           <div class="aso-grid aso-grid-2">${makeChoiceButtons(DISPOSITIONS, state.eachDisposition, 'each-disposition')}</div>
         </div>`;
@@ -566,7 +492,7 @@
           <div class="aso-label">Current state</div>
           <div class="aso-grid aso-grid-3">${makeChoiceButtons(STATES, state.skuCurrentState, 'sku-current-state', { 'Pending Research': 'Pending' })}</div>
         </div>
-        <div class="aso-group" data-adaptive ${currentUnsellable ? '' : 'hidden'}>
+        <div class="aso-group" ${currentUnsellable ? '' : 'hidden'}>
           <div class="aso-label">Current disposition</div>
           <div class="aso-grid aso-grid-2">${makeChoiceButtons(DISPOSITIONS, state.skuCurrentDisposition, 'sku-current-disposition')}</div>
         </div>
@@ -580,7 +506,7 @@
             currentUnsellable ? [] : [state.skuCurrentState]
           )}</div>
         </div>
-        <div class="aso-group" data-adaptive ${desiredUnsellable ? '' : 'hidden'}>
+        <div class="aso-group" ${desiredUnsellable ? '' : 'hidden'}>
           <div class="aso-label">Desired disposition</div>
           <div class="aso-grid aso-grid-2">${makeChoiceButtons(
             DISPOSITIONS,
@@ -605,60 +531,21 @@
     }
 
     const messages = {
-      'edit:date': 'Date workflow selected in backend. SYNC PAGE only if you need native/manual controls.',
-      'edit:fcsku': 'FCSKU automatically selects the inner SKU workflow; LPN is never selected.',
+      'edit:date': 'Date workflow selected in backend. SYNC PAGE only for native/manual controls.',
+      'edit:fcsku': 'FCSKU uses SKU only. LPN is not used.',
       'move:each': 'Move Each selected in backend. Existing helper settings are preserved.',
-      'move:container': 'Move Container selected in backend. No separate Move App is used.'
+      'move:container': 'Move Container selected in backend.'
     };
     return `<div class="aso-note">${messages[mode] || 'Select a mode.'}</div>`;
   }
 
   function choose(key, value) {
+    const before = { ...state };
     state[key] = value;
     normalizeRules();
     saveState();
-    syncStableHelperSettings();
+    syncChangedHelperSettings(before);
     render();
-  }
-
-  function chooseMode(area, mode) {
-    state.area = area;
-    if (area === 'edit') state.editMode = mode;
-    else state.moveMode = mode;
-    saveState();
-    render();
-    performSwitch(`${area}:${mode}`);
-  }
-
-  function render() {
-    if (!root) return;
-    root.dataset.minimized = state.minimized ? '1' : '0';
-    root.dataset.busy = switchBusy ? '1' : '0';
-
-    root.innerHTML = `
-      <div class="aso-head">
-        <div><span class="aso-test">TEST</span> AFT SUPER <span class="aso-version">v${VERSION}</span></div>
-        <button type="button" class="aso-min" data-min aria-label="${state.minimized ? 'Expand' : 'Minimize'}">${state.minimized ? '+' : '−'}</button>
-      </div>
-      <div class="aso-body">
-        <div class="aso-main-tabs">
-          <button type="button" data-area="edit" data-active="${state.area === 'edit' ? '1' : '0'}">EDIT</button>
-          <button type="button" data-area="move" data-active="${state.area === 'move' ? '1' : '0'}">MOVE</button>
-        </div>
-        <div class="aso-mode-tabs">
-          ${state.area === 'edit'
-            ? makeModeButtons('edit', VALID_EDIT_MODES, { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
-            : makeModeButtons('move', VALID_MOVE_MODES, { each: 'EACH', multi: 'MULTI', container: 'CONTAINER' })}
-        </div>
-        <div class="aso-adaptive">${adaptiveHtml()}</div>
-        <div class="aso-status" data-status>Backend controller ready</div>
-        <div class="aso-actions"><button type="button" data-sync>SYNC PAGE</button></div>
-        <div class="aso-safety">API-FIRST TEST • native page may intentionally stay stale</div>
-      </div>`;
-
-    statusEl = root.querySelector('[data-status]');
-    wireUi();
-    paintCurrentStatus();
   }
 
   function wireUi() {
@@ -672,10 +559,10 @@
       button.onclick = () => choose('area', button.dataset.area);
     });
     root.querySelectorAll('[data-edit-mode]').forEach(button => {
-      button.onclick = () => chooseMode('edit', button.dataset.editMode);
+      button.onclick = () => requestModeSwitch('edit', button.dataset.editMode);
     });
     root.querySelectorAll('[data-move-mode]').forEach(button => {
-      button.onclick = () => chooseMode('move', button.dataset.moveMode);
+      button.onclick = () => requestModeSwitch('move', button.dataset.moveMode);
     });
     root.querySelectorAll('[data-each-state]').forEach(button => {
       button.onclick = () => choose('eachState', button.dataset.eachState);
@@ -704,34 +591,40 @@
       qty.oninput = () => {
         state.moveUserQty = qty.value.replace(/[^0-9]/g, '').slice(0, 6);
         saveState();
-        writeLocalSetting('aftm_move_user_qty', state.moveUserQty);
+        writeHelperSetting('moveUserQty');
       };
     }
 
     root.querySelector('[data-sync]').onclick = syncPage;
   }
 
-  function paintCurrentStatus() {
-    const definition = selectedDefinition();
-    if (!definition) return;
-    if (switchBusy) {
-      setStatus(`${definition.title} • backend switch…`);
-      return;
-    }
+  function render() {
+    if (!root) return;
+    root.dataset.minimized = state.minimized ? '1' : '0';
+    root.dataset.busy = switchRunnerActive ? '1' : '0';
+    root.innerHTML = `
+      <div class="aso-head">
+        <div><span class="aso-test">TEST</span> AFT SUPER <span class="aso-version">v${VERSION}</span></div>
+        <button type="button" class="aso-min" data-min aria-label="${state.minimized ? 'Expand' : 'Minimize'}">${state.minimized ? '+' : '−'}</button>
+      </div>
+      <div class="aso-body">
+        <div class="aso-main-tabs">
+          <button type="button" data-area="edit" data-active="${state.area === 'edit' ? '1' : '0'}">EDIT</button>
+          <button type="button" data-area="move" data-active="${state.area === 'move' ? '1' : '0'}">MOVE</button>
+        </div>
+        <div class="aso-mode-tabs">
+          ${state.area === 'edit'
+            ? makeModeButtons('edit', EDIT_MODES, { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
+            : makeModeButtons('move', MOVE_MODES, { each: 'EACH', multi: 'MULTI', container: 'CONTAINER' })}
+        </div>
+        <div class="aso-adaptive">${adaptiveHtml()}</div>
+        <div class="aso-status" data-status data-kind="${statusKind}">${statusMessage}</div>
+        <div class="aso-actions"><button type="button" data-sync ${switchRunnerActive ? 'disabled' : ''}>SYNC PAGE</button></div>
+        <div class="aso-safety">API-FIRST TEST • native page may intentionally stay stale</div>
+      </div>`;
 
-    const active = state.backendMode || currentNativeModeKey();
-    if (active === modeKey()) {
-      const stale = currentNativeModeKey() !== active;
-      setStatus(`${definition.title} active${stale ? ' • page stale' : ''}`, 'ok');
-      return;
-    }
-
-    if (active && DEFINITIONS[active]) {
-      setStatus(`Backend active: ${DEFINITIONS[active].title}`);
-      return;
-    }
-
-    setStatus('Backend controller ready');
+    statusEl = root.querySelector('[data-status]');
+    wireUi();
   }
 
   function injectStyle() {
@@ -740,7 +633,7 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${ROOT_ID}{position:fixed;z-index:2147483647;top:76px;left:50%;transform:translateX(-50%);width:430px;max-width:calc(100vw - 24px);overflow:hidden;border:2px solid #b85c00;border-radius:9px;background:#f4f7f8;color:#1e2b31;box-shadow:0 8px 24px #0005;font:13px/1.35 Arial,sans-serif}
-      #${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} button{font:inherit;font-weight:800;cursor:pointer}#${ROOT_ID} [hidden]{display:none!important}
+      #${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} button{font:inherit;font-weight:800;cursor:pointer}#${ROOT_ID} button:disabled{cursor:not-allowed;opacity:.55}#${ROOT_ID} [hidden]{display:none!important}
       #${ROOT_ID} .aso-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#263f47;color:#fff;font-weight:900;letter-spacing:.25px}
       #${ROOT_ID} .aso-test{display:inline-block;margin-right:5px;padding:2px 5px;border-radius:4px;background:#f59e0b;color:#1b2529;font-size:10px}#${ROOT_ID} .aso-version{color:#cdd9dd;font-size:10px}
       #${ROOT_ID} .aso-min{width:29px;height:24px;padding:0;border:1px solid #9bb0b7;border-radius:5px;background:#1d333a;color:#fff}
@@ -764,24 +657,12 @@
   }
 
   function start() {
-    rememberOrigin();
+    if (document.getElementById(ROOT_ID)) return;
     normalizeRules();
-    syncStableHelperSettings();
-
-    const native = currentNativeModeKey();
-    if (native) {
-      state.backendMode = native;
-      state.backendConfirmedAt = Date.now();
-      const definition = DEFINITIONS[native];
-      if (definition) {
-        state.area = definition.area;
-        if (definition.area === 'edit') state.editMode = definition.mode;
-        else state.moveMode = definition.mode;
-      }
-    }
     saveState();
-
+    syncAllHelperSettings();
     injectStyle();
+
     root = document.createElement('section');
     root.id = ROOT_ID;
     document.body.appendChild(root);
@@ -789,7 +670,10 @@
   }
 
   function startWhenReady() {
-    if (!document.body) return setTimeout(startWhenReady, 20);
+    if (!document.body) {
+      setTimeout(startWhenReady, 20);
+      return;
+    }
     start();
   }
 
