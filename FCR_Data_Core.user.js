@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.12 FCR Data Core — 30-Day MADCAT
+// @name         TEST v0.2.13 FCR Data Core — Strict Bin + 30-Day MADCAT
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.12
-// @description  Shared modular FCResearch data engine with fast authenticated 30-day MADCAT measurement checks.
+// @version      0.2.13
+// @description  Shared FCR engine with exact-item-only binDescription and fast authenticated 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -34,7 +34,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.12';
+  const VERSION = '0.2.13';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -43,7 +43,7 @@
   const USAGE_EVENT = 'fcr-usage:event';
   const USAGE_KEY = 'fcr-usage-v1';
   const USAGE_FLUSH_MS = 1500;
-  const CACHE_PREFIX = 'fcr-data-core-v3:';
+  const CACHE_PREFIX = 'fcr-data-core-v4:';
   const PRODUCT_TTL = 5 * 60 * 1000;
   const BIN_TTL = 5 * 60 * 1000;
   const HISTORY_TTL = 2 * 60 * 1000;
@@ -1259,7 +1259,7 @@
       });
       const payload = JSON.parse(response.responseText || '{}');
       const items = Array.isArray(payload.items) ? payload.items : [];
-      const wanted = upper(code);
+      const wanted = new Set([code, ...aliases].map(upper).filter(Boolean));
       const exact = items.find(entry => [
         entry?.scannableId,
         entry?.value,
@@ -1267,17 +1267,16 @@
         entry?.skuDetail?.fnSku,
         entry?.skuDetail?.asin,
         entry?.skuDetail?.fcSku
-      ].map(upper).includes(wanted));
-      const result = exact || items.find(entry => entry?.binDescription) || items[0];
-      const size = clean(result?.binDescription || '');
+      ].map(upper).some(value => wanted.has(value)));
+      const size = clean(exact?.binDescription || '');
       if (size) {
         const resultAliases = [
-          result?.scannableId,
-          result?.value,
-          result?.scannedBarcode,
-          result?.skuDetail?.fnSku,
-          result?.skuDetail?.asin,
-          result?.skuDetail?.fcSku,
+          exact?.scannableId,
+          exact?.value,
+          exact?.scannedBarcode,
+          exact?.skuDetail?.fnSku,
+          exact?.skuDetail?.asin,
+          exact?.skuDetail?.fcSku,
           ...aliases
         ];
         saveBin(source, code, size, resultAliases);
@@ -1373,7 +1372,7 @@
       progress: data => reportProgress(id, data)
     };
     if (!id || !type) return;
-    const tracked = !['ping', 'stats', 'usageStats', 'usageReset', 'rememberProduct', 'rememberBinSize'].includes(type);
+    const tracked = !['ping', 'stats', 'usageStats', 'usageReset', 'rememberProduct'].includes(type);
     if (tracked) {
       recordUsage(`core.request.${type}`);
       recordUsage(`client.${client}.request.${type}`);
@@ -1394,10 +1393,7 @@
         const product = requestedKey ? saveProductForKey(requestedKey, payload.product || {}) : normalizeProduct(payload.product || {});
         data = { product, source: requestedKey ? 'remembered' : 'uncached' };
       } else if (type === 'binSize') data = await fetchBinSize(payload.container, payload.item, Array.isArray(payload.aliases) ? payload.aliases : []);
-      else if (type === 'rememberBinSize') {
-        const size = saveBin(payload.container, payload.item, payload.size, Array.isArray(payload.aliases) ? payload.aliases : []);
-        data = { size, source: 'remembered' };
-      } else if (type === 'stats') data = { version: VERSION, stats: { ...stats } };
+      else if (type === 'stats') data = { version: VERSION, stats: { ...stats } };
       else if (type === 'usageStats') data = { version: VERSION, text: usageText() };
       else if (type === 'usageReset') {
         usage = { startedAt: Date.now(), updatedAt: Date.now(), counts: {}, timings: {} };
