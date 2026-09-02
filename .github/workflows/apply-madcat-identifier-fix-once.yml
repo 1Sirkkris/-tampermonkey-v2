@@ -16,196 +16,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Patch Core Master and FC-Lite
+      - name: Patch and publish
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          def replace_once(path, old, new, label):
-              p = Path(path)
-              text = p.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 exact match, found {count}')
-              p.write_text(text.replace(old, new, 1))
-
-          # ---------------- Core 0.2.16 ----------------
-          p = Path('FCR_Data_Core.user.js')
-          text = p.read_text()
-          text = text.replace('// @name         TEST v0.2.15 FCR Data Core — MADCAT Session Keepalive', '// @name         TEST v0.2.16 FCR Data Core — MADCAT ASIN/FNSKU Fix', 1)
-          text = text.replace('// @version      0.2.15', '// @version      0.2.16', 1)
-          text = text.replace('// @description  Strict binDescription plus 30-day raw MADCAT with Item Measurement session keepalive and automatic Inventory History fallback.', '// @description  Strict binDescription plus 30-day raw MADCAT using FNSKU when available, ASIN otherwise, with automatic Inventory History fallback.', 1)
-          text = text.replace("  const VERSION = '0.2.15';", "  const VERSION = '0.2.16';", 1)
-          old_handler = "      else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload.fnsku || payload.code, payload.force === true);"
-          new_handler = "      else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);"
-          if text.count(old_handler) != 1:
-              raise SystemExit(f'core madcat handler: expected 1 match, found {text.count(old_handler)}')
-          text = text.replace(old_handler, new_handler, 1)
-          text = text.replace("      source: 'history-fallback-auth',", "      source: 'history-fallback',", 1)
-
-          new_func = r'''  async function fetchRecentMadcat(inputValue, force = false) {
-    const input = inputValue && typeof inputValue === 'object' ? inputValue : { fnsku: inputValue };
-    const fnsku = upper(input?.fnsku);
-    const asin = upper(input?.asin || (!fnsku ? input?.code : ''));
-    const identifier = fnsku || asin;
-    const identifierType = fnsku ? 'FNSKU' : 'ASIN';
-    if (!identifier) throw new Error('Measurement item unavailable');
-
-    const auth = readMeasurementAuth();
-    if (!auth) {
-      stats.madcatAuthRequired++;
-      return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-login-required');
-    }
-
-    const key = `madcat30:${identifierType}:${identifier}:${force ? 'force' : 'normal'}`;
-    if (inFlight.has(key)) {
-      stats.dedupeHits++;
-      try {
-        const data = await inFlight.get(key);
-        return { ...data, source: 'dedupe' };
-      } catch (error) {
-        const message = clean(error?.message || error || 'Measurement request failed');
-        if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
-        return fallbackMadcatToInventoryHistory(identifier, force,
-          /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed');
-      }
-    }
-
-    const work = (async () => {
-      stats.madcatNetwork++;
-      const before = new Date();
-      const after = new Date(before.getTime() - MEASUREMENT_LOOKBACK_MS);
-      const url = new URL(`${MEASUREMENT_API}/${encodeURIComponent(identifier)}/${identifierType}`);
-      url.searchParams.set('effectiveAfter', after.toISOString());
-      url.searchParams.set('effectiveBefore', before.toISOString());
-
-      let pages = 0;
-      let eventsChecked = 0;
-      let nextToken = '';
-
-      do {
-        if (nextToken) url.searchParams.set('nextToken', nextToken);
-        else url.searchParams.delete('nextToken');
-
-        const response = await requestMeasurementPage(url.href, auth.token);
-        let payload;
-        try {
-          payload = JSON.parse(response.responseText || '{}');
-        } catch {
-          throw new Error('Measurement response invalid');
-        }
-
-        pages++;
-        const events = Array.isArray(payload.measurementEvents) ? payload.measurementEvents : [];
-        eventsChecked += events.length;
-        const hasRecentMadcat = events.some(event => {
-          if (upper(event?.measurementSource) !== 'MADCAT') return false;
-          const instant = Date.parse(event?.measurementInstant || '');
-          return Number.isFinite(instant) && instant >= after.getTime() && instant <= before.getTime();
-        });
-        if (hasRecentMadcat) {
-          return { madcat: true, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
-        }
-
-        nextToken = clean(payload.nextToken);
-      } while (nextToken && pages < MEASUREMENT_MAX_PAGES);
-
-      if (nextToken) throw new Error('Measurement history incomplete');
-      return { madcat: false, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
-    })();
-
-    inFlight.set(key, work);
-    try {
-      return await work;
-    } catch (error) {
-      const message = clean(error?.message || error || 'Measurement request failed');
-      if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
-      return await fallbackMadcatToInventoryHistory(identifier, force,
-        /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed');
-    } finally {
-      if (inFlight.get(key) === work) inFlight.delete(key);
-    }
-  }
-'''
-          pattern = re.compile(r"  async function fetchRecentMadcat\(.*?\n(?=  async function fetchBinSize\()", re.S)
-          text, count = pattern.subn(new_func + '\n', text, count=1)
-          if count != 1:
-              raise SystemExit(f'core fetchRecentMadcat replacement: expected 1, found {count}')
-          p.write_text(text)
-
-          # ---------------- FCResearch Master 0.1.24 ----------------
-          p = Path('FCResearch_Master.user.js')
-          text = p.read_text()
-          text = text.replace('// @name         TEST v0.1.23 FCResearch Master — Auto Bin + 30-Day MADCAT', '// @name         TEST v0.1.24 FCResearch Master — MADCAT Identifier Fix', 1)
-          text = text.replace('// @version      0.1.23', '// @version      0.1.24', 1)
-          text = text.replace("  const VERSION = '0.1.23';", "  const VERSION = '0.1.24';", 1)
-          old = "    const fnskuId = clean(fnsku?.text || '').match(/\\b(?:X0|ZZ)[A-Z0-9]{8}\\b/i)?.[0] || '';"
-          new = "    const fnskuId = clean(fnsku?.text || '').match(/\\b(?:[A-Z0-9]{10}|\\d{8,14})\\b/i)?.[0] || '';"
-          if text.count(old) != 1:
-              raise SystemExit(f'master fnsku parser: expected 1, found {text.count(old)}')
-          text = text.replace(old, new, 1)
-          text = text.replace("      checkMadcat(current, true, /measurement login required/i.test(message));", "      checkMadcat(current, true, true);", 1)
-          text = text.replace("  function measurementBridgeUrl(fnsku) {\n    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(fnsku)}`);", "  function measurementBridgeUrl(identifier) {\n    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(identifier)}`);", 1)
-          old_block = """    const signature = panel?.signature || '';
-    const fnsku = clean(panel?.fnskuId).toUpperCase();
-    if (!signature) return;"""
-          new_block = """    const signature = panel?.signature || '';
-    const fnsku = clean(panel?.fnskuId).toUpperCase();
-    const asin = clean(panel?.primaryId).toUpperCase();
-    const measurementId = fnsku || asin;
-    if (!signature) return;"""
-          if text.count(old_block) != 1:
-              raise SystemExit(f'master identifiers: expected 1, found {text.count(old_block)}')
-          text = text.replace(old_block, new_block, 1)
-          text = text.replace("    if (!fnsku) {\n      madcatState.status = 'error';\n      madcatState.message = 'Measurement FNSKU unavailable';", "    if (!measurementId) {\n      madcatState.status = 'error';\n      madcatState.message = 'Measurement item unavailable';", 1)
-          text = text.replace("      bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');", "      bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');", 1)
-          text = text.replace("        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);", "        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);", 1)
-          p.write_text(text)
-
-          # ---------------- FC-Lite 0.1.63 ----------------
-          p = Path('FC_Lite.user.js')
-          text = p.read_text()
-          text = text.replace('// @name        TEST v0.1.62 FC-Lite — MADCAT FNSKU Fix', '// @name        TEST v0.1.63 FC-Lite — MADCAT Identifier Fix', 1)
-          text = text.replace('// @version      0.1.62', '// @version      0.1.63', 1)
-          text = text.replace("  const VERSION = '0.1.62';", "  const VERSION = '0.1.63';", 1)
-          old_click = """        const fnsku = clean(row._fcratcMadcatFnsku);
-        checkMadcat(row, fnsku, true, Boolean(fnsku));"""
-          new_click = """        const fnsku = clean(row._fcratcMadcatFnsku);
-        const asin = clean(row._fcratcMadcatAsin);
-        const measurementId = fnsku || asin;
-        checkMadcat(row, fnsku, asin, true, Boolean(measurementId));"""
-          if text.count(old_click) != 1:
-              raise SystemExit(f'fclite error click: expected 1, found {text.count(old_click)}')
-          text = text.replace(old_click, new_click, 1)
-          old_sig = "  async function checkMadcat(row, fnskuValue, force = false, openLoginBridge = false) {\n    const fnsku = clean(fnskuValue);\n    if (!row?.isConnected) return;\n    row._fcratcMadcatFnsku = fnsku;"
-          new_sig = "  async function checkMadcat(row, fnskuValue, asinValue = '', force = false, openLoginBridge = false) {\n    const fnsku = clean(fnskuValue);\n    const asin = clean(asinValue);\n    const measurementId = fnsku || asin;\n    if (!row?.isConnected) return;\n    row._fcratcMadcatFnsku = fnsku;\n    row._fcratcMadcatAsin = asin;"
-          if text.count(old_sig) != 1:
-              raise SystemExit(f'fclite check signature: expected 1, found {text.count(old_sig)}')
-          text = text.replace(old_sig, new_sig, 1)
-          text = text.replace("    if (!fnsku) {\n      paintMadcat(row, 'error', 'Measurement FNSKU unavailable');", "    if (!measurementId) {\n      paintMadcat(row, 'error', 'Measurement item unavailable');", 1)
-          text = text.replace("      const bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');", "      const bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');", 1)
-          text = text.replace("        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);", "        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);", 1)
-          old_call = """      const matchedFnsku = clean(matches.find(match => clean(match?.fnsku))?.fnsku || '');
-      const measurementFnsku = matchedFnsku || clean(product?.fnsku || '');
-      checkMadcat(row, measurementFnsku, false, false);"""
-          new_call = """      const matchedFnsku = clean(matches.find(match => clean(match?.fnsku))?.fnsku || '');
-      const measurementFnsku = matchedFnsku || clean(product?.fnsku || '');
-      const measurementAsin = clean(product?.asin || product?.isbn || product?.primary || rawScan);
-      checkMadcat(row, measurementFnsku, measurementAsin, false, false);"""
-          if text.count(old_call) != 1:
-              raise SystemExit(f'fclite process call: expected 1, found {text.count(old_call)}')
-          text = text.replace(old_call, new_call, 1)
-          p.write_text(text)
-          PY
-
+          echo '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' | base64 -d | gzip -d > /tmp/patch.py
+          python /tmp/patch.py
           node --check FCR_Data_Core.user.js
           node --check FCResearch_Master.user.js
           node --check FC_Lite.user.js
@@ -216,13 +35,11 @@ jobs:
           grep -q "coreRequest('madcatRecent', { fnsku, asin, force }" FCResearch_Master.user.js
           grep -q "checkMadcat(row, measurementFnsku, measurementAsin" FC_Lite.user.js
           git diff --check
-
           git add FCR_Data_Core.user.js FCResearch_Master.user.js FC_Lite.user.js
           git rm .github/workflows/apply-madcat-identifier-fix-once.yml
           git diff --cached --check
           git commit -m "fix: MADCAT supports ASIN when FNSKU is absent"
           git push origin HEAD:main
-
           main_short="$(git rev-parse --short HEAD)"
           git fetch origin work-laptop-pack
           worktree="$(mktemp -d)"
@@ -230,24 +47,10 @@ jobs:
           cp FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
           cp FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
           cp FC_Lite.user.js "$worktree/05_FC-Lite.txt"
-
-          WORKTREE="$worktree" MAIN_SHORT="$main_short" python - <<'PY'
-          from pathlib import Path
-          import os, re
-          p = Path(os.environ['WORKTREE']) / 'WORK_LAPTOP_INSTALL.txt'
-          text = p.read_text()
-          for pattern, replacement in [
-              (r'^03 FCR Data Core v[^\n]+$', '03 FCR Data Core v0.2.16'),
-              (r'^04 FCResearch Master v[^\n]+$', '04 FCResearch Master v0.1.24'),
-              (r'^05 FC-Lite v[^\n]+$', '05 FC-Lite v0.1.63'),
-              (r'^Updater-enabled sources: main [0-9a-f]+\.$', f"Updater-enabled sources: main {os.environ['MAIN_SHORT']}.")
-          ]:
-              text, n = re.subn(pattern, replacement, text, count=1, flags=re.M)
-              if n != 1:
-                  raise SystemExit(f'manifest replacement failed: {pattern} -> {n}')
-          p.write_text(text)
-          PY
-
+          sed -i -E 's/^03 FCR Data Core v.*/03 FCR Data Core v0.2.16/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^04 FCResearch Master v.*/04 FCResearch Master v0.1.24/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^05 FC-Lite v.*/05 FC-Lite v0.1.63/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E "s/^Updater-enabled sources: main [0-9a-f]+\.$/Updater-enabled sources: main ${main_short}./" "$worktree/WORK_LAPTOP_INSTALL.txt"
           cmp -s FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
           cmp -s FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
           cmp -s FC_Lite.user.js "$worktree/05_FC-Lite.txt"
@@ -255,9 +58,9 @@ jobs:
           node --check "$worktree/04_FCResearch_Master.txt"
           node --check "$worktree/05_FC-Lite.txt"
           git -C "$worktree" diff --check
-          git -C "$worktree" add 03_FCR_Data_Core.txt 04_FCResearch_Master.txt 05_FC-Lite.txt WORK_LAPTOP_INSTALL.txt
-          git -C "$worktree" diff --cached --check
           git -C "$worktree" config user.name "github-actions[bot]"
           git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$worktree" add 03_FCR_Data_Core.txt 04_FCResearch_Master.txt 05_FC-Lite.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" diff --cached --check
           git -C "$worktree" commit -m "sync: MADCAT identifier fix"
           git -C "$worktree" push origin HEAD:work-laptop-pack
