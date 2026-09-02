@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.24 FCResearch Master — MADCAT Identifier Fix
+// @name         TEST v0.1.25 FCResearch Master — Bin Input Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.24
+// @version      0.1.25
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,7 +21,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.24';
+  const VERSION = '0.1.25';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -872,7 +872,7 @@
   function currentSidelineItem(panel) {
     const queryValue = clean(new URLSearchParams(location.search).get('s'));
     if (isValidSidelineItem(queryValue)) return queryValue.toUpperCase();
-    for (const input of $('input')) if (isValidSidelineItem(input.value)) return clean(input.value).toUpperCase();
+    for (const input of $$('input')) if (isValidSidelineItem(input.value)) return clean(input.value).toUpperCase();
     return [panel?.asin?.text, panel?.isbn?.text, panel?.fnsku?.text, panel?.fcsku?.text].map(clean).find(isValidSidelineItem)?.toUpperCase() || '';
   }
 
