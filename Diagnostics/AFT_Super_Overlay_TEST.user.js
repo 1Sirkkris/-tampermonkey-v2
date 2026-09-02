@@ -1,11 +1,10 @@
 // ==UserScript==
-// @name         TEST v0.3.0 AFT Super Overlay
-// @name:en      TEST v0.3.0 AFT Super Overlay
+// @name         TEST v0.3.1 AFT Super Overlay
+// @name:en      TEST v0.3.1 AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.0
-// @description  TEST: adaptive Edit/Move mode switcher using AFT's native selector. Mode buttons switch immediately; no inventory actions are submitted.
+// @version      0.3.1
+// @description  TEST: adaptive Edit/Move mode switcher. Move exposes Each/Multi/Container only; FCSKU auto-selects SKU inside FcSkuFlip.
 // @include      *://aft-qt-*.corp.amazon.com/*
-// @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @run-at       document-start
 // @noframes
 // @grant        GM_getValue
@@ -19,12 +18,11 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
   const PENDING_MAX_AGE_MS = 2 * 60 * 1000;
-  const MOVE_CONTAINER_URL = 'https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/move-container';
   const STATES = ['Sellable', 'Pending Research', 'Unsellable'];
   const DISPOSITIONS = ['Amazon Damage', 'Defective', 'Distributor Damage', 'Expired'];
 
@@ -78,10 +76,6 @@
     return /^aft-qt-/i.test(location.hostname) && /\.corp\.amazon\.com$/i.test(location.hostname);
   }
 
-  function isMoveContainer() {
-    return /^aft-moveapp-/i.test(location.hostname) && /\/move-container(?:\/|$)/i.test(location.pathname);
-  }
-
   function rememberOrigin() {
     if (!isAftQt()) return;
     if (state.aftOrigin === location.origin) return;
@@ -103,13 +97,11 @@
 
   function routeFor(definition) {
     if (!definition) return '';
-    if (definition.externalUrl) return definition.externalUrl;
     return state.aftOrigin ? `${state.aftOrigin}${definition.path}` : '';
   }
 
   function currentRouteMatches(definition) {
     if (!definition) return false;
-    if (definition.externalUrl) return isMoveContainer();
     return isAftQt() && location.pathname.toLowerCase().startsWith(definition.path.toLowerCase());
   }
 
@@ -123,7 +115,6 @@
   }
 
   function activeModeKey() {
-    if (isMoveContainer()) return 'move:moveapp';
     if (!isAftQt()) return '';
     if (location.pathname.toLowerCase().startsWith('/app/fcskuflip')) return 'edit:fcsku';
     const native = currentNativeMode();
@@ -187,7 +178,8 @@
       labels: ['Datelot', 'Date Lot', 'Expiry', 'Expiration']
     },
     'edit:fcsku': {
-      title: 'Edit • FCSKU', path: '/app/fcskuflip', nativeMode: '', labels: []
+      title: 'Edit • FCSKU', path: '/app/fcskuflip', nativeMode: 'sku',
+      labels: ['SKU', 'Reassign FcSku']
     },
     'move:each': {
       title: 'Move • Each', path: '/app/moveitems', nativeMode: 'each',
@@ -200,13 +192,6 @@
     'move:container': {
       title: 'Move • Container', path: '/app/moveitems', nativeMode: 'container',
       labels: ['Container', 'Move Container']
-    },
-    'move:lpn': {
-      title: 'Move • LPN', path: '/app/moveitems', nativeMode: 'lpn',
-      labels: ['LPN']
-    },
-    'move:moveapp': {
-      title: 'Move • Separate App', externalUrl: MOVE_CONTAINER_URL, nativeMode: '', labels: []
     }
   };
 
@@ -461,9 +446,7 @@
       'edit:date': 'Date rows and per-item expiry options appear after this mode opens.',
       'edit:fcsku': 'OLD FCSKU, NEW FCSKU and locations appear after this mode opens.',
       'move:each': 'Source, destination and item queue appear after this mode opens.',
-      'move:container': 'Native MoveItems Container options appear after this mode opens.',
-      'move:lpn': 'Native MoveItems LPN options appear after this mode opens.',
-      'move:moveapp': 'Separate MoveContainer app: dropzone, floor and container queue.'
+      'move:container': 'Native MoveItems Container options appear after this mode opens.'
     };
     return `<div class="aso-note">${messages[mode] || 'Select a mode.'}</div>`;
   }
@@ -492,7 +475,7 @@
         <div class="aso-mode-tabs">
           ${state.area === 'edit'
             ? makeModeButtons('edit', ['each', 'sku', 'date', 'fcsku'], { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
-            : makeModeButtons('move', ['each', 'multi', 'container', 'lpn', 'moveapp'], { each: 'EACH', multi: 'MULTI', container: 'CONTAINER', lpn: 'LPN', moveapp: 'MOVE APP' })}
+            : makeModeButtons('move', ['each', 'multi', 'container'], { each: 'EACH', multi: 'MULTI', container: 'CONTAINER' })}
         </div>
         <div class="aso-adaptive">${adaptiveHtml()}</div>
         <div class="aso-status" data-status>Selection ready</div>
@@ -529,6 +512,7 @@
     if (!DISPOSITIONS.includes(state.skuCurrentDisposition)) state.skuCurrentDisposition = 'Defective';
     if (!DISPOSITIONS.includes(state.skuDesiredDisposition)) state.skuDesiredDisposition = 'Defective';
     if (!['all', 'user'].includes(state.moveQtyMode)) state.moveQtyMode = 'all';
+    if (!['each', 'multi', 'container'].includes(state.moveMode)) state.moveMode = 'each';
 
     if (state.skuCurrentState !== 'Unsellable' && state.skuDesiredState === state.skuCurrentState) {
       state.skuDesiredState = state.skuCurrentState === 'Sellable' ? 'Unsellable' : 'Sellable';
@@ -597,7 +581,7 @@
     if (!definition) return;
 
     if (!currentRouteMatches(definition)) {
-      setStatus(`Current page: ${isMoveContainer() ? 'Move Container' : isAftQt() ? location.pathname.split('/').pop() : 'other AFT'}`);
+      setStatus(`Current page: ${isAftQt() ? location.pathname.split('/').pop() : 'other AFT'}`);
       return;
     }
 
@@ -627,7 +611,7 @@
       #${ROOT_ID} .aso-main-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px}
       #${ROOT_ID} .aso-main-tabs button,#${ROOT_ID} .aso-mode-tabs button,#${ROOT_ID} .aso-choice{min-width:0;padding:7px 5px;border:1px solid #91a1a8;border-radius:6px;background:#fff;color:#26343a}#${ROOT_ID} button:disabled{background:#e2e8ea;color:#87949a;border-color:#c4cdd1;cursor:not-allowed}
       #${ROOT_ID} button[data-active="1"]{background:#245e56;color:#fff;border-color:#17463f;box-shadow:inset 0 0 0 1px #fff6}
-      #${ROOT_ID} .aso-mode-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}#${ROOT_ID} .aso-mode-tabs:has([data-move-mode]){grid-template-columns:repeat(5,minmax(0,1fr))}
+      #${ROOT_ID} .aso-mode-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}#${ROOT_ID} .aso-mode-tabs:has([data-move-mode]){grid-template-columns:repeat(3,minmax(0,1fr))}
       #${ROOT_ID} .aso-adaptive{display:grid;gap:7px}#${ROOT_ID} .aso-group{display:grid;gap:5px;padding:7px;border:1px solid #c4d0d4;border-radius:7px;background:#fbfdfe}
       #${ROOT_ID} .aso-label{font-size:11px;font-weight:900;color:#3a4e56}#${ROOT_ID} .aso-grid{display:grid;gap:6px}#${ROOT_ID} .aso-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}#${ROOT_ID} .aso-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
       #${ROOT_ID} .aso-qty-grid{grid-template-columns:72px 72px minmax(0,1fr)}#${ROOT_ID} input{width:100%;min-width:0;padding:7px;border:1px solid #91a1a8;border-radius:6px;background:#fff;color:#1e2b31;font-weight:800;text-align:center}
