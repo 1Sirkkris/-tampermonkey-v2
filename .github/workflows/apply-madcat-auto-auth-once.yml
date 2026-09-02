@@ -28,14 +28,17 @@ jobs:
           node --check FCR_Data_Core.user.js
           node --check FCResearch_Master.user.js
           node --check FC_Lite.user.js
-          grep -q '@version      0.2.17' FCR_Data_Core.user.js
-          grep -q '@version      0.1.25' FCResearch_Master.user.js
+          grep -q '@version      0.2.18' FCR_Data_Core.user.js
+          grep -q '@version      0.1.26' FCResearch_Master.user.js
           grep -q '@version      0.1.64' FC_Lite.user.js
           grep -q "MEASUREMENT_RENEW_BEFORE_MS = 10 \* 60 \* 1000" FCR_Data_Core.user.js
+          grep -q "MADCAT_NO_TTL_MS = 5 \* 60 \* 1000" FCR_Data_Core.user.js
+          grep -q "nextSydneyShiftCutoff" FCR_Data_Core.user.js
           grep -q "madcatSource: 'raw'" FCR_Data_Core.user.js
           grep -q "madcatSource: 'history'" FCR_Data_Core.user.js
           grep -q "measurementSource) !== 'MADCAT'" FCR_Data_Core.user.js
           ! grep -q "measurement-request-failed" FCR_Data_Core.user.js
+          grep -Fq "for (const input of \$\$('input'))" FCResearch_Master.user.js
           grep -q "history-no' ? 'Madcat: NO?'" FCResearch_Master.user.js
           grep -q "history-no' ? 'NO?'" FC_Lite.user.js
           grep -q "fcrm-madcat-history-yes" FCResearch_Master.user.js
@@ -55,8 +58,8 @@ jobs:
           cp FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
           cp FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
           cp FC_Lite.user.js "$worktree/05_FC-Lite.txt"
-          sed -i -E 's/^03 FCR Data Core v.*/03 FCR Data Core v0.2.17/' "$worktree/WORK_LAPTOP_INSTALL.txt"
-          sed -i -E 's/^04 FCResearch Master v.*/04 FCResearch Master v0.1.25/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^03 FCR Data Core v.*/03 FCR Data Core v0.2.18/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^04 FCResearch Master v.*/04 FCResearch Master v0.1.26/' "$worktree/WORK_LAPTOP_INSTALL.txt"
           sed -i -E 's/^05 FC-Lite v.*/05 FC-Lite v0.1.64/' "$worktree/WORK_LAPTOP_INSTALL.txt"
           sed -i -E "s/^Updater-enabled sources: main [0-9a-f]+\.$/Updater-enabled sources: main ${main_short}./" "$worktree/WORK_LAPTOP_INSTALL.txt"
 
