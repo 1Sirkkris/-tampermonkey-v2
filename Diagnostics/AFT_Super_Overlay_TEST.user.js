@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         TEST v0.1.1 AFT Super Overlay
-// @name:en      TEST v0.1.1 AFT Super Overlay
+// @name         TEST v0.2.0 AFT Super Overlay
+// @name:en      TEST v0.2.0 AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.1
-// @description  TEST: one adaptive Edit/Move launcher across AFT EditItems, FcSkuFlip, MoveItems and MoveContainer. Does not submit inventory actions.
+// @version      0.2.0
+// @description  TEST: adaptive Edit/Move launcher using AFT's native mode selector. Does not submit inventory actions.
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @run-at       document-start
@@ -19,7 +19,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.2.0';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
@@ -50,6 +50,8 @@
   let root = null;
   let statusEl = null;
   let nativeTimer = 0;
+  let changeModeRequested = false;
+  let selectorSubmitted = false;
 
   function norm(value) {
     return String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -116,7 +118,7 @@
     const copy = document.body.cloneNode(true);
     copy.querySelectorAll(`#${ROOT_ID},.aftm`).forEach(el => el.remove());
     const text = norm(copy.innerText || copy.textContent || '');
-    const match = text.match(/\bMode\s*:\s*(Datelot|Each|Sku|Multi)\b/i);
+    const match = text.match(/\bMode\s*:\s*(Datelot|Each|Sku|Multi|Container|LPN)\b/i);
     return match ? low(match[1]) : '';
   }
 
@@ -183,7 +185,15 @@
       labels: ['Multi', 'Move Multi']
     },
     'move:container': {
-      title: 'Move • Container', externalUrl: MOVE_CONTAINER_URL, nativeMode: '', labels: []
+      title: 'Move • Container', path: '/app/moveitems', nativeMode: 'container',
+      labels: ['Container', 'Move Container']
+    },
+    'move:lpn': {
+      title: 'Move • LPN', path: '/app/moveitems', nativeMode: 'lpn',
+      labels: ['LPN']
+    },
+    'move:moveapp': {
+      title: 'Move • Separate App', externalUrl: MOVE_CONTAINER_URL, nativeMode: '', labels: []
     }
   };
 
@@ -201,6 +211,63 @@
       const label = el.matches('input') ? el.value : el.textContent;
       return wanted.has(low(label));
     }) || null;
+  }
+
+  function findNativeModeRadio(labels) {
+    const wanted = labels.map(low);
+    return [...document.querySelectorAll('input[type="radio"][name="options"]')].find(radio => {
+      if (!isVisible(radio)) return false;
+      const pieces = [radio.value, radio.getAttribute('aria-label')];
+      const label = radio.id ? document.querySelector(`label[for="${CSS.escape(radio.id)}"]`) : null;
+      if (label) pieces.push(label.textContent);
+      const row = radio.closest('label,.a-radio,.a-control-row');
+      if (row) pieces.push(row.textContent);
+      else if (radio.parentElement) pieces.push(radio.parentElement.textContent);
+      const copy = low(pieces.join(' '));
+      return wanted.some(value => copy === value || copy.includes(value));
+    }) || null;
+  }
+
+  function submitNativeMode(radio, definition) {
+    if (selectorSubmitted) return;
+    selectorSubmitted = true;
+    radio.click();
+    setStatus(`Selecting ${definition.title}…`);
+    setTimeout(() => {
+      const form = radio.form || radio.closest('form');
+      const submit = form?.querySelector('button[type="submit"],input[type="submit"]');
+      if (form?.requestSubmit && submit) form.requestSubmit(submit);
+      else if (form?.requestSubmit) form.requestSubmit();
+      else if (submit) submit.click();
+      else {
+        selectorSubmitted = false;
+        setStatus(`${definition.title} selected • press Continue`, 'warn');
+      }
+    }, 120);
+  }
+
+  function requestNativeChangeMode(definition) {
+    if (changeModeRequested) {
+      setStatus(`Press C once to switch to ${definition.title}`, 'warn');
+      return;
+    }
+    changeModeRequested = true;
+
+    const changeControl = [...document.querySelectorAll('button,a,[role="button"]')].find(el =>
+      isVisible(el) && /\bchange\s+mode\b/i.test(norm(el.textContent || el.getAttribute('aria-label')))
+    );
+    if (changeControl) {
+      setStatus(`Opening AFT mode selector…`);
+      changeControl.click();
+      return;
+    }
+
+    const init = { key: 'c', code: 'KeyC', keyCode: 67, which: 67, bubbles: true, cancelable: true };
+    document.dispatchEvent(new KeyboardEvent('keydown', init));
+    document.dispatchEvent(new KeyboardEvent('keyup', init));
+    window.dispatchEvent(new KeyboardEvent('keydown', init));
+    window.dispatchEvent(new KeyboardEvent('keyup', init));
+    setStatus(`Switch requested • if AFT stays here, press C once`, 'warn');
   }
 
   function clearPending() {
@@ -227,14 +294,18 @@
     }
 
     if (current && current !== definition.nativeMode) {
-      clearPending();
-      setStatus(`Currently ${current.toUpperCase()} • Start Over before switching`, 'warn');
+      requestNativeChangeMode(definition);
+      return;
+    }
+
+    const radio = findNativeModeRadio(definition.labels);
+    if (radio) {
+      submitNativeMode(radio, definition);
       return;
     }
 
     const control = findNativeModeControl(definition.labels);
     if (control) {
-      clearPending();
       setStatus(`Opening ${definition.title}…`);
       control.click();
       return;
@@ -348,7 +419,9 @@
       'edit:date': 'Date rows and per-item expiry options appear after this mode opens.',
       'edit:fcsku': 'OLD FCSKU, NEW FCSKU and locations appear after this mode opens.',
       'move:each': 'Source, destination and item queue appear after this mode opens.',
-      'move:container': 'Dropzone, floor and container queue appear after this mode opens.'
+      'move:container': 'Native MoveItems Container options appear after this mode opens.',
+      'move:lpn': 'Native MoveItems LPN options appear after this mode opens.',
+      'move:moveapp': 'Separate MoveContainer app: dropzone, floor and container queue.'
     };
     return `<div class="aso-note">${messages[mode] || 'Select a mode.'}</div>`;
   }
@@ -377,7 +450,7 @@
         <div class="aso-mode-tabs">
           ${state.area === 'edit'
             ? makeChoiceButtons(['each', 'sku', 'date', 'fcsku'], state.editMode, 'edit-mode', { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
-            : makeChoiceButtons(['each', 'multi', 'container'], state.moveMode, 'move-mode', { each: 'EACH', multi: 'MULTI', container: 'CONTAINER' })}
+            : makeChoiceButtons(['each', 'multi', 'container', 'lpn', 'moveapp'], state.moveMode, 'move-mode', { each: 'EACH', multi: 'MULTI', container: 'CONTAINER', lpn: 'LPN', moveapp: 'MOVE APP' })}
         </div>
         <div class="aso-adaptive">${adaptiveHtml()}</div>
         <button type="button" class="aso-open" data-open>OPEN ${selectedDefinition()?.title.toUpperCase() || 'MODE'}</button>
@@ -505,7 +578,7 @@
       #${ROOT_ID} .aso-main-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px}
       #${ROOT_ID} .aso-main-tabs button,#${ROOT_ID} .aso-mode-tabs button,#${ROOT_ID} .aso-choice{min-width:0;padding:7px 5px;border:1px solid #91a1a8;border-radius:6px;background:#fff;color:#26343a}#${ROOT_ID} button:disabled{background:#e2e8ea;color:#87949a;border-color:#c4cdd1;cursor:not-allowed}
       #${ROOT_ID} button[data-active="1"]{background:#245e56;color:#fff;border-color:#17463f;box-shadow:inset 0 0 0 1px #fff6}
-      #${ROOT_ID} .aso-mode-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}#${ROOT_ID} .aso-mode-tabs:has([data-move-mode]){grid-template-columns:repeat(3,minmax(0,1fr))}
+      #${ROOT_ID} .aso-mode-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}#${ROOT_ID} .aso-mode-tabs:has([data-move-mode]){grid-template-columns:repeat(5,minmax(0,1fr))}
       #${ROOT_ID} .aso-adaptive{display:grid;gap:7px}#${ROOT_ID} .aso-group{display:grid;gap:5px;padding:7px;border:1px solid #c4d0d4;border-radius:7px;background:#fbfdfe}
       #${ROOT_ID} .aso-label{font-size:11px;font-weight:900;color:#3a4e56}#${ROOT_ID} .aso-grid{display:grid;gap:6px}#${ROOT_ID} .aso-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}#${ROOT_ID} .aso-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
       #${ROOT_ID} .aso-qty-grid{grid-template-columns:72px 72px minmax(0,1fr)}#${ROOT_ID} input{width:100%;min-width:0;padding:7px;border:1px solid #91a1a8;border-radius:6px;background:#fff;color:#1e2b31;font-weight:800;text-align:center}
