@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        TEST v0.1.59 FC-Lite — Tote Audit XXL
+// @name        TEST v0.1.60 FC-Lite — 30-Day MADCAT
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.59
-// @description  TEST: Clean modular FC-Lite front end; direct tote audit using FCR Data Core.
+// @version      0.1.60
+// @description  TEST: Tote Audit with authenticated rolling 30-day raw MADCAT checks and click-to-retry errors.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -37,7 +37,8 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.59';
+  const VERSION = '0.1.60';
+  const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
   const SECTION_PREFS_KEY = 'fcrlite:sections:v1';
@@ -614,7 +615,7 @@
       <td class="scan" title="${esc(rawScan)}"><span class="scan-code">${esc(rawScan)}</span><span class="scan-count" hidden data-count=""></span></td>
       <td class="sortable">…</td>
       <td class="dimensions"><span class="dims-pill">…</span><span class="bin-size pending">BIN …</span></td>
-      <td class="madcat">…</td>
+      <td class="madcat"><button type="button" class="madcat-pill checking" disabled>CHECK…</button></td>
       <td class="result"><strong class="result-pill checking">CHECKING</strong></td>
     `;
     tbody.prepend(tr);
@@ -666,7 +667,90 @@
     focusScanner();
   }
 
-  function paintResult(row, rawScan, product, history, matches, error = '') {
+  function paintMadcat(row, state, message = '') {
+    if (!row?.isConnected) return;
+    const cell = row.querySelector('.madcat');
+    if (!cell) return;
+
+    const value = ['yes', 'no', 'error', 'checking'].includes(state) ? state : 'error';
+    cell.classList.toggle('yes', value === 'yes');
+    cell.classList.toggle('no', value === 'no');
+    cell.classList.toggle('error', value === 'error');
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `madcat-pill ${value}`;
+    button.textContent = value === 'yes' ? 'YES'
+      : value === 'no' ? 'NO'
+      : value === 'checking' ? 'CHECK…'
+      : 'ERROR ↻';
+    button.disabled = value !== 'error';
+    button.title = value === 'error'
+      ? `${message || 'MADCAT check failed'} — click to retry`
+      : value === 'yes'
+        ? 'Raw MADCAT measurement found within the past 30 days'
+        : value === 'no'
+          ? 'No raw MADCAT measurement found within the past 30 days'
+          : 'Checking raw MADCAT measurements from the past 30 days';
+
+    if (value === 'error') {
+      button.addEventListener('click', () => {
+        const needsLogin = /login required/i.test(message);
+        checkMadcat(row, row._fcratcMadcatFnsku, true, needsLogin);
+      }, { once: true });
+    }
+
+    cell.replaceChildren(button);
+  }
+
+  function measurementBridgeUrl(fnsku) {
+    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/${encodeURIComponent(clean(fnsku))}`);
+    url.searchParams.set('fcrMadcatBridge', '1');
+    return url.href;
+  }
+
+  async function checkMadcat(row, fnskuValue, force = false, openLoginBridge = false) {
+    const fnsku = clean(fnskuValue);
+    if (!row?.isConnected) return;
+    row._fcratcMadcatFnsku = fnsku;
+    const checkSerial = (Number(row._fcratcMadcatCheckSerial) || 0) + 1;
+    row._fcratcMadcatCheckSerial = checkSerial;
+    paintMadcat(row, 'checking');
+
+    if (!fnsku) {
+      paintMadcat(row, 'error', 'Measurement FNSKU unavailable');
+      return;
+    }
+
+    if (openLoginBridge) {
+      const bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      if (!bridge) {
+        paintMadcat(row, 'error', 'Measurement login popup blocked');
+        return;
+      }
+    }
+
+    const started = Date.now();
+    while (row.isConnected && row._fcratcMadcatCheckSerial === checkSerial) {
+      try {
+        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);
+        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
+        paintMadcat(row, result?.madcat === true ? 'yes' : 'no');
+        return;
+      } catch (error) {
+        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
+        const message = clean(error?.message || 'MADCAT check failed');
+        if (openLoginBridge && /login required/i.test(message) && Date.now() - started < 15_000) {
+          await new Promise(resolve => setTimeout(resolve, 600));
+          continue;
+        }
+        paintMadcat(row, 'error', message);
+        return;
+      }
+    }
+  }
+
+  function paintResult(row, rawScan, product, matches, error = '') {
     const primary = product?.asin || product?.isbn || product?.primary || '';
     const fnsku = product?.fnsku || '';
     const sort = product?.sortable === 'true' ? 'TRUE'
@@ -674,7 +758,6 @@
       : '—';
     const dims = product?.dimensions || '—';
     const dimsSussy = product?.suspicious === true;
-    const madcat = history ? (history.madcat ? 'YES' : 'NO') : '—';
     const found = matches.length > 0;
     const qty = found ? sumQty(matches) : 0;
 
@@ -696,11 +779,6 @@
       dimsHost.textContent = `${dimsSussy ? '⚠ ' : ''}${dims}`;
       dimsHost.title = dimsSussy ? 'Suspicious dimensions — verify measurement data' : dims;
     }
-
-    const madCell = row.querySelector('.madcat');
-    madCell.classList.toggle('yes', madcat === 'YES');
-    madCell.classList.toggle('no', madcat === 'NO');
-    madCell.innerHTML = madcat === '—' ? '—' : `<span class="madcat-pill ${madcat === 'YES' ? 'yes' : 'no'}">${madcat}</span>`;
 
     const result = row.querySelector('.result');
     if (error) {
@@ -740,28 +818,6 @@
     return product;
   }
 
-  async function getHistory(rawScan, product, initialParsed = null) {
-    const rawKey = upper(rawScan);
-    let parsed = initialParsed;
-
-    if (!parsed) {
-      const result = await coreRequest('history', { code: rawScan });
-      parsed = result?.history || { rows: 0, madcat: false };
-    }
-
-    // Keep the strict/flexible behaviour from the Tote Checker:
-    // external UPC/EAN/ISBN may resolve to an internal code, so retry history once.
-    if (parsed.rows === 0 && product) {
-      const resolved = clean(product.fnsku || product.asin || product.isbn || product.primary);
-      if (resolved && upper(resolved) !== rawKey) {
-        const result = await coreRequest('history', { code: resolved });
-        parsed = result?.history || parsed;
-      }
-    }
-
-    return parsed;
-  }
-
   async function processItem(rawScan) {
     usage('item.scan');
     const run = sessionSerial;
@@ -773,15 +829,8 @@
       // Raw scan preserves UPC/EAN/ISBN resolution
       const productPromise = getProduct(rawScan);
       const binSizePromise = resolveBinSize(rawScan, sourceContainer, productPromise);
-      const rawHistoryPromise = coreRequest('history', { code: rawScan })
-        .then(result => {
-          const parsed = result?.history || { rows: 0, madcat: false };
-          return parsed;
-        })
-        .catch(() => null);
 
       const product = await productPromise;
-      let history = await rawHistoryPromise;
       if (run !== sessionSerial || upper(sourceContainer) !== upper(container)) return;
 
       if (!product) {
@@ -789,9 +838,7 @@
       }
 
       registerRowAliases(row, rawScan, product);
-
-      history = await getHistory(rawScan, product, history);
-      if (run !== sessionSerial || upper(sourceContainer) !== upper(container)) return;
+      checkMadcat(row, product.fnsku, false, false);
 
       const matches = matchContainer(product, rawScan);
       const found = matches.length > 0;
@@ -801,7 +848,7 @@
       if (found) foundCount++;
       else missingCount++;
 
-      paintResult(row, rawScan, product, history, matches);
+      paintResult(row, rawScan, product, matches);
       if (found) allocatePhysicalScans(matches, 1);
       updateToteResultProgress(row);
       binSizePromise.then(size => paintBinSize(row, size));
@@ -816,7 +863,7 @@
     } catch (error) {
       if (run !== sessionSerial || upper(sourceContainer) !== upper(container)) return;
       completed++;
-      paintResult(row, rawScan, null, null, [], clean(error.message));
+      paintResult(row, rawScan, null, [], clean(error.message));
       setStatus(`⚠ ${rawScan}: ${clean(error.message)}`, 'error');
       flash('error');
     } finally {
@@ -1334,10 +1381,16 @@
         min-width:29px;
         padding:3px 4px;
         border-radius:999px;
+        border:1px solid transparent;
         font-size:9px;
+        font-family:inherit;
       }
       .madcat-pill.yes { border-color:#a16207; background:#fde047; color:#422006; }
       .madcat-pill.no { border-color:#991b1b; background:#ef4444; color:#111827; }
+      .madcat-pill.checking { border-color:#64748b; background:#e2e8f0; color:#334155; }
+      .madcat-pill.error { border-color:#111827; background:#334155; color:#fff; cursor:pointer; }
+      .madcat-pill.error:hover { background:#0f172a; }
+      .madcat-pill:disabled { cursor:default; opacity:1; }
 
       .result-pill {
         min-width:31px;
