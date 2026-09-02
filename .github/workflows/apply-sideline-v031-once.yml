@@ -1,4 +1,4 @@
-name: Sync Sideline v0.3.11 to work-laptop pack once
+name: Apply FC-Lite MADCAT FNSKU fix once
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  sync:
+  patch:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify main and sync pack
+      - name: Patch FC-Lite and sync work-laptop pack
         shell: bash
         run: |
           set -euo pipefail
@@ -25,58 +25,109 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
 
-          # Exact v0.3.11 source produced and validated by commit a10f8e7.
-          test "$(git hash-object Sideline_API_Move.user.js)" = "30a72fac62ad8a4947f61ec1bb32f967d502644c"
-          grep -q "@version      0.3.11" Sideline_API_Move.user.js
-          grep -q "const API_CLOSE_CONTAINER = '/api/close-container';" Sideline_API_Move.user.js
-          grep -q "delayEnabled:true" Sideline_API_Move.user.js
-          grep -q 'data-live-delay>Delay: YES' Sideline_API_Move.user.js
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('FC_Lite.user.js')
+          text = path.read_text()
+
+          def once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          once('// @name        TEST v0.1.61 FC-Lite — Strict Bin + 30-Day MADCAT',
+               '// @name        TEST v0.1.62 FC-Lite — MADCAT FNSKU Fix', 'name')
+          once('// @version      0.1.61', '// @version      0.1.62', 'metadata version')
+          once("const VERSION = '0.1.61';", "const VERSION = '0.1.62';", 'runtime version')
+
+          old = """      registerRowAliases(row, rawScan, product);
+      checkMadcat(row, product.fnsku, false, false);
+
+      const matches = matchContainer(product, rawScan);
+      const found = matches.length > 0;
+      usage(found ? 'item.in' : 'item.out');
+"""
+          new = """      registerRowAliases(row, rawScan, product);
+
+      const matches = matchContainer(product, rawScan);
+      const found = matches.length > 0;
+      const matchedFnsku = clean(matches.find(match => clean(match?.fnsku))?.fnsku || '');
+      const measurementFnsku = matchedFnsku || clean(product?.fnsku || '');
+      checkMadcat(row, measurementFnsku, false, false);
+      usage(found ? 'item.in' : 'item.out');
+"""
+          once(old, new, 'measurement FNSKU resolution')
+
+          old = """      button.addEventListener('click', () => {
+        const needsLogin = /login required/i.test(message);
+        checkMadcat(row, row._fcratcMadcatFnsku, true, needsLogin);
+      }, { once: true });
+"""
+          new = """      button.addEventListener('click', () => {
+        const fnsku = clean(row._fcratcMadcatFnsku);
+        checkMadcat(row, fnsku, true, Boolean(fnsku));
+      }, { once: true });
+"""
+          once(old, new, 'error click bridge')
+
+          path.write_text(text)
+
+          readme = Path('README.md')
+          doc = readme.read_text()
+          if '| FC-Lite | 0.1.61 |' in doc:
+              doc = doc.replace('| FC-Lite | 0.1.61 |', '| FC-Lite | 0.1.62 |', 1)
+          elif '| FC-Lite | 0.1.60 |' in doc:
+              doc = doc.replace('| FC-Lite | 0.1.60 |', '| FC-Lite | 0.1.62 |', 1)
+          else:
+              raise SystemExit('README FC-Lite row not found')
+          readme.write_text(doc)
+          PY
+
+          node --check FC_Lite.user.js
+          grep -q '@version      0.1.62' FC_Lite.user.js
+          grep -q 'const matchedFnsku' FC_Lite.user.js
+          grep -q 'checkMadcat(row, measurementFnsku' FC_Lite.user.js
+          grep -q 'Boolean(fnsku)' FC_Lite.user.js
+          git diff --check
+
+          git rm .github/workflows/apply-sideline-v031-once.yml
+          if [ -f .github/workflows/apply-fclite-madcat-fnsku-once.yml ]; then
+            git rm .github/workflows/apply-fclite-madcat-fnsku-once.yml
+          fi
+          git add FC_Lite.user.js README.md
+          git diff --cached --check
+          git commit -m "fix(fclite): resolve MADCAT FNSKU from tote inventory"
+          git push origin HEAD:main
 
           git fetch origin work-laptop-pack
           worktree="$(mktemp -d)"
-          git worktree add -b sideline-pack-sync "$worktree" origin/work-laptop-pack
-
-          # Pack is known to still contain v0.3.8. Refuse to overwrite anything unexpected/newer.
-          test "$(git -C "$worktree" hash-object 01_Sideline.txt)" = "8a4b9dbe80dc351fee34904f38c7f930e587e3d2"
-
-          cp Sideline_API_Move.user.js "$worktree/01_Sideline.txt"
+          git worktree add -b fclite-madcat-pack "$worktree" origin/work-laptop-pack
+          cp FC_Lite.user.js "$worktree/05_FC-Lite.txt"
+          cp "$worktree/05_FC-Lite.txt" /tmp/fclite-check.js
+          node --check /tmp/fclite-check.js
 
           WORKTREE="$worktree" python - <<'PY'
-          import re
-          from pathlib import Path
           import os
-
+          from pathlib import Path
           path = Path(os.environ['WORKTREE']) / 'WORK_LAPTOP_INSTALL.txt'
           text = path.read_text()
-
-          text, n = re.subn(r'^01 Sideline v[^\n]+$', '01 Sideline v0.3.11', text, count=1, flags=re.M)
-          if n != 1:
-              raise SystemExit(f'pack Sideline manifest row: expected 1 match, found {n}')
-
-          text, n = re.subn(
-              r'^Updater-enabled sources: main [0-9a-f]+\.$',
-              'Updater-enabled sources: main a10f8e7.',
-              text,
-              count=1,
-              flags=re.M
-          )
-          if n != 1:
-              raise SystemExit(f'pack updater source row: expected 1 match, found {n}')
-
-          path.write_text(text)
+          for old in ('05 FC-Lite v0.1.61', '05 FC-Lite v0.1.60', '05 FC-Lite v0.1.59'):
+              if old in text:
+                  path.write_text(text.replace(old, '05 FC-Lite v0.1.62', 1))
+                  break
+          else:
+              raise SystemExit('pack FC-Lite manifest row not found')
           PY
 
-          # Exact copy validation; source itself already passed node --check before main was pushed.
-          cmp -s Sideline_API_Move.user.js "$worktree/01_Sideline.txt"
-          test "$(git -C "$worktree" hash-object 01_Sideline.txt)" = "30a72fac62ad8a4947f61ec1bb32f967d502644c"
+          grep -q '@version      0.1.62' "$worktree/05_FC-Lite.txt"
+          grep -q 'const matchedFnsku' "$worktree/05_FC-Lite.txt"
           git -C "$worktree" diff --check
-          grep -q "@version      0.3.11" "$worktree/01_Sideline.txt"
-          grep -q '^01 Sideline v0.3.11$' "$worktree/WORK_LAPTOP_INSTALL.txt"
-          grep -q '^Updater-enabled sources: main a10f8e7\.$' "$worktree/WORK_LAPTOP_INSTALL.txt"
-
           git -C "$worktree" config user.name "github-actions[bot]"
           git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$worktree" add 01_Sideline.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" add 05_FC-Lite.txt WORK_LAPTOP_INSTALL.txt
           git -C "$worktree" diff --cached --check
-          git -C "$worktree" commit -m "sync: Sideline API Move v0.3.11"
+          git -C "$worktree" commit -m "sync: FC-Lite v0.1.62"
           git -C "$worktree" push origin HEAD:work-laptop-pack
