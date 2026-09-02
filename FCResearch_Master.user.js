@@ -1,16 +1,14 @@
 // ==UserScript==
-// @name         TEST v0.1.22 FCResearch Master — Automatic Bin Size
+// @name         TEST v0.1.22 FCResearch Master — 30-Day MADCAT
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.22
-// @description  TEST: Authoritative automatic exact-item binDescription with no manual source tote.
+// @description  TEST: Product MADCAT uses only authenticated raw measurements from the rolling past 30 days.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // ==/UserScript==
@@ -27,9 +25,10 @@
   const UI_ATTR = 'data-fcr-master-ui';
   const UI_SELECTOR = `[${UI_ATTR}]`;
   const MAX_PARALLEL = 8;
-  const SIDELINE_API = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
-  const BIN_REQUEST_TIMEOUT_MS = 15000;
-  const BIN_MAX_CONTAINER_ATTEMPTS = 3;
+  const SIDELINE_CONTAINER_KEY = 'fcr_sideline_container';
+  const SIDELINE_CONTAINER_TIME_KEY = 'fcr_sideline_container_saved_at';
+  const SIDELINE_CONTAINER_MAX_AGE = 24 * 60 * 60 * 1000;
+  const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com';
   const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
   const SECTION_LOAD_PREF_KEY_PREFIX = 'fcrm_native_section_load_v2.';
   const SECTION_LOAD_RECORD_KEY_PREFIX = 'fcrm_native_section_load_v3.';
@@ -361,15 +360,17 @@
       .fc-hazmat.fc-river-l0:hover { text-decoration:underline; }
       .fc-hazmat.fc-river-l0[aria-busy="true"] { cursor:wait; opacity:.72; }
       .fc-badge { margin-left:6px; user-select:none; pointer-events:none; }
-      .fc-madcat-badge { margin-left:8px; user-select:none; }
+      .fc-madcat-badge { margin-left:8px; border:0; user-select:none; }
       .fcrm-madcat-yes { background:#ffff00; }
       .fcrm-madcat-no { background:#ff0000; }
       .fcrm-madcat-loading { background:#d9d9d9; }
-      .fcrm-madcat-hit { background:#ffcc00!important; color:#000!important; font-weight:700!important; }
-      .fc-size-badge { margin-left:6px; border:1px solid #0284c7; background:#bae6fd; color:#082f49; cursor:pointer; user-select:none; }
-      .fc-size-badge[data-state="loading"] { border-color:#94a3b8; background:#e5e7eb; color:#334155; cursor:wait; }
-      .fc-size-badge[data-state="error"] { border-color:#d97706; background:#fef3c7; color:#78350f; }
-      .fc-size-badge:hover { box-shadow:inset 0 0 0 1px currentColor; }
+      .fcrm-madcat-error { background:#334155; color:#fff; cursor:pointer; }
+      .fcrm-madcat-error:hover { background:#0f172a; }
+      .fc-madcat-badge:disabled { opacity:1; cursor:default; }
+      .fc-size-badge { gap:5px; margin-left:6px; background:#e5e7eb; color:#111827; user-select:none; }
+      .fcrm-size-error { background:#fee2e2; color:#991b1b; }
+      .fcrm-size-change { border:0; padding:0 2px; background:transparent; color:#4b5563; font:700 11px Arial; cursor:pointer; }
+      .fcrm-size-change:hover { color:#111827; text-decoration:underline; }
       .fcrm-haz-refresh { margin-left:8px; padding:4px 9px; cursor:pointer; border-radius:3px; border:1px solid #888; background:#eee; font:12px Arial,sans-serif; }
       .fcrm-haz-refresh:hover { background:#ddd; }
       .fcrm-prop-label { background:#3f5973!important; color:#fff!important; }
@@ -758,59 +759,130 @@
     const host = badgeHost(panel);
     if (!host) return null;
     let badge = $('.fc-madcat-badge', host);
-    if (!sectionLoadEnabled('inventory-history')) {
-      badge?.remove();
-      return null;
-    }
     if (!badge) {
-      badge = markUi(document.createElement('span'));
+      badge = markUi(document.createElement('button'));
+      badge.type = 'button';
       badge.className = 'fc-madcat-badge fcrm-madcat-loading';
-      badge.textContent = 'Madcat: Loading…';
+      badge.textContent = 'Madcat: CHECK…';
+      badge.disabled = true;
       host.appendChild(badge);
     }
     return badge;
   }
 
-  function findInventoryHistoryContainer() {
-    for (const selector of ['[data-section-type="inventory-history"]','[data-test-id*="inventory-history"]','[id*="inventory-history"]']) {
-      const match = $(selector);
-      if (match) return match;
-    }
-    for (const heading of $$('h1,h2,h3,h4,h5,h6')) {
-      if (!/inventory history/i.test(clean(heading.textContent))) continue;
-      return heading.closest('[data-section-type],.a-box,section') || heading.parentElement;
-    }
-    for (const table of $$('table')) {
-      const text = clean(table.textContent);
-      if (/inventory history/i.test(text) && /madcat|date|event|action/i.test(text)) return table.closest('[data-section-type],.a-box,section') || table;
-    }
-    return null;
-  }
+  const madcatState = { signature: '', status: '', message: '', serial: 0 };
 
-  function updateMadcat(panel) {
-    if (!sectionLoadEnabled('inventory-history')) {
-      $('.fc-madcat-badge', badgeHost(panel))?.remove();
-      return;
-    }
+  function paintMadcat(panel, status, message = '') {
     const badge = ensureMadcatBadge(panel);
     if (!badge) return;
-    const container = findInventoryHistoryContainer();
-    if (!container) {
-      badge.className = 'fc-madcat-badge fcrm-madcat-loading';
-      badge.textContent = 'Madcat: Loading…';
-      return;
-    }
-    const found = /madcat/i.test(clean(container.textContent));
-    badge.className = `fc-madcat-badge ${found ? 'fcrm-madcat-yes' : 'fcrm-madcat-no'}`;
-    badge.textContent = `Madcat: ${found ? 'Yes' : 'No'}`;
-    $$('.fcrm-madcat-hit', container).forEach(row => row.classList.remove('fcrm-madcat-hit'));
-    if (found) $$('tr', container).filter(row => /madcat/i.test(clean(row.textContent))).forEach(row => row.classList.add('fcrm-madcat-hit'));
+    const state = ['yes', 'no', 'error'].includes(status) ? status : 'loading';
+    badge.className = `fc-madcat-badge fcrm-madcat-${state}`;
+    badge.textContent = state === 'yes' ? 'Madcat: YES'
+      : state === 'no' ? 'Madcat: NO'
+        : state === 'error' ? 'Madcat: ERROR ↻'
+          : 'Madcat: CHECK…';
+    badge.disabled = state !== 'error';
+    badge.title = state === 'yes' ? 'Raw MADCAT measurement found within the past 30 days'
+      : state === 'no' ? 'No raw MADCAT measurement found within the past 30 days'
+        : state === 'error' ? `${message || 'MADCAT check failed'} — click to retry`
+          : 'Checking raw MADCAT measurements from the past 30 days';
+    badge.onclick = state === 'error' ? () => {
+      const current = readProductPanel();
+      if (!current) return;
+      checkMadcat(current, true, /measurement login required/i.test(message));
+    } : null;
   }
 
-  const sizeState = { signature: '', busy: false, serial: 0 };
+  function measurementBridgeUrl(fnsku) {
+    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(fnsku)}`);
+    url.searchParams.set('fcrMadcatBridge', '1');
+    return url.href;
+  }
 
-  function isValidSidelineItem(value) {
-    return /^(?:B[A-Z0-9]{9}|X[A-Z0-9]{9}|ZZ[A-Z0-9]{8}|\d{8,14})$/i.test(clean(value));
+  async function checkMadcat(panel, force = false, openLoginBridge = false) {
+    const signature = panel?.signature || '';
+    const fnsku = clean(panel?.fnskuId).toUpperCase();
+    if (!signature) return;
+
+    if (!force && madcatState.signature === signature && madcatState.status) {
+      paintMadcat(panel, madcatState.status, madcatState.message);
+      return;
+    }
+
+    const serial = ++madcatState.serial;
+    madcatState.signature = signature;
+    madcatState.status = 'loading';
+    madcatState.message = '';
+    paintMadcat(panel, 'loading');
+
+    if (!fnsku) {
+      madcatState.status = 'error';
+      madcatState.message = 'Measurement FNSKU unavailable';
+      paintMadcat(panel, 'error', madcatState.message);
+      return;
+    }
+
+    let bridge = null;
+    if (openLoginBridge) {
+      bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      if (!bridge) {
+        madcatState.status = 'error';
+        madcatState.message = 'Measurement login popup blocked';
+        paintMadcat(panel, 'error', madcatState.message);
+        return;
+      }
+    }
+
+    const deadline = Date.now() + (bridge ? 15000 : 1);
+    while (madcatState.serial === serial && madcatState.signature === signature) {
+      try {
+        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);
+        if (madcatState.serial !== serial || madcatState.signature !== signature) return;
+        madcatState.status = result?.madcat === true ? 'yes' : 'no';
+        madcatState.message = '';
+        const current = readProductPanel();
+        if (current?.signature === signature) paintMadcat(current, madcatState.status);
+        return;
+      } catch (error) {
+        if (madcatState.serial !== serial || madcatState.signature !== signature) return;
+        const message = clean(error?.message || 'MADCAT check failed');
+        if (bridge && /measurement login required/i.test(message) && Date.now() < deadline) {
+          await sleep(600);
+          continue;
+        }
+        madcatState.status = 'error';
+        madcatState.message = message;
+        const current = readProductPanel();
+        if (current?.signature === signature) paintMadcat(current, 'error', message);
+        return;
+      }
+    }
+  }
+
+  const sizeState = { item: '', lastGood: '', busy: false, serial: 0 };
+
+  function isValidSidelineContainer(value) { return /^(?:csX|tsX)[A-Za-z0-9]+$/i.test(clean(value)); }
+  function isValidSidelineItem(value) { return /^(?:B[A-Z0-9]{9}|X[A-Z0-9]{9}|\d{8,14})$/i.test(clean(value)); }
+  function clearSavedSidelineContainer() { GM_setValue(SIDELINE_CONTAINER_KEY, ''); GM_setValue(SIDELINE_CONTAINER_TIME_KEY, 0); }
+
+  function getSavedSidelineContainer() {
+    const value = clean(GM_getValue(SIDELINE_CONTAINER_KEY, ''));
+    const savedAt = Number(GM_getValue(SIDELINE_CONTAINER_TIME_KEY, 0));
+    if (!isValidSidelineContainer(value) || !savedAt || Date.now() - savedAt > SIDELINE_CONTAINER_MAX_AGE) {
+      clearSavedSidelineContainer();
+      return '';
+    }
+    return value;
+  }
+
+  function askSidelineContainer(current = '') {
+    const entered = prompt('Enter valid Sideline source container (csX / tsX).\nSaved for 24 hours.', current);
+    if (entered === null) return '';
+    const value = clean(entered);
+    if (!isValidSidelineContainer(value)) { alert('Invalid container. Must begin with csX or tsX.'); return ''; }
+    GM_setValue(SIDELINE_CONTAINER_KEY, value);
+    GM_setValue(SIDELINE_CONTAINER_TIME_KEY, Date.now());
+    return value;
   }
 
   function currentSidelineItem(panel) {
@@ -818,17 +890,6 @@
     if (isValidSidelineItem(queryValue)) return queryValue.toUpperCase();
     for (const input of $$('input')) if (isValidSidelineItem(input.value)) return clean(input.value).toUpperCase();
     return [panel?.asin?.text, panel?.isbn?.text, panel?.fnsku?.text, panel?.fcsku?.text].map(clean).find(isValidSidelineItem)?.toUpperCase() || '';
-  }
-
-  function binAliases(panel, item) {
-    return new Set([
-      item,
-      clean(new URLSearchParams(location.search).get('s')),
-      panel?.asin?.text,
-      panel?.isbn?.text,
-      panel?.fnsku?.text,
-      panel?.fcsku?.text
-    ].map(value => clean(value).toUpperCase()).filter(isValidSidelineItem));
   }
 
 
@@ -839,160 +900,59 @@
     if (!badge) {
       badge = markUi(document.createElement('span'));
       badge.className = 'fc-size-badge';
-      badge.dataset.state = 'loading';
-      badge.textContent = 'Size: Loading…';
-      badge.title = 'Automatic exact-item binDescription • click to recheck';
-      badge.tabIndex = 0;
-      const recheck = event => {
-        if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+      badge.innerHTML = '<span class="fc-size-value">Size: Loading…</span><button type="button" class="fcrm-size-change">Change</button>';
+      const change = $('.fcrm-size-change', badge);
+      markUi(change);
+      change.title = 'Change Sideline source container';
+      change.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        const current = readProductPanel();
-        if (current) runSizeLookup(current, true);
-      };
-      badge.addEventListener('click', recheck);
-      badge.addEventListener('keydown', recheck);
+        if (askSidelineContainer(getSavedSidelineContainer())) runSizeLookup(readProductPanel(), true);
+      });
       host.appendChild(badge);
     }
     return badge;
   }
 
-  function setSizeText(panel, text, mode = 'loading', title = '') {
+  function setSizeText(panel, text, error = false) {
     const badge = ensureSizeBadge(panel);
     if (!badge) return;
-    badge.dataset.state = mode;
-    badge.textContent = `Size: ${text}`;
-    badge.title = title || 'Automatic exact-item binDescription • click to recheck';
-  }
-
-  function inventoryRowCodes(row) {
-    return [row?.asin, row?.fnsku, row?.fcsku, row?.lpn].map(value => clean(value).toUpperCase()).filter(Boolean);
-  }
-
-  function exactInventoryRows(rows, aliases) {
-    return rows.filter(row => clean(row?.container) && inventoryRowCodes(row).some(code => aliases.has(code)));
-  }
-
-  function binContainerPriority(value) {
-    const container = clean(value);
-    if (/^(?:tsX|csX)[A-Za-z0-9]+$/i.test(container)) return 0;
-    if (/^P-\d-/i.test(container)) return 1;
-    return 2;
-  }
-
-  function candidateBinContainers(rows) {
-    const sorted = rows.slice().sort((a, b) =>
-      binContainerPriority(a.container) - binContainerPriority(b.container)
-      || (Number(b.qty) || 0) - (Number(a.qty) || 0)
-    );
-    const seen = new Set();
-    const containers = [];
-    for (const row of sorted) {
-      const container = clean(row.container);
-      const key = container.toUpperCase();
-      if (!container || seen.has(key)) continue;
-      seen.add(key);
-      containers.push(container);
-    }
-    return containers;
-  }
-
-  function makeSidelineRequestId() {
-    const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
-  }
-
-  function directBinScan(container, item) {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: SIDELINE_API,
-        timeout: BIN_REQUEST_TIMEOUT_MS,
-        headers: { Accept: '*/*', 'Content-Type': 'application/json' },
-        data: JSON.stringify({
-          containerScannableId: container,
-          isMasterpack: null,
-          itemAndonContext: null,
-          itemBarcode: item,
-          requestId: makeSidelineRequestId(),
-          tool: 'V3'
-        }),
-        onload: response => {
-          if (response.status < 200 || response.status >= 300) {
-            reject(new Error(`HTTP ${response.status}`));
-            return;
-          }
-          try { resolve(JSON.parse(response.responseText || '{}')); }
-          catch { reject(new Error('Invalid scanitem response')); }
-        },
-        onerror: () => reject(new Error('scanitem request failed')),
-        ontimeout: () => reject(new Error('scanitem timed out'))
-      });
-    });
-  }
-
-  function binResponseCodes(entry) {
-    return [
-      entry?.scannableId,
-      entry?.value,
-      entry?.scannedBarcode,
-      entry?.skuDetail?.fnSku,
-      entry?.skuDetail?.asin,
-      entry?.skuDetail?.fcSku
-    ].map(value => clean(value).toUpperCase()).filter(Boolean);
-  }
-
-  function strictBinDescription(payload, aliases) {
-    const items = Array.isArray(payload?.items) ? payload.items : [];
-    const exact = items.find(entry => binResponseCodes(entry).some(code => aliases.has(code)));
-    return {
-      size: clean(exact?.binDescription),
-      matched: binResponseCodes(exact).find(code => aliases.has(code)) || ''
-    };
-  }
-
-  async function fetchAutomaticSize(panel, item, aliases, serial) {
-    const started = performance.now();
-    setSizeText(panel, 'Finding container…', 'loading');
-
-    const inventory = await coreRequest('inventoryPreview', { search: item });
-    if (serial !== sizeState.serial) return;
-    const rows = Array.isArray(inventory?.rows) ? inventory.rows : [];
-    const containers = candidateBinContainers(exactInventoryRows(rows, aliases)).slice(0, BIN_MAX_CONTAINER_ATTEMPTS);
-
-    if (!containers.length) {
-      usage('bin.auto.no_exact_container');
-      setSizeText(panel, 'Unavailable', 'error', 'No exact-item live container found in the fast inventory preview. No size was guessed. Click to retry.');
+    const value = $('.fc-size-value', badge);
+    if (error && sizeState.lastGood) {
+      badge.classList.remove('fcrm-size-error');
+      if (value) value.textContent = `Size: ${sizeState.lastGood}`;
+      badge.title = `Latest refresh failed: ${text}. Keeping last successful size.`;
       return;
     }
+    badge.classList.toggle('fcrm-size-error', error);
+    badge.title = '';
+    if (value) value.textContent = `Size: ${text}`;
+  }
 
-    let lastError = '';
-    for (const container of containers) {
+
+  async function fetchSidelineSize(panel, item, container, force = false) {
+    const serial = ++sizeState.serial;
+    sizeState.busy = true;
+    setSizeText(panel, 'Checking…');
+    try {
+      const result = await coreRequest('binSize', { container, item });
       if (serial !== sizeState.serial) return;
-      setSizeText(panel, 'Checking…', 'loading', `Trying ${container}`);
-      try {
-        const payload = await directBinScan(container, item);
-        if (serial !== sizeState.serial) return;
-        const result = strictBinDescription(payload, aliases);
-        if (!result.size) {
-          lastError = `${container}: no exact-item binDescription`;
-          continue;
-        }
-
-        const elapsedMs = Math.round(performance.now() - started);
-        setSizeText(panel, result.size, 'success', `Fresh automatic lookup • ${elapsedMs}ms • source ${container} • exact match ${result.matched} • click to recheck`);
-        usage('bin.auto.success', elapsedMs);
-        window.dispatchEvent(new CustomEvent('fcrm:size-resolved', {
-          detail: { item, container, size: result.size, matched: result.matched, cache: 'fresh-auto', elapsedMs }
-        }));
+      const size = clean(result?.size || '');
+      if (size) {
+        sizeState.lastGood = size;
+        setSizeText(panel, sizeState.lastGood, false);
+        window.dispatchEvent(new CustomEvent('fcrm:size-resolved', { detail: { item, container, size: sizeState.lastGood, cache: result?.source || 'core' } }));
         return;
-      } catch (error) {
-        lastError = `${container}: ${clean(error?.message || error)}`;
       }
+      setSizeText(panel, 'No size returned', true);
+    } catch (error) {
+      if (serial !== sizeState.serial) return;
+      const message = error?.message || 'Request failed';
+      if (/container|source/i.test(message)) clearSavedSidelineContainer();
+      setSizeText(panel, message, true);
+    } finally {
+      if (serial === sizeState.serial) sizeState.busy = false;
     }
-
-    usage('bin.auto.unavailable');
-    setSizeText(panel, 'Unavailable', 'error', `${lastError || 'No exact-item binDescription returned'}. No fallback or measurement guess was used. Click to retry.`);
   }
 
   function runSizeLookup(panel, force = false) {
@@ -1000,26 +960,16 @@
     ensureSizeBadge(panel);
     const item = currentSidelineItem(panel);
     if (!item) return;
-    const aliases = binAliases(panel, item);
-    const signature = `${panel.signature}|${item}|${[...aliases].sort().join('|')}`;
-    if (signature !== sizeState.signature) {
+    if (item !== sizeState.item) {
       sizeState.serial++;
       sizeState.busy = false;
-      sizeState.signature = signature;
+      sizeState.item = item;
+      sizeState.lastGood = '';
     } else if (sizeState.busy) return;
-    else if (!force) return;
-
-    const serial = ++sizeState.serial;
-    sizeState.busy = true;
-    fetchAutomaticSize(panel, item, aliases, serial)
-      .catch(error => {
-        if (serial !== sizeState.serial) return;
-        usage('bin.auto.error');
-        setSizeText(panel, 'Error', 'error', `${clean(error?.message || error)} • click to retry`);
-      })
-      .finally(() => {
-        if (serial === sizeState.serial) sizeState.busy = false;
-      });
+    else if (!force) { if (sizeState.lastGood) setSizeText(panel, sizeState.lastGood, false); return; }
+    const container = getSavedSidelineContainer();
+    if (!container) { setSizeText(panel, 'Set container', true); return; }
+    fetchSidelineSize(panel, item, container, force);
   }
 
   let inventoryRunId = 0;
@@ -1406,11 +1356,10 @@
           }).catch(() => {});
         }
         applyProductHighlights(panel);
-        ensureMadcatBadge(panel);
         ensureSizeBadge(panel);
         ensurePrintControls(panel);
         ensureProductHazmatUi(panel);
-        updateMadcat(panel);
+        jobs.push(checkMadcat(panel, false, false));
         runSizeLookup(panel, false);
         if (changed || $('.fc-hazmat', panel.primary?.valueCell)?.textContent === 'Loading…') jobs.push(updateProductHazmat(panel, false));
       }
