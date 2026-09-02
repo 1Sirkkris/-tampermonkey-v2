@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         TEST v0.1.1 AFT UI State Logger
-// @name:en      TEST v0.1.1 AFT UI State Logger
+// @name         TEST v0.1.2 AFT UI State Logger
+// @name:en      TEST v0.1.2 AFT UI State Logger
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.1
-// @description  Read-only logger for AFT same-tab mode switches, UI states, form actions, XHR/fetch results and errors. Never records request bodies or headers.
+// @version      0.1.2
+// @description  Read-only AFT workflow logger. Captures UI state plus request/response payloads for /action, /status and /end; excludes auth/cookie headers.
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/(?:move-container)?(?:[\/?#]|$)/
 // @include      *://*.amazonoperations.app/*
@@ -20,12 +20,14 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const ROOT_ID = 'aft-ui-state-logger-panel';
-  const STORE_KEY = 'aft_ui_state_trace_v011';
-  const MAX_ROWS = 600;
-  const MAX_STORE_CHARS = 3500000;
+  const STORE_KEY = 'aft_ui_state_trace_v012';
+  const MAX_ROWS = 700;
+  const MAX_STORE_CHARS = 4500000;
   const MAX_TEXT = 1800;
+  const MAX_BODY = 14000;
+  const WORKFLOW_PATHS = new Set(['/action', '/status', '/end']);
   const startedAt = performance.now();
 
   if (document.documentElement?.hasAttribute('data-aft-ui-state-logger')) return;
@@ -39,14 +41,109 @@
   const now = () => new Date().toISOString();
   const elapsed = () => Math.round(performance.now() - startedAt);
   const norm = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+
   const clip = (value, max = 260) => {
     const text = norm(value);
     return text.length > max ? `${text.slice(0, max)}…` : text;
   };
 
+  const clipRaw = (value, max = MAX_BODY) => {
+    const text = String(value ?? '');
+    return text.length > max ? `${text.slice(0, max)}…[truncated ${text.length - max} chars]` : text;
+  };
+
   function safeJson(value) {
     try { return JSON.stringify(value); }
     catch { return '"[unserializable]"'; }
+  }
+
+  function endpointInfo(rawUrl) {
+    try {
+      const parsed = new URL(String(rawUrl ?? ''), location.href);
+      return {
+        url: clip(parsed.href, 900),
+        path: parsed.pathname,
+        workflow: WORKFLOW_PATHS.has(parsed.pathname)
+      };
+    } catch {
+      const url = clip(rawUrl, 900);
+      return { url, path: '', workflow: false };
+    }
+  }
+
+  function contentTypeFromHeaders(headers) {
+    try {
+      if (!headers) return '';
+      if (headers instanceof Headers) return clip(headers.get('content-type') || '', 300);
+      if (Array.isArray(headers)) {
+        const hit = headers.find(([name]) => String(name).toLowerCase() === 'content-type');
+        return clip(hit?.[1] || '', 300);
+      }
+      for (const [name, value] of Object.entries(headers)) {
+        if (String(name).toLowerCase() === 'content-type') return clip(value, 300);
+      }
+    } catch {}
+    return '';
+  }
+
+  function serializeBody(body) {
+    if (body == null) return '';
+
+    try {
+      if (typeof body === 'string') return clipRaw(body);
+
+      if (body instanceof URLSearchParams) {
+        return clipRaw(body.toString());
+      }
+
+      if (body instanceof FormData) {
+        const entries = [];
+        for (const [key, value] of body.entries()) {
+          entries.push([
+            key,
+            value instanceof File
+              ? `[File name=${value.name} type=${value.type || 'unknown'} size=${value.size}]`
+              : String(value)
+          ]);
+        }
+        return clipRaw(safeJson(entries));
+      }
+
+      if (body instanceof Blob) {
+        return `[Blob type=${body.type || 'unknown'} size=${body.size}]`;
+      }
+
+      if (body instanceof ArrayBuffer) {
+        return `[ArrayBuffer bytes=${body.byteLength}]`;
+      }
+
+      if (ArrayBuffer.isView(body)) {
+        return `[${body.constructor?.name || 'TypedArray'} bytes=${body.byteLength}]`;
+      }
+
+      if (typeof body === 'object') return clipRaw(safeJson(body));
+      return clipRaw(String(body));
+    } catch (error) {
+      return `[body serialize failed: ${clip(error?.message || error, 300)}]`;
+    }
+  }
+
+  function serializeForm(form) {
+    if (!(form instanceof HTMLFormElement)) return [];
+    try {
+      const entries = [];
+      for (const [key, value] of new FormData(form).entries()) {
+        entries.push([
+          key,
+          value instanceof File
+            ? `[File name=${value.name} type=${value.type || 'unknown'} size=${value.size}]`
+            : String(value)
+        ]);
+      }
+      return entries;
+    } catch (error) {
+      return [['[form serialize failed]', clip(error?.message || error, 300)]];
+    }
   }
 
   function readRows() {
@@ -145,11 +242,14 @@
     }, true);
 
     document.addEventListener('submit', event => {
+      const form = event.target;
+      const endpoint = endpointInfo(form?.action || location.href);
       log('FORM_SUBMIT', {
         defaultPrevented: event.defaultPrevented,
-        action: clip(event.target?.action || '', 500),
-        method: String(event.target?.method || '').toUpperCase(),
-        form: describeElement(event.target)
+        action: endpoint.url,
+        method: String(form?.method || '').toUpperCase(),
+        form: describeElement(form),
+        fields: endpoint.workflow ? serializeForm(form) : undefined
       });
       queueSnapshot('AFTER_SUBMIT');
     }, true);
@@ -158,28 +258,78 @@
   function installFetchTrace() {
     if (typeof window.fetch !== 'function') return;
     const original = window.fetch;
+
     window.fetch = async function (...args) {
       const request = args[0];
       const options = args[1] || {};
-      const url = clip(typeof request === 'string' ? request : request?.url, 700);
+      const rawUrl = typeof request === 'string' || request instanceof URL ? request : request?.url;
+      const endpoint = endpointInfo(rawUrl);
       const method = String(options.method || request?.method || 'GET').toUpperCase();
       const began = performance.now();
-      log('FETCH_START', { method, url });
+
+      const startDetails = {
+        method,
+        url: endpoint.url,
+        path: endpoint.path,
+        workflow: endpoint.workflow
+      };
+
+      if (endpoint.workflow) {
+        startDetails.contentType = contentTypeFromHeaders(options.headers) ||
+          contentTypeFromHeaders(request?.headers);
+        startDetails.requestBody = serializeBody(options.body);
+
+        if (!options.body && request instanceof Request && !['GET', 'HEAD'].includes(method)) {
+          try {
+            request.clone().text().then(text => {
+              log('FETCH_REQUEST_BODY', {
+                method,
+                url: endpoint.url,
+                path: endpoint.path,
+                requestBody: clipRaw(text)
+              });
+            }).catch(error => {
+              log('FETCH_REQUEST_BODY_ERROR', {
+                method,
+                url: endpoint.url,
+                path: endpoint.path,
+                error: clip(error?.message || error, 500)
+              });
+            });
+          } catch {}
+        }
+      }
+
+      log('FETCH_START', startDetails);
+
       try {
         const response = await original.apply(this, args);
-        log('FETCH_END', {
+        const endDetails = {
           method,
-          url,
+          url: endpoint.url,
+          path: endpoint.path,
           status: response.status,
           ok: response.ok,
           durationMs: Math.round(performance.now() - began)
-        });
+        };
+
+        if (endpoint.workflow) {
+          endDetails.contentType = clip(response.headers?.get?.('content-type') || '', 300);
+          try {
+            endDetails.responseBody = clipRaw(await response.clone().text());
+          } catch (error) {
+            endDetails.responseBody = `[response read failed: ${clip(error?.message || error, 500)}]`;
+          }
+        }
+
+        log('FETCH_END', endDetails);
         queueSnapshot('AFTER_FETCH');
         return response;
       } catch (error) {
         log('FETCH_ERROR', {
           method,
-          url,
+          url: endpoint.url,
+          path: endpoint.path,
           durationMs: Math.round(performance.now() - began),
           error: clip(error?.stack || error?.message || error, 700)
         });
@@ -191,30 +341,94 @@
   function installXhrTrace() {
     const originalOpen = XMLHttpRequest.prototype.open;
     const originalSend = XMLHttpRequest.prototype.send;
+    const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
 
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+      const endpoint = endpointInfo(url);
       this.__aftUiTrace = {
         method: String(method || 'GET').toUpperCase(),
-        url: clip(url, 700)
+        url: endpoint.url,
+        path: endpoint.path,
+        workflow: endpoint.workflow,
+        contentType: ''
       };
       return originalOpen.call(this, method, url, ...rest);
     };
 
+    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+      const meta = this.__aftUiTrace;
+      if (meta && String(name).toLowerCase() === 'content-type') {
+        meta.contentType = clip(value, 300);
+      }
+      return originalSetRequestHeader.call(this, name, value);
+    };
+
     XMLHttpRequest.prototype.send = function (...args) {
-      const meta = this.__aftUiTrace || { method: 'UNKNOWN', url: 'UNKNOWN' };
+      const meta = this.__aftUiTrace || {
+        method: 'UNKNOWN',
+        url: 'UNKNOWN',
+        path: '',
+        workflow: false,
+        contentType: ''
+      };
       const began = performance.now();
-      log('XHR_START', meta);
+
+      const startDetails = {
+        method: meta.method,
+        url: meta.url,
+        path: meta.path,
+        workflow: meta.workflow
+      };
+
+      if (meta.workflow) {
+        startDetails.contentType = meta.contentType;
+        startDetails.requestBody = serializeBody(args[0]);
+      }
+
+      log('XHR_START', startDetails);
+
       this.addEventListener('loadend', () => {
-        log('XHR_END', {
-          ...meta,
+        const endDetails = {
+          method: meta.method,
+          url: meta.url,
+          path: meta.path,
           status: this.status,
           durationMs: Math.round(performance.now() - began)
-        });
+        };
+
+        if (meta.workflow) {
+          try {
+            endDetails.contentType = clip(this.getResponseHeader('content-type') || '', 300);
+          } catch {
+            endDetails.contentType = '';
+          }
+
+          try {
+            if (this.responseType === '' || this.responseType === 'text') {
+              endDetails.responseBody = clipRaw(this.responseText || '');
+            } else if (this.responseType === 'json') {
+              endDetails.responseBody = clipRaw(safeJson(this.response));
+            } else {
+              endDetails.responseBody = `[responseType=${this.responseType || 'unknown'}]`;
+            }
+          } catch (error) {
+            endDetails.responseBody = `[response read failed: ${clip(error?.message || error, 500)}]`;
+          }
+        }
+
+        log('XHR_END', endDetails);
         queueSnapshot('AFTER_XHR');
       }, { once: true });
+
       this.addEventListener('error', () => {
-        log('XHR_ERROR', { ...meta, durationMs: Math.round(performance.now() - began) });
+        log('XHR_ERROR', {
+          method: meta.method,
+          url: meta.url,
+          path: meta.path,
+          durationMs: Math.round(performance.now() - began)
+        });
       }, { once: true });
+
       return originalSend.apply(this, args);
     };
   }
@@ -289,8 +503,10 @@
       `Current URL: ${location.href}`,
       `User agent: ${navigator.userAgent}`,
       `Rows: ${readRows().length}`,
+      'Workflow payload capture: /action, /status, /end only',
       ''
     ].join('\n');
+
     return header + readRows().map(row => safeJson(row)).join('\n');
   }
 
@@ -378,21 +594,24 @@
     panel.appendChild(countNode);
 
     addButton(panel, 'MARK', () => {
-      const note = prompt('What are you about to test?', 'BEFORE MOVE MODE SWITCH');
+      const note = prompt('What are you about to test?', 'BEFORE AFT MODE SWITCH');
       if (note !== null) {
         log('USER_MARK', { note: clip(note, 600) });
         captureState('USER_MARK');
         setPanelMessage('MARKED ✓');
       }
     });
+
     addButton(panel, 'COPY LOG', copyLog);
     addButton(panel, 'DOWNLOAD', downloadLog);
+
     addButton(panel, 'CLEAR', () => {
       if (!confirm('Clear the saved AFT trace?')) return;
       localStorage.removeItem(STORE_KEY);
       log('TRACE_CLEARED');
       setPanelMessage('CLEARED ✓');
     });
+
     addButton(panel, '−', () => {
       [...panel.children].forEach((child, index) => {
         if (index > 2) child.hidden = !child.hidden;
@@ -404,7 +623,13 @@
     captureState('PANEL_READY');
   }
 
-  log('LOGGER_START', { version: VERSION, title: document.title, referrer: document.referrer });
+  log('LOGGER_START', {
+    version: VERSION,
+    title: document.title,
+    referrer: document.referrer,
+    workflowCapture: [...WORKFLOW_PATHS]
+  });
+
   installUiTrace();
   installFetchTrace();
   installXhrTrace();
