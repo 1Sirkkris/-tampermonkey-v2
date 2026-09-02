@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        TEST v0.1.60 FC-Lite — 30-Day MADCAT
+// @name        TEST v0.1.61 FC-Lite — Strict Bin + 30-Day MADCAT
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.60
-// @description  TEST: Tote Audit with authenticated rolling 30-day raw MADCAT checks and click-to-retry errors.
+// @version      0.1.61
+// @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.60';
+  const VERSION = '0.1.61';
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
@@ -352,7 +352,6 @@
     const resolved = clean(product?.fnsku || product?.asin || product?.isbn || product?.primary || '');
     if (!resolved || upper(resolved) === upper(rawScan)) return '';
     size = await requestBinSize(resolved, sourceContainer, aliases);
-    if (size) coreRequest('rememberBinSize', { container: sourceContainer, item: rawScan, size, aliases }).catch(() => {});
     return size;
   }
 
