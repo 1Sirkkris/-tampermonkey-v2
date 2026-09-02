@@ -24,19 +24,19 @@ def regex_once(text, pattern, repl, label):
     return out
 
 
-# ---------- Core ----------
+# ---------- Core: preserve v0.2.17 shift cache, add auth renewal ----------
 path = 'FCR_Data_Core.user.js'
 s = read(path)
-s = replace_once(s, '// @name         TEST v0.2.16 FCR Data Core — MADCAT ASIN/FNSKU Fix', '// @name         TEST v0.2.17 FCR Data Core — Auto MADCAT Auth', 'core name')
-s = replace_once(s, '// @version      0.2.16', '// @version      0.2.17', 'core version')
+s = replace_once(s, '// @name         TEST v0.2.17 FCR Data Core — MADCAT Shift Cache', '// @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth', 'core name')
+s = replace_once(s, '// @version      0.2.17', '// @version      0.2.18', 'core version')
 s = replace_once(s,
-    '// @description  Strict binDescription plus 30-day raw MADCAT using FNSKU when available, ASIN otherwise, with automatic Inventory History fallback.',
-    '// @description  Strict binDescription plus global 30-day raw MADCAT with automatic user-gesture auth renewal and auth-only Inventory History fallback.',
+    '// @description  Strict binDescription plus shift-aware caching for authenticated rolling 30-day MADCAT checks.',
+    '// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with automatic user-gesture auth renewal.',
     'core description')
 s = replace_once(s, "  const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';", """  const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
   const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';""", 'core keys')
-s = replace_once(s, "  const VERSION = '0.2.16';", "  const VERSION = '0.2.17';", 'core VERSION')
+s = replace_once(s, "  const VERSION = '0.2.17';", "  const VERSION = '0.2.18';", 'core VERSION')
 s = replace_once(s, "  const MEASUREMENT_TIMEOUT_MS = 6000;", """  const MEASUREMENT_TIMEOUT_MS = 6000;
   const MEASUREMENT_RENEW_BEFORE_MS = 10 * 60 * 1000;
   const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
@@ -167,7 +167,7 @@ s = replace_once(s,
         }, 700);""",
     'core bridge close')
 
-new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, force = false, reason = 'measurement-auth') {
+new_fallback = r'''  async function fallbackMadcatToInventoryHistory(identifier, force = false, reason = 'measurement-auth') {
     stats.madcatHistoryFallback++;
     recordUsage('madcat.fallback.inventory-history');
     const result = await fetchHistory(identifier, force);
@@ -185,8 +185,13 @@ new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, f
       historyRows: Number(history.rows) || 0
     };
   }
+'''
+s = regex_once(s,
+    r"  async function fallbackMadcatToInventoryHistory\(.*?\n  const sydneyClock =",
+    new_fallback + "\n  const sydneyClock =",
+    'core fallback')
 
-  async function fetchRecentMadcat(inputValue, force = false) {
+new_fetch = r'''  async function fetchRecentMadcat(inputValue, force = false) {
     const input = inputValue && typeof inputValue === 'object' ? inputValue : { fnsku: inputValue };
     const fnsku = upper(input?.fnsku);
     const asin = upper(input?.asin || (!fnsku ? input?.code : ''));
@@ -194,6 +199,15 @@ new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, f
     const identifierType = fnsku ? 'FNSKU' : 'ASIN';
     if (!identifier) throw new Error('Measurement item unavailable');
     rememberMeasurementIdentifier(identifier);
+
+    if (!force) {
+      const cached = readMadcatCache(identifierType, identifier);
+      if (cached) {
+        stats.madcatCacheHits++;
+        recordUsage(`madcat.cache.${cached.madcat ? 'yes' : 'no'}`);
+        return cached;
+      }
+    }
 
     let auth = readMeasurementAuth();
     if (!auth) {
@@ -212,8 +226,17 @@ new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, f
     const key = `madcat30:${identifierType}:${identifier}:${force ? 'force' : 'normal'}`;
     if (inFlight.has(key)) {
       stats.dedupeHits++;
-      const data = await inFlight.get(key);
-      return { ...data, deduped: true };
+      try {
+        const data = await inFlight.get(key);
+        return { ...data, deduped: true };
+      } catch (error) {
+        const message = clean(error?.message || error || 'Measurement request failed');
+        if (/measurement login required/i.test(message)) {
+          stats.madcatAuthRequired++;
+          return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-token-expired');
+        }
+        throw error;
+      }
     }
 
     const work = (async () => {
@@ -279,7 +302,9 @@ new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, f
 
     inFlight.set(key, work);
     try {
-      return await work;
+      const result = await work;
+      writeMadcatCache(identifierType, identifier, result);
+      return result;
     } catch (error) {
       const message = clean(error?.message || error || 'Measurement request failed');
       if (/measurement login required/i.test(message)) {
@@ -293,9 +318,9 @@ new_madcat = r'''  async function fallbackMadcatToInventoryHistory(identifier, f
   }
 '''
 s = regex_once(s,
-    r"  async function fallbackMadcatToInventoryHistory\(.*?\n  async function fetchBinSize\(",
-    new_madcat + "\n  async function fetchBinSize(",
-    'core MADCAT functions')
+    r"  async function fetchRecentMadcat\(inputValue, force = false\) \{.*?\n  async function fetchBinSize\(",
+    new_fetch + "\n  async function fetchBinSize(",
+    'core fetch MADCAT')
 
 s = replace_once(s,
     "if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'hazmat', 'binSize', 'section'], stats: { ...stats } };",
@@ -309,12 +334,12 @@ s = replace_once(s,
 write(path, s)
 
 
-# ---------- Master ----------
+# ---------- Master: preserve v0.1.25 bin-input fix, add source-aware MADCAT UI ----------
 path = 'FCResearch_Master.user.js'
 s = read(path)
-s = replace_once(s, '// @name         TEST v0.1.24 FCResearch Master — MADCAT Identifier Fix', '// @name         TEST v0.1.25 FCResearch Master — Auto MADCAT Auth', 'master name')
-s = replace_once(s, '// @version      0.1.24', '// @version      0.1.25', 'master version')
-s = replace_once(s, "  const VERSION = '0.1.24';", "  const VERSION = '0.1.25';", 'master VERSION')
+s = replace_once(s, '// @name         TEST v0.1.25 FCResearch Master — Bin Input Fix', '// @name         TEST v0.1.26 FCResearch Master — MADCAT Auto Auth', 'master name')
+s = replace_once(s, '// @version      0.1.25', '// @version      0.1.26', 'master version')
+s = replace_once(s, "  const VERSION = '0.1.25';", "  const VERSION = '0.1.26';", 'master VERSION')
 s = replace_once(s,
     """      .fcrm-madcat-yes { background:#ffff00; }
       .fcrm-madcat-no { background:#ff0000; }
@@ -454,7 +479,7 @@ write(path, s)
 # ---------- FC-Lite ----------
 path = 'FC_Lite.user.js'
 s = read(path)
-s = replace_once(s, '// @name        TEST v0.1.63 FC-Lite — MADCAT Identifier Fix', '// @name        TEST v0.1.64 FC-Lite — Auto MADCAT Auth', 'fcl name')
+s = replace_once(s, '// @name        TEST v0.1.63 FC-Lite — MADCAT Identifier Fix', '// @name        TEST v0.1.64 FC-Lite — MADCAT Auto Auth', 'fcl name')
 s = replace_once(s, '// @version      0.1.63', '// @version      0.1.64', 'fcl version')
 s = replace_once(s, "  const VERSION = '0.1.63';", "  const VERSION = '0.1.64';", 'fcl VERSION')
 s = replace_once(s,
@@ -593,9 +618,9 @@ write(path, s)
 # ---------- README ----------
 path = 'README.md'
 s = read(path)
-s = replace_once(s, '| FCR Data Core | 0.2.15 |', '| FCR Data Core | 0.2.17 |', 'README core')
-s = replace_once(s, '| FCResearch Master | 0.1.22 |', '| FCResearch Master | 0.1.25 |', 'README master')
-s = replace_once(s, '| FC-Lite | 0.1.62 |', '| FC-Lite | 0.1.64 |', 'README fcl')
+s = replace_once(s, '| FCR Data Core | 0.2.17 |', '| FCR Data Core | 0.2.18 |', 'README core')
+s = replace_once(s, '| FCResearch Master | 0.1.25 |', '| FCResearch Master | 0.1.26 |', 'README master')
+s = replace_once(s, '| FC-Lite | 0.1.63 |', '| FC-Lite | 0.1.64 |', 'README fcl')
 write(path, s)
 
-print('MADCAT auto-auth patch applied')
+print('MADCAT auto-auth patch applied on top of shift-cache/bin-input baseline')
