@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.64 FC-Lite — MADCAT Auto Auth
+// @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.64
+// @version      0.1.65
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.64';
+  const VERSION = '0.1.65';
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
@@ -1410,7 +1410,7 @@
         font-size:9px;
         font-family:inherit;
       }
-      .madcat-pill.yes { border-color:#15803d; background:#16a34a; color:#fff; }
+      .madcat-pill.yes { border-color:#15803d; background:#4ade80; color:#111827; }
       .madcat-pill.no,.madcat-pill.history-no { border-color:#991b1b; background:#ef4444; color:#111827; }
       .madcat-pill.history-yes { border-color:#1d4ed8; background:#2563eb; color:#fff; cursor:pointer; }
       .madcat-pill.history-no { cursor:pointer; }
