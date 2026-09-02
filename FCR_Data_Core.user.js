@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.13 FCR Data Core — Strict Bin + 30-Day MADCAT
+// @name         TEST v0.2.14 FCR Data Core — MADCAT Auth Fallback
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.13
-// @description  Shared FCR engine with exact-item-only binDescription and fast authenticated 30-day MADCAT checks.
+// @version      0.2.14
+// @description  Strict exact-item binDescription plus 30-day raw MADCAT with automatic Inventory History fallback when measurement auth is unavailable.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -34,7 +34,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.13';
+  const VERSION = '0.2.14';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -94,6 +94,7 @@
     historyCacheHits: 0,
     madcatNetwork: 0,
     madcatAuthRequired: 0,
+    madcatHistoryFallback: 0,
     hazNetwork: 0,
     hazCacheHits: 0,
     binNetwork: 0,
@@ -1156,6 +1157,23 @@
     });
   }
 
+  async function fallbackMadcatToInventoryHistory(fnsku, force = false, reason = 'measurement-auth') {
+    stats.madcatHistoryFallback++;
+    recordUsage('madcat.fallback.inventory-history');
+    const result = await fetchHistory(fnsku, force);
+    const history = result?.history || { rows: 0, madcat: false };
+    return {
+      madcat: history.madcat === true,
+      eventsChecked: 0,
+      pages: 0,
+      source: 'history-fallback-auth',
+      windowDays: null,
+      fallback: 'inventory-history',
+      fallbackReason: reason,
+      historyRows: Number(history.rows) || 0
+    };
+  }
+
   async function fetchRecentMadcat(fnskuValue, force = false) {
     const fnsku = upper(fnskuValue);
     if (!fnsku) throw new Error('Measurement FNSKU unavailable');
@@ -1163,14 +1181,23 @@
     const auth = readMeasurementAuth();
     if (!auth) {
       stats.madcatAuthRequired++;
-      throw new Error('Measurement login required');
+      return fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-login-required');
     }
 
     const key = `madcat30:${fnsku}:${force ? 'force' : 'normal'}`;
     if (inFlight.has(key)) {
       stats.dedupeHits++;
-      const data = await inFlight.get(key);
-      return { ...data, source: 'dedupe' };
+      try {
+        const data = await inFlight.get(key);
+        return { ...data, source: 'dedupe' };
+      } catch (error) {
+        const message = clean(error?.message || error || 'Measurement request failed');
+        if (/measurement login required/i.test(message)) {
+          stats.madcatAuthRequired++;
+          return fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-token-expired');
+        }
+        throw error;
+      }
     }
 
     const work = (async () => {
@@ -1219,6 +1246,13 @@
     inFlight.set(key, work);
     try {
       return await work;
+    } catch (error) {
+      const message = clean(error?.message || error || 'Measurement request failed');
+      if (/measurement login required/i.test(message)) {
+        stats.madcatAuthRequired++;
+        return await fallbackMadcatToInventoryHistory(fnsku, force, 'measurement-token-expired');
+      }
+      throw error;
     } finally {
       if (inFlight.get(key) === work) inFlight.delete(key);
     }
