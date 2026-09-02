@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.17 FCR Data Core — MADCAT Shift Cache
+// @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.17
-// @description  Strict binDescription plus shift-aware caching for authenticated rolling 30-day MADCAT checks.
+// @version      0.2.18
+// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with automatic user-gesture auth renewal.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -25,6 +25,8 @@
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
+  const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
+  const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
 
   if (location.hostname === MEASUREMENT_SITE_HOST) {
     installMeasurementAuthBridge();
@@ -34,7 +36,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.17';
+  const VERSION = '0.2.18';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -51,6 +53,9 @@
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
   const MEASUREMENT_TIMEOUT_MS = 6000;
+  const MEASUREMENT_RENEW_BEFORE_MS = 10 * 60 * 1000;
+  const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
+  const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
   const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
@@ -100,6 +105,9 @@
     madcatCacheHits: 0,
     madcatAuthRequired: 0,
     madcatHistoryFallback: 0,
+    madcatAuthWaits: 0,
+    madcatAutoBridge: 0,
+    madcatAutoBridgeBlocked: 0,
     hazNetwork: 0,
     hazCacheHits: 0,
     binNetwork: 0,
@@ -110,6 +118,111 @@
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
+
+  function measurementIdentifierCandidate(value) {
+    const candidate = upper(value);
+    return /^[A-Z0-9]{10}$/.test(candidate) ? candidate : '';
+  }
+
+  function rememberMeasurementIdentifier(value) {
+    const identifier = measurementIdentifierCandidate(value);
+    if (!identifier) return '';
+    try { GM_setValue(MEASUREMENT_LAST_IDENTIFIER_KEY, identifier); } catch {}
+    return identifier;
+  }
+
+  function readMeasurementIdentifier() {
+    try { return measurementIdentifierCandidate(GM_getValue(MEASUREMENT_LAST_IDENTIFIER_KEY, '')); } catch { return ''; }
+  }
+
+  function readMeasurementBridgeAttemptAt() {
+    try { return Number(GM_getValue(MEASUREMENT_BRIDGE_ATTEMPT_KEY, 0)) || 0; } catch { return 0; }
+  }
+
+  function markMeasurementBridgeAttempt() {
+    const at = Date.now();
+    try { GM_setValue(MEASUREMENT_BRIDGE_ATTEMPT_KEY, at); } catch {}
+    return at;
+  }
+
+  function measurementBridgeUrl(identifier) {
+    const url = new URL(`https://${MEASUREMENT_SITE_HOST}/item/${encodeURIComponent(identifier)}`);
+    url.searchParams.set('fcrMadcatBridge', '1');
+    url.searchParams.set('fcrMadcatAuto', '1');
+    return url.href;
+  }
+
+  function gestureMeasurementIdentifier(target) {
+    const direct = measurementIdentifierCandidate(target?.value || target?.getAttribute?.('value') || '');
+    if (direct) return direct;
+    const search = measurementIdentifierCandidate(new URLSearchParams(location.search).get('s') || '');
+    if (search) return search;
+    return readMeasurementIdentifier();
+  }
+
+  function measurementAuthStatus() {
+    const auth = readMeasurementAuth();
+    const lastAttempt = readMeasurementBridgeAttemptAt();
+    const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
+    return {
+      available: !!auth,
+      expiresAt: Number(auth?.exp) || 0,
+      expiresInMs: auth ? Math.max(0, auth.exp - Date.now()) : 0,
+      renewSoon: !auth || auth.exp - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
+      bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
+    };
+  }
+
+  function installMeasurementAutoRenewal() {
+    if (window.__fcrMeasurementAutoRenewal_v1) return;
+    window.__fcrMeasurementAutoRenewal_v1 = true;
+
+    const maybeOpen = event => {
+      if (!event?.isTrusted) return;
+      if (event.type === 'keydown' && event.key !== 'Enter') return;
+      if (event.type === 'click' && event.target?.closest?.('.fc-madcat-badge,.madcat-pill')) return;
+
+      const auth = readMeasurementAuth();
+      if (auth && auth.exp - Date.now() > MEASUREMENT_RENEW_BEFORE_MS) return;
+
+      const lastAttempt = readMeasurementBridgeAttemptAt();
+      if (lastAttempt && Date.now() - lastAttempt < MEASUREMENT_BRIDGE_COOLDOWN_MS) return;
+
+      const identifier = gestureMeasurementIdentifier(event.target);
+      if (!identifier) return;
+      rememberMeasurementIdentifier(identifier);
+      markMeasurementBridgeAttempt();
+
+      let bridge = null;
+      try {
+        bridge = window.open(measurementBridgeUrl(identifier), 'fcrMadcatBridge', 'popup,width=560,height=680');
+      } catch {}
+      if (bridge) {
+        stats.madcatAutoBridge++;
+        recordUsage('madcat.auth.auto-bridge');
+      } else {
+        stats.madcatAutoBridgeBlocked++;
+        recordUsage('madcat.auth.auto-bridge-blocked');
+      }
+    };
+
+    document.addEventListener('keydown', maybeOpen, true);
+    document.addEventListener('click', maybeOpen, true);
+  }
+
+  async function waitForMeasurementAuth(timeoutMs = MEASUREMENT_BRIDGE_WAIT_MS) {
+    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+    let auth = readMeasurementAuth();
+    if (auth) return auth;
+    stats.madcatAuthWaits++;
+    while (!auth && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      auth = readMeasurementAuth();
+    }
+    return auth;
+  }
+
+  installMeasurementAutoRenewal();
 
   function decodeJwtPayload(token) {
     try {
@@ -159,6 +272,7 @@
       }
       if (bridgeLaunch && !keepaliveLaunch && !closeTimer) {
         closeTimer = setTimeout(() => {
+          try { pageWindow.opener?.focus?.(); } catch {}
           try { pageWindow.close(); } catch {}
         }, 700);
       }
@@ -1177,19 +1291,21 @@
     });
   }
 
-  async function fallbackMadcatToInventoryHistory(fnsku, force = false, reason = 'measurement-auth') {
+  async function fallbackMadcatToInventoryHistory(identifier, force = false, reason = 'measurement-auth') {
     stats.madcatHistoryFallback++;
     recordUsage('madcat.fallback.inventory-history');
-    const result = await fetchHistory(fnsku, force);
+    const result = await fetchHistory(identifier, force);
     const history = result?.history || { rows: 0, madcat: false };
     return {
       madcat: history.madcat === true,
       eventsChecked: 0,
       pages: 0,
       source: 'history-fallback',
+      madcatSource: 'history',
       windowDays: null,
       fallback: 'inventory-history',
       fallbackReason: reason,
+      authRequired: true,
       historyRows: Number(history.rows) || 0
     };
   }
@@ -1300,6 +1416,7 @@
     const identifier = fnsku || asin;
     const identifierType = fnsku ? 'FNSKU' : 'ASIN';
     if (!identifier) throw new Error('Measurement item unavailable');
+    rememberMeasurementIdentifier(identifier);
 
     if (!force) {
       const cached = readMadcatCache(identifierType, identifier);
@@ -1310,7 +1427,15 @@
       }
     }
 
-    const auth = readMeasurementAuth();
+    let auth = readMeasurementAuth();
+    if (!auth) {
+      const lastAttempt = readMeasurementBridgeAttemptAt();
+      const recentAttempt = lastAttempt && Date.now() - lastAttempt <= MEASUREMENT_BRIDGE_WAIT_MS + 1500;
+      const requestedWait = Math.max(0, Number(input?.waitForAuthMs) || 0);
+      if (recentAttempt || requestedWait) {
+        auth = await waitForMeasurementAuth(requestedWait || MEASUREMENT_BRIDGE_WAIT_MS);
+      }
+    }
     if (!auth) {
       stats.madcatAuthRequired++;
       return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-login-required');
@@ -1321,15 +1446,14 @@
       stats.dedupeHits++;
       try {
         const data = await inFlight.get(key);
-        return { ...data, source: 'dedupe' };
+        return { ...data, deduped: true };
       } catch (error) {
         const message = clean(error?.message || error || 'Measurement request failed');
-        if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
-        return fallbackMadcatToInventoryHistory(
-          identifier,
-          force,
-          /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed'
-        );
+        if (/measurement login required/i.test(message)) {
+          stats.madcatAuthRequired++;
+          return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-token-expired');
+        }
+        throw error;
       }
     }
 
@@ -1366,14 +1490,32 @@
           return Number.isFinite(instant) && instant >= after.getTime() && instant <= before.getTime();
         });
         if (hasRecentMadcat) {
-          return { madcat: true, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
+          return {
+            madcat: true,
+            eventsChecked,
+            pages,
+            source: 'network',
+            madcatSource: 'raw',
+            windowDays: 30,
+            identifierType,
+            authExpiresAt: auth.exp
+          };
         }
 
         nextToken = clean(payload.nextToken);
       } while (nextToken && pages < MEASUREMENT_MAX_PAGES);
 
       if (nextToken) throw new Error('Measurement history incomplete');
-      return { madcat: false, eventsChecked, pages, source: 'network', windowDays: 30, identifierType };
+      return {
+        madcat: false,
+        eventsChecked,
+        pages,
+        source: 'network',
+        madcatSource: 'raw',
+        windowDays: 30,
+        identifierType,
+        authExpiresAt: auth.exp
+      };
     })();
 
     inFlight.set(key, work);
@@ -1383,12 +1525,11 @@
       return result;
     } catch (error) {
       const message = clean(error?.message || error || 'Measurement request failed');
-      if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
-      return await fallbackMadcatToInventoryHistory(
-        identifier,
-        force,
-        /measurement login required/i.test(message) ? 'measurement-token-expired' : 'measurement-request-failed'
-      );
+      if (/measurement login required/i.test(message)) {
+        stats.madcatAuthRequired++;
+        return await fallbackMadcatToInventoryHistory(identifier, force, 'measurement-token-expired');
+      }
+      throw error;
     } finally {
       if (inFlight.get(key) === work) inFlight.delete(key);
     }
@@ -1549,11 +1690,12 @@
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
       else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);
+      else if (type === 'madcatAuthStatus') data = measurementAuthStatus();
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
