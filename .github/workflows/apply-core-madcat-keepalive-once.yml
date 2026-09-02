@@ -1,164 +1,53 @@
-name: Apply MADCAT session keepalive once
+name: Apply Core MADCAT keepalive
 
 on:
   push:
     paths:
-      - '.github/workflows/apply-core-madcat-keepalive-once.yml'
+      - .github/workflows/apply-core-madcat-keepalive-once.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Patch Core keepalive and sync work-laptop pack
+      - name: Patch and publish Core
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-
-          grep -q '@version      0.2.14' FCR_Data_Core.user.js
-          grep -q "const VERSION = '0.2.14';" FCR_Data_Core.user.js
-
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('FCR_Data_Core.user.js')
-          text = path.read_text()
-
-          def once(old, new, label):
-              global text
-              n = text.count(old)
-              if n != 1:
-                  raise SystemExit(f'{label}: expected 1 match, found {n}')
-              text = text.replace(old, new, 1)
-
-          once('// @name         TEST v0.2.14 FCR Data Core — MADCAT Auth Fallback',
-               '// @name         TEST v0.2.15 FCR Data Core — MADCAT Session Keepalive', 'name')
-          once('// @version      0.2.14', '// @version      0.2.15', 'metadata version')
-          once('// @description  Strict exact-item binDescription plus 30-day raw MADCAT with automatic Inventory History fallback when measurement auth is unavailable.',
-               '// @description  Strict binDescription plus 30-day raw MADCAT with Item Measurement session keepalive and automatic Inventory History fallback.', 'description')
-          once("const VERSION = '0.2.14';", "const VERSION = '0.2.15';", 'runtime version')
-
-          old = """    const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
-    const bridgeLaunch = new URLSearchParams(location.search).get('fcrMadcatBridge') === '1';
-    let closeTimer = 0;
-"""
-          new = """    const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
-    const params = new URLSearchParams(location.search);
-    const bridgeLaunch = params.get('fcrMadcatBridge') === '1';
-    const keepaliveLaunch = params.get('fcrMadcatKeepalive') === '1';
-    let closeTimer = 0;
-    let keepaliveTimer = 0;
-"""
-          once(old, new, 'bridge flags')
-
-          old = """      try {
-        GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt: Date.now() }));
-      } catch {
-        return false;
-      }
-      if (bridgeLaunch && !closeTimer) {
-        closeTimer = setTimeout(() => {
-          try { pageWindow.close(); } catch {}
-        }, 700);
-      }
-      return true;
-"""
-          new = """      try {
-        GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt: Date.now() }));
-      } catch {
-        return false;
-      }
-      if (keepaliveLaunch) {
-        clearTimeout(keepaliveTimer);
-        const untilExpiry = Math.max(0, pack.exp - Date.now());
-        const refreshIn = Math.max(5 * 60 * 1000, Math.min(45 * 60 * 1000, untilExpiry - 10 * 60 * 1000));
-        keepaliveTimer = setTimeout(() => {
-          try { location.reload(); } catch {}
-        }, refreshIn);
-      }
-      if (bridgeLaunch && !keepaliveLaunch && !closeTimer) {
-        closeTimer = setTimeout(() => {
-          try { pageWindow.close(); } catch {}
-        }, 700);
-      }
-      return true;
-"""
-          once(old, new, 'keepalive schedule')
-
-          old = """    for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
-      try {
-        for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
-      } catch {}
-    }
-"""
-          new = """    const inspectStores = () => {
-      for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
-        try {
-          for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
-        } catch {}
-      }
-    };
-    inspectStores();
-    if (keepaliveLaunch) setInterval(inspectStores, 5000);
-"""
-          once(old, new, 'storage polling')
-
-          path.write_text(text)
-
-          readme = Path('README.md')
-          r = readme.read_text()
-          if '| FCR Data Core | 0.2.14 |' in r:
-              r = r.replace('| FCR Data Core | 0.2.14 |', '| FCR Data Core | 0.2.15 |', 1)
-          elif '| FCR Data Core | 0.2.13 |' in r:
-              r = r.replace('| FCR Data Core | 0.2.13 |', '| FCR Data Core | 0.2.15 |', 1)
-          else:
-              raise SystemExit('README Core version row not found')
-          readme.write_text(r)
-          PY
-
+          python .github/apply_core_madcat_keepalive_once.py FCR_Data_Core.user.js README.md
           node --check FCR_Data_Core.user.js
           grep -q '@version      0.2.15' FCR_Data_Core.user.js
           grep -q 'fcrMadcatKeepalive' FCR_Data_Core.user.js
-          grep -q 'setInterval(inspectStores, 5000)' FCR_Data_Core.user.js
           grep -q 'history-fallback-auth' FCR_Data_Core.user.js
           git diff --check
-
-          git rm .github/workflows/apply-core-madcat-keepalive-once.yml
+          git rm .github/workflows/apply-core-madcat-keepalive-once.yml .github/apply_core_madcat_keepalive_once.py
           git add FCR_Data_Core.user.js README.md
           git diff --cached --check
           git commit -m "feat(core): keep Item Measurement MADCAT auth warm"
           git push origin HEAD:main
 
-          git fetch origin work-laptop-pack
+      - name: Sync work-laptop pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main work-laptop-pack
           worktree="$(mktemp -d)"
           git worktree add -b core-keepalive-pack "$worktree" origin/work-laptop-pack
-          cp FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
+          git show origin/main:FCR_Data_Core.user.js > "$worktree/03_FCR_Data_Core.txt"
           cp "$worktree/03_FCR_Data_Core.txt" /tmp/fcr-core-check.js
           node --check /tmp/fcr-core-check.js
-
-          PACK="$worktree/WORK_LAPTOP_INSTALL.txt" python - <<'PY'
-          import os
-          from pathlib import Path
-          p = Path(os.environ['PACK'])
-          s = p.read_text()
-          old = '03 FCR Data Core v0.2.14'
-          if old not in s:
-              raise SystemExit('pack manifest Core row not found')
-          p.write_text(s.replace(old, '03 FCR Data Core v0.2.15', 1))
-          PY
-
+          sed -i 's/^03 FCR Data Core v0\.2\.14$/03 FCR Data Core v0.2.15/' "$worktree/WORK_LAPTOP_INSTALL.txt"
           grep -q '@version      0.2.15' "$worktree/03_FCR_Data_Core.txt"
-          grep -q 'fcrMadcatKeepalive' "$worktree/03_FCR_Data_Core.txt"
+          grep -q '^03 FCR Data Core v0.2.15$' "$worktree/WORK_LAPTOP_INSTALL.txt"
           git -C "$worktree" diff --check
           git -C "$worktree" config user.name "github-actions[bot]"
           git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
