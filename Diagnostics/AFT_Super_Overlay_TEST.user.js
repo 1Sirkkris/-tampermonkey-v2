@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         TEST v0.2.0 AFT Super Overlay
-// @name:en      TEST v0.2.0 AFT Super Overlay
+// @name         TEST v0.3.0 AFT Super Overlay
+// @name:en      TEST v0.3.0 AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.0
-// @description  TEST: adaptive Edit/Move launcher using AFT's native mode selector. Does not submit inventory actions.
+// @version      0.3.0
+// @description  TEST: adaptive Edit/Move mode switcher using AFT's native selector. Mode buttons switch immediately; no inventory actions are submitted.
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @run-at       document-start
@@ -19,7 +19,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
@@ -117,9 +117,22 @@
     if (!document.body) return '';
     const copy = document.body.cloneNode(true);
     copy.querySelectorAll(`#${ROOT_ID},.aftm`).forEach(el => el.remove());
-    const text = norm(copy.innerText || copy.textContent || '');
-    const match = text.match(/\bMode\s*:\s*(Datelot|Each|Sku|Multi|Container|LPN)\b/i);
+    const text = norm(copy.textContent || '');
+    const match = text.match(/\bMode\s*:\s*(Datelot|Container|Multi|Each|Sku|LPN)/i);
     return match ? low(match[1]) : '';
+  }
+
+  function activeModeKey() {
+    if (isMoveContainer()) return 'move:moveapp';
+    if (!isAftQt()) return '';
+    if (location.pathname.toLowerCase().startsWith('/app/fcskuflip')) return 'edit:fcsku';
+    const native = currentNativeMode();
+    if (!native) return '';
+    if (location.pathname.toLowerCase().startsWith('/app/edititems')) {
+      return `edit:${native === 'datelot' ? 'date' : native}`;
+    }
+    if (location.pathname.toLowerCase().startsWith('/app/moveitems')) return `move:${native}`;
+    return '';
   }
 
   function setStatus(message, kind = '') {
@@ -263,10 +276,7 @@
     }
 
     const init = { key: 'c', code: 'KeyC', keyCode: 67, which: 67, bubbles: true, cancelable: true };
-    document.dispatchEvent(new KeyboardEvent('keydown', init));
-    document.dispatchEvent(new KeyboardEvent('keyup', init));
-    window.dispatchEvent(new KeyboardEvent('keydown', init));
-    window.dispatchEvent(new KeyboardEvent('keyup', init));
+    ['keydown', 'keypress', 'keyup'].forEach(type => document.dispatchEvent(new KeyboardEvent(type, init)));
     setStatus(`Switch requested • if AFT stays here, press C once`, 'warn');
   }
 
@@ -276,25 +286,38 @@
     saveState();
   }
 
+  function confirmActiveMode(definition) {
+    const [area, mode] = modeKeyForDefinition(definition).split(':');
+    state.area = area;
+    if (area === 'edit') state.editMode = mode;
+    else state.moveMode = mode;
+    clearPending();
+    render();
+    setStatus(`${definition.title} active`, 'ok');
+  }
+
+  function modeKeyForDefinition(definition) {
+    return Object.keys(DEFINITIONS).find(key => DEFINITIONS[key] === definition) || '';
+  }
+
   function attemptNativeMode(definition, attempt = 0) {
     clearTimeout(nativeTimer);
 
     if (!definition || !currentRouteMatches(definition)) return;
     if (!definition.nativeMode) {
-      clearPending();
-      setStatus(`${definition.title} ready`, 'ok');
+      confirmActiveMode(definition);
       return;
     }
 
     const current = currentNativeMode();
     if (current === definition.nativeMode) {
-      clearPending();
-      setStatus(`${definition.title} active`, 'ok');
+      confirmActiveMode(definition);
       return;
     }
 
     if (current && current !== definition.nativeMode) {
       requestNativeChangeMode(definition);
+      if (attempt < 24) nativeTimer = setTimeout(() => attemptNativeMode(definition, attempt + 1), 500);
       return;
     }
 
@@ -334,6 +357,7 @@
     state.pendingMode = modeKey();
     state.pendingAt = Date.now();
     saveState();
+    render();
 
     if (currentRouteMatches(definition)) {
       attemptNativeMode(definition);
@@ -353,8 +377,26 @@
     }).join('');
   }
 
+  function makeModeButtons(area, values, labelMap) {
+    const active = activeModeKey();
+    const pending = state.pendingMode;
+    return values.map(value => {
+      const key = `${area}:${value}`;
+      const isActive = key === active;
+      const isPending = key === pending && !isActive;
+      const label = labelMap[value] || value;
+      return `<button type="button" class="aso-choice" data-${area}-mode="${value}" data-active="${isActive ? '1' : '0'}" data-pending="${isPending ? '1' : '0'}" aria-pressed="${isActive ? 'true' : 'false'}">${isActive ? '✓ ' : isPending ? '… ' : ''}${label}</button>`;
+    }).join('');
+  }
+
   function adaptiveHtml() {
     const mode = modeKey();
+    const active = activeModeKey();
+
+    if (active !== mode) {
+      const requested = DEFINITIONS[state.pendingMode];
+      return `<div class="aso-note">${requested ? `SWITCHING TO ${requested.title.toUpperCase()}…` : 'Select a mode to switch AFT.'}</div>`;
+    }
 
     if (mode === 'edit:each') {
       const showDisposition = state.eachState === 'Unsellable';
@@ -449,11 +491,10 @@
         </div>
         <div class="aso-mode-tabs">
           ${state.area === 'edit'
-            ? makeChoiceButtons(['each', 'sku', 'date', 'fcsku'], state.editMode, 'edit-mode', { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
-            : makeChoiceButtons(['each', 'multi', 'container', 'lpn', 'moveapp'], state.moveMode, 'move-mode', { each: 'EACH', multi: 'MULTI', container: 'CONTAINER', lpn: 'LPN', moveapp: 'MOVE APP' })}
+            ? makeModeButtons('edit', ['each', 'sku', 'date', 'fcsku'], { each: 'EACH', sku: 'SKU', date: 'DATE', fcsku: 'FCSKU' })
+            : makeModeButtons('move', ['each', 'multi', 'container', 'lpn', 'moveapp'], { each: 'EACH', multi: 'MULTI', container: 'CONTAINER', lpn: 'LPN', moveapp: 'MOVE APP' })}
         </div>
         <div class="aso-adaptive">${adaptiveHtml()}</div>
-        <button type="button" class="aso-open" data-open>OPEN ${selectedDefinition()?.title.toUpperCase() || 'MODE'}</button>
         <div class="aso-status" data-status>Selection ready</div>
         <div class="aso-safety">TEST controller only • existing helpers perform the work</div>
       </div>`;
@@ -469,6 +510,15 @@
     saveState();
     syncStableHelperSettings();
     render();
+  }
+
+  function chooseMode(area, mode) {
+    state.area = area;
+    if (area === 'edit') state.editMode = mode;
+    else state.moveMode = mode;
+    saveState();
+    render();
+    openSelected();
   }
 
   function normalizeRules() {
@@ -504,10 +554,10 @@
       button.onclick = () => choose('area', button.dataset.area);
     });
     root.querySelectorAll('[data-edit-mode]').forEach(button => {
-      button.onclick = () => choose('editMode', button.dataset.editMode);
+      button.onclick = () => chooseMode('edit', button.dataset.editMode);
     });
     root.querySelectorAll('[data-move-mode]').forEach(button => {
-      button.onclick = () => choose('moveMode', button.dataset.moveMode);
+      button.onclick = () => chooseMode('move', button.dataset.moveMode);
     });
     root.querySelectorAll('[data-each-state]').forEach(button => {
       button.onclick = () => choose('eachState', button.dataset.eachState);
@@ -540,7 +590,6 @@
       };
     }
 
-    root.querySelector('[data-open]').onclick = openSelected;
   }
 
   function paintCurrentStatus() {
@@ -583,7 +632,7 @@
       #${ROOT_ID} .aso-label{font-size:11px;font-weight:900;color:#3a4e56}#${ROOT_ID} .aso-grid{display:grid;gap:6px}#${ROOT_ID} .aso-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}#${ROOT_ID} .aso-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
       #${ROOT_ID} .aso-qty-grid{grid-template-columns:72px 72px minmax(0,1fr)}#${ROOT_ID} input{width:100%;min-width:0;padding:7px;border:1px solid #91a1a8;border-radius:6px;background:#fff;color:#1e2b31;font-weight:800;text-align:center}
       #${ROOT_ID} .aso-note{padding:9px;border:1px solid #c4d0d4;border-radius:6px;background:#fff;color:#52636a}
-      #${ROOT_ID} .aso-open{width:100%;padding:9px;border:0;border-radius:6px;background:#146eb4;color:#fff}
+      #${ROOT_ID} button[data-pending="1"]{background:#dce9f5;color:#174f7a;border-color:#4380ad}
       #${ROOT_ID} .aso-status{min-height:28px;padding:6px 8px;border:1px solid #c4d0d4;border-radius:6px;background:#e8f2f5;font-weight:800}#${ROOT_ID} .aso-status[data-kind="ok"]{border-color:#35836f;background:#dcefe8;color:#164d41}#${ROOT_ID} .aso-status[data-kind="warn"]{border-color:#d38a19;background:#fff0cf;color:#5c3a00}
       #${ROOT_ID} .aso-safety{text-align:center;color:#66767c;font-size:10px}
       @media(max-width:560px){#${ROOT_ID}{top:10px}#${ROOT_ID} .aso-grid-3{grid-template-columns:1fr}#${ROOT_ID} .aso-mode-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -598,12 +647,22 @@
     syncStableHelperSettings();
     injectStyle();
 
+    const pendingFresh = state.pendingMode && Date.now() - Number(state.pendingAt || 0) <= PENDING_MAX_AGE_MS;
+    if (!pendingFresh) {
+      const active = activeModeKey();
+      if (active) {
+        const [area, mode] = active.split(':');
+        state.area = area;
+        if (area === 'edit') state.editMode = mode;
+        else state.moveMode = mode;
+      }
+    }
+
     root = document.createElement('section');
     root.id = ROOT_ID;
     document.body.appendChild(root);
     render();
 
-    const pendingFresh = state.pendingMode && Date.now() - Number(state.pendingAt || 0) <= PENDING_MAX_AGE_MS;
     if (pendingFresh) {
       const definition = DEFINITIONS[state.pendingMode];
       if (definition && currentRouteMatches(definition)) attemptNativeMode(definition);

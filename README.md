@@ -27,7 +27,7 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 
 | Script | Version | Purpose | Install/update |
 | --- | --- | --- | --- |
-| AFT Super Overlay | 0.2.0 | One-tab adaptive Edit/Move launcher using AFT's native selector. MoveItems Each, Multi, Container and LPN are distinct from the separate MoveContainer app; no inventory actions are submitted. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_Super_Overlay_TEST.user.js) |
+| AFT Super Overlay | 0.3.0 | Immediate adaptive Edit/Move mode switcher using AFT's native selector. Checkmarks reflect AFT's confirmed mode; MoveItems modes remain distinct from the separate MoveContainer app. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_Super_Overlay_TEST.user.js) |
 | AFT UI State Logger | 0.1.1 | Read-only same-tab trace for AFT mode switches, DOM states, form actions, XHR/fetch results and errors. Visible MARK, COPY LOG, DOWNLOAD and CLEAR controls. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_UI_State_Logger_TEST.user.js) |
 | Amazon AU ASIN Variation Finder | 0.1.1-test | Right-click current Amazon inline/classic variation swatches and reveal matching child ASINs from the loaded page, including unavailable options when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
 | FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
