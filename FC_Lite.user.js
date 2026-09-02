@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.63 FC-Lite — MADCAT Identifier Fix
+// @name        TEST v0.1.64 FC-Lite — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.63
+// @version      0.1.64
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.63';
+  const VERSION = '0.1.64';
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
@@ -671,9 +671,10 @@
     const cell = row.querySelector('.madcat');
     if (!cell) return;
 
-    const value = ['yes', 'no', 'error', 'checking'].includes(state) ? state : 'error';
+    const allowed = new Set(['yes', 'no', 'history-yes', 'history-no', 'auth', 'error', 'checking']);
+    const value = allowed.has(state) ? state : 'error';
     cell.classList.toggle('yes', value === 'yes');
-    cell.classList.toggle('no', value === 'no');
+    cell.classList.toggle('no', value === 'no' || value === 'history-no');
     cell.classList.toggle('error', value === 'error');
 
     const button = document.createElement('button');
@@ -681,18 +682,29 @@
     button.className = `madcat-pill ${value}`;
     button.textContent = value === 'yes' ? 'YES'
       : value === 'no' ? 'NO'
-      : value === 'checking' ? 'CHECK…'
-      : 'ERROR ↻';
-    button.disabled = value !== 'error';
-    button.title = value === 'error'
-      ? `${message || 'MADCAT check failed'} — click to retry`
-      : value === 'yes'
-        ? 'Raw MADCAT measurement found within the past 30 days'
-        : value === 'no'
-          ? 'No raw MADCAT measurement found within the past 30 days'
-          : 'Checking raw MADCAT measurements from the past 30 days';
+        : value === 'history-yes' ? 'YES'
+          : value === 'history-no' ? 'NO?'
+            : value === 'auth' ? 'AUTH'
+              : value === 'checking' ? 'CHECK…'
+                : 'ERROR ↻';
 
-    if (value === 'error') {
+    const retryable = value === 'history-yes' || value === 'history-no' || value === 'error';
+    button.disabled = !retryable;
+    button.title = value === 'yes'
+      ? 'RAW Item Measurement: MADCAT found within the past 30 days'
+      : value === 'no'
+        ? 'RAW Item Measurement: no MADCAT found within the past 30 days'
+        : value === 'history-yes'
+          ? 'Inventory History fallback: MADCAT found — click to refresh RAW auth'
+          : value === 'history-no'
+            ? 'Inventory History fallback only — click to refresh RAW auth and confirm'
+            : value === 'auth'
+              ? 'Refreshing Item Measurement authentication…'
+              : value === 'error'
+                ? `${message || 'MADCAT check failed'} — click to refresh auth and retry`
+                : 'Checking global raw MADCAT measurements from the past 30 days';
+
+    if (retryable) {
       button.addEventListener('click', () => {
         const fnsku = clean(row._fcratcMadcatFnsku);
         const asin = clean(row._fcratcMadcatAsin);
@@ -704,9 +716,10 @@
     cell.replaceChildren(button);
   }
 
-  function measurementBridgeUrl(fnsku) {
-    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/${encodeURIComponent(clean(fnsku))}`);
+  function measurementBridgeUrl(identifier) {
+    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/${encodeURIComponent(clean(identifier))}`);
     url.searchParams.set('fcrMadcatBridge', '1');
+    url.searchParams.set('fcrMadcatAuto', '1');
     return url.href;
   }
 
@@ -719,38 +732,43 @@
     row._fcratcMadcatAsin = asin;
     const checkSerial = (Number(row._fcratcMadcatCheckSerial) || 0) + 1;
     row._fcratcMadcatCheckSerial = checkSerial;
-    paintMadcat(row, 'checking');
+    paintMadcat(row, openLoginBridge ? 'auth' : 'checking');
 
     if (!measurementId) {
       paintMadcat(row, 'error', 'Measurement item unavailable');
       return;
     }
 
+    let bridge = null;
     if (openLoginBridge) {
-      const bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=560,height=680');
       if (!bridge) {
         paintMadcat(row, 'error', 'Measurement login popup blocked');
         return;
       }
+    } else {
+      try {
+        const auth = await coreRequest('madcatAuthStatus', {}, 1200);
+        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
+        if (!auth?.available && auth?.bridgeRecent) paintMadcat(row, 'auth');
+      } catch {}
     }
 
-    const started = Date.now();
-    while (row.isConnected && row._fcratcMadcatCheckSerial === checkSerial) {
-      try {
-        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);
-        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
-        paintMadcat(row, result?.madcat === true ? 'yes' : 'no');
-        return;
-      } catch (error) {
-        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
-        const message = clean(error?.message || 'MADCAT check failed');
-        if (openLoginBridge && /login required/i.test(message) && Date.now() - started < 15_000) {
-          await new Promise(resolve => setTimeout(resolve, 600));
-          continue;
-        }
-        paintMadcat(row, 'error', message);
-        return;
-      }
+    try {
+      const result = await coreRequest('madcatRecent', {
+        fnsku,
+        asin,
+        force,
+        waitForAuthMs: bridge ? 6500 : 0
+      }, 25000);
+      if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
+      const history = result?.madcatSource === 'history' || result?.fallback === 'inventory-history';
+      paintMadcat(row, history
+        ? (result?.madcat === true ? 'history-yes' : 'history-no')
+        : (result?.madcat === true ? 'yes' : 'no'), clean(result?.fallbackReason || ''));
+    } catch (error) {
+      if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
+      paintMadcat(row, 'error', clean(error?.message || 'MADCAT check failed'));
     }
   }
 
@@ -1392,10 +1410,15 @@
         font-size:9px;
         font-family:inherit;
       }
-      .madcat-pill.yes { border-color:#a16207; background:#fde047; color:#422006; }
-      .madcat-pill.no { border-color:#991b1b; background:#ef4444; color:#111827; }
+      .madcat-pill.yes { border-color:#15803d; background:#16a34a; color:#fff; }
+      .madcat-pill.no,.madcat-pill.history-no { border-color:#991b1b; background:#ef4444; color:#111827; }
+      .madcat-pill.history-yes { border-color:#1d4ed8; background:#2563eb; color:#fff; cursor:pointer; }
+      .madcat-pill.history-no { cursor:pointer; }
+      .madcat-pill.auth { border-color:#ca8a04; background:#facc15; color:#111827; cursor:wait; }
       .madcat-pill.checking { border-color:#64748b; background:#e2e8f0; color:#334155; }
       .madcat-pill.error { border-color:#111827; background:#334155; color:#fff; cursor:pointer; }
+      .madcat-pill.history-yes:hover { background:#1d4ed8; }
+      .madcat-pill.history-no:hover { background:#dc2626; }
       .madcat-pill.error:hover { background:#0f172a; }
       .madcat-pill:disabled { cursor:default; opacity:1; }
 

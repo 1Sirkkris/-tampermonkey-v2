@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.25 FCResearch Master — Bin Input Fix
+// @name         TEST v0.1.26 FCResearch Master — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.25
+// @version      0.1.26
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,7 +21,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.25';
+  const VERSION = '0.1.26';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -363,10 +363,15 @@
       .fc-hazmat.fc-river-l0[aria-busy="true"] { cursor:wait; opacity:.72; }
       .fc-badge { margin-left:6px; user-select:none; pointer-events:none; }
       .fc-madcat-badge { margin-left:8px; border:0; user-select:none; }
-      .fcrm-madcat-yes { background:#ffff00; }
-      .fcrm-madcat-no { background:#ff0000; }
+      .fcrm-madcat-yes { background:#16a34a; color:#fff; }
+      .fcrm-madcat-no,.fcrm-madcat-history-no { background:#ef4444; color:#111827; }
+      .fcrm-madcat-history-yes { background:#2563eb; color:#fff; cursor:pointer; }
+      .fcrm-madcat-history-no { cursor:pointer; }
+      .fcrm-madcat-auth { background:#facc15; color:#111827; cursor:wait; }
       .fcrm-madcat-loading { background:#d9d9d9; }
       .fcrm-madcat-error { background:#334155; color:#fff; cursor:pointer; }
+      .fcrm-madcat-history-yes:hover { background:#1d4ed8; }
+      .fcrm-madcat-history-no:hover { background:#dc2626; }
       .fcrm-madcat-error:hover { background:#0f172a; }
       .fc-madcat-badge:disabled { opacity:1; cursor:default; }
       .fc-size-badge { margin-left:6px; border:1px solid #0284c7; background:#bae6fd; color:#082f49; cursor:pointer; user-select:none; }
@@ -777,18 +782,28 @@
   function paintMadcat(panel, status, message = '') {
     const badge = ensureMadcatBadge(panel);
     if (!badge) return;
-    const state = ['yes', 'no', 'error'].includes(status) ? status : 'loading';
+    const allowed = new Set(['yes', 'no', 'history-yes', 'history-no', 'auth', 'error']);
+    const state = allowed.has(status) ? status : 'loading';
     badge.className = `fc-madcat-badge fcrm-madcat-${state}`;
     badge.textContent = state === 'yes' ? 'Madcat: YES'
       : state === 'no' ? 'Madcat: NO'
-        : state === 'error' ? 'Madcat: ERROR ↻'
-          : 'Madcat: CHECK…';
-    badge.disabled = state !== 'error';
-    badge.title = state === 'yes' ? 'Raw MADCAT measurement found within the past 30 days'
-      : state === 'no' ? 'No raw MADCAT measurement found within the past 30 days'
-        : state === 'error' ? `${message || 'MADCAT check failed'} — click to retry`
-          : 'Checking raw MADCAT measurements from the past 30 days';
-    badge.onclick = state === 'error' ? () => {
+        : state === 'history-yes' ? 'Madcat: YES'
+          : state === 'history-no' ? 'Madcat: NO?'
+            : state === 'auth' ? 'Madcat: AUTH…'
+              : state === 'error' ? 'Madcat: ERROR ↻'
+                : 'Madcat: CHECK…';
+
+    const retryable = state === 'history-yes' || state === 'history-no' || state === 'error';
+    badge.disabled = !retryable;
+    badge.title = state === 'yes' ? 'RAW Item Measurement: MADCAT found within the past 30 days'
+      : state === 'no' ? 'RAW Item Measurement: no MADCAT found within the past 30 days'
+        : state === 'history-yes' ? 'Inventory History fallback: MADCAT found — click to refresh RAW auth'
+          : state === 'history-no' ? 'Inventory History fallback only — click to refresh RAW auth and confirm'
+            : state === 'auth' ? 'Refreshing Item Measurement authentication…'
+              : state === 'error' ? `${message || 'MADCAT check failed'} — click to refresh auth and retry`
+                : 'Checking global raw MADCAT measurements from the past 30 days';
+
+    badge.onclick = retryable ? () => {
       const current = readProductPanel();
       if (!current) return;
       checkMadcat(current, true, true);
@@ -798,6 +813,7 @@
   function measurementBridgeUrl(identifier) {
     const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(identifier)}`);
     url.searchParams.set('fcrMadcatBridge', '1');
+    url.searchParams.set('fcrMadcatAuto', '1');
     return url.href;
   }
 
@@ -815,9 +831,9 @@
 
     const serial = ++madcatState.serial;
     madcatState.signature = signature;
-    madcatState.status = 'loading';
+    madcatState.status = openLoginBridge ? 'auth' : 'loading';
     madcatState.message = '';
-    paintMadcat(panel, 'loading');
+    paintMadcat(panel, madcatState.status);
 
     if (!measurementId) {
       madcatState.status = 'error';
@@ -828,38 +844,45 @@
 
     let bridge = null;
     if (openLoginBridge) {
-      bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=560,height=680');
       if (!bridge) {
         madcatState.status = 'error';
         madcatState.message = 'Measurement login popup blocked';
         paintMadcat(panel, 'error', madcatState.message);
         return;
       }
+    } else {
+      try {
+        const auth = await coreRequest('madcatAuthStatus', {}, 1200);
+        if (madcatState.serial !== serial || madcatState.signature !== signature) return;
+        if (!auth?.available && auth?.bridgeRecent) {
+          madcatState.status = 'auth';
+          paintMadcat(panel, 'auth');
+        }
+      } catch {}
     }
 
-    const deadline = Date.now() + (bridge ? 15000 : 1);
-    while (madcatState.serial === serial && madcatState.signature === signature) {
-      try {
-        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);
-        if (madcatState.serial !== serial || madcatState.signature !== signature) return;
-        madcatState.status = result?.madcat === true ? 'yes' : 'no';
-        madcatState.message = '';
-        const current = readProductPanel();
-        if (current?.signature === signature) paintMadcat(current, madcatState.status);
-        return;
-      } catch (error) {
-        if (madcatState.serial !== serial || madcatState.signature !== signature) return;
-        const message = clean(error?.message || 'MADCAT check failed');
-        if (bridge && /measurement login required/i.test(message) && Date.now() < deadline) {
-          await sleep(600);
-          continue;
-        }
-        madcatState.status = 'error';
-        madcatState.message = message;
-        const current = readProductPanel();
-        if (current?.signature === signature) paintMadcat(current, 'error', message);
-        return;
-      }
+    try {
+      const result = await coreRequest('madcatRecent', {
+        fnsku,
+        asin,
+        force,
+        waitForAuthMs: bridge ? 6500 : 0
+      }, 25000);
+      if (madcatState.serial !== serial || madcatState.signature !== signature) return;
+      const history = result?.madcatSource === 'history' || result?.fallback === 'inventory-history';
+      madcatState.status = history
+        ? (result?.madcat === true ? 'history-yes' : 'history-no')
+        : (result?.madcat === true ? 'yes' : 'no');
+      madcatState.message = clean(result?.fallbackReason || '');
+      const current = readProductPanel();
+      if (current?.signature === signature) paintMadcat(current, madcatState.status, madcatState.message);
+    } catch (error) {
+      if (madcatState.serial !== serial || madcatState.signature !== signature) return;
+      madcatState.status = 'error';
+      madcatState.message = clean(error?.message || 'MADCAT check failed');
+      const current = readProductPanel();
+      if (current?.signature === signature) paintMadcat(current, 'error', madcatState.message);
     }
   }
 
