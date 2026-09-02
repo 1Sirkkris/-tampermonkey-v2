@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.16 FCR Data Core — MADCAT ASIN/FNSKU Fix
+// @name         TEST v0.2.17 FCR Data Core — MADCAT Shift Cache
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.16
-// @description  Strict binDescription plus 30-day raw MADCAT using FNSKU when available, ASIN otherwise, with automatic Inventory History fallback.
+// @version      0.2.17
+// @description  Strict binDescription plus shift-aware caching for authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -34,7 +34,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.16';
+  const VERSION = '0.2.17';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -52,6 +52,9 @@
   const REQUEST_TIMEOUT_MS = 15000;
   const MEASUREMENT_TIMEOUT_MS = 6000;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+  const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
+  const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
+  const MADCAT_TIME_ZONE = 'Australia/Sydney';
   const MEASUREMENT_MAX_PAGES = 10;
   const MEASUREMENT_API = `https://${MEASUREMENT_API_HOST}/prod/measurementEvents`;
   const INVENTORY_RETRY_DELAYS_MS = [250, 400, 650, 1000, 1500];
@@ -81,6 +84,7 @@
 
   const productMemory = new Map();
   const binMemory = new Map();
+  const madcatMemory = new Map();
   const historyMemory = new Map();
   const hazMemory = new Map();
   const inFlight = new Map();
@@ -93,6 +97,7 @@
     historyNetwork: 0,
     historyCacheHits: 0,
     madcatNetwork: 0,
+    madcatCacheHits: 0,
     madcatAuthRequired: 0,
     madcatHistoryFallback: 0,
     hazNetwork: 0,
@@ -1189,6 +1194,105 @@
     };
   }
 
+  const sydneyClock = new Intl.DateTimeFormat('en-CA', {
+    timeZone: MADCAT_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  });
+
+  function sydneyParts(value) {
+    const parts = {};
+    for (const part of sydneyClock.formatToParts(new Date(value))) {
+      if (part.type !== 'literal') parts[part.type] = Number(part.value);
+    }
+    return parts;
+  }
+
+  function sydneyWallTime(parts, hour = 18) {
+    const target = Date.UTC(parts.year, parts.month - 1, parts.day, hour, 0, 0);
+    let guess = target;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const shown = sydneyParts(guess);
+      const shownUtc = Date.UTC(shown.year, shown.month - 1, shown.day, shown.hour, shown.minute, shown.second);
+      guess += target - shownUtc;
+    }
+    return guess;
+  }
+
+  function nextSydneyShiftCutoff(now = Date.now()) {
+    const today = sydneyParts(now);
+    const todayCutoff = sydneyWallTime(today, 18);
+    if (now < todayCutoff) return todayCutoff;
+    const tomorrow = new Date(Date.UTC(today.year, today.month - 1, today.day + 1));
+    return sydneyWallTime({
+      year: tomorrow.getUTCFullYear(),
+      month: tomorrow.getUTCMonth() + 1,
+      day: tomorrow.getUTCDate()
+    }, 18);
+  }
+
+  const madcatStoragePrefix = `${CACHE_PREFIX}madcat30:`;
+  let madcatLastPrune = 0;
+
+  function pruneMadcatCache(now = Date.now()) {
+    if (now - madcatLastPrune < MADCAT_CACHE_PRUNE_MS) return;
+    madcatLastPrune = now;
+    try {
+      for (let index = sessionStorage.length - 1; index >= 0; index--) {
+        const key = sessionStorage.key(index);
+        if (!key?.startsWith(madcatStoragePrefix)) continue;
+        let expiresAt = 0;
+        try { expiresAt = Number(JSON.parse(sessionStorage.getItem(key) || '{}')?.expiresAt) || 0; } catch {}
+        if (expiresAt <= now) sessionStorage.removeItem(key);
+      }
+    } catch {}
+    for (const [key, entry] of madcatMemory) {
+      if (Number(entry?.expiresAt) <= now) madcatMemory.delete(key);
+    }
+  }
+
+  function madcatCacheKey(identifierType, identifier) {
+    return `${madcatStoragePrefix}${upper(identifierType)}:${upper(identifier)}`;
+  }
+
+  function readMadcatCache(identifierType, identifier) {
+    const now = Date.now();
+    pruneMadcatCache(now);
+    const key = madcatCacheKey(identifierType, identifier);
+    let entry = madcatMemory.get(key) || null;
+    if (!entry) {
+      try { entry = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { entry = null; }
+      if (entry) madcatMemory.set(key, entry);
+    }
+    if (!entry || Number(entry.expiresAt) <= now || typeof entry.result?.madcat !== 'boolean') {
+      madcatMemory.delete(key);
+      try { sessionStorage.removeItem(key); } catch {}
+      return null;
+    }
+    return {
+      ...entry.result,
+      source: 'cache',
+      cachedSource: 'network',
+      cacheExpiresAt: Number(entry.expiresAt)
+    };
+  }
+
+  function writeMadcatCache(identifierType, identifier, result) {
+    if (result?.source !== 'network' || typeof result?.madcat !== 'boolean') return result;
+    const now = Date.now();
+    const expiresAt = result.madcat === true ? nextSydneyShiftCutoff(now) : now + MADCAT_NO_TTL_MS;
+    const key = madcatCacheKey(identifierType, identifier);
+    const entry = { expiresAt, result: { ...result, source: 'network' } };
+    madcatMemory.set(key, entry);
+    try { sessionStorage.setItem(key, JSON.stringify(entry)); } catch {}
+    return result;
+  }
+
   async function fetchRecentMadcat(inputValue, force = false) {
     const input = inputValue && typeof inputValue === 'object' ? inputValue : { fnsku: inputValue };
     const fnsku = upper(input?.fnsku);
@@ -1196,6 +1300,15 @@
     const identifier = fnsku || asin;
     const identifierType = fnsku ? 'FNSKU' : 'ASIN';
     if (!identifier) throw new Error('Measurement item unavailable');
+
+    if (!force) {
+      const cached = readMadcatCache(identifierType, identifier);
+      if (cached) {
+        stats.madcatCacheHits++;
+        recordUsage(`madcat.cache.${cached.madcat ? 'yes' : 'no'}`);
+        return cached;
+      }
+    }
 
     const auth = readMeasurementAuth();
     if (!auth) {
@@ -1265,7 +1378,9 @@
 
     inFlight.set(key, work);
     try {
-      return await work;
+      const result = await work;
+      writeMadcatCache(identifierType, identifier, result);
+      return result;
     } catch (error) {
       const message = clean(error?.message || error || 'Measurement request failed');
       if (/measurement login required/i.test(message)) stats.madcatAuthRequired++;
