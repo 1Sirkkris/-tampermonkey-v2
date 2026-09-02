@@ -23,8 +23,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-          echo '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' | base64 -d | gzip -d > /tmp/patch.py
-          python /tmp/patch.py
+          python .github/madcat_patch_once.py
 
           node --check FCR_Data_Core.user.js
           node --check FCResearch_Master.user.js
@@ -39,12 +38,12 @@ jobs:
           ! grep -q "measurement-request-failed" FCR_Data_Core.user.js
           grep -q "history-no' ? 'Madcat: NO?'" FCResearch_Master.user.js
           grep -q "history-no' ? 'NO?'" FC_Lite.user.js
-          grep -q "background:#2563eb" FCResearch_Master.user.js
-          grep -q "background:#16a34a" FC_Lite.user.js
+          grep -q "fcrm-madcat-history-yes" FCResearch_Master.user.js
+          grep -q "madcat-pill.history-yes" FC_Lite.user.js
           git diff --check
 
           git add FCR_Data_Core.user.js FCResearch_Master.user.js FC_Lite.user.js README.md
-          git rm .github/workflows/apply-madcat-auto-auth-once.yml
+          git rm .github/workflows/apply-madcat-auto-auth-once.yml .github/madcat_patch_once.py
           git diff --cached --check
           git commit -m "feat: auto-renew MADCAT auth from user gestures"
           git push origin HEAD:main
