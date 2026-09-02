@@ -5,7 +5,7 @@ Disable older copies first.
 
 01 Sideline v0.3.11
 02 AFT Edit-SKU-Move v0.9.12
-03 FCR Data Core v0.2.14
+03 FCR Data Core v0.2.15
 04 FCResearch Master v0.1.21
 05 FC-Lite v0.1.59
 06 Stow Andons v5.5.1

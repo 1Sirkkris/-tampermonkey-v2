@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.2.14 FCR Data Core — MADCAT Auth Fallback
+// @name         TEST v0.2.15 FCR Data Core — MADCAT Session Keepalive
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.14
-// @description  Strict exact-item binDescription plus 30-day raw MADCAT with automatic Inventory History fallback when measurement auth is unavailable.
+// @version      0.2.15
+// @description  Strict binDescription plus 30-day raw MADCAT with Item Measurement session keepalive and automatic Inventory History fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -34,7 +34,7 @@
   if (window.__fcrDataCore_v0210test) return;
   window.__fcrDataCore_v0210test = true;
 
-  const VERSION = '0.2.14';
+  const VERSION = '0.2.15';
   const REQUEST_EVENT = 'fcr-data-core:request';
   const RESPONSE_EVENT = 'fcr-data-core:response';
   const PROGRESS_EVENT = 'fcr-data-core:progress';
@@ -130,8 +130,11 @@
     window.__fcrMeasurementAuthBridge_v1 = true;
 
     const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
-    const bridgeLaunch = new URLSearchParams(location.search).get('fcrMadcatBridge') === '1';
+    const params = new URLSearchParams(location.search);
+    const bridgeLaunch = params.get('fcrMadcatBridge') === '1';
+    const keepaliveLaunch = params.get('fcrMadcatKeepalive') === '1';
     let closeTimer = 0;
+    let keepaliveTimer = 0;
 
     const saveToken = raw => {
       const pack = normalizeMeasurementToken(raw);
@@ -141,7 +144,15 @@
       } catch {
         return false;
       }
-      if (bridgeLaunch && !closeTimer) {
+      if (keepaliveLaunch) {
+        clearTimeout(keepaliveTimer);
+        const untilExpiry = Math.max(0, pack.exp - Date.now());
+        const refreshIn = Math.max(5 * 60 * 1000, Math.min(45 * 60 * 1000, untilExpiry - 10 * 60 * 1000));
+        keepaliveTimer = setTimeout(() => {
+          try { location.reload(); } catch {}
+        }, refreshIn);
+      }
+      if (bridgeLaunch && !keepaliveLaunch && !closeTimer) {
         closeTimer = setTimeout(() => {
           try { pageWindow.close(); } catch {}
         }, 700);
@@ -154,11 +165,15 @@
       return matches.some(saveToken);
     };
 
-    for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
-      try {
-        for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
-      } catch {}
-    }
+    const inspectStores = () => {
+      for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
+        try {
+          for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
+        } catch {}
+      }
+    };
+    inspectStores();
+    if (keepaliveLaunch) setInterval(inspectStores, 5000);
 
     const authFromHeaders = headers => {
       if (!headers) return '';
