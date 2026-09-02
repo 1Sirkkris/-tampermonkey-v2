@@ -1,0 +1,52 @@
+name: Sync MADCAT pack once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/sync-madcat-pack-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Sync work laptop pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          node --check FCR_Data_Core.user.js
+          node --check FCResearch_Master.user.js
+          node --check FC_Lite.user.js
+          main_short="$(git rev-parse --short HEAD)"
+          git fetch origin work-laptop-pack
+          worktree="$(mktemp -d)"
+          git worktree add -b madcat-pack-sync-final "$worktree" origin/work-laptop-pack
+          cp FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
+          cp FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
+          cp FC_Lite.user.js "$worktree/05_FC-Lite.txt"
+          sed -i -E 's/^03 FCR Data Core v.*/03 FCR Data Core v0.2.16/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^04 FCResearch Master v.*/04 FCResearch Master v0.1.24/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E 's/^05 FC-Lite v.*/05 FC-Lite v0.1.63/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          sed -i -E "s/^Updater-enabled sources: main [0-9a-f]+\.$/Updater-enabled sources: main ${main_short}./" "$worktree/WORK_LAPTOP_INSTALL.txt"
+          cmp -s FCR_Data_Core.user.js "$worktree/03_FCR_Data_Core.txt"
+          cmp -s FCResearch_Master.user.js "$worktree/04_FCResearch_Master.txt"
+          cmp -s FC_Lite.user.js "$worktree/05_FC-Lite.txt"
+          git -C "$worktree" diff --check
+          git -C "$worktree" config user.name "github-actions[bot]"
+          git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$worktree" add 03_FCR_Data_Core.txt 04_FCResearch_Master.txt 05_FC-Lite.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" diff --cached --check
+          git -C "$worktree" commit -m "sync: MADCAT ASIN/FNSKU fix"
+          git -C "$worktree" push origin HEAD:work-laptop-pack
+          git rm .github/workflows/sync-madcat-pack-once.yml
+          git commit -m "ci: remove one-shot MADCAT pack sync"
+          git push origin HEAD:main
