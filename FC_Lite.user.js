@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        TEST v0.1.62 FC-Lite — MADCAT FNSKU Fix
+// @name        TEST v0.1.63 FC-Lite — MADCAT Identifier Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.62
+// @version      0.1.63
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.62';
+  const VERSION = '0.1.63';
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
   const SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
 
@@ -695,7 +695,9 @@
     if (value === 'error') {
       button.addEventListener('click', () => {
         const fnsku = clean(row._fcratcMadcatFnsku);
-        checkMadcat(row, fnsku, true, Boolean(fnsku));
+        const asin = clean(row._fcratcMadcatAsin);
+        const measurementId = fnsku || asin;
+        checkMadcat(row, fnsku, asin, true, Boolean(measurementId));
       }, { once: true });
     }
 
@@ -708,21 +710,24 @@
     return url.href;
   }
 
-  async function checkMadcat(row, fnskuValue, force = false, openLoginBridge = false) {
+  async function checkMadcat(row, fnskuValue, asinValue = '', force = false, openLoginBridge = false) {
     const fnsku = clean(fnskuValue);
+    const asin = clean(asinValue);
+    const measurementId = fnsku || asin;
     if (!row?.isConnected) return;
     row._fcratcMadcatFnsku = fnsku;
+    row._fcratcMadcatAsin = asin;
     const checkSerial = (Number(row._fcratcMadcatCheckSerial) || 0) + 1;
     row._fcratcMadcatCheckSerial = checkSerial;
     paintMadcat(row, 'checking');
 
-    if (!fnsku) {
-      paintMadcat(row, 'error', 'Measurement FNSKU unavailable');
+    if (!measurementId) {
+      paintMadcat(row, 'error', 'Measurement item unavailable');
       return;
     }
 
     if (openLoginBridge) {
-      const bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      const bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');
       if (!bridge) {
         paintMadcat(row, 'error', 'Measurement login popup blocked');
         return;
@@ -732,7 +737,7 @@
     const started = Date.now();
     while (row.isConnected && row._fcratcMadcatCheckSerial === checkSerial) {
       try {
-        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);
+        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);
         if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
         paintMadcat(row, result?.madcat === true ? 'yes' : 'no');
         return;
@@ -842,7 +847,8 @@
       const found = matches.length > 0;
       const matchedFnsku = clean(matches.find(match => clean(match?.fnsku))?.fnsku || '');
       const measurementFnsku = matchedFnsku || clean(product?.fnsku || '');
-      checkMadcat(row, measurementFnsku, false, false);
+      const measurementAsin = clean(product?.asin || product?.isbn || product?.primary || rawScan);
+      checkMadcat(row, measurementFnsku, measurementAsin, false, false);
       usage(found ? 'item.in' : 'item.out');
 
       completed++;

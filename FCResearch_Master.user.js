@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         TEST v0.1.23 FCResearch Master — Auto Bin + 30-Day MADCAT
+// @name         TEST v0.1.24 FCResearch Master — MADCAT Identifier Fix
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.23
+// @version      0.1.24
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,7 +21,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.23';
+  const VERSION = '0.1.24';
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const FCRLITE_SECTION_RENDERED_EVENT = 'fcrlite:section-rendered';
   const UI_ATTR = 'data-fcr-master-ui';
@@ -635,7 +635,7 @@
     const dimensions = get('Dimensions');
     const primary = asin || isbn;
     const primaryId = normaliseAsin(primary?.text || '');
-    const fnskuId = clean(fnsku?.text || '').match(/\b(?:X0|ZZ)[A-Z0-9]{8}\b/i)?.[0] || '';
+    const fnskuId = clean(fnsku?.text || '').match(/\b(?:[A-Z0-9]{10}|\d{8,14})\b/i)?.[0] || '';
     const signature = `${primaryId}|${fnskuId.toUpperCase()}|${clean(title?.text || '')}`;
     return { table, rows, get, asin, isbn, fnsku, fcsku, title, dimensions, primary, primaryId, fnskuId, signature };
   }
@@ -791,12 +791,12 @@
     badge.onclick = state === 'error' ? () => {
       const current = readProductPanel();
       if (!current) return;
-      checkMadcat(current, true, /measurement login required/i.test(message));
+      checkMadcat(current, true, true);
     } : null;
   }
 
-  function measurementBridgeUrl(fnsku) {
-    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(fnsku)}`);
+  function measurementBridgeUrl(identifier) {
+    const url = new URL(`${MEASUREMENT_BRIDGE_SITE}/item/${encodeURIComponent(identifier)}`);
     url.searchParams.set('fcrMadcatBridge', '1');
     return url.href;
   }
@@ -804,6 +804,8 @@
   async function checkMadcat(panel, force = false, openLoginBridge = false) {
     const signature = panel?.signature || '';
     const fnsku = clean(panel?.fnskuId).toUpperCase();
+    const asin = clean(panel?.primaryId).toUpperCase();
+    const measurementId = fnsku || asin;
     if (!signature) return;
 
     if (!force && madcatState.signature === signature && madcatState.status) {
@@ -817,16 +819,16 @@
     madcatState.message = '';
     paintMadcat(panel, 'loading');
 
-    if (!fnsku) {
+    if (!measurementId) {
       madcatState.status = 'error';
-      madcatState.message = 'Measurement FNSKU unavailable';
+      madcatState.message = 'Measurement item unavailable';
       paintMadcat(panel, 'error', madcatState.message);
       return;
     }
 
     let bridge = null;
     if (openLoginBridge) {
-      bridge = window.open(measurementBridgeUrl(fnsku), 'fcrMadcatBridge', 'popup,width=920,height=720');
+      bridge = window.open(measurementBridgeUrl(measurementId), 'fcrMadcatBridge', 'popup,width=920,height=720');
       if (!bridge) {
         madcatState.status = 'error';
         madcatState.message = 'Measurement login popup blocked';
@@ -838,7 +840,7 @@
     const deadline = Date.now() + (bridge ? 15000 : 1);
     while (madcatState.serial === serial && madcatState.signature === signature) {
       try {
-        const result = await coreRequest('madcatRecent', { fnsku, force }, 9000);
+        const result = await coreRequest('madcatRecent', { fnsku, asin, force }, 9000);
         if (madcatState.serial !== serial || madcatState.signature !== signature) return;
         madcatState.status = result?.madcat === true ? 'yes' : 'no';
         madcatState.message = '';
