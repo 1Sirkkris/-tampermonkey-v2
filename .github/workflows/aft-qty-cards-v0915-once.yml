@@ -19,107 +19,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Polish Edit SKU quantity viewer
+      - name: Patch and validate
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('AFT_Edit_SKU_Move.user.js')
-          s = p.read_text()
-
-          replacements = [
-              ('// @name         MAIN v0.9.14 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.15 AFT Edit/SKU/Move master'),
-              ('// @name:en      MAIN v0.9.14 AFT Edit/SKU/Move master', '// @name:en      MAIN v0.9.15 AFT Edit/SKU/Move master'),
-              ('// @version      0.9.14', '// @version      0.9.15'),
-              ("const VERSION = '0.9.14';", "const VERSION = '0.9.15';"),
-              (
-                  '#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 144px;gap:8px;align-items:end}#aftm-sku .sku-start input{font:800 10px/1.2 Consolas,monospace;text-align:center;background:#eef1f2;padding-left:5px;padding-right:5px}',
-                  '#aftm-sku .sku-top{display:grid;grid-template-columns:1fr;gap:7px}#aftm-sku .sku-qty-wrap{display:grid;gap:4px}#aftm-sku .sku-qty-label{font-weight:800}#aftm-sku .sku-qty-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}#aftm-sku .sku-qty-card{min-width:0;display:grid;gap:2px;padding:6px 7px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:6px;background:#fff;text-align:center}#aftm-sku .sku-qty-name{font:800 10px/1 Arial,sans-serif;letter-spacing:.25px;color:#53666e}#aftm-sku .sku-qty-value{font:900 18px/1 Consolas,monospace;color:#17262d}#aftm-sku .sku-qty-card[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}#aftm-sku .sku-qty-card[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}#aftm-sku .sku-qty-card[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}'
-              ),
-              ('''          <div class="sku-top">
-            <label>
-              SKU / ASIN / FNSKU / FCSKU
-              <input data-sku autocomplete="off">
-            </label>
-            <label class="sku-start">
-              Qty • S / P / U
-              <input data-start-qty value="—" readonly tabindex="-1">
-            </label>
-          </div>''', '''          <div class="sku-top">
-            <label>
-              SKU / ASIN / FNSKU / FCSKU
-              <input data-sku autocomplete="off">
-            </label>
-            <div class="sku-qty-wrap" aria-live="polite">
-              <div class="sku-qty-label">Inventory qty</div>
-              <div class="sku-qty-grid">
-                <div class="sku-qty-card" data-tone="s"><span class="sku-qty-name">SELLABLE</span><span class="sku-qty-value" data-qty-s>—</span></div>
-                <div class="sku-qty-card" data-tone="p"><span class="sku-qty-name">PENDING</span><span class="sku-qty-value" data-qty-p>—</span></div>
-                <div class="sku-qty-card" data-tone="u"><span class="sku-qty-name">UNSELL</span><span class="sku-qty-value" data-qty-u>—</span></div>
-              </div>
-            </div>
-          </div>'''),
-              ("      const startQty = $('[data-start-qty]', panel);\n      const syncSkuRules = this.wireSkuRules(currentState, currentDamage, desiredState, desiredDamage);", "      const syncSkuRules = this.wireSkuRules(currentState, currentDamage, desiredState, desiredDamage);"),
-              ('''      sku.oninput = debounce(() => {
-        localStorage.setItem(this.keys.sku, norm(sku.value));
-        if (startQty) startQty.value = '—';
-      });''', '''      sku.oninput = debounce(() => {
-        localStorage.setItem(this.keys.sku, norm(sku.value));
-        this.setStartQty(null);
-      });'''),
-              ('''    setStartQty(value) {
-      const el = this.panel && $('[data-start-qty]', this.panel);
-      if (!el) return;
-      if (value == null) {
-        el.value = '—';
-        return;
-      }
-      if (typeof value === 'object') {
-        const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
-        el.value = `S ${qty('sellable')} · P ${qty('pending research')} · U ${qty('unsellable')}`;
-        return;
-      }
-      el.value = String(value);
-    },''', '''    setStartQty(value) {
-      if (!this.panel) return;
-      const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
-      const values = {
-        '[data-qty-s]': value ? qty('sellable') : '—',
-        '[data-qty-p]': value ? qty('pending research') : '—',
-        '[data-qty-u]': value ? qty('unsellable') : '—'
-      };
-      for (const [selector, amount] of Object.entries(values)) {
-        const el = $(selector, this.panel);
-        if (el) el.textContent = String(amount);
-      }
-    },''')
-          ]
-
-          for old, new in replacements:
-              if old not in s:
-                  raise SystemExit(f'Expected patch target missing: {old[:120]!r}')
-              s = s.replace(old, new, 1)
-
-          p.write_text(s)
-          PY
-
+          python3 -c "import base64;exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnAgPSBQYXRoKCdBRlRfRWRpdF9TS1VfTW92ZS51c2VyLmpzJykKcyA9IHAucmVhZF90ZXh0KCkKCnJlcGxhY2VtZW50cyA9IFsKICAgICgnLy8gQG5hbWUgICAgICAgICBNQUlOIHYwLjkuMTQgQUZUIEVkaXQvU0tVL01vdmUgbWFzdGVyJywgJy8vIEBuYW1lICAgICAgICAgTUFJTiB2MC45LjE1IEFGVCBFZGl0L1NLVS9Nb3ZlIG1hc3RlcicpLAogICAgKCcvLyBAbmFtZTplbiAgICAgIE1BSU4gdjAuOS4xNCBBRlQgRWRpdC9TS1UvTW92ZSBtYXN0ZXInLCAnLy8gQG5hbWU6ZW4gICAgICBNQUlOIHYwLjkuMTUgQUZUIEVkaXQvU0tVL01vdmUgbWFzdGVyJyksCiAgICAoJy8vIEB2ZXJzaW9uICAgICAgMC45LjE0JywgJy8vIEB2ZXJzaW9uICAgICAgMC45LjE1JyksCiAgICAoImNvbnN0IFZFUlNJT04gPSAnMC45LjE0JzsiLCAiY29uc3QgVkVSU0lPTiA9ICcwLjkuMTUnOyIpLAogICAgKAogICAgICAgICcjYWZ0bS1za3UgLnNrdS10b3B7ZGlzcGxheTpncmlkO2dyaWQtdGVtcGxhdGUtY29sdW1uczptaW5tYXgoMCwxZnIpIDE0NHB4O2dhcDo4cHg7YWxpZ24taXRlbXM6ZW5kfSNhZnRtLXNrdSAuc2t1LXN0YXJ0IGlucHV0e2ZvbnQ6ODAwIDEwcHgvMS4yIENvbnNvbGFzLG1vbm9zcGFjZTt0ZXh0LWFsaWduOmNlbnRlcjtiYWNrZ3JvdW5kOiNlZWYxZjI7cGFkZGluZy1sZWZ0OjVweDtwYWRkaW5nLXJpZ2h0OjVweH0nLAogICAgICAgICcjYWZ0bS1za3UgLnNrdS10b3B7ZGlzcGxheTpncmlkO2dyaWQtdGVtcGxhdGUtY29sdW1uczoxZnI7Z2FwOjdweH0jYWZ0bS1za3UgLnNrdS1xdHktd3JhcHtkaXNwbGF5OmdyaWQ7Z2FwOjRweH0jYWZ0bS1za3UgLnNrdS1xdHktbGFiZWx7Zm9udC13ZWlnaHQ6ODAwfSNhZnRtLXNrdSAuc2t1LXF0eS1ncmlke2Rpc3BsYXk6Z3JpZDtncmlkLXRlbXBsYXRlLWNvbHVtbnM6cmVwZWF0KDMsbWlubWF4KDAsMWZyKSk7Z2FwOjZweH0jYWZ0bS1za3UgLnNrdS1xdHktY2FyZHttaW4td2lkdGg6MDtkaXNwbGF5OmdyaWQ7Z2FwOjJweDtwYWRkaW5nOjZweCA3cHg7Ym9yZGVyOjFweCBzb2xpZCAjOWZiMGI3O2JvcmRlci10b3Atd2lkdGg6M3B4O2JvcmRlci1yYWRpdXM6NnB4O2JhY2tncm91bmQ6I2ZmZjt0ZXh0LWFsaWduOmNlbnRlcn0jYWZ0bS1za3UgLnNrdS1xdHktbmFtZXtmb250OjgwMCAxMHB4LzEgQXJpYWwsc2Fucy1zZXJpZjtsZXR0ZXItc3BhY2luZzouMjVweDtjb2xvcjojNTM2NjZlfSNhZnRtLXNrdSAuc2t1LXF0eS12YWx1ZXtmb250OjkwMCAxOHB4LzEgQ29uc29sYXMsbW9ub3NwYWNlO2NvbG9yOiMxNzI2MmR9I2FmdG0tc2t1IC5za3UtcXR5LWNhcmRbZGF0YS10b25lPSJzIl17Ym9yZGVyLXRvcC1jb2xvcjojMTQ2ZWI0O2JhY2tncm91bmQ6I2VlZjZmZn0jYWZ0bS1za3UgLnNrdS1xdHktY2FyZFtkYXRhLXRvbmU9InAiXXtib3JkZXItdG9wLWNvbG9yOiNjNTZhMDA7YmFja2dyb3VuZDojZmZmNmU4fSNhZnRtLXNrdSAuc2t1LXF0eS1jYXJkW2RhdGEtdG9uZT0idSJde2JvcmRlci10b3AtY29sb3I6IzVkNjY3MDtiYWNrZ3JvdW5kOiNmM2Y1ZjZ9JwogICAgKSwKICAgICgKICAgICAgICAnJycgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LXRvcCI+CiAgICAgICAgICAgIDxsYWJlbD4KICAgICAgICAgICAgICBTS1UgLyBBU0lOIC8gRk5TS1UgLyBGQ1NLVQogICAgICAgICAgICAgIDxpbnB1dCBkYXRhLXNrdSBhdXRvY29tcGxldGU9Im9mZiI+CiAgICAgICAgICAgIDwvbGFiZWw+CiAgICAgICAgICAgIDxsYWJlbCBjbGFzcz0ic2t1LXN0YXJ0Ij4KICAgICAgICAgICAgICBRdHkg4oCiIFMgLyBQIC8gVQogICAgICAgICAgICAgIDxpbnB1dCBkYXRhLXN0YXJ0LXF0eSB2YWx1ZT0i4oCUIiByZWFkb25seSB0YWJpbmRleD0iLTEiPgogICAgICAgICAgICA8L2xhYmVsPgogICAgICAgICAgPC9kaXY+JycnLAogICAgICAgICcnJyAgICAgICAgICA8ZGl2IGNsYXNzPSJza3UtdG9wIj4KICAgICAgICAgICAgPGxhYmVsPgogICAgICAgICAgICAgIFNLVSAvIEFTSU4gLyBGTlNLVSAvIEZDU0tVCiAgICAgICAgICAgICAgPGlucHV0IGRhdGEtc2t1IGF1dG9jb21wbGV0ZT0ib2ZmIj4KICAgICAgICAgICAgPC9sYWJlbD4KICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LXF0eS13cmFwIiBhcmlhLWxpdmU9InBvbGl0ZSI+CiAgICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LXF0eS1sYWJlbCI+SW52ZW50b3J5IHF0eTwvZGl2PgogICAgICAgICAgICAgIDxkaXYgY2xhc3M9InNrdS1xdHktZ3JpZCI+CiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzPSJza3UtcXR5LWNhcmQiIGRhdGEtdG9uZT0icyI+PHNwYW4gY2xhc3M9InNrdS1xdHktbmFtZSI+U0VMTEFCTEU8L3NwYW4+PHNwYW4gY2xhc3M9InNrdS1xdHktdmFsdWUiIGRhdGEtcXR5LXM+4oCUPC9zcGFuPjwvZGl2PgogICAgICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LXF0eS1jYXJkIiBkYXRhLXRvbmU9InAiPjxzcGFuIGNsYXNzPSJza3UtcXR5LW5hbWUiPlBFTkRJTkc8L3NwYW4+PHNwYW4gY2xhc3M9InNrdS1xdHktdmFsdWUiIGRhdGEtcXR5LXA+4oCUPC9zcGFuPjwvZGl2PgogICAgICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LXF0eS1jYXJkIiBkYXRhLXRvbmU9InUiPjxzcGFuIGNsYXNzPSJza3UtcXR5LW5hbWUiPlVOU0VMTDwvc3Bhbj48c3BhbiBjbGFzcz0ic2t1LXF0eS12YWx1ZSIgZGF0YS1xdHktdT7igJQ8L3NwYW4+PC9kaXY+CiAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgPC9kaXY+JycnCiAgICApLAogICAgKAogICAgICAgICIgICAgICBjb25zdCBzdGFydFF0eSA9ICQoJ1tkYXRhLXN0YXJ0LXF0eV0nLCBwYW5lbCk7XG4gICAgICBjb25zdCBzeW5jU2t1UnVsZXMgPSB0aGlzLndpcmVTa3VSdWxlcyhjdXJyZW50U3RhdGUsIGN1cnJlbnREYW1hZ2UsIGRlc2lyZWRTdGF0ZSwgZGVzaXJlZERhbWFnZSk7IiwKICAgICAgICAiICAgICAgY29uc3Qgc3luY1NrdVJ1bGVzID0gdGhpcy53aXJlU2t1UnVsZXMoY3VycmVudFN0YXRlLCBjdXJyZW50RGFtYWdlLCBkZXNpcmVkU3RhdGUsIGRlc2lyZWREYW1hZ2UpOyIKICAgICksCiAgICAoCiAgICAgICAgJycnICAgICAgc2t1Lm9uaW5wdXQgPSBkZWJvdW5jZSgoKSA9PiB7CiAgICAgICAgbG9jYWxTdG9yYWdlLnNldEl0ZW0odGhpcy5rZXlzLnNrdSwgbm9ybShza3UudmFsdWUpKTsKICAgICAgICBpZiAoc3RhcnRRdHkpIHN0YXJ0UXR5LnZhbHVlID0gJ+KAlCc7CiAgICAgIH0pOycnJywKICAgICAgICAnJycgICAgICBza3Uub25pbnB1dCA9IGRlYm91bmNlKCgpID0+IHsKICAgICAgICBsb2NhbFN0b3JhZ2Uuc2V0SXRlbSh0aGlzLmtleXMuc2t1LCBub3JtKHNrdS52YWx1ZSkpOwogICAgICAgIHRoaXMuc2V0U3RhcnRRdHkobnVsbCk7CiAgICAgIH0pOycnJwogICAgKSwKICAgICgKICAgICAgICAnJycgICAgc2V0U3RhcnRRdHkodmFsdWUpIHsKICAgICAgY29uc3QgZWwgPSB0aGlzLnBhbmVsICYmICQoJ1tkYXRhLXN0YXJ0LXF0eV0nLCB0aGlzLnBhbmVsKTsKICAgICAgaWYgKCFlbCkgcmV0dXJuOwogICAgICBpZiAodmFsdWUgPT0gbnVsbCkgewogICAgICAgIGVsLnZhbHVlID0gJ+KAlCc7CiAgICAgICAgcmV0dXJuOwogICAgICB9CiAgICAgIGlmICh0eXBlb2YgdmFsdWUgPT09ICdvYmplY3QnKSB7CiAgICAgICAgY29uc3QgcXR5ID0ga2V5ID0+IE51bWJlci5pc0ludGVnZXIodmFsdWU/LltrZXldPy5xdHkpID8gdmFsdWVba2V5XS5xdHkgOiAn4oCUJzsKICAgICAgICBlbC52YWx1ZSA9IGBTICR7cXR5KCdzZWxsYWJsZScpfSDCtyBQICR7cXR5KCdwZW5kaW5nIHJlc2VhcmNoJyl9IMK3IFUgJHtxdHkoJ3Vuc2VsbGFibGUnKX1gOwogICAgICAgIHJldHVybjsKICAgICAgfQogICAgICBlbC52YWx1ZSA9IFN0cmluZyh2YWx1ZSk7CiAgICB9LCcnJywKICAgICAgICAnJycgICAgc2V0U3RhcnRRdHkodmFsdWUpIHsKICAgICAgaWYgKCF0aGlzLnBhbmVsKSByZXR1cm47CiAgICAgIGNvbnN0IHF0eSA9IGtleSA9PiBOdW1iZXIuaXNJbnRlZ2VyKHZhbHVlPy5ba2V5XT8ucXR5KSA/IHZhbHVlW2tleV0ucXR5IDogJ+KAlCc7CiAgICAgIGNvbnN0IHZhbHVlcyA9IHsKICAgICAgICAnW2RhdGEtcXR5LXNdJzogdmFsdWUgPyBxdHkoJ3NlbGxhYmxlJykgOiAn4oCUJywKICAgICAgICAnW2RhdGEtcXR5LXBdJzogdmFsdWUgPyBxdHkoJ3BlbmRpbmcgcmVzZWFyY2gnKSA6ICfigJQnLAogICAgICAgICdbZGF0YS1xdHktdV0nOiB2YWx1ZSA/IHF0eSgndW5zZWxsYWJsZScpIDogJ+KAlCcKICAgICAgfTsKICAgICAgZm9yIChjb25zdCBbc2VsZWN0b3IsIGFtb3VudF0gb2YgT2JqZWN0LmVudHJpZXModmFsdWVzKSkgewogICAgICAgIGNvbnN0IGVsID0gJChzZWxlY3RvciwgdGhpcy5wYW5lbCk7CiAgICAgICAgaWYgKGVsKSBlbC50ZXh0Q29udGVudCA9IFN0cmluZyhhbW91bnQpOwogICAgICB9CiAgICB9LCcnJwogICAgKQpdCgpmb3Igb2xkLCBuZXcgaW4gcmVwbGFjZW1lbnRzOgogICAgaWYgb2xkIG5vdCBpbiBzOgogICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZidFeHBlY3RlZCBwYXRjaCB0YXJnZXQgbWlzc2luZzoge29sZFs6MTIwXSFyfScpCiAgICBzID0gcy5yZXBsYWNlKG9sZCwgbmV3LCAxKQoKcC53cml0ZV90ZXh0KHMpCg=='))"
           node --check AFT_Edit_SKU_Move.user.js
           grep -q '@version      0.9.15' AFT_Edit_SKU_Move.user.js
           grep -q 'data-qty-s' AFT_Edit_SKU_Move.user.js
           grep -q 'SELLABLE' AFT_Edit_SKU_Move.user.js
-          ! grep -q 'data-start-qty' AFT_Edit_SKU_Move.user.js
-
+          if grep -q 'data-start-qty' AFT_Edit_SKU_Move.user.js; then exit 1; fi
       - name: Publish main and sync work laptop pack
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           rm .github/workflows/aft-qty-cards-v0915-once.yml
           git add AFT_Edit_SKU_Move.user.js .github/workflows/aft-qty-cards-v0915-once.yml
           git commit -m "ui: make Edit SKU inventory quantities readable"
           git push origin main
-
           git fetch origin work-laptop-pack
           git switch work-laptop-pack
           git show main:AFT_Edit_SKU_Move.user.js > 02_AFT_Edit-SKU-Move.txt
