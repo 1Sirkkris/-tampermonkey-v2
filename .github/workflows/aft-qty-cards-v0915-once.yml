@@ -1,0 +1,131 @@
+name: one-shot AFT qty card polish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/aft-qty-cards-v0915-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Polish Edit SKU quantity viewer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('AFT_Edit_SKU_Move.user.js')
+          s = p.read_text()
+
+          replacements = [
+              ('// @name         MAIN v0.9.14 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.15 AFT Edit/SKU/Move master'),
+              ('// @name:en      MAIN v0.9.14 AFT Edit/SKU/Move master', '// @name:en      MAIN v0.9.15 AFT Edit/SKU/Move master'),
+              ('// @version      0.9.14', '// @version      0.9.15'),
+              ("const VERSION = '0.9.14';", "const VERSION = '0.9.15';"),
+              (
+                  '#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 144px;gap:8px;align-items:end}#aftm-sku .sku-start input{font:800 10px/1.2 Consolas,monospace;text-align:center;background:#eef1f2;padding-left:5px;padding-right:5px}',
+                  '#aftm-sku .sku-top{display:grid;grid-template-columns:1fr;gap:7px}#aftm-sku .sku-qty-wrap{display:grid;gap:4px}#aftm-sku .sku-qty-label{font-weight:800}#aftm-sku .sku-qty-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}#aftm-sku .sku-qty-card{min-width:0;display:grid;gap:2px;padding:6px 7px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:6px;background:#fff;text-align:center}#aftm-sku .sku-qty-name{font:800 10px/1 Arial,sans-serif;letter-spacing:.25px;color:#53666e}#aftm-sku .sku-qty-value{font:900 18px/1 Consolas,monospace;color:#17262d}#aftm-sku .sku-qty-card[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}#aftm-sku .sku-qty-card[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}#aftm-sku .sku-qty-card[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}'
+              ),
+              ('''          <div class="sku-top">
+            <label>
+              SKU / ASIN / FNSKU / FCSKU
+              <input data-sku autocomplete="off">
+            </label>
+            <label class="sku-start">
+              Qty • S / P / U
+              <input data-start-qty value="—" readonly tabindex="-1">
+            </label>
+          </div>''', '''          <div class="sku-top">
+            <label>
+              SKU / ASIN / FNSKU / FCSKU
+              <input data-sku autocomplete="off">
+            </label>
+            <div class="sku-qty-wrap" aria-live="polite">
+              <div class="sku-qty-label">Inventory qty</div>
+              <div class="sku-qty-grid">
+                <div class="sku-qty-card" data-tone="s"><span class="sku-qty-name">SELLABLE</span><span class="sku-qty-value" data-qty-s>—</span></div>
+                <div class="sku-qty-card" data-tone="p"><span class="sku-qty-name">PENDING</span><span class="sku-qty-value" data-qty-p>—</span></div>
+                <div class="sku-qty-card" data-tone="u"><span class="sku-qty-name">UNSELL</span><span class="sku-qty-value" data-qty-u>—</span></div>
+              </div>
+            </div>
+          </div>'''),
+              ("      const startQty = $('[data-start-qty]', panel);\n      const syncSkuRules = this.wireSkuRules(currentState, currentDamage, desiredState, desiredDamage);", "      const syncSkuRules = this.wireSkuRules(currentState, currentDamage, desiredState, desiredDamage);"),
+              ('''      sku.oninput = debounce(() => {
+        localStorage.setItem(this.keys.sku, norm(sku.value));
+        if (startQty) startQty.value = '—';
+      });''', '''      sku.oninput = debounce(() => {
+        localStorage.setItem(this.keys.sku, norm(sku.value));
+        this.setStartQty(null);
+      });'''),
+              ('''    setStartQty(value) {
+      const el = this.panel && $('[data-start-qty]', this.panel);
+      if (!el) return;
+      if (value == null) {
+        el.value = '—';
+        return;
+      }
+      if (typeof value === 'object') {
+        const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
+        el.value = `S ${qty('sellable')} · P ${qty('pending research')} · U ${qty('unsellable')}`;
+        return;
+      }
+      el.value = String(value);
+    },''', '''    setStartQty(value) {
+      if (!this.panel) return;
+      const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
+      const values = {
+        '[data-qty-s]': value ? qty('sellable') : '—',
+        '[data-qty-p]': value ? qty('pending research') : '—',
+        '[data-qty-u]': value ? qty('unsellable') : '—'
+      };
+      for (const [selector, amount] of Object.entries(values)) {
+        const el = $(selector, this.panel);
+        if (el) el.textContent = String(amount);
+      }
+    },''')
+          ]
+
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit(f'Expected patch target missing: {old[:120]!r}')
+              s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+          node --check AFT_Edit_SKU_Move.user.js
+          grep -q '@version      0.9.15' AFT_Edit_SKU_Move.user.js
+          grep -q 'data-qty-s' AFT_Edit_SKU_Move.user.js
+          grep -q 'SELLABLE' AFT_Edit_SKU_Move.user.js
+          ! grep -q 'data-start-qty' AFT_Edit_SKU_Move.user.js
+
+      - name: Publish main and sync work laptop pack
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          rm .github/workflows/aft-qty-cards-v0915-once.yml
+          git add AFT_Edit_SKU_Move.user.js .github/workflows/aft-qty-cards-v0915-once.yml
+          git commit -m "ui: make Edit SKU inventory quantities readable"
+          git push origin main
+
+          git fetch origin work-laptop-pack
+          git switch work-laptop-pack
+          git show main:AFT_Edit_SKU_Move.user.js > 02_AFT_Edit-SKU-Move.txt
+          cp 02_AFT_Edit-SKU-Move.txt /tmp/aft-edit-sku-move.js
+          node --check /tmp/aft-edit-sku-move.js
+          grep -q '@version      0.9.15' 02_AFT_Edit-SKU-Move.txt
+          git add 02_AFT_Edit-SKU-Move.txt
+          git commit -m "deploy: sync AFT Edit SKU Move v0.9.15" || true
+          git push origin work-laptop-pack
