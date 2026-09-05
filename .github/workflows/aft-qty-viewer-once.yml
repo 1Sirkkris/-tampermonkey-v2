@@ -24,45 +24,69 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('AFT_Edit_SKU_Move.user.js')
           s = p.read_text()
-          replacements = [
-              ('// @name         MAIN v0.9.13 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.14 AFT Edit/SKU/Move master'),
-              ('// @name:en      MAIN v0.9.13 AFT Edit/SKU/Move master', '// @name:en      MAIN v0.9.14 AFT Edit/SKU/Move master'),
-              ('// @version      0.9.13', '// @version      0.9.14'),
-              ("const VERSION = '0.9.13';", "const VERSION = '0.9.14';"),
-              ('#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:8px;align-items:end}#aftm-sku .sku-start input{font-weight:800;text-align:center;background:#eef1f2}', '#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 144px;gap:8px;align-items:end}#aftm-sku .sku-start input{font:800 10px/1.2 Consolas,monospace;text-align:center;background:#eef1f2;padding-left:5px;padding-right:5px}'),
-              ('              Qty\n              <input data-start-qty value="—" readonly tabindex="-1">', '              Qty • S / P / U\n              <input data-start-qty value="—" readonly tabindex="-1">'),
-              ('''    setStartQty(qty) {
-      const el = this.panel && $('[data-start-qty]', this.panel);
-      if (el) el.value = qty == null ? '—' : String(qty);
-    },''', '''    setStartQty(value) {
-      const el = this.panel && $('[data-start-qty]', this.panel);
-      if (!el) return;
-      if (value == null) {
-        el.value = '—';
-        return;
-      }
-      if (typeof value === 'object') {
-        const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
-        el.value = `S ${qty('sellable')} · P ${qty('pending research')} · U ${qty('unsellable')}`;
-        return;
-      }
-      el.value = String(value);
-    },'''),
-              ('''          const qty = this.readEditQty(sourcePage, currentLabel);
-          if (qty != null) {
-            if (initialQty == null) initialQty = qty;
-            this.setStartQty(qty);
-          }''', '''          const inventory = this.readEditInventory(sourcePage.doc);
-          this.setStartQty(inventory);
-          const qty = this.readEditQty(sourcePage, currentLabel);
-          if (qty != null && initialQty == null) initialQty = qty;'''),
-          ]
-          for old, new in replacements:
+
+          def one(old, new):
+              global s
               if old not in s:
-                  raise SystemExit(f'Expected patch target missing: {old[:80]!r}')
+                  raise SystemExit(f'Expected patch target missing: {old[:100]!r}')
               s = s.replace(old, new, 1)
+
+          one('// @name         MAIN v0.9.13 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.14 AFT Edit/SKU/Move master')
+          one('// @name:en      MAIN v0.9.13 AFT Edit/SKU/Move master', '// @name:en      MAIN v0.9.14 AFT Edit/SKU/Move master')
+          one('// @version      0.9.13', '// @version      0.9.14')
+          one("const VERSION = '0.9.13';", "const VERSION = '0.9.14';")
+
+          one(
+              '#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:8px;align-items:end}#aftm-sku .sku-start input{font-weight:800;text-align:center;background:#eef1f2}',
+              '#aftm-sku .sku-top{display:grid;grid-template-columns:minmax(0,1fr) 144px;gap:8px;align-items:end}#aftm-sku .sku-start input{font:800 10px/1.2 Consolas,monospace;text-align:center;background:#eef1f2;padding-left:5px;padding-right:5px}'
+          )
+          one(
+              '              Qty\n              <input data-start-qty value="—" readonly tabindex="-1">',
+              '              Qty • S / P / U\n              <input data-start-qty value="—" readonly tabindex="-1">'
+          )
+
+          old = (
+              "    setStartQty(qty) {\n"
+              "      const el = this.panel && $('[data-start-qty]', this.panel);\n"
+              "      if (el) el.value = qty == null ? '—' : String(qty);\n"
+              "    },"
+          )
+          new = (
+              "    setStartQty(value) {\n"
+              "      const el = this.panel && $('[data-start-qty]', this.panel);\n"
+              "      if (!el) return;\n"
+              "      if (value == null) {\n"
+              "        el.value = '—';\n"
+              "        return;\n"
+              "      }\n"
+              "      if (typeof value === 'object') {\n"
+              "        const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';\n"
+              "        el.value = `S ${qty('sellable')} · P ${qty('pending research')} · U ${qty('unsellable')}`;\n"
+              "        return;\n"
+              "      }\n"
+              "      el.value = String(value);\n"
+              "    },"
+          )
+          one(old, new)
+
+          old = (
+              "          const qty = this.readEditQty(sourcePage, currentLabel);\n"
+              "          if (qty != null) {\n"
+              "            if (initialQty == null) initialQty = qty;\n"
+              "            this.setStartQty(qty);\n"
+              "          }"
+          )
+          new = (
+              "          const inventory = this.readEditInventory(sourcePage.doc);\n"
+              "          this.setStartQty(inventory);\n"
+              "          const qty = this.readEditQty(sourcePage, currentLabel);\n"
+              "          if (qty != null && initialQty == null) initialQty = qty;"
+          )
+          one(old, new)
+
           p.write_text(s)
           PY
           node --check AFT_Edit_SKU_Move.user.js
