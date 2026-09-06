@@ -1,0 +1,187 @@
+name: one-shot QQSkuSku source-state choice fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/qqskusku-source-state-choice-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('AFT_Edit_SKU_Move.user.js')
+          s = p.read_text()
+
+          def one(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              s = s.replace(old, new, 1)
+
+          one('// @name         MAIN v0.9.17 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.23 AFT Edit/SKU/Move master', 'metadata name version')
+          one('// @version      0.9.22', '// @version      0.9.23', 'metadata version')
+          one("const VERSION = '0.9.22';", "const VERSION = '0.9.23';", 'internal version')
+
+          marker = '''    readEditQty(source, stateLabel = '') {
+      const key = low(stateLabel) === 'inventory' ? 'sellable' : low(stateLabel);
+      const pattern = EDIT_QTY_PATTERNS[key];
+      const text = source?.text || '';
+
+      if (pattern && text) {
+        const qty = Number(text.match(pattern)?.[1]);
+        if (Number.isInteger(qty)) return qty;
+      }
+
+      const map = this.readEditInventory(source?.doc || source);
+      return map[key]?.qty ?? null;
+    },
+'''
+
+          addition = marker + '''
+    readSkuSourceChoices(source) {
+      const doc = source?.doc || source;
+      if (!doc?.querySelectorAll) return [];
+      const out = [];
+
+      for (const radio of doc.querySelectorAll('input[type="radio"]')) {
+        const labels = [];
+        try {
+          for (const label of radio.labels || []) labels.push(label.textContent || '');
+        } catch {}
+        if (!labels.length) {
+          labels.push(radio.closest('label')?.textContent || radio.parentElement?.textContent || '');
+        }
+
+        const label = norm(labels.join(' '));
+        if (!/Quantity\s*:/i.test(label) || !/Owner\s*:/i.test(label)) continue;
+
+        let state = '';
+        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = 'PENDING_RESEARCH';
+        else if (/Unsellable|UNSELLABLE/i.test(label)) state = 'UNSELLABLE';
+        else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
+        if (!state) continue;
+
+        out.push({
+          state,
+          label,
+          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : ''
+        });
+      }
+
+      return out;
+    },
+
+    resolveSkuSourceInput(source, wantedState) {
+      const choices = this.readSkuSourceChoices(source);
+      if (!choices.length) return { input: wantedState, matched: false, choices };
+
+      const matches = choices.filter(choice => choice.state === wantedState);
+      if (matches.length === 1) {
+        const selected = matches[0];
+        return {
+          input: selected.value || wantedState,
+          matched: true,
+          choices,
+          selected
+        };
+      }
+
+      const available = [...new Set(choices.map(choice => choice.state))].join(', ') || 'unknown';
+      if (!matches.length) {
+        throw new Error(`Requested source ${wantedState} not available; found ${available}`);
+      }
+
+      throw new Error(`Multiple ${wantedState} source options found (${matches.length}); manual selection required`);
+    },
+'''
+          one(marker, addition, 'source-choice helper insertion')
+
+          old_source = '''          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>
+            EditApi.action(objectId, 'Input', currentState, 'Source state', {
+              timeout: 120000
+        })
+          );'''
+
+          new_source = '''          const sourceChoice = this.resolveSkuSourceInput(sourcePage, currentState);
+          traceAft('AFT_SKU_SOURCE_CHOICE', {
+            sku: meta.sku,
+            requestedState: currentState,
+            matchedStructuredChoice: sourceChoice.matched,
+            selectedLabel: sourceChoice.selected?.label || '',
+            optionStates: sourceChoice.choices.map(choice => choice.state)
+          });
+          if (sourceChoice.matched) {
+            this.status(`Attempt ${attempt} • source matched ${currentLabel}`);
+          }
+
+          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>
+            EditApi.action(objectId, 'Input', sourceChoice.input, 'Source state', {
+              timeout: 120000
+        })
+          );'''
+          one(old_source, new_source, 'source state input selection')
+
+          p.write_text(s)
+
+          r = Path('README.md')
+          rs = r.read_text()
+          rs, n = re.subn(r'(\| AFT Edit/SKU/Move \| )0\.9\.22( \| \[Open\])', r'\g<1>0.9.23\g<2>', rs, count=1)
+          if n != 1:
+              raise SystemExit('README AFT row not found')
+          r.write_text(rs)
+          PY
+
+          node --check AFT_Edit_SKU_Move.user.js
+          grep -q '@version      0.9.23' AFT_Edit_SKU_Move.user.js
+          grep -q "const VERSION = '0.9.23';" AFT_Edit_SKU_Move.user.js
+          grep -q 'readSkuSourceChoices(source)' AFT_Edit_SKU_Move.user.js
+          grep -q 'AFT_SKU_SOURCE_CHOICE' AFT_Edit_SKU_Move.user.js
+          grep -q 'sourceChoice.input' AFT_Edit_SKU_Move.user.js
+          git diff --check
+
+      - name: Publish main and sync pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          cp AFT_Edit_SKU_Move.user.js /tmp/AFT_Edit_SKU_Move.user.js
+          rm .github/workflows/qqskusku-source-state-choice-once.yml
+          git add AFT_Edit_SKU_Move.user.js README.md .github/workflows/qqskusku-source-state-choice-once.yml
+          git commit -m "fix: choose requested SKU source state"
+          git push origin main
+
+          git fetch origin work-laptop-pack
+          worktree="$(mktemp -d)"
+          git worktree add -b qqskusku-source-choice-pack-sync "$worktree" origin/work-laptop-pack
+          cp /tmp/AFT_Edit_SKU_Move.user.js "$worktree/02_AFT_Edit-SKU-Move.txt"
+          sed -i -E 's/^02 AFT Edit-SKU-Move v.*/02 AFT Edit-SKU-Move v0.9.23/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          cp "$worktree/02_AFT_Edit-SKU-Move.txt" /tmp/check-aft.js
+          node --check /tmp/check-aft.js
+          grep -q '@version      0.9.23' "$worktree/02_AFT_Edit-SKU-Move.txt"
+          git -C "$worktree" diff --check
+          git -C "$worktree" config user.name "github-actions[bot]"
+          git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$worktree" add 02_AFT_Edit-SKU-Move.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" commit -m "deploy: sync AFT v0.9.23" || true
+          git -C "$worktree" push origin HEAD:work-laptop-pack
