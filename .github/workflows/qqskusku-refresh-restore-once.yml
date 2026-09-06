@@ -1,0 +1,98 @@
+name: one-shot QQSkuSku refresh-state fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/qqskusku-refresh-restore-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch AFT QQSkuSku startup state
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('AFT_Edit_SKU_Move.user.js')
+          s = p.read_text()
+
+          def one(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              s = s.replace(old, new, 1)
+
+          one('// @version      0.9.20', '// @version      0.9.21', 'metadata version')
+          one("  const VERSION = '0.9.20';", "  const VERSION = '0.9.21';", 'internal version')
+
+          # renderSku() runs before Edit.render() assigns the returned panel to this.panel.
+          # Applying persisted QQ mode inside renderSku therefore targets null/stale panel on first load.
+          one(
+              '''      drawSkuChoices();\n      this.paintSkuBatchMode();\n\n      wireMin(panel, this.keys.skuMin);''',
+              '''      drawSkuChoices();\n\n      wireMin(panel, this.keys.skuMin);''',
+              'remove premature QQ paint'
+          )
+
+          one(
+              '''      if (!this.panel) return;\n      this.statusEl = $('[data-status]', this.panel);''',
+              '''      if (!this.panel) return;\n      if (this.mode === 'sku') this.paintSkuBatchMode();\n      this.statusEl = $('[data-status]', this.panel);''',
+              'apply persisted QQ mode after panel assignment'
+          )
+
+          p.write_text(s)
+
+          r = Path('README.md').read_text()
+          old = '| AFT Edit/SKU/Move | 0.9.20 |'
+          new = '| AFT Edit/SKU/Move | 0.9.21 |'
+          if r.count(old) != 1:
+              raise SystemExit('README AFT version row mismatch')
+          Path('README.md').write_text(r.replace(old, new, 1))
+          PY
+
+          node --check AFT_Edit_SKU_Move.user.js
+          grep -q '@name:en      MAIN AFT Edit/SKU/Move master' AFT_Edit_SKU_Move.user.js
+          grep -q '@version      0.9.21' AFT_Edit_SKU_Move.user.js
+          grep -q "const VERSION = '0.9.21';" AFT_Edit_SKU_Move.user.js
+          grep -q "if (this.mode === 'sku') this.paintSkuBatchMode();" AFT_Edit_SKU_Move.user.js
+          test "$(grep -c 'drawSkuChoices();' AFT_Edit_SKU_Move.user.js)" -ge 1
+          git diff --check
+
+      - name: Publish main and sync pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          cp AFT_Edit_SKU_Move.user.js /tmp/AFT_Edit_SKU_Move.user.js
+          git rm .github/workflows/qqskusku-refresh-restore-once.yml
+          git add AFT_Edit_SKU_Move.user.js README.md
+          git commit -m "fix: restore QQSkuSku mode after refresh"
+          git push origin HEAD:main
+
+          git fetch origin work-laptop-pack
+          worktree="$(mktemp -d)"
+          git worktree add -b qqskusku-refresh-pack-sync "$worktree" origin/work-laptop-pack
+          cp /tmp/AFT_Edit_SKU_Move.user.js "$worktree/02_AFT_Edit-SKU-Move.txt"
+          sed -i -E 's/^02 AFT Edit-SKU-Move v.*/02 AFT Edit-SKU-Move v0.9.21/' "$worktree/WORK_LAPTOP_INSTALL.txt"
+          cp "$worktree/02_AFT_Edit-SKU-Move.txt" /tmp/check.js
+          node --check /tmp/check.js
+          grep -q '@version      0.9.21' "$worktree/02_AFT_Edit-SKU-Move.txt"
+          git -C "$worktree" diff --check
+          git -C "$worktree" config user.name "github-actions[bot]"
+          git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$worktree" add 02_AFT_Edit-SKU-Move.txt WORK_LAPTOP_INSTALL.txt
+          git -C "$worktree" commit -m "deploy: sync AFT v0.9.21" || true
+          git -C "$worktree" push origin HEAD:work-laptop-pack
