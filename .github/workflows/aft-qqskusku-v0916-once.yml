@@ -22,6 +22,7 @@ jobs:
       - name: Patch and validate QQSkuSku
         shell: bash
         run: |
+          sed -i "s/^'''    parseEachQueue/r'''    parseEachQueue/" .github/qqskusku-v0916-patch.py
           python3 .github/qqskusku-v0916-patch.py
           node --check AFT_Edit_SKU_Move.user.js
           grep -q '@version      0.9.16' AFT_Edit_SKU_Move.user.js
