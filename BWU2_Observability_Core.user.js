@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.12
+// @version      0.1.13
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.12';
+  const VERSION = '0.1.13';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1474,6 +1474,36 @@
     });
   }
 
+  function recordMadcatAuthDiagnostic(message) {
+    const data = message?.data;
+    if (!data || typeof data !== 'object') return;
+
+    const available = !!data.available;
+    const issuedAt = Math.max(0, Number(data.issuedAt) || 0);
+    const expiresAt = Math.max(0, Number(data.expiresAt) || 0);
+    const capturedAt = Math.max(0, Number(data.capturedAt) || 0);
+    const lifetimeMs = Math.max(0, Number(data.lifetimeMs) || (issuedAt && expiresAt ? expiresAt - issuedAt : 0));
+    const remainingMs = Math.max(0, Number(data.expiresInMs) || 0);
+    const captureAgeMs = Math.max(0, Number(data.captureAgeMs) || (capturedAt ? Date.now() - capturedAt : 0));
+    const signature = JSON.stringify([available, issuedAt, expiresAt, capturedAt]);
+    const stateKey = `${SAMPLE_PREFIX}${activeSessionId}:madcat-auth-state`;
+    if (gmGet(stateKey, '') === signature) return;
+    gmSet(stateKey, signature);
+
+    add('fcr.madcat.auth-status', {
+      available,
+      issuedAt,
+      expiresAt,
+      capturedAt,
+      lifetimeMs,
+      remainingMs,
+      captureAgeMs,
+      renewSoon: !!data.renewSoon,
+      bridgeRecent: !!data.bridgeRecent,
+      coreVersion: scrubText(message.version || '')
+    });
+  }
+
   function installFcrDataCoreTrace() {
     window.addEventListener('fcr-data-core:request', event => {
       const message = parseEventDetail(event.detail);
@@ -1504,6 +1534,8 @@
         error,
         ...coreResponseSummary(message.data)
       };
+
+      if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);
 
       if (error === 'fcr-data-core:cancelled') {
         add('fcr.core.cancelled', response);

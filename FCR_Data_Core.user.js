@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.21
+// @version      0.2.22
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand measurement auth.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.21';
+  const VERSION = '0.2.22';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -188,11 +188,18 @@
     const auth = readMeasurementAuth();
     const lastAttempt = readMeasurementBridgeAttemptAt();
     const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
+    const issuedAt = Number(auth?.issuedAt) || 0;
+    const expiresAt = Number(auth?.exp) || 0;
+    const capturedAt = Number(auth?.capturedAt) || 0;
     return {
       available: !!auth,
-      expiresAt: Number(auth?.exp) || 0,
-      expiresInMs: auth ? Math.max(0, auth.exp - Date.now()) : 0,
-      renewSoon: !auth || auth.exp - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
+      issuedAt,
+      expiresAt,
+      capturedAt,
+      lifetimeMs: issuedAt && expiresAt ? Math.max(0, expiresAt - issuedAt) : 0,
+      expiresInMs: expiresAt ? Math.max(0, expiresAt - Date.now()) : 0,
+      captureAgeMs: capturedAt ? Math.max(0, Date.now() - capturedAt) : 0,
+      renewSoon: !auth || expiresAt - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
       bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
     };
   }
@@ -263,8 +270,13 @@
     const token = String(value || '').trim().replace(/^Bearer\s+/i, '');
     const payload = decodeJwtPayload(token);
     if (!payload || payload.token_use !== 'id' || !Number(payload.exp)) return null;
-    if (Number(payload.exp) * 1000 <= Date.now() + 10_000) return null;
-    return { token, exp: Number(payload.exp) * 1000 };
+    const exp = Number(payload.exp) * 1000;
+    if (exp <= Date.now() + 10_000) return null;
+    return {
+      token,
+      exp,
+      issuedAt: Number(payload.iat) ? Number(payload.iat) * 1000 : 0
+    };
   }
 
   function installMeasurementAuthBridge() {
@@ -1281,7 +1293,7 @@
       const raw = GM_getValue(MEASUREMENT_AUTH_KEY, '');
       const stored = raw ? JSON.parse(raw) : null;
       const pack = normalizeMeasurementToken(stored?.token || '');
-      if (pack) return pack;
+      if (pack) return { ...pack, capturedAt: Number(stored?.capturedAt) || 0 };
     } catch {}
     clearMeasurementAuth();
     return null;
