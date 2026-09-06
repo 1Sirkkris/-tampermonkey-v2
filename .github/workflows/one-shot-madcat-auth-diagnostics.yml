@@ -22,6 +22,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           def replace_once(text, old, new, label):
               count = text.count(old)
@@ -29,25 +30,18 @@ jobs:
                   raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
               return text.replace(old, new, 1)
 
+          def regex_once(text, pattern, replacement, label):
+              text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              return text
+
           core_path = Path('FCR_Data_Core.user.js')
           core = core_path.read_text(encoding='utf-8')
           core = replace_once(core, '// @version      0.2.21', '// @version      0.2.22', 'core metadata version')
           core = replace_once(core, "const VERSION = '0.2.21';", "const VERSION = '0.2.22';", 'core runtime version')
 
-          old_status = '''  function measurementAuthStatus() {
-            const auth = readMeasurementAuth();
-            const lastAttempt = readMeasurementBridgeAttemptAt();
-            const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
-            return {
-              available: !!auth,
-              expiresAt: Number(auth?.exp) || 0,
-              expiresInMs: auth ? Math.max(0, auth.exp - Date.now()) : 0,
-              renewSoon: !auth || auth.exp - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
-              bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
-            };
-          }
-          '''
-          new_status = '''  function measurementAuthStatus() {
+          status = """  function measurementAuthStatus() {
             const auth = readMeasurementAuth();
             const lastAttempt = readMeasurementBridgeAttemptAt();
             const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
@@ -66,18 +60,16 @@ jobs:
               bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
             };
           }
-          '''
-          core = replace_once(core, old_status, new_status, 'measurementAuthStatus')
 
-          old_normalize = '''  function normalizeMeasurementToken(value) {
-            const token = String(value || '').trim().replace(/^Bearer\\s+/i, '');
-            const payload = decodeJwtPayload(token);
-            if (!payload || payload.token_use !== 'id' || !Number(payload.exp)) return null;
-            if (Number(payload.exp) * 1000 <= Date.now() + 10_000) return null;
-            return { token, exp: Number(payload.exp) * 1000 };
-          }
-          '''
-          new_normalize = '''  function normalizeMeasurementToken(value) {
+"""
+          core = regex_once(
+              core,
+              r"  function measurementAuthStatus\(\) \{.*?\n  function installMeasurementAutoRenewal\(\) \{",
+              status + "  function installMeasurementAutoRenewal() {",
+              'measurementAuthStatus'
+          )
+
+          normalize = """  function normalizeMeasurementToken(value) {
             const token = String(value || '').trim().replace(/^Bearer\\s+/i, '');
             const payload = decodeJwtPayload(token);
             if (!payload || payload.token_use !== 'id' || !Number(payload.exp)) return null;
@@ -89,21 +81,16 @@ jobs:
               issuedAt: Number(payload.iat) ? Number(payload.iat) * 1000 : 0
             };
           }
-          '''
-          core = replace_once(core, old_normalize, new_normalize, 'normalizeMeasurementToken')
 
-          old_read = '''  function readMeasurementAuth() {
-            try {
-              const raw = GM_getValue(MEASUREMENT_AUTH_KEY, '');
-              const stored = raw ? JSON.parse(raw) : null;
-              const pack = normalizeMeasurementToken(stored?.token || '');
-              if (pack) return pack;
-            } catch {}
-            clearMeasurementAuth();
-            return null;
-          }
-          '''
-          new_read = '''  function readMeasurementAuth() {
+"""
+          core = regex_once(
+              core,
+              r"  function normalizeMeasurementToken\(value\) \{.*?\n  function installMeasurementAuthBridge\(\) \{",
+              lambda _: normalize + "  function installMeasurementAuthBridge() {",
+              'normalizeMeasurementToken'
+          )
+
+          read_auth = """  function readMeasurementAuth() {
             try {
               const raw = GM_getValue(MEASUREMENT_AUTH_KEY, '');
               const stored = raw ? JSON.parse(raw) : null;
@@ -113,8 +100,14 @@ jobs:
             clearMeasurementAuth();
             return null;
           }
-          '''
-          core = replace_once(core, old_read, new_read, 'readMeasurementAuth')
+
+"""
+          core = regex_once(
+              core,
+              r"  function readMeasurementAuth\(\) \{.*?\n  function requestMeasurementPage\(url, token\) \{",
+              read_auth + "  function requestMeasurementPage(url, token) {",
+              'readMeasurementAuth'
+          )
           core_path.write_text(core, encoding='utf-8')
 
           obs_path = Path('BWU2_Observability_Core.user.js')
@@ -122,9 +115,7 @@ jobs:
           obs = replace_once(obs, '// @version      0.1.12', '// @version      0.1.13', 'obs metadata version')
           obs = replace_once(obs, "const VERSION = '0.1.12';", "const VERSION = '0.1.13';", 'obs runtime version')
 
-          marker = '''  function installFcrDataCoreTrace() {
-          '''
-          diagnostic = '''  function recordMadcatAuthDiagnostic(message) {
+          diagnostic = """  function recordMadcatAuthDiagnostic(message) {
             const data = message?.data;
             if (!data || typeof data !== 'object') return;
 
@@ -154,39 +145,19 @@ jobs:
             });
           }
 
-          function installFcrDataCoreTrace() {
-          '''
-          obs = replace_once(obs, marker, diagnostic, 'OBS auth diagnostic insertion')
-
-          old_response = '''      const response = {
-            type: pending.type,
-            client: pending.client,
-            group: pending.group,
-            ok: !!message.ok,
-            elapsedMs,
-            coreVersion: scrubText(message.version || ''),
-            error,
-            ...coreResponseSummary(message.data)
-          };
-
-          if (error === 'fcr-data-core:cancelled') {
-          '''
-          new_response = '''      const response = {
-            type: pending.type,
-            client: pending.client,
-            group: pending.group,
-            ok: !!message.ok,
-            elapsedMs,
-            coreVersion: scrubText(message.version || ''),
-            error,
-            ...coreResponseSummary(message.data)
-          };
-
-          if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);
-
-          if (error === 'fcr-data-core:cancelled') {
-          '''
-          obs = replace_once(obs, old_response, new_response, 'OBS response hook')
+"""
+          obs = replace_once(
+              obs,
+              '  function installFcrDataCoreTrace() {',
+              diagnostic + '  function installFcrDataCoreTrace() {',
+              'OBS auth diagnostic insertion'
+          )
+          obs = replace_once(
+              obs,
+              "      if (error === 'fcr-data-core:cancelled') {",
+              "      if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);\n\n      if (error === 'fcr-data-core:cancelled') {",
+              'OBS response hook'
+          )
           obs_path.write_text(obs, encoding='utf-8')
 
           readme_path = Path('README.md')
