@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.21
+// @version      0.9.22
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.21';
+  const VERSION = '0.9.22';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1460,24 +1460,61 @@
       return false;
     },
 
-    async restoreSkuBatchReady() {
-      const ended = new Set();
+    async restoreSkuBatchReady(options = {}) {
+      const endCurrent = options.endCurrent === true;
+      const timeout = Number.isFinite(options.timeout) ? options.timeout : 30000;
+      const started = performance.now();
+      let blockedObjectId = options.oldObjectId || null;
+      let cleanupDone = !endCurrent;
       let last = null;
-      for (let attempt = 1; attempt <= 12; attempt++) {
+      let attempt = 0;
+      let readErrors = 0;
+
+      while (performance.now() - started < timeout) {
         if (this.stopRequested) throw new Error('Stopped by user');
-        const snap = await this.fetchState(`Queue recovery ${attempt}`);
+        attempt++;
+
+        let snap;
+        try {
+          snap = await this.fetchState(`Queue recovery ${attempt}`);
+          readErrors = 0;
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (/networkerror|failed to fetch|fetch resource/i.test(message) && readErrors < 2) {
+            readErrors++;
+            this.status(`Queue recovery • network blip ${readErrors}/2`);
+            await sleep(220);
+            continue;
+          }
+          throw error;
+        }
+
         last = snap;
+
+        if (snap.objectId && blockedObjectId && snap.objectId === blockedObjectId) {
+          await sleep(220);
+          continue;
+        }
+
         if (snap.objectId && snap.state === 'item') {
           const ready = await EditApi.wait(snap.objectId, `Queue recovery ${attempt}`, { timeout: 12000 });
           if (ready.state === 'READY') return snap;
         }
-        if (snap.objectId && !ended.has(snap.objectId)) {
-          ended.add(snap.objectId);
+
+        // Failed-item recovery may close the one workflow we actually failed in.
+        // After that, only WAIT for AFT to create/settle the next task. Ending every
+        // new object was causing the queue to destroy its own recovery tasks.
+        if (!cleanupDone && snap.objectId) {
+          cleanupDone = true;
+          blockedObjectId = snap.objectId;
           try { await EditApi.end(snap.objectId); } catch {}
+          this.status('Queue recovery • closed failed workflow • waiting');
         }
-        await sleep(attempt < 4 ? 90 : 180);
+
+        await sleep(250);
       }
-      throw new Error(`Queue recovery failed; last state="${last?.state || 'unknown'}"`);
+
+      throw new Error(`Queue recovery timed out; last state="${last?.state || 'unknown'}"`);
     },
 
     async startSkuBatchDirect() {
@@ -1534,7 +1571,7 @@
           failed.push({ sku, message: String(error?.message || error) });
           this.showSkuBatchFailures(failed);
           this.status(`${i + 1}/${items.length} FAILED • resetting`);
-          await this.restoreSkuBatchReady();
+          await this.restoreSkuBatchReady({ endCurrent: true, timeout: 30000 });
         }
       }
 
@@ -1701,7 +1738,7 @@
 
           this.status(`Attempt ${attempt} complete • rechecking ${currentLabel}`);
           session = options.allowReload === false
-  ? await this.restoreSkuBatchReady()
+  ? await this.restoreSkuBatchReady({ oldObjectId: objectId, timeout: 30000 })
   : await this.resetSkuWorkflow(objectId, `Attempt ${attempt} complete`, false);
         } catch (error) {
           const message = String(error?.message || error);
