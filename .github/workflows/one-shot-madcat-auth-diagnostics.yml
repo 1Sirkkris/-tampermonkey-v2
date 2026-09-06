@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'chore: run MADCAT auth diagnostic patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -212,6 +211,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-madcat-auth-diagnostics.yml
           git add FCR_Data_Core.user.js BWU2_Observability_Core.user.js README.md
           git diff --cached --check
           git commit -m "diag: record MADCAT auth lifetime safely"
