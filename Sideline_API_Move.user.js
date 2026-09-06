@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         MAIN v0.3.16 Sideline API Move TEST
+// @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.16
+// @version      0.3.17
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +16,29 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.16';
+  const VERSION = '0.3.17';
+  function registerRuntimeVersion(label, version) {
+    const mount = () => {
+      const root = document.body || document.documentElement;
+      if (!root) return;
+      let host = document.getElementById('bwu2-runtime-version-stamp');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'bwu2-runtime-version-stamp';
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)';
+        root.appendChild(host);
+      }
+      let item = Array.from(host.children).find(node => node.dataset?.bwu2RuntimeKey === label);
+      if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
+      item.textContent = `${label} · v${version}`;
+      Array.from(host.children).sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
+    };
+    mount();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
+  }
+  registerRuntimeVersion('SIDELINE', VERSION);
+
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 5;
