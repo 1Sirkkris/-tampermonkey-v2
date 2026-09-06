@@ -1,0 +1,87 @@
+name: one-shot runtime version policy docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/runtime-version-docs-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update README and agent rules
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def one(s, old, new, label):
+              n = s.count(old)
+              if n != 1: raise SystemExit(f'{label}: expected 1 match, got {n}')
+              return s.replace(old, new, 1)
+
+          p = Path('README.md'); s = p.read_text()
+          versions = {
+              'Carton PrEditor':'7.4','SIM Markdown Toolbar':'5.1.6','FNSKU Mapping Lookup':'1.4.1-test',
+              'Sideline API Move':'0.3.17','AFT Edit/SKU/Move':'0.9.20','FCR Data Core':'0.2.19',
+              'FCResearch Master':'0.1.28','FC-Lite':'0.1.66','Stow Andons Helper':'5.5.2',
+              'Bin Check Overlay':'7.4.4','Dropzone Selector Queue':'0.2.19','BWU2 Observability Core':'0.1.12'
+          }
+          for name, version in versions.items():
+              pat = rf'(?m)^(\| {re.escape(name)} \| )[^|]+( \| \[Open\])'
+              s, n = re.subn(pat, lambda m, v=version: m.group(1)+v+m.group(2), s, count=1)
+              if n != 1: raise SystemExit(f'README row missing: {name}')
+          if '| Calm Code |' not in s:
+              anchor = '| BWU2 Observability Core | 0.1.12 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |'
+              extra = anchor + '\n| Calm Code | 1.3.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |\n| Unbind Hierarchy Queue | 1.0.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |'
+              s = one(s, anchor, extra, 'README Calm/Unbind')
+          s, n = re.subn(r'(?m)^(\| Amazon AU ASIN Variation Finder \| )[^|]+', lambda m: m.group(1)+'0.1.2', s, count=1)
+          if n != 1: raise SystemExit('README Amazon row missing')
+          s, n = re.subn(r'(?m)^(\| FCResearch → RIVER Ticket Assistant \| )[^|]+', lambda m: m.group(1)+'0.3.12', s, count=1)
+          if n != 1: raise SystemExit('README RIVER row missing')
+          note = '\nTampermonkey manager titles are intentionally version-free via `@name:en`; legacy base `@name` values stay frozen as update identity. Every active fleet script renders a shared low-profile runtime version stamp at the bottom of the page, so the actually running version is visible immediately after reload.\n'
+          anchor = '\nEach stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`.'
+          if note.strip() not in s: s = one(s, anchor, note+anchor, 'README runtime note')
+          p.write_text(s)
+
+          p = Path('AGENTS.md'); s = p.read_text()
+          old = '''- bump `@version`
+          - keep exposed UI/toast versions consistent
+          - preserve `@name`, `@namespace`, deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
+          - ensure the version described is the version actually modified
+          '''
+          new = '''- bump `@version`
+          - keep exposed UI/toast versions consistent
+          - treat base `@name` + `@namespace` as immutable update identity once deployed; never change base `@name` merely to show the current version
+          - when a legacy deployed base `@name` already contains a version, leave it frozen and use a stable version-free `@name:en` for the Tampermonkey manager display
+          - keep `@name:en` version-free; the running version belongs in `@version`, the matching internal version constant and visible runtime UI
+          - every active fleet script must expose its actually running version through the shared unobtrusive runtime version stamp
+          - preserve deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
+          - ensure the version described is the version actually modified
+          '''
+          s = one(s, old, new, 'AGENTS identity/version block')
+          old = '''- return the direct GitHub `.user.js` install/update link
+          - default user action: `open link → Update/Overwrite`
+          '''
+          new = '''- return the direct canonical GitHub `.user.js` install/update link with no cache-busting query string
+          - default user action: `open link → Update/Overwrite`
+          '''
+          s = one(s, old, new, 'AGENTS direct-link block')
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Publish docs and remove one-shot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/runtime-version-docs-once.yml
+          git add -A
+          git commit -m "docs: codify stable titles and runtime versions"
+          git push origin main
