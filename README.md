@@ -6,18 +6,22 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 
 | Script | Version | Install/update |
 | --- | --- | --- |
-| Carton PrEditor | 7.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
-| SIM Markdown Toolbar | 5.1.5 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
-| FNSKU Mapping Lookup | 1.3.3-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
-| Sideline API Move | 0.3.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
-| AFT Edit/SKU/Move | 0.9.13 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
-| FCR Data Core | 0.2.18 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
-| FCResearch Master | 0.1.27 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
-| FC-Lite | 0.1.65 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
-| Stow Andons Helper | 5.5.1 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
-| Bin Check Overlay | 7.4.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
-| Dropzone Selector Queue | 0.2.18 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
-| BWU2 Observability Core | 0.1.11 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
+| Carton PrEditor | 7.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
+| SIM Markdown Toolbar | 5.1.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
+| FNSKU Mapping Lookup | 1.4.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
+| Sideline API Move | 0.3.17 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
+| AFT Edit/SKU/Move | 0.9.20 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
+| FCR Data Core | 0.2.19 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
+| FCResearch Master | 0.1.28 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
+| FC-Lite | 0.1.66 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
+| Stow Andons Helper | 5.5.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
+| Bin Check Overlay | 7.4.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
+| Dropzone Selector Queue | 0.2.19 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
+| BWU2 Observability Core | 0.1.12 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
+| Calm Code | 1.3.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
+| Unbind Hierarchy Queue | 1.0.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |
+
+Tampermonkey manager titles are intentionally version-free via `@name:en`; legacy base `@name` values stay frozen as update identity. Every active fleet script renders a shared low-profile runtime version stamp at the bottom of the page, so the actually running version is visible immediately after reload.
 
 Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
 
@@ -29,6 +33,6 @@ Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless exp
 | --- | --- | --- | --- |
 | AFT Super Overlay | 0.3.0 | Immediate adaptive Edit/Move mode switcher using AFT's native selector. Checkmarks reflect AFT's confirmed mode; MoveItems modes remain distinct from the separate MoveContainer app. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_Super_Overlay_TEST.user.js) |
 | AFT UI State Logger | 0.1.1 | Read-only same-tab trace for AFT mode switches, DOM states, form actions, XHR/fetch results and errors. Visible MARK, COPY LOG, DOWNLOAD and CLEAR controls. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/AFT_UI_State_Logger_TEST.user.js) |
-| Amazon AU ASIN Variation Finder | 0.1.1-test | Right-click current Amazon inline/classic variation swatches and reveal matching child ASINs from the loaded page, including unavailable options when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
+| Amazon AU ASIN Variation Finder | 0.1.2| Right-click current Amazon inline/classic variation swatches and reveal matching child ASINs from the loaded page, including unavailable options when exposed. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/Amazon_ASIN_Variation_Finder_TEST.user.js) |
 | FCResearch Section Probe | 0.2.0 | Map native section XHR/render timing and run one explicit, reversible Product request suppression test. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Diagnostics/FCR_Section_Probe.user.js) |
-| FCResearch → RIVER Ticket Assistant | 0.3.9 | Event-driven Hazmat N/A/L0 capture. Information W1 now recognises the actual `X0 ASIN` field and fills `N/A` when no X0 FNSKU exists; `Sort/Non-Sort Identification` is recognised as the sortability step so Option 1 + Next can continue automatically. Latest matching PO/vendor/quantity rules remain unchanged. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |
+| FCResearch → RIVER Ticket Assistant | 0.3.12| Event-driven Hazmat N/A/L0 capture. Information W1 now recognises the actual `X0 ASIN` field and fills `N/A` when no X0 FNSKU exists; `Sort/Non-Sort Identification` is recognised as the sortability step so Option 1 + Next can continue automatically. Latest matching PO/vendor/quantity rules remain unchanged. | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js) |

@@ -379,7 +379,11 @@ For every behaviour-changing userscript revision:
 
 - bump `@version`
 - keep exposed UI/toast versions consistent
-- preserve `@name`, `@namespace`, deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
+- treat base `@name` + `@namespace` as immutable update identity once deployed; never change base `@name` merely to show the current version
+- when a legacy deployed base `@name` already contains a version, leave it frozen and use a stable version-free `@name:en` for the Tampermonkey manager display
+- keep `@name:en` version-free; the running version belongs in `@version`, the matching internal version constant and visible runtime UI
+- every active fleet script must expose its actually running version through the shared unobtrusive runtime version stamp
+- preserve deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
 - ensure the version described is the version actually modified
 - inspect final diff for unrelated changes
 - commit with a scoped message
@@ -392,7 +396,7 @@ For deployed fleet scripts:
 - preserve deployed filename/update path
 - preserve a rollback commit/source version
 - verify the pack contains the intended exact revision
-- return the direct GitHub `.user.js` install/update link
+- return the direct canonical GitHub `.user.js` install/update link with no cache-busting query string
 - default user action: `open link → Update/Overwrite`
 
 Do not make the normal workflow local script copies, manual source editing, full-script copy/paste from chat, competing source copies, or waiting for a scheduled Tampermonkey update when a direct link is available.
