@@ -1,0 +1,122 @@
+from pathlib import Path
+import re
+
+p = Path('AFT_Edit_SKU_Move.user.js')
+s = p.read_text()
+
+def one(old, new, label):
+    global s
+    n = s.count(old)
+    if n != 1:
+        raise SystemExit(f'{label}: expected 1 match, got {n}')
+    s = s.replace(old, new, 1)
+
+one('// @version      0.9.21', '// @version      0.9.22', 'metadata version')
+one("const VERSION = '0.9.21';", "const VERSION = '0.9.22';", 'internal version')
+
+old = '''    async restoreSkuBatchReady() {
+      const ended = new Set();
+      let last = null;
+      for (let attempt = 1; attempt <= 12; attempt++) {
+        if (this.stopRequested) throw new Error('Stopped by user');
+        const snap = await this.fetchState(`Queue recovery ${attempt}`);
+        last = snap;
+        if (snap.objectId && snap.state === 'item') {
+          const ready = await EditApi.wait(snap.objectId, `Queue recovery ${attempt}`, { timeout: 12000 });
+          if (ready.state === 'READY') return snap;
+        }
+        if (snap.objectId && !ended.has(snap.objectId)) {
+          ended.add(snap.objectId);
+          try { await EditApi.end(snap.objectId); } catch {}
+        }
+        await sleep(attempt < 4 ? 90 : 180);
+      }
+      throw new Error(`Queue recovery failed; last state="${last?.state || 'unknown'}"`);
+    },'''
+
+new = '''    async restoreSkuBatchReady(options = {}) {
+      const endCurrent = options.endCurrent === true;
+      const timeout = Number.isFinite(options.timeout) ? options.timeout : 30000;
+      const started = performance.now();
+      let blockedObjectId = options.oldObjectId || null;
+      let cleanupDone = !endCurrent;
+      let last = null;
+      let attempt = 0;
+      let readErrors = 0;
+
+      while (performance.now() - started < timeout) {
+        if (this.stopRequested) throw new Error('Stopped by user');
+        attempt++;
+
+        let snap;
+        try {
+          snap = await this.fetchState(`Queue recovery ${attempt}`);
+          readErrors = 0;
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (/networkerror|failed to fetch|fetch resource/i.test(message) && readErrors < 2) {
+            readErrors++;
+            this.status(`Queue recovery • network blip ${readErrors}/2`);
+            await sleep(220);
+            continue;
+          }
+          throw error;
+        }
+
+        last = snap;
+
+        if (snap.objectId && blockedObjectId && snap.objectId === blockedObjectId) {
+          await sleep(220);
+          continue;
+        }
+
+        if (snap.objectId && snap.state === 'item') {
+          const ready = await EditApi.wait(snap.objectId, `Queue recovery ${attempt}`, { timeout: 12000 });
+          if (ready.state === 'READY') return snap;
+        }
+
+        // Failed-item recovery may close the one workflow we actually failed in.
+        // After that, only WAIT for AFT to create/settle the next task. Ending every
+        // new object was causing the queue to destroy its own recovery tasks.
+        if (!cleanupDone && snap.objectId) {
+          cleanupDone = true;
+          blockedObjectId = snap.objectId;
+          try { await EditApi.end(snap.objectId); } catch {}
+          this.status('Queue recovery • closed failed workflow • waiting');
+        }
+
+        await sleep(250);
+      }
+
+      throw new Error(`Queue recovery timed out; last state="${last?.state || 'unknown'}"`);
+    },'''
+one(old, new, 'restoreSkuBatchReady')
+
+one(
+    '''          this.status(`${i + 1}/${items.length} FAILED • resetting`);
+          await this.restoreSkuBatchReady();''',
+    '''          this.status(`${i + 1}/${items.length} FAILED • resetting`);
+          await this.restoreSkuBatchReady({ endCurrent: true, timeout: 30000 });''',
+    'batch failure recovery call'
+)
+
+one(
+    '''          this.status(`Attempt ${attempt} complete • rechecking ${currentLabel}`);
+          session = options.allowReload === false
+  ? await this.restoreSkuBatchReady()
+  : await this.resetSkuWorkflow(objectId, `Attempt ${attempt} complete`, false);''',
+    '''          this.status(`Attempt ${attempt} complete • rechecking ${currentLabel}`);
+          session = options.allowReload === false
+  ? await this.restoreSkuBatchReady({ oldObjectId: objectId, timeout: 30000 })
+  : await this.resetSkuWorkflow(objectId, `Attempt ${attempt} complete`, false);''',
+    'post-success recovery call'
+)
+
+p.write_text(s)
+
+r = Path('README.md')
+rs = r.read_text()
+rs, n = re.subn(r'(\| AFT Edit/SKU/Move \| )0\.9\.21( \| \[Open\])', r'\g<1>0.9.22\g<2>', rs, count=1)
+if n != 1:
+    raise SystemExit('README AFT row not found')
+r.write_text(rs)
