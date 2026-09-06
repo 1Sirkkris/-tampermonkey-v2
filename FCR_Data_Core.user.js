@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.19
+// @version      0.2.20
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with automatic user-gesture auth renewal.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,21 +23,7 @@
 (() => {
   'use strict';
 
-  const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
-  const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
-  const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
-  const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
-  const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
-
-  if (location.hostname === MEASUREMENT_SITE_HOST) {
-    installMeasurementAuthBridge();
-    return;
-  }
-
-  if (window.__fcrDataCore_v0210test) return;
-  window.__fcrDataCore_v0210test = true;
-
-  const VERSION = '0.2.19';
+  const VERSION = '0.2.20';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -58,6 +44,21 @@
     mount();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
   }
+
+  const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
+  const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
+  const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
+  const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
+  const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
+
+  if (location.hostname === MEASUREMENT_SITE_HOST) {
+    registerRuntimeVersion('FCR CORE', VERSION);
+    installMeasurementAuthBridge();
+    return;
+  }
+
+  if (window.__fcrDataCore_v0210test) return;
+  window.__fcrDataCore_v0210test = true;
   registerRuntimeVersion('FCR CORE', VERSION);
 
   const REQUEST_EVENT = 'fcr-data-core:request';
