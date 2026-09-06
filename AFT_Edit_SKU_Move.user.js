@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MAIN v0.9.18 AFT Edit/SKU/Move master
-// @name:en      MAIN v0.9.18 AFT Edit/SKU/Move master
+// @name         MAIN v0.9.17 AFT Edit/SKU/Move master
+// @name:en      MAIN v0.9.17 AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.18
+// @version      0.9.19
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.18';
+  const VERSION = '0.9.19';
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
