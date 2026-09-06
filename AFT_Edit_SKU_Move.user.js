@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.20
+// @version      0.9.21
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.20';
+  const VERSION = '0.9.21';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -525,6 +525,7 @@
       else this.panel = null;
 
       if (!this.panel) return;
+      if (this.mode === 'sku') this.paintSkuBatchMode();
       this.statusEl = $('[data-status]', this.panel);
       this.busyStatusEl = $('[data-exp-busy-status]', this.panel);
       this.runBtn = $('[data-run]', this.panel) || $('[data-start]', this.panel);
@@ -934,7 +935,6 @@
       }
 
       drawSkuChoices();
-      this.paintSkuBatchMode();
 
       wireMin(panel, this.keys.skuMin);
 
