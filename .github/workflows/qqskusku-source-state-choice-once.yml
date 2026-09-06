@@ -41,104 +41,13 @@ jobs:
           one('// @version      0.9.22', '// @version      0.9.23', 'metadata version')
           one("const VERSION = '0.9.22';", "const VERSION = '0.9.23';", 'internal version')
 
-          marker = '''    readEditQty(source, stateLabel = '') {
-      const key = low(stateLabel) === 'inventory' ? 'sellable' : low(stateLabel);
-      const pattern = EDIT_QTY_PATTERNS[key];
-      const text = source?.text || '';
+          marker = "    setStartQty(value) {"
+          if marker not in s:
+              raise SystemExit('setStartQty marker not found')
+          s = s.replace(marker, '\n    readSkuSourceChoices(source) {\n      const doc = source?.doc || source;\n      if (!doc?.querySelectorAll) return [];\n      const out = [];\n\n      for (const radio of doc.querySelectorAll(\'input[type="radio"]\')) {\n        const labels = [];\n        try {\n          for (const label of radio.labels || []) labels.push(label.textContent || \'\');\n        } catch {}\n        if (!labels.length) {\n          labels.push(radio.closest(\'label\')?.textContent || radio.parentElement?.textContent || \'\');\n        }\n\n        const label = norm(labels.join(\' \'));\n        if (!/Quantity\\s*:/i.test(label) || !/Owner\\s*:/i.test(label)) continue;\n\n        let state = \'\';\n        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = \'PENDING_RESEARCH\';\n        else if (/Unsellable|UNSELLABLE/i.test(label)) state = \'UNSELLABLE\';\n        else if (/(?:Inventory|Sellable)|\\bSELLABLE\\b/i.test(label)) state = \'SELLABLE\';\n        if (!state) continue;\n\n        out.push({\n          state,\n          label,\n          value: radio.hasAttribute(\'value\') ? norm(radio.getAttribute(\'value\')) : \'\'\n        });\n      }\n\n      return out;\n    },\n\n    resolveSkuSourceInput(source, wantedState) {\n      const choices = this.readSkuSourceChoices(source);\n      if (!choices.length) return { input: wantedState, matched: false, choices };\n\n      const matches = choices.filter(choice => choice.state === wantedState);\n      if (matches.length === 1) {\n        const selected = matches[0];\n        return {\n          input: selected.value || wantedState,\n          matched: true,\n          choices,\n          selected\n        };\n      }\n\n      const available = [...new Set(choices.map(choice => choice.state))].join(\', \') || \'unknown\';\n      if (!matches.length) {\n        throw new Error(`Requested source ${wantedState} not available; found ${available}`);\n      }\n\n      throw new Error(`Multiple ${wantedState} source options found (${matches.length}); manual selection required`);\n    },' + '\n\n' + marker, 1)
 
-      if (pattern && text) {
-        const qty = Number(text.match(pattern)?.[1]);
-        if (Number.isInteger(qty)) return qty;
-      }
-
-      const map = this.readEditInventory(source?.doc || source);
-      return map[key]?.qty ?? null;
-    },
-'''
-
-          addition = marker + '''
-    readSkuSourceChoices(source) {
-      const doc = source?.doc || source;
-      if (!doc?.querySelectorAll) return [];
-      const out = [];
-
-      for (const radio of doc.querySelectorAll('input[type="radio"]')) {
-        const labels = [];
-        try {
-          for (const label of radio.labels || []) labels.push(label.textContent || '');
-        } catch {}
-        if (!labels.length) {
-          labels.push(radio.closest('label')?.textContent || radio.parentElement?.textContent || '');
-        }
-
-        const label = norm(labels.join(' '));
-        if (!/Quantity\s*:/i.test(label) || !/Owner\s*:/i.test(label)) continue;
-
-        let state = '';
-        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = 'PENDING_RESEARCH';
-        else if (/Unsellable|UNSELLABLE/i.test(label)) state = 'UNSELLABLE';
-        else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
-        if (!state) continue;
-
-        out.push({
-          state,
-          label,
-          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : ''
-        });
-      }
-
-      return out;
-    },
-
-    resolveSkuSourceInput(source, wantedState) {
-      const choices = this.readSkuSourceChoices(source);
-      if (!choices.length) return { input: wantedState, matched: false, choices };
-
-      const matches = choices.filter(choice => choice.state === wantedState);
-      if (matches.length === 1) {
-        const selected = matches[0];
-        return {
-          input: selected.value || wantedState,
-          matched: true,
-          choices,
-          selected
-        };
-      }
-
-      const available = [...new Set(choices.map(choice => choice.state))].join(', ') || 'unknown';
-      if (!matches.length) {
-        throw new Error(`Requested source ${wantedState} not available; found ${available}`);
-      }
-
-      throw new Error(`Multiple ${wantedState} source options found (${matches.length}); manual selection required`);
-    },
-'''
-          one(marker, addition, 'source-choice helper insertion')
-
-          old_source = '''          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>
-            EditApi.action(objectId, 'Input', currentState, 'Source state', {
-              timeout: 120000
-        })
-          );'''
-
-          new_source = '''          const sourceChoice = this.resolveSkuSourceInput(sourcePage, currentState);
-          traceAft('AFT_SKU_SOURCE_CHOICE', {
-            sku: meta.sku,
-            requestedState: currentState,
-            matchedStructuredChoice: sourceChoice.matched,
-            selectedLabel: sourceChoice.selected?.label || '',
-            optionStates: sourceChoice.choices.map(choice => choice.state)
-          });
-          if (sourceChoice.matched) {
-            this.status(`Attempt ${attempt} • source matched ${currentLabel}`);
-          }
-
-          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>
-            EditApi.action(objectId, 'Input', sourceChoice.input, 'Source state', {
-              timeout: 120000
-        })
-          );'''
-          one(old_source, new_source, 'source state input selection')
+          old_source = "          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>\n            EditApi.action(objectId, 'Input', currentState, 'Source state', {\n              timeout: 120000\n        })\n          );"
+          one(old_source, "          const sourceChoice = this.resolveSkuSourceInput(sourcePage, currentState);\n          traceAft('AFT_SKU_SOURCE_CHOICE', {\n            sku: meta.sku,\n            requestedState: currentState,\n            matchedStructuredChoice: sourceChoice.matched,\n            selectedLabel: sourceChoice.selected?.label || '',\n            optionStates: sourceChoice.choices.map(choice => choice.state)\n          });\n          if (sourceChoice.matched) {\n            this.status(`Attempt ${attempt} • source matched ${currentLabel}`);\n          }\n\n          await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>\n            EditApi.action(objectId, 'Input', sourceChoice.input, 'Source state', {\n              timeout: 120000\n        })\n          );", 'source state input selection')
 
           p.write_text(s)
 
