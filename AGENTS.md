@@ -373,33 +373,142 @@ Directly connected opportunities may be reported but not implemented outside aut
 
 # 6. DELIVER THE EXACT THING THAT WAS VALIDATED
 
-## 6.1 VERSIONING, GITHUB AND DELIVERY
+## 6.1 USERSCRIPT IDENTITY, VERSIONING, GITHUB AND DELIVERY
 
-For every behaviour-changing userscript revision:
+### IMMUTABLE USERSCRIPT IDENTITY
 
-- bump `@version`
-- keep exposed UI/toast versions consistent
-- treat base `@name` + `@namespace` as immutable update identity once deployed; never change base `@name` merely to show the current version
-- when a legacy deployed base `@name` already contains a version, leave it frozen and use a stable version-free `@name:en` for the Tampermonkey manager display
-- keep `@name:en` version-free; the running version belongs in `@version`, the matching internal version constant and visible runtime UI
-- every active fleet script must expose its actually running version through the shared unobtrusive runtime version stamp
-- preserve deployed filename, `@updateURL` and `@downloadURL` unless migration is intentional
+Once a userscript has been deployed, Tampermonkey identity is permanent:
+
+`@name + @namespace = immutable deployed identity`
+
+During a normal update:
+
+- NEVER change `@name`
+- NEVER change `@namespace`
+- NEVER add the current version to `@name`
+- NEVER remove an old embedded version from `@name`
+- NEVER add or change `@name:en` merely to sidestep or cosmetically clean up a deployed `@name`
+
+If an existing deployed script unfortunately already has a version embedded in `@name`, KEEP THAT EXACT `@name` FROZEN unless the user explicitly approves a one-time identity migration.
+
+New scripts must use a stable version-free `@name` from first deployment.
+
+GOOD:
+
+`// @name         MAIN AFT Edit/SKU/Move master`
+
+BAD:
+
+`// @name         MAIN v0.9.23 AFT Edit/SKU/Move master`
+
+**DO NOT CHANGE USERSCRIPT IDENTITY JUST TO DISPLAY THE CURRENT VERSION.**
+
+The visible title/version problem must NEVER be solved by changing `@name`.
+
+### PERMANENT VERSION-FREE GITHUB PATHS
+
+Every deployed GitHub userscript filename is permanent and VERSION-FREE.
+
+GOOD:
+
+`AFT_Edit_SKU_Move.user.js`
+
+BAD:
+
+`AFT_Edit_SKU_Move_v0.9.23.user.js`
+
+Once deployed, keep the canonical filename unchanged during normal updates.
+
+`@updateURL` and `@downloadURL` must remain permanent canonical VERSION-FREE GitHub raw links to that same stable filename.
+
+GOOD:
+
+`https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js`
+
+NEVER use for normal delivery:
+
+- version numbers in the filename/path
+- alternate temporary userscript files
+- cache-busting query strings
+- a different raw path merely to force Tampermonkey to see a new version
+
+### WHERE VERSION CHANGES ARE ALLOWED
+
+The current release version belongs ONLY in:
+
+- `@version`
+- the matching internal `VERSION` constant
+- visible runtime UI / watermark / stamp
+- manifest/README version references where applicable
+
+Every active fleet script must visibly expose the ACTUAL RUNNING VERSION on-page using the shared small unobtrusive runtime version stamp or an equivalent approved visible runtime indicator.
+
+Preferred examples:
+
+`AFT · v0.9.23`
+
+`FCR CORE · v0.2.20`
+
+This runtime stamp exists so the user can refresh the site and immediately confirm which version Tampermonkey is actually executing. Do not use `@name` as the runtime version display.
+
+### MANDATORY PRE-PUBLISH GATE
+
+Before publishing ANY userscript update, validate all of the following against the currently deployed canonical script:
+
+`stable filename unchanged`
+
+`→ @name unchanged`
+
+`→ @namespace unchanged`
+
+`→ @updateURL unchanged`
+
+`→ @downloadURL unchanged`
+
+`→ @version bumped`
+
+`→ internal VERSION matches @version`
+
+`→ visible runtime watermark/stamp matches @version`
+
+`→ syntax/static check passes`
+
+`→ correct canonical file is pushed to main`
+
+`→ work-laptop-pack is synced where applicable`
+
+If any identity/path check fails unexpectedly, STOP. Do not publish a workaround that creates a second install. Resolve the mismatch or obtain explicit approval for a one-time migration.
+
+For a brand-new script, also verify before first deployment:
+
+- filename is stable and version-free
+- `@name` is stable and version-free
+- `@namespace` is intentionally chosen and stable
+- canonical `@updateURL` and `@downloadURL` point to the permanent version-free filename
+- internal/runtime version displays match `@version`
+
+### GITHUB DELIVERY
+
+For every userscript update:
+
 - ensure the version described is the version actually modified
-- inspect final diff for unrelated changes
+- inspect the final diff for unrelated changes
 - commit with a scoped message
-- push to `main`
-- update an existing manifest/README entry where applicable
+- push the correct stable file to `main`
+- update an existing manifest/README version reference where applicable
 
 For deployed fleet scripts:
 
-- synchronize only the intended validated version to `work-laptop-pack`
-- preserve deployed filename/update path
+- synchronize only the intended validated version to `work-laptop-pack` where applicable
+- preserve the deployed stable filename and canonical update/download paths
 - preserve a rollback commit/source version
 - verify the pack contains the intended exact revision
-- return the direct canonical GitHub `.user.js` install/update link with no cache-busting query string
+- return the direct canonical GitHub `.user.js` link for the stable filename with no cache-busting query string
 - default user action: `open link → Update/Overwrite`
 
-Do not make the normal workflow local script copies, manual source editing, full-script copy/paste from chat, competing source copies, or waiting for a scheduled Tampermonkey update when a direct link is available.
+The direct link MUST target the existing deployed identity/path and must update/overwrite the existing Tampermonkey script. If the proposed normal-update link would create another install, treat that as an identity failure, not as an acceptable delivery method.
+
+Do not make the normal workflow local script copies, manual source editing, full-script copy/paste from chat, competing source copies, alternate versioned userscript files, or waiting for a scheduled Tampermonkey update when the canonical direct link is available.
 
 Unvalidated experimental/diagnostic candidates stay out of `work-laptop-pack`.
 
@@ -525,8 +634,9 @@ Before finishing a code-changing task verify:
 - final diff contains no unrelated change
 - affected shared modes/helpers were considered
 - state-changing retries cannot duplicate actions
-- version metadata is consistent
-- claimed GitHub push/deployment/update link is real
+- userscript identity/path metadata remained stable unless an explicitly approved migration was in scope
+- version metadata, internal VERSION and visible runtime version are consistent
+- claimed GitHub push/deployment/direct update link is real and canonical
 - remaining live uncertainty is stated plainly
 - user-facing response contains only information the user needs
 
