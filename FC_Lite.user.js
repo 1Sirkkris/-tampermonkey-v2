@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.66
+// @version      0.1.67
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.66';
+  const VERSION = '0.1.67';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -689,6 +689,11 @@
     focusScanner();
   }
 
+  function madcatRetryNeedsAuth(status, message = '') {
+    if (status === 'history-yes' || status === 'history-no') return true;
+    return status === 'error' && /(?:measurement login required|token expired|authentication required|login popup)/i.test(clean(message));
+  }
+
   function paintMadcat(row, state, message = '') {
     if (!row?.isConnected) return;
     const cell = row.querySelector('.madcat');
@@ -724,7 +729,7 @@
             : value === 'auth'
               ? 'Refreshing Item Measurement authentication…'
               : value === 'error'
-                ? `${message || 'MADCAT check failed'} — click to refresh auth and retry`
+                ? `${message || 'MADCAT check failed'} — click to ${madcatRetryNeedsAuth(value, message) ? 'refresh auth and retry' : 'retry'}`
                 : 'Checking global raw MADCAT measurements from the past 30 days';
 
     if (retryable) {
@@ -732,7 +737,7 @@
         const fnsku = clean(row._fcratcMadcatFnsku);
         const asin = clean(row._fcratcMadcatAsin);
         const measurementId = fnsku || asin;
-        checkMadcat(row, fnsku, asin, true, Boolean(measurementId));
+        checkMadcat(row, fnsku, asin, true, Boolean(measurementId) && madcatRetryNeedsAuth(value, message));
       }, { once: true });
     }
 

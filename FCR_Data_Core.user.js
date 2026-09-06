@@ -2,8 +2,8 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.20
-// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with automatic user-gesture auth renewal.
+// @version      0.2.21
+// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand measurement auth.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.20';
+  const VERSION = '0.2.21';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -76,8 +76,8 @@
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
-  const MEASUREMENT_TIMEOUT_MS = 6000;
-  const MEASUREMENT_RENEW_BEFORE_MS = 10 * 60 * 1000;
+  const MEASUREMENT_TIMEOUT_MS = 10000;
+  const MEASUREMENT_RENEW_BEFORE_MS = 15 * 1000;
   const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -246,7 +246,7 @@
     return auth;
   }
 
-  installMeasurementAutoRenewal();
+  // Auth renewal is intentionally user-triggered only; never steal focus from normal FCResearch clicks/Enter presses.
 
   function decodeJwtPayload(token) {
     try {

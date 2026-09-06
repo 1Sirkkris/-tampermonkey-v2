@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.28
+// @version      0.1.29
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -22,7 +22,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.28';
+  const VERSION = '0.1.29';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -802,6 +802,11 @@
 
   const madcatState = { signature: '', status: '', message: '', serial: 0 };
 
+  function madcatRetryNeedsAuth(status, message = '') {
+    if (status === 'history-yes' || status === 'history-no') return true;
+    return status === 'error' && /(?:measurement login required|token expired|authentication required|login popup)/i.test(clean(message));
+  }
+
   function paintMadcat(panel, status, message = '') {
     const badge = ensureMadcatBadge(panel);
     if (!badge) return;
@@ -823,13 +828,13 @@
         : state === 'history-yes' ? 'Inventory History fallback: MADCAT found — click to refresh RAW auth'
           : state === 'history-no' ? 'Inventory History fallback only — click to refresh RAW auth and confirm'
             : state === 'auth' ? 'Refreshing Item Measurement authentication…'
-              : state === 'error' ? `${message || 'MADCAT check failed'} — click to refresh auth and retry`
+              : state === 'error' ? `${message || 'MADCAT check failed'} — click to ${madcatRetryNeedsAuth(state, message) ? 'refresh auth and retry' : 'retry'}`
                 : 'Checking global raw MADCAT measurements from the past 30 days';
 
     badge.onclick = retryable ? () => {
       const current = readProductPanel();
       if (!current) return;
-      checkMadcat(current, true, true);
+      checkMadcat(current, true, madcatRetryNeedsAuth(state, message));
     } : null;
   }
 
