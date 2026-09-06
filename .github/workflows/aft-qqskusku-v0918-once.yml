@@ -22,180 +22,7 @@ jobs:
       - name: Patch and validate
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('AFT_Edit_SKU_Move.user.js')
-          s = p.read_text()
-
-          def rep(old, new, label):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected 1 match, got {count}')
-              s = s.replace(old, new, 1)
-
-          rep('// @name         MAIN v0.9.17 AFT Edit/SKU/Move master', '// @name         MAIN v0.9.18 AFT Edit/SKU/Move master', 'name')
-          rep('// @name:en      MAIN v0.9.17 AFT Edit/SKU/Move master', '// @name:en      MAIN v0.9.18 AFT Edit/SKU/Move master', 'name en')
-          rep('// @version      0.9.17', '// @version      0.9.18', 'meta version')
-          rep("const VERSION = '0.9.17';", "const VERSION = '0.9.18';", 'runtime version')
-
-          rep(
-              '''            <div class="sku-batch-note">Uses the Current state → Desired state selected below.</div>
-            <div class="sku-batch-failed" data-sku-batch-failed hidden></div>''',
-              '''            <div class="sku-batch-note">Uses the Current state → Desired state selected below.</div>
-            <style>
-              #aftm-sku .sku-batch-progress{display:grid;gap:4px;max-height:156px;overflow:auto;padding:2px;border-radius:6px}
-              #aftm-sku .sku-batch-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;min-height:29px;padding:5px 7px;border:1px solid #c1cbd0;border-left:5px solid #b8c1c5;border-radius:5px;background:#fff;color:#26343a;font:700 11px/1.2 Consolas,monospace}
-              #aftm-sku .sku-batch-row[data-state="active"]{background:#fff2a8;border-color:#d1a300;border-left-color:#a86f00;color:#2e2600}
-              #aftm-sku .sku-batch-row[data-state="done"]{background:#e5e8ea;border-color:#aeb7bc;border-left-color:#7d898f;color:#4a565c}
-              #aftm-sku .sku-batch-row[data-state="error"]{background:#ffe0e0;border-color:#bd514d;border-left-color:#9f1f1a;color:#681714}
-              #aftm-sku .sku-batch-code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-              #aftm-sku .sku-batch-state{font:900 10px/1 Arial,sans-serif;letter-spacing:.25px;white-space:nowrap}
-            </style>
-            <div class="sku-batch-progress" data-sku-batch-progress hidden aria-live="polite"></div>
-            <div class="sku-batch-failed" data-sku-batch-failed hidden></div>''',
-              'batch progress markup'
-          )
-
-          rep(
-              '''    showSkuBatchFailures(failed) {''',
-              '''    initSkuBatchProgress(items) {
-      this.skuBatchProgress = (items || []).map(sku => ({ sku, state: 'pending', label: 'WAIT' }));
-      this.drawSkuBatchProgress();
-    },
-
-    clearSkuBatchProgress() {
-      this.skuBatchProgress = [];
-      const el = this.panel && $('[data-sku-batch-progress]', this.panel);
-      if (!el) return;
-      el.hidden = true;
-      el.replaceChildren();
-    },
-
-    setSkuBatchProgressState(index, state, label = '') {
-      const row = this.skuBatchProgress?.[index];
-      if (!row) return;
-      row.state = state;
-      row.label = label || ({ pending: 'WAIT', active: '▶ RUNNING', done: '✓ DONE', error: '! ERROR' }[state] || String(state).toUpperCase());
-      this.drawSkuBatchProgress(index);
-    },
-
-    drawSkuBatchProgress(focusIndex = -1) {
-      const el = this.panel && $('[data-sku-batch-progress]', this.panel);
-      if (!el) return;
-      const rows = this.skuBatchProgress || [];
-      if (!rows.length) {
-        el.hidden = true;
-        el.replaceChildren();
-        return;
-      }
-
-      const frag = document.createDocumentFragment();
-      for (const row of rows) {
-        const line = document.createElement('div');
-        line.className = 'sku-batch-row';
-        line.dataset.state = row.state;
-
-        const code = document.createElement('span');
-        code.className = 'sku-batch-code';
-        code.textContent = row.sku;
-
-        const state = document.createElement('span');
-        state.className = 'sku-batch-state';
-        state.textContent = row.label;
-
-        line.append(code, state);
-        frag.append(line);
-      }
-
-      el.replaceChildren(frag);
-      el.hidden = false;
-      if (focusIndex >= 0 && el.children[focusIndex]) {
-        const row = el.children[focusIndex];
-        const top = row.offsetTop;
-        const bottom = top + row.offsetHeight;
-        if (top < el.scrollTop) el.scrollTop = top;
-        else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
-      }
-    },
-
-    showSkuBatchFailures(failed) {''',
-              'progress methods'
-          )
-
-          rep(
-              '''      skuQueue.oninput = debounce(() => {
-        localStorage.setItem(this.keys.skuQueue, skuQueue.value);
-        this.updateSkuBatchMeta();
-      });''',
-              '''      skuQueue.oninput = debounce(() => {
-        localStorage.setItem(this.keys.skuQueue, skuQueue.value);
-        this.clearSkuBatchProgress();
-        this.showSkuBatchFailures([]);
-        this.updateSkuBatchMeta();
-      });''',
-              'queue input reset'
-          )
-
-          rep(
-              '''      this.setStartQty(null);
-      this.tracker?.restartSameSku?.();
-      this.showSkuBatchFailures([]);
-      await this.directRun(() => this.runSkuBatchQueue(items, meta));''',
-              '''      this.setStartQty(null);
-      this.tracker?.restartSameSku?.();
-      this.showSkuBatchFailures([]);
-      this.initSkuBatchProgress(items);
-      await this.directRun(() => this.runSkuBatchQueue(items, meta));''',
-              'batch start progress'
-          )
-
-          rep(
-              '''        const sku = items[i];
-        this.status(`${i + 1}/${items.length} • ${sku}`);
-
-        try {''',
-              '''        const sku = items[i];
-        this.status(`${i + 1}/${items.length} • ${sku}`);
-        this.setSkuBatchProgressState(i, 'active', '▶ RUNNING');
-
-        try {''',
-              'current highlight'
-          )
-
-          rep(
-              '''          if (result?.outcome === 'zero') zero++;
-          else flipped++;''',
-              '''          if (result?.outcome === 'zero') {
-            zero++;
-            this.setSkuBatchProgressState(i, 'done', '— 0 QTY');
-          } else {
-            flipped++;
-            this.setSkuBatchProgressState(i, 'done', '✓ DONE');
-          }''',
-              'done highlight'
-          )
-
-          rep(
-              '''          failed.push({ sku, message: String(error?.message || error) });''',
-              '''          this.setSkuBatchProgressState(i, 'error', '! ERROR');
-          failed.push({ sku, message: String(error?.message || error) });''',
-              'error highlight'
-          )
-
-          rep(
-              '''      if (clearFields) this.tracker?.clear();''',
-              '''      if (clearFields) {
-        this.tracker?.clear();
-        this.clearSkuBatchProgress?.();
-        this.showSkuBatchFailures?.([]);
-      }''',
-              'clear progress'
-          )
-
-          p.write_text(s)
-          PY
-
+          python3 -c "import base64;exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnAgPSBQYXRoKCdBRlRfRWRpdF9TS1VfTW92ZS51c2VyLmpzJykKcyA9IHAucmVhZF90ZXh0KCkKCmRlZiByZXAob2xkLCBuZXcsIGxhYmVsKToKICAgIGdsb2JhbCBzCiAgICBjb3VudCA9IHMuY291bnQob2xkKQogICAgaWYgY291bnQgIT0gMToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYne2xhYmVsfTogZXhwZWN0ZWQgMSBtYXRjaCwgZ290IHtjb3VudH0nKQogICAgcyA9IHMucmVwbGFjZShvbGQsIG5ldywgMSkKCnJlcCgnLy8gQG5hbWUgICAgICAgICBNQUlOIHYwLjkuMTcgQUZUIEVkaXQvU0tVL01vdmUgbWFzdGVyJywgJy8vIEBuYW1lICAgICAgICAgTUFJTiB2MC45LjE4IEFGVCBFZGl0L1NLVS9Nb3ZlIG1hc3RlcicsICduYW1lJykKcmVwKCcvLyBAbmFtZTplbiAgICAgIE1BSU4gdjAuOS4xNyBBRlQgRWRpdC9TS1UvTW92ZSBtYXN0ZXInLCAnLy8gQG5hbWU6ZW4gICAgICBNQUlOIHYwLjkuMTggQUZUIEVkaXQvU0tVL01vdmUgbWFzdGVyJywgJ25hbWUgZW4nKQpyZXAoJy8vIEB2ZXJzaW9uICAgICAgMC45LjE3JywgJy8vIEB2ZXJzaW9uICAgICAgMC45LjE4JywgJ21ldGEgdmVyc2lvbicpCnJlcCgiY29uc3QgVkVSU0lPTiA9ICcwLjkuMTcnOyIsICJjb25zdCBWRVJTSU9OID0gJzAuOS4xOCc7IiwgJ3J1bnRpbWUgdmVyc2lvbicpCgpyZXAoCicnJyAgICAgICAgICAgIDxkaXYgY2xhc3M9InNrdS1iYXRjaC1ub3RlIj5Vc2VzIHRoZSBDdXJyZW50IHN0YXRlIOKGkiBEZXNpcmVkIHN0YXRlIHNlbGVjdGVkIGJlbG93LjwvZGl2PgogICAgICAgICAgICA8ZGl2IGNsYXNzPSJza3UtYmF0Y2gtZmFpbGVkIiBkYXRhLXNrdS1iYXRjaC1mYWlsZWQgaGlkZGVuPjwvZGl2PicnJywKJycnICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LWJhdGNoLW5vdGUiPlVzZXMgdGhlIEN1cnJlbnQgc3RhdGUg4oaSIERlc2lyZWQgc3RhdGUgc2VsZWN0ZWQgYmVsb3cuPC9kaXY+CiAgICAgICAgICAgIDxzdHlsZT4KICAgICAgICAgICAgICAjYWZ0bS1za3UgLnNrdS1iYXRjaC1wcm9ncmVzc3tkaXNwbGF5OmdyaWQ7Z2FwOjRweDttYXgtaGVpZ2h0OjE1NnB4O292ZXJmbG93OmF1dG87cGFkZGluZzoycHg7Ym9yZGVyLXJhZGl1czo2cHh9CiAgICAgICAgICAgICAgI2FmdG0tc2t1IC5za3UtYmF0Y2gtcm93e2Rpc3BsYXk6Z3JpZDtncmlkLXRlbXBsYXRlLWNvbHVtbnM6bWlubWF4KDAsMWZyKSBhdXRvO2FsaWduLWl0ZW1zOmNlbnRlcjtnYXA6OHB4O21pbi1oZWlnaHQ6MjlweDtwYWRkaW5nOjVweCA3cHg7Ym9yZGVyOjFweCBzb2xpZCAjYzFjYmQwO2JvcmRlci1sZWZ0OjVweCBzb2xpZCAjYjhjMWM1O2JvcmRlci1yYWRpdXM6NXB4O2JhY2tncm91bmQ6I2ZmZjtjb2xvcjojMjYzNDNhO2ZvbnQ6NzAwIDExcHgvMS4yIENvbnNvbGFzLG1vbm9zcGFjZX0KICAgICAgICAgICAgICAjYWZ0bS1za3UgLnNrdS1iYXRjaC1yb3dbZGF0YS1zdGF0ZT0iYWN0aXZlIl17YmFja2dyb3VuZDojZmZmMmE4O2JvcmRlci1jb2xvcjojZDFhMzAwO2JvcmRlci1sZWZ0LWNvbG9yOiNhODZmMDA7Y29sb3I6IzJlMjYwMH0KICAgICAgICAgICAgICAjYWZ0bS1za3UgLnNrdS1iYXRjaC1yb3dbZGF0YS1zdGF0ZT0iZG9uZSJde2JhY2tncm91bmQ6I2U1ZThlYTtib3JkZXItY29sb3I6I2FlYjdiYztib3JkZXItbGVmdC1jb2xvcjojN2Q4OThmO2NvbG9yOiM0YTU2NWN9CiAgICAgICAgICAgICAgI2FmdG0tc2t1IC5za3UtYmF0Y2gtcm93W2RhdGEtc3RhdGU9ImVycm9yIl17YmFja2dyb3VuZDojZmZlMGUwO2JvcmRlci1jb2xvcjojYmQ1MTRkO2JvcmRlci1sZWZ0LWNvbG9yOiM5ZjFmMWE7Y29sb3I6IzY4MTcxNH0KICAgICAgICAgICAgICAjYWZ0bS1za3UgLnNrdS1iYXRjaC1jb2Rle21pbi13aWR0aDowO292ZXJmbG93OmhpZGRlbjt0ZXh0LW92ZXJmbG93OmVsbGlwc2lzO3doaXRlLXNwYWNlOm5vd3JhcH0KICAgICAgICAgICAgICAjYWZ0bS1za3UgLnNrdS1iYXRjaC1zdGF0ZXtmb250OjkwMCAxMHB4LzEgQXJpYWwsc2Fucy1zZXJpZjtsZXR0ZXItc3BhY2luZzouMjVweDt3aGl0ZS1zcGFjZTpub3dyYXB9CiAgICAgICAgICAgIDwvc3R5bGU+CiAgICAgICAgICAgIDxkaXYgY2xhc3M9InNrdS1iYXRjaC1wcm9ncmVzcyIgZGF0YS1za3UtYmF0Y2gtcHJvZ3Jlc3MgaGlkZGVuIGFyaWEtbGl2ZT0icG9saXRlIj48L2Rpdj4KICAgICAgICAgICAgPGRpdiBjbGFzcz0ic2t1LWJhdGNoLWZhaWxlZCIgZGF0YS1za3UtYmF0Y2gtZmFpbGVkIGhpZGRlbj48L2Rpdj4nJycsCidiYXRjaCBwcm9ncmVzcyBtYXJrdXAnCikKCnJlcCgKJycnICAgIHNob3dTa3VCYXRjaEZhaWx1cmVzKGZhaWxlZCkgeyc nJycu cmVwbGFjZSgnICcsICcnKSwKJycnICAgIGluaXRTa3VCYXRjaFByb2dyZXNzKGl0ZW1zKSB7CiAgICAgIHRoaXMuc2t1QmF0Y2hQcm9ncmVzcyA9IChpdGVtcyB8fCBbXSkubWFwKHNrdSA9PiAoeyBza3UsIHN0YXRlOiAncGVuZGluZycsIGxhYmVsOiAnV0FJVCcgfSkpOwogICAgICB0aGlzLmRyYXdTa3VCYXRjaFByb2dyZXNzKCk7CiAgICB9LAoKICAgIGNsZWFyU2t1QmF0Y2hQcm9ncmVzcygpIHsKICAgICAgdGhpcy5za3VCYXRjaFByb2dyZXNzID0gW107CiAgICAgIGNvbnN0IGVsID0gdGhpcy5wYW5lbCAmJiAkKCdbZGF0YS1za3UtYmF0Y2gtcHJvZ3Jlc3NdJywgdGhpcy5wYW5lbCk7CiAgICAgIGlmICghZWwpIHJldHVybjsKICAgICAgZWwuaGlkZGVuID0gdHJ1ZTsKICAgICAgZWwucmVwbGFjZUNoaWxkcmVuKCk7CiAgICB9LAoKICAgIHNldFNrdUJhdGNoUHJvZ3Jlc3NTdGF0ZShpbmRleCwgc3RhdGUsIGxhYmVsID0gJycpIHsKICAgICAgY29uc3Qgcm93ID0gdGhpcy5za3VCYXRjaFByb2dyZXNzPy5baW5kZXhdOwogICAgICBpZiAoIXJvdykgcmV0dXJuOwogICAgICByb3cuc3RhdGUgPSBzdGF0ZTsKICAgICAgcm93LmxhYmVsID0gbGFiZWwgfHwgKHsgcGVuZGluZzogJ1dBSVQnLCBhY3RpdmU6ICfigLYgUlVOTklORycsIGRvbmU6ICfinJMgRE9ORScsIGVycm9yOiAnISBFUlJPUicgfVtzdGF0ZV0gfHwgU3RyaW5nKHN0YXRlKS50b1VwcGVyQ2FzZSgpKTsKICAgICAgdGhpcy5kcmF3U2t1QmF0Y2hQcm9ncmVzcyhpbmRleCk7CiAgICB9LAoKICAgIGRyYXdTa3VCYXRjaFByb2dyZXNzKGZvY3VzSW5kZXggPSAtMSkgewogICAgICBjb25zdCBlbCA9IHRoaXMucGFuZWwgJiYgJCgnW2RhdGEtc2t1LWJhdGNoLXByb2dyZXNzXScsIHRoaXMucGFuZWwpOwogICAgICBpZiAoIWVsKSByZXR1cm47CiAgICAgIGNvbnN0IHJvd3MgPSB0aGlzLnNrdUJhdGNoUHJvZ3Jlc3MgfHwgW107CiAgICAgIGlmICghcm93cy5sZW5ndGgpIHsKICAgICAgICBlbC5oaWRkZW4gPSB0cnVlOwogICAgICAgIGVsLnJlcGxhY2VDaGlsZHJlbigpOwogICAgICAgIHJldHVybjsKICAgICAgfQoKICAgICAgY29uc3QgZnJhZyA9IGRvY3VtZW50LmNyZWF0ZURvY3VtZW50RnJhZ21lbnQoKTsKICAgICAgZm9yIChjb25zdCByb3cgb2Ygcm93cykgewogICAgICAgIGNvbnN0IGxpbmUgPSBkb2N1bWVudC5jcmVhdGVFbGVtZW50KCdkaXYnKTsKICAgICAgICBsaW5lLmNsYXNzTmFtZSA9ICdza3UtYmF0Y2gtcm93JzsKICAgICAgICBsaW5lLmRhdGFzZXQuc3RhdGUgPSByb3cuc3RhdGU7CgogICAgICAgIGNvbnN0IGNvZGUgPSBkb2N1bWVudC5jcmVhdGVFbGVtZW50KCdzcGFuJyk7CiAgICAgICAgY29kZS5jbGFzc05hbWUgPSAnc2t1LWJhdGNoLWNvZGUnOwogICAgICAgIGNvZGUudGV4dENvbnRlbnQgPSByb3cuc2t1OwoKICAgICAgICBjb25zdCBzdGF0ZSA9IGRvY3VtZW50LmNyZWF0ZUVsZW1lbnQoJ3NwYW4nKTsKICAgICAgICBzdGF0ZS5jbGFzc05hbWUgPSAnc2t1LWJhdGNoLXN0YXRlJzsKICAgICAgICBzdGF0ZS50ZXh0Q29udGVudCA9IHJvdy5sYWJlbDsKCiAgICAgICAgbGluZS5hcHBlbmQoY29kZSwgc3RhdGUpOwogICAgICAgIGZyYWcuYXBwZW5kKGxpbmUpOwogICAgICB9CgogICAgICBlbC5yZXBsYWNlQ2hpbGRyZW4oZnJhZyk7CiAgICAgIGVsLmhpZGRlbiA9IGZhbHNlOwogICAgICBpZiAoZm9jdXNJbmRleCA+PSAwICYmIGVsLmNoaWxkcmVuW2ZvY3VzSW5kZXhdKSB7CiAgICAgICAgY29uc3Qgcm93ID0gZWwuY2hpbGRyZW5bZm9jdXNJbmRleF07CiAgICAgICAgY29uc3QgdG9wID0gcm93Lm9mZnNldFRvcDsKICAgICAgICBjb25zdCBib3R0b20gPSB0b3AgKyByb3cub2Zmc2V0SGVpZ2h0OwogICAgICAgIGlmICh0b3AgPCBlbC5zY3JvbGxUb3ApIGVsLnNjcm9sbFRvcCA9IHRvcDsKICAgICAgICBlbHNlIGlmIChib3R0b20gPiBlbC5zY3JvbGxUb3AgKyBlbC5jbGllbnRIZWlnaHQpIGVsLnNjcm9sbFRvcCA9IGJvdHRvbSAtIGVsLmNsaWVudEhlaWdodDsKICAgICAgfQogICAgfSwKCiAgICBzaG93U2t1QmF0Y2hGYWlsdXJlcyhmYWlsZWQpIHsnJycsCidwcm9ncmVzcyBtZXRob2RzJwopCgpyZXAoCicnJyAgICAgIHNrdVF1ZXVlLm9uaW5wdXQgPSBkZWJvdW5jZSgoKSA9PiB7CiAgICAgICAgbG9jYWxTdG9yYWdlLnNldEl0ZW0odGhpcy5rZXlzLnNrdVF1ZXVlLCBza3VRdWV1ZS52YWx1ZSk7CiAgICAgICAgdGhpcy51cGRhdGVTa3VCYXRjaE1ldGEoKTsKICAgICAgfSk7JycnLAonJycgICAgICBza3VRdWV1ZS5vbmlucHV0ID0gZGVib3VuY2UoKCkgPT4gewogICAgICAgIGxvY2FsU3RvcmFnZS5zZXRJdGVtKHRoaXMua2V5cy5za3VRdWV1ZSwgc2t1UXVldWUudmFsdWUpOwogICAgICAgIHRoaXMuY2xlYXJTa3VCYXRjaFByb2dyZXNzKCk7CiAgICAgICAgdGhpcy5zaG93U2t1QmF0Y2hGYWlsdXJlcyhbXSk7CiAgICAgICAgdGhpcy51cGRhdGVTa3VCYXRjaE1ldGEoKTsKICAgICAgfSk7JycnLAoncXVldWUgaW5wdXQgcmVzZXQnCikKCnJlcCgKJycnICAgICAgdGhpcy5zZXRTdGFydFF0eShudWxsKTsKICAgICAgdGhpcy50cmFja2VyPy5yZXN0YXJ0U2FtZVNrdT8uKCk7CiAgICAgIHRoaXMuc2hvd1NrdUJhdGNoRmFpbHVyZXMoW10pOwogICAgICBhd2FpdCB0aGlzLmRpcmVjdFJ1bigoKSA9PiB0aGlzLnJ1blNrdUJhdGNoUXVldWUoaXRlbXMsIG1ldGEpKTs nJycu cmVwbGFjZSgnICcsICcnKSwKJycnICAgICAgdGhpcy5zZXRTdGFydFF0eShudWxsKTsKICAgICAgdGhpcy50cmFja2VyPy5yZXN0YXJ0U2FtZVNrdT8uKCk7CiAgICAgIHRoaXMuc2hvd1NrdUJhdGNoRmFpbHVyZXMoW10pOwogICAgICB0aGlzLmluaXRTa3VCYXRjaFByb2dyZXNzKGl0ZW1zKTsKICAgICAgYXdhaXQgdGhpcy5kaXJlY3RSdW4oKCkgPT4gdGhpcy5ydW5Ta3VCYXRjaFF1ZXVlKGl0ZW1zLCBtZXRhKSk7JycnLAonYmF0Y2ggc3RhcnQgcHJvZ3Jlc3MnCikKCnJlcCgKJycnICAgICAgICBjb25zdCBza3UgPSBpdGVtc1tpXTsKICAgICAgICB0aGlzLnN0YXR1cyhgJHtpICsgMX0vJHtpdGVtcy5sZW5ndGh9IOKAoiAke3NrdX1gKTsKCiAgICAgICAgdHJ5IHsnJycsCicnJyAgICAgICAgY29uc3Qgc2t1ID0gaXRlbXNbaV07CiAgICAgICAgdGhpcy5zdGF0dXMoYCR7aSArIDF9LyR7aXRlbXMubGVuZ3RofSDigKIgJHtza3V9YCk7CiAgICAgICAgdGhpcy5zZXRTa3VCYXRjaFByb2dyZXNzU3RhdGUoaSwgJ2FjdGl2ZScsICfigLYgUlVOTklORycpOwoKICAgICAgICB0cnkgeyc nJycu cmVwbGFjZSgnICcsICcnKSwKJ2N1cnJlbnQgaGlnaGxpZ2h0JwopCgpyZXAoCicnJyAgICAgICAgICBpZiAocmVzdWx0Py5vdXRjb21lID09PSAnemVybycpIHplcm8rKzsKICAgICAgICAgIGVsc2UgZmxpcHBlZCsrOyc nJycu cmVwbGFjZSgnICcsICcnKSwKJycnICAgICAgICAgIGlmIChyZXN1bHQ/Lm91dGNvbWUgPT09ICd6ZXJvJykgewogICAgICAgICAgICB6ZXJvKys7CiAgICAgICAgICAgIHRoaXMuc2V0U2t1QmF0Y2hQcm9ncmVzc1N0YXRlKGksICdkb25lJywgJ+KAlCAwIFFUWScpOwogICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgZmxpcHBlZCsrOwogICAgICAgICAgICB0aGlzLnNldFNrdUJhdGNoUHJvZ3Jlc3NTdGF0ZShpLCAnZG9uZScsICfinJMgRE9ORScpOwogICAgICAgICAgfScnJywKJ2RvbmUgaGlnaGxpZ2h0JwopCgpyZXAoCicnJyAgICAgICAgICBmYWlsZWQucHVzaCh7IHNrdSwgbWVzc2FnZTogU3RyaW5nKGVycm9yPy5tZXNzYWdlIHx8IGVycm9yKSB9KTsnJycsCicnJyAgICAgICAgICB0aGlzLnNldFNrdUJhdGNoUHJvZ3Jlc3NTdGF0ZShpLCAnZXJyb3InLCAnISBFUlJPUicpOwogICAgICAgICAgZmFpbGVkLnB1c2goeyBza3UsIG1lc3NhZ2U6IFN0cmluZyhlcnJvcj8ubWVzc2FnZSB8fCBlcnJvcikgfSk7JycnLAonZXJyb3IgaGlnaGxpZ2h0JwopCgpyZXAoCicnJyAgICAgIGlmIChjbGVhckZpZWxkcykgdGhpcy50cmFja2VyPy5jbGVhcigpOyc nJycu cmVwbGFjZSgnICcsICcnKSwKJycnICAgICAgaWYgKGNsZWFyRmllbGRzKSB7CiAgICAgICAgdGhpcy50cmFja2VyPy5jbGVhcigpOwogICAgICAgIHRoaXMuY2xlYXJTa3VCYXRjaFByb2dyZXNzPy4oKTsKICAgICAgICB0aGlzLnNob3dTa3VCYXRjaEZhaWx1cmVzPy4oW10pOwogICAgICB9JycnLAonY2xlYXIgcHJvZ3Jlc3MnCikKCnAud3JpdGVfdGV4dChzKQo='))"
           node --check AFT_Edit_SKU_Move.user.js
           grep -q '@version      0.9.18' AFT_Edit_SKU_Move.user.js
           grep -q 'data-sku-batch-progress' AFT_Edit_SKU_Move.user.js
@@ -204,18 +31,15 @@ jobs:
           grep -q '! ERROR' AFT_Edit_SKU_Move.user.js
           grep -q '— 0 QTY' AFT_Edit_SKU_Move.user.js
           git diff --check
-
       - name: Publish main and sync work laptop pack
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           rm .github/workflows/aft-qqskusku-v0918-once.yml
           git add AFT_Edit_SKU_Move.user.js .github/workflows/aft-qqskusku-v0918-once.yml
           git commit -m "ui: highlight QQSkuSku queue progress"
           git push origin main
-
           git fetch origin work-laptop-pack
           git switch work-laptop-pack
           git show main:AFT_Edit_SKU_Move.user.js > 02_AFT_Edit-SKU-Move.txt
