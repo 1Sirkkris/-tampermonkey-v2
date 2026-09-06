@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.4.1 AFT Super Overlay
-// @name:en      TEST v0.4.1 AFT Super Overlay
+// @name         TEST AFT Super Overlay
+// @name:en      TEST AFT Super Overlay
 // @namespace    https://github.com/1Sirkkris
-// @version      0.4.1
+// @version      0.4.2
 // @description  TEST: API-first AFT Edit/Move mode controller. Backend workflow is authoritative; native page may stay stale until SYNC PAGE.
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @run-at       document-start
@@ -18,7 +18,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   const ROOT_ID = 'aft-super-test';
   const STYLE_ID = 'aft-super-test-style';
   const STORE_KEY = 'aft_super_overlay_test_v010';
