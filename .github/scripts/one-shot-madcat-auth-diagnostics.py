@@ -1,0 +1,147 @@
+from pathlib import Path
+import re
+
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+    return text.replace(old, new, 1)
+
+
+def regex_once(text, pattern, replacement, label):
+    text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+    return text
+
+
+core_path = Path("FCR_Data_Core.user.js")
+core = core_path.read_text(encoding="utf-8")
+core = replace_once(core, "// @version      0.2.21", "// @version      0.2.22", "core metadata version")
+core = replace_once(core, "const VERSION = '0.2.21';", "const VERSION = '0.2.22';", "core runtime version")
+
+status = """  function measurementAuthStatus() {
+    const auth = readMeasurementAuth();
+    const lastAttempt = readMeasurementBridgeAttemptAt();
+    const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
+    const issuedAt = Number(auth?.issuedAt) || 0;
+    const expiresAt = Number(auth?.exp) || 0;
+    const capturedAt = Number(auth?.capturedAt) || 0;
+    return {
+      available: !!auth,
+      issuedAt,
+      expiresAt,
+      capturedAt,
+      lifetimeMs: issuedAt && expiresAt ? Math.max(0, expiresAt - issuedAt) : 0,
+      expiresInMs: expiresAt ? Math.max(0, expiresAt - Date.now()) : 0,
+      captureAgeMs: capturedAt ? Math.max(0, Date.now() - capturedAt) : 0,
+      renewSoon: !auth || expiresAt - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
+      bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
+    };
+  }
+
+"""
+core = regex_once(
+    core,
+    r"  function measurementAuthStatus\(\) \{.*?\n  function installMeasurementAutoRenewal\(\) \{",
+    status + "  function installMeasurementAutoRenewal() {",
+    "measurementAuthStatus",
+)
+
+normalize = """  function normalizeMeasurementToken(value) {
+    const token = String(value || '').trim().replace(/^Bearer\\s+/i, '');
+    const payload = decodeJwtPayload(token);
+    if (!payload || payload.token_use !== 'id' || !Number(payload.exp)) return null;
+    const exp = Number(payload.exp) * 1000;
+    if (exp <= Date.now() + 10_000) return null;
+    return {
+      token,
+      exp,
+      issuedAt: Number(payload.iat) ? Number(payload.iat) * 1000 : 0
+    };
+  }
+
+"""
+core = regex_once(
+    core,
+    r"  function normalizeMeasurementToken\(value\) \{.*?\n  function installMeasurementAuthBridge\(\) \{",
+    lambda _: normalize + "  function installMeasurementAuthBridge() {",
+    "normalizeMeasurementToken",
+)
+
+read_auth = """  function readMeasurementAuth() {
+    try {
+      const raw = GM_getValue(MEASUREMENT_AUTH_KEY, '');
+      const stored = raw ? JSON.parse(raw) : null;
+      const pack = normalizeMeasurementToken(stored?.token || '');
+      if (pack) return { ...pack, capturedAt: Number(stored?.capturedAt) || 0 };
+    } catch {}
+    clearMeasurementAuth();
+    return null;
+  }
+
+"""
+core = regex_once(
+    core,
+    r"  function readMeasurementAuth\(\) \{.*?\n  function requestMeasurementPage\(url, token\) \{",
+    read_auth + "  function requestMeasurementPage(url, token) {",
+    "readMeasurementAuth",
+)
+core_path.write_text(core, encoding="utf-8")
+
+obs_path = Path("BWU2_Observability_Core.user.js")
+obs = obs_path.read_text(encoding="utf-8")
+obs = replace_once(obs, "// @version      0.1.12", "// @version      0.1.13", "obs metadata version")
+obs = replace_once(obs, "const VERSION = '0.1.12';", "const VERSION = '0.1.13';", "obs runtime version")
+
+diagnostic = """  function recordMadcatAuthDiagnostic(message) {
+    const data = message?.data;
+    if (!data || typeof data !== 'object') return;
+
+    const available = !!data.available;
+    const issuedAt = Math.max(0, Number(data.issuedAt) || 0);
+    const expiresAt = Math.max(0, Number(data.expiresAt) || 0);
+    const capturedAt = Math.max(0, Number(data.capturedAt) || 0);
+    const lifetimeMs = Math.max(0, Number(data.lifetimeMs) || (issuedAt && expiresAt ? expiresAt - issuedAt : 0));
+    const remainingMs = Math.max(0, Number(data.expiresInMs) || 0);
+    const captureAgeMs = Math.max(0, Number(data.captureAgeMs) || (capturedAt ? Date.now() - capturedAt : 0));
+    const signature = JSON.stringify([available, issuedAt, expiresAt, capturedAt]);
+    const stateKey = `${SAMPLE_PREFIX}${activeSessionId}:madcat-auth-state`;
+    if (gmGet(stateKey, '') === signature) return;
+    gmSet(stateKey, signature);
+
+    add('fcr.madcat.auth-status', {
+      available,
+      issuedAt,
+      expiresAt,
+      capturedAt,
+      lifetimeMs,
+      remainingMs,
+      captureAgeMs,
+      renewSoon: !!data.renewSoon,
+      bridgeRecent: !!data.bridgeRecent,
+      coreVersion: scrubText(message.version || '')
+    });
+  }
+
+"""
+obs = replace_once(
+    obs,
+    "  function installFcrDataCoreTrace() {",
+    diagnostic + "  function installFcrDataCoreTrace() {",
+    "OBS auth diagnostic insertion",
+)
+obs = replace_once(
+    obs,
+    "      if (error === 'fcr-data-core:cancelled') {",
+    "      if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);\n\n      if (error === 'fcr-data-core:cancelled') {",
+    "OBS response hook",
+)
+obs_path.write_text(obs, encoding="utf-8")
+
+readme_path = Path("README.md")
+readme = readme_path.read_text(encoding="utf-8")
+readme = replace_once(readme, "| FCR Data Core | 0.2.21 |", "| FCR Data Core | 0.2.22 |", "README core version")
+readme = replace_once(readme, "| BWU2 Observability Core | 0.1.12 |", "| BWU2 Observability Core | 0.1.13 |", "README obs version")
+readme_path.write_text(readme, encoding="utf-8")
