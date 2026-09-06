@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MAIN v0.9.17 AFT Edit/SKU/Move master
+// @name         MAIN v0.9.23 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.22
+// @version      0.9.23
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.22';
+  const VERSION = '0.9.23';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1390,6 +1390,63 @@
       return map[key]?.qty ?? null;
     },
 
+
+    readSkuSourceChoices(source) {
+      const doc = source?.doc || source;
+      if (!doc?.querySelectorAll) return [];
+      const out = [];
+
+      for (const radio of doc.querySelectorAll('input[type="radio"]')) {
+        const labels = [];
+        try {
+          for (const label of radio.labels || []) labels.push(label.textContent || '');
+        } catch {}
+        if (!labels.length) {
+          labels.push(radio.closest('label')?.textContent || radio.parentElement?.textContent || '');
+        }
+
+        const label = norm(labels.join(' '));
+        if (!/Quantity\s*:/i.test(label) || !/Owner\s*:/i.test(label)) continue;
+
+        let state = '';
+        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = 'PENDING_RESEARCH';
+        else if (/Unsellable|UNSELLABLE/i.test(label)) state = 'UNSELLABLE';
+        else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
+        if (!state) continue;
+
+        out.push({
+          state,
+          label,
+          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : ''
+        });
+      }
+
+      return out;
+    },
+
+    resolveSkuSourceInput(source, wantedState) {
+      const choices = this.readSkuSourceChoices(source);
+      if (!choices.length) return { input: wantedState, matched: false, choices };
+
+      const matches = choices.filter(choice => choice.state === wantedState);
+      if (matches.length === 1) {
+        const selected = matches[0];
+        return {
+          input: selected.value || wantedState,
+          matched: true,
+          choices,
+          selected
+        };
+      }
+
+      const available = [...new Set(choices.map(choice => choice.state))].join(', ') || 'unknown';
+      if (!matches.length) {
+        throw new Error(`Requested source ${wantedState} not available; found ${available}`);
+      }
+
+      throw new Error(`Multiple ${wantedState} source options found (${matches.length}); manual selection required`);
+    },
+
     setStartQty(value) {
       if (!this.panel) return;
       const qty = key => Number.isInteger(value?.[key]?.qty) ? value[key].qty : '—';
@@ -1686,8 +1743,20 @@
           }
           if (qty == null) throw new Error(`Could not read ${currentLabel} quantity`);
 
+          const sourceChoice = this.resolveSkuSourceInput(sourcePage, currentState);
+          traceAft('AFT_SKU_SOURCE_CHOICE', {
+            sku: meta.sku,
+            requestedState: currentState,
+            matchedStructuredChoice: sourceChoice.matched,
+            selectedLabel: sourceChoice.selected?.label || '',
+            optionStates: sourceChoice.choices.map(choice => choice.state)
+          });
+          if (sourceChoice.matched) {
+            this.status(`Attempt ${attempt} • source matched ${currentLabel}`);
+          }
+
           await this.tracked('Source', `Attempt ${attempt} • ${currentLabel} (${qty})`, () =>
-            EditApi.action(objectId, 'Input', currentState, 'Source state', {
+            EditApi.action(objectId, 'Input', sourceChoice.input, 'Source state', {
               timeout: 120000
         })
           );
