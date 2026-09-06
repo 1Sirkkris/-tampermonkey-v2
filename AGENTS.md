@@ -6,7 +6,6 @@ Repository: `1Sirkkris/-tampermonkey-v2`
 
 - `main` is the canonical editable source branch.
 - This root `AGENTS.md` on `main` is the canonical agent rulebook.
-- `work-laptop-pack` is the stable deployment artifact, not a competing source branch.
 - Do not create competing instruction files or source copies.
 
 The user defines the real-world workflow and correct outcome. The agent owns the technical implementation.
@@ -475,8 +474,6 @@ Before publishing ANY userscript update, validate all of the following against t
 
 `→ correct canonical file is pushed to main`
 
-`→ work-laptop-pack is synced where applicable`
-
 If any identity/path check fails unexpectedly, STOP. Do not publish a workaround that creates a second install. Resolve the mismatch or obtain explicit approval for a one-time migration.
 
 For a brand-new script, also verify before first deployment:
@@ -499,18 +496,14 @@ For every userscript update:
 
 For deployed fleet scripts:
 
-- synchronize only the intended validated version to `work-laptop-pack` where applicable
 - preserve the deployed stable filename and canonical update/download paths
 - preserve a rollback commit/source version
-- verify the pack contains the intended exact revision
 - return the direct canonical GitHub `.user.js` link for the stable filename with no cache-busting query string
 - default user action: `open link → Update/Overwrite`
 
 The direct link MUST target the existing deployed identity/path and must update/overwrite the existing Tampermonkey script. If the proposed normal-update link would create another install, treat that as an identity failure, not as an acceptable delivery method.
 
 Do not make the normal workflow local script copies, manual source editing, full-script copy/paste from chat, competing source copies, alternate versioned userscript files, or waiting for a scheduled Tampermonkey update when the canonical direct link is available.
-
-Unvalidated experimental/diagnostic candidates stay out of `work-laptop-pack`.
 
 Before saying a version was pushed/deployed, verify that it actually was.
 
