@@ -2,8 +2,8 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.22
-// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand measurement auth.
+// @version      0.2.23
+// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -23,7 +23,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.22';
+  const VERSION = '0.2.23';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -50,6 +50,7 @@
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
   const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
+  const MEASUREMENT_KEEPALIVE_OWNER_KEY = 'fcr-data-core:measurement-keepalive-owner-v1';
 
   if (location.hostname === MEASUREMENT_SITE_HOST) {
     registerRuntimeVersion('FCR CORE', VERSION);
@@ -80,6 +81,8 @@
   const MEASUREMENT_RENEW_BEFORE_MS = 15 * 1000;
   const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
+  const MEASUREMENT_KEEPALIVE_TTL_MS = 5 * 60 * 1000;
+  const MEASUREMENT_KEEPALIVE_HEARTBEAT_MS = 60 * 1000;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
   const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
@@ -140,6 +143,9 @@
     dedupeHits: 0
   };
 
+  const measurementKeepaliveOwner = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  let measurementKeepaliveHeartbeat = 0;
+
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
 
@@ -176,7 +182,102 @@
     return url.href;
   }
 
-  function gestureMeasurementIdentifier(target) {
+  function measurementKeepaliveUrl(identifier) {
+  const url = new URL(measurementBridgeUrl(identifier));
+  url.searchParams.set('fcrMadcatKeepalive', '1');
+  return url.href;
+}
+
+function readMeasurementKeepaliveOwner() {
+  try {
+    const raw = GM_getValue(MEASUREMENT_KEEPALIVE_OWNER_KEY, '');
+    const value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+    return {
+      owner: String(value?.owner || ''),
+      at: Number(value?.at) || 0
+    };
+  } catch {
+    return { owner: '', at: 0 };
+  }
+}
+
+function writeMeasurementKeepaliveOwner() {
+  const record = { owner: measurementKeepaliveOwner, at: Date.now() };
+  try { GM_setValue(MEASUREMENT_KEEPALIVE_OWNER_KEY, JSON.stringify(record)); } catch { return false; }
+  return readMeasurementKeepaliveOwner().owner === measurementKeepaliveOwner;
+}
+
+function releaseMeasurementKeepaliveOwner() {
+  const current = readMeasurementKeepaliveOwner();
+  if (current.owner !== measurementKeepaliveOwner) return;
+  try { GM_deleteValue(MEASUREMENT_KEEPALIVE_OWNER_KEY); } catch {}
+}
+
+function ensureMeasurementKeepalive(identifier) {
+  const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
+  if (!wanted) return false;
+
+  const existing = document.getElementById('fcr-madcat-keepalive-frame');
+  if (existing?.isConnected) {
+    writeMeasurementKeepaliveOwner();
+    return true;
+  }
+
+  const current = readMeasurementKeepaliveOwner();
+  if (current.owner && current.owner !== measurementKeepaliveOwner && Date.now() - current.at < MEASUREMENT_KEEPALIVE_TTL_MS) return false;
+  if (!writeMeasurementKeepaliveOwner()) return false;
+
+  const mount = () => {
+    const root = document.body || document.documentElement;
+    if (!root) return false;
+    const already = document.getElementById('fcr-madcat-keepalive-frame');
+    if (already?.isConnected) return true;
+
+    const owner = readMeasurementKeepaliveOwner();
+    if (owner.owner && owner.owner !== measurementKeepaliveOwner && Date.now() - owner.at < MEASUREMENT_KEEPALIVE_TTL_MS) return false;
+    if (!writeMeasurementKeepaliveOwner()) return false;
+
+    const frame = document.createElement('iframe');
+    frame.id = 'fcr-madcat-keepalive-frame';
+    frame.src = measurementKeepaliveUrl(wanted);
+    frame.tabIndex = -1;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
+    root.appendChild(frame);
+    recordUsage('madcat.auth.keepalive-start');
+
+    if (!measurementKeepaliveHeartbeat) {
+      measurementKeepaliveHeartbeat = setInterval(() => {
+        const node = document.getElementById('fcr-madcat-keepalive-frame');
+        if (!node?.isConnected) return;
+        const active = readMeasurementKeepaliveOwner();
+        if (active.owner && active.owner !== measurementKeepaliveOwner && Date.now() - active.at < MEASUREMENT_KEEPALIVE_TTL_MS) {
+          node.remove();
+          clearInterval(measurementKeepaliveHeartbeat);
+          measurementKeepaliveHeartbeat = 0;
+          return;
+        }
+        writeMeasurementKeepaliveOwner();
+      }, MEASUREMENT_KEEPALIVE_HEARTBEAT_MS);
+    }
+
+    if (!window.__fcrMeasurementKeepaliveCleanup_v1) {
+      window.__fcrMeasurementKeepaliveCleanup_v1 = true;
+      window.addEventListener('pagehide', () => {
+        if (measurementKeepaliveHeartbeat) clearInterval(measurementKeepaliveHeartbeat);
+        measurementKeepaliveHeartbeat = 0;
+        releaseMeasurementKeepaliveOwner();
+      }, { once: true });
+    }
+    return true;
+  };
+
+  if (mount()) return true;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+  return false;
+}
+
+function gestureMeasurementIdentifier(target) {
     const direct = measurementIdentifierCandidate(target?.value || target?.getAttribute?.('value') || '');
     if (direct) return direct;
     const search = measurementIdentifierCandidate(new URLSearchParams(location.search).get('s') || '');
@@ -1453,6 +1554,7 @@
     const identifierType = fnsku ? 'FNSKU' : 'ASIN';
     if (!identifier) throw new Error('Measurement item unavailable');
     rememberMeasurementIdentifier(identifier);
+    if (readMeasurementAuth()) ensureMeasurementKeepalive(identifier);
 
     if (!force) {
       const cached = readMadcatCache(identifierType, identifier);
@@ -1476,6 +1578,7 @@
       stats.madcatAuthRequired++;
       return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-login-required');
     }
+    ensureMeasurementKeepalive(identifier);
 
     const key = `madcat30:${identifierType}:${identifier}:${force ? 'force' : 'normal'}`;
     if (inFlight.has(key)) {
