@@ -64,23 +64,8 @@ jobs:
               'keepalive owner state'
           )
 
-          old = """  function measurementBridgeUrl(identifier) {
-            const url = new URL(`https://${MEASUREMENT_SITE_HOST}/item/${encodeURIComponent(identifier)}`);
-            url.searchParams.set('fcrMadcatBridge', '1');
-            url.searchParams.set('fcrMadcatAuto', '1');
-            return url.href;
-          }
-
-          function gestureMeasurementIdentifier(target) {
-          """
-          new = """  function measurementBridgeUrl(identifier) {
-            const url = new URL(`https://${MEASUREMENT_SITE_HOST}/item/${encodeURIComponent(identifier)}`);
-            url.searchParams.set('fcrMadcatBridge', '1');
-            url.searchParams.set('fcrMadcatAuto', '1');
-            return url.href;
-          }
-
-          function measurementKeepaliveUrl(identifier) {
+          anchor = "  function gestureMeasurementIdentifier(target) {"
+          insertion = """  function measurementKeepaliveUrl(identifier) {
             const url = new URL(measurementBridgeUrl(identifier));
             url.searchParams.set('fcrMadcatKeepalive', '1');
             return url.href;
@@ -175,9 +160,8 @@ jobs:
             return false;
           }
 
-          function gestureMeasurementIdentifier(target) {
-          """
-          text = replace_once(text, old, new, 'silent keepalive helpers')
+          function gestureMeasurementIdentifier(target) {"""
+          text = replace_once(text, anchor, insertion, 'silent keepalive helpers')
 
           text = replace_once(
               text,
