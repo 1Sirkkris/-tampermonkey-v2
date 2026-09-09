@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.24
+// @version      0.9.25
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.24';
+  const VERSION = '0.9.25';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -393,7 +393,7 @@
       #aftm-sku{width:368px;max-width:calc(100vw - 30px);background:#eef7fb;border-color:#527985}#aftm-sku .body{gap:9px;background:#f4fafc}#aftm-sku .two{grid-template-columns:1fr;gap:8px}#aftm-sku .sku-picker-group{display:grid;gap:6px;padding:8px;border:1px solid #c3d3d9;border-radius:7px;background:#f9fcfd}#aftm-sku .sku-picker-label{font-weight:800}#aftm-sku .sku-choice-buttons{display:grid;gap:6px}#aftm-sku .sku-state-buttons{grid-template-columns:repeat(3,minmax(0,1fr))}#aftm-sku .sku-disp-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}#aftm-sku .sku-choice-btn{min-width:0;padding:8px 5px;border:1px solid #8fa2aa;border-radius:6px;background:#fff;color:#26343a;font-size:12px;white-space:nowrap}#aftm-sku .sku-choice-btn[data-active="1"]{background:#295f58;color:#fff;border-color:#173f3a;box-shadow:inset 0 0 0 1px #fff7}#aftm-sku .sku-choice-btn:disabled{background:#e5eaec;color:#879298;border-color:#c3ccd0;opacity:1;cursor:not-allowed}#aftm-sku .sku-choice-btn:focus-visible{outline:3px solid #f59e0b;outline-offset:1px}#aftm-sku .sku-route-summary{padding:8px 9px;border:2px solid #36545c;border-left:7px solid #146eb4;border-radius:6px;background:#eef6ff;color:#172536;font:900 12px/1.35 Arial,sans-serif;text-align:center}#aftm-sku .sku-route-summary .from,#aftm-sku .sku-route-summary .to{font-family:Consolas,monospace}#aftm-sku .sku-route-summary .arrow{padding:0 6px;color:#8a4b00;font-size:15px}#aftm-sku .aftm-status{min-height:28px;padding:5px 7px;border:1px solid #c3d3d9;border-radius:5px;background:#e8f3f7;font-weight:700}
       #aftm-datelot{right:12px;bottom:12px;width:420px}#aftm-datelot .exp-grid-head,#aftm-datelot .exp-row{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px;align-items:center;min-width:0;width:100%}#aftm-datelot .exp-grid-head{padding:0 2px;font-size:10px;font-weight:800;color:#617078}#aftm-datelot .exp-grid-head span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aftm-datelot .exp-rows{display:grid;gap:6px;max-height:205px;overflow-y:auto;overflow-x:hidden;padding-right:2px;min-width:0}#aftm-datelot .exp-row{min-width:0;width:100%;overflow:hidden}#aftm-datelot .exp-row input{min-width:0;max-width:100%;width:100%;padding:6px}#aftm-datelot .exp-row [data-code]{font-family:Consolas,monospace;font-size:12px}#aftm-datelot .exp-row [data-date]{min-width:0;width:100%}#aftm-datelot .exp-add{background:#edf1f2;color:#263238;border:1px solid #a8b4ba;padding:6px;border-radius:5px}#aftm-datelot .exp-busy{position:absolute;inset:39px 0 0;z-index:20;background:rgba(236,240,242,.86);backdrop-filter:blur(1px);display:grid;place-items:center;padding:18px}#aftm-datelot .exp-busy-card{min-width:210px;max-width:300px;padding:16px 18px;border:1px solid #94a3aa;border-radius:8px;background:#fff;box-shadow:0 5px 18px #0003;text-align:center}#aftm-datelot .exp-spinner{width:34px;height:34px;margin:0 auto 10px;border:4px solid #c7d0d4;border-top-color:#2f6f63;border-radius:50%;animation:aftm-exp-spin .75s linear infinite}#aftm-datelot .exp-busy-title{font-size:14px;font-weight:900;letter-spacing:.4px;color:#24343a}#aftm-datelot .exp-busy-status{margin-top:5px;min-height:16px;font-size:11px;font-weight:700;color:#54646b}#aftm-datelot .exp-busy-stop{margin-top:11px;width:100%;padding:7px;border:1px solid #a8b4ba;border-radius:5px;background:#e8ecee;color:#182126;font-weight:800}@keyframes aftm-exp-spin{to{transform:rotate(360deg)}}#aftm-move{border-color:#225d67}#aftm-move .move-head{background:#225d67}#aftm-move .move-items{height:104px;resize:vertical;font:11px Consolas,monospace}#aftm-move .move-note{font-size:10px;color:#68757b}#aftm-move .move-status{font-weight:700}
       #aftm-fcsku{top:86px;left:10px;width:320px;border-color:#002e36}#aftm-fcsku .fcsku-head{background:#002e36}#aftm-fcsku .fcsku-status{padding:5px 6px;border:1px solid #9bb;border-radius:4px;background:#fff;font-weight:700}#aftm-fcsku .fcsku-metrics{padding:4px 6px;background:#e9f6ff;border:1px solid #9bb;border-radius:4px;font-size:11px;font-weight:600}#aftm-fcsku .fcsku-label{font-weight:bold;margin-top:3px}#aftm-fcsku .fcsku-locations{height:120px;font:11px Consolas,monospace;resize:vertical}
-      #aftm-control{top:76px;right:10px;width:174px;font-size:11px}#aftm-control .ctrl-head{width:100%;border:0;border-radius:0;background:#36545c;color:#fff;padding:6px 8px;display:flex;justify-content:space-between}#aftm-control .ctrl-body{padding:6px;display:grid;gap:5px;background:#eef1f2}#aftm-control[data-open="0"]{width:auto;min-width:102px}#aftm-control[data-open="0"] .ctrl-body{display:none}.ctrl-toggle{border:1px solid #9ca9ae;border-radius:5px;padding:5px 7px;background:#fff;color:#263238;text-align:left}.ctrl-toggle[data-on="1"]{background:#2f6f63;color:#fff;border-color:#25594f}.ctrl-toggle[data-on="0"]{background:#e8ecee;color:#59656b}.ctrl-toggle[data-active="1"]{box-shadow:inset 0 0 0 1px #fff8,0 0 0 1px #25594f}.ctrl-note{font-size:10px;color:#68757b;padding:0 2px}
+      #aftm-control{top:76px;right:10px;width:278px;font-size:11px}#aftm-control .ctrl-head{width:100%;border:0;border-radius:0;background:#36545c;color:#fff;padding:6px 8px;display:flex;justify-content:space-between}#aftm-control .ctrl-body{padding:6px;display:grid;gap:6px;background:#eef1f2}#aftm-control[data-open="0"]{width:auto;min-width:102px}#aftm-control[data-open="0"] .ctrl-body{display:none}.ctrl-toggle{border:1px solid #9ca9ae;border-radius:5px;padding:5px 7px;background:#fff;color:#263238;text-align:left}.ctrl-toggle[data-on="1"]{background:#2f6f63;color:#fff;border-color:#25594f}.ctrl-toggle[data-on="0"]{background:#e8ecee;color:#59656b}.ctrl-toggle[data-active="1"]{box-shadow:inset 0 0 0 1px #fff8,0 0 0 1px #25594f}.ctrl-mode-group{display:grid;gap:4px;padding:5px;border:1px solid #bec9cd;border-radius:6px;background:#f8fbfc}.ctrl-mode-label{font-size:9px;font-weight:900;letter-spacing:.45px;color:#596a72}.ctrl-mode-grid{display:grid;gap:4px}.ctrl-mode-grid[data-area="edit"]{grid-template-columns:repeat(4,minmax(0,1fr))}.ctrl-mode-grid[data-area="move"]{grid-template-columns:repeat(3,minmax(0,1fr))}.ctrl-mode{min-width:0;padding:5px 3px;border:1px solid #9ca9ae;border-radius:5px;background:#fff;color:#263238;font-size:10px;font-weight:800}.ctrl-mode[data-active="1"]{background:#2f6f63;color:#fff;border-color:#25594f;box-shadow:inset 0 0 0 1px #fff8}.ctrl-mode[data-pending="1"]{background:#dce9f5;color:#174f7a;border-color:#4380ad}.ctrl-mode:disabled{opacity:.55;cursor:not-allowed}.ctrl-mode-status{min-height:25px;padding:5px 6px;border:1px solid #c4d0d4;border-radius:5px;background:#e8f2f5;font-size:10px;font-weight:800;color:#41545c}.ctrl-mode-status[data-kind="ok"]{border-color:#35836f;background:#dcefe8;color:#164d41}.ctrl-mode-status[data-kind="warn"]{border-color:#d38a19;background:#fff0cf;color:#5c3a00}.ctrl-note{font-size:10px;color:#68757b;padding:0 2px}
     `;
     style.textContent += `
       #aftm-move .move-qty{display:grid;gap:5px;padding:7px;border:1px solid #b3c0c5;border-radius:6px;background:#eaf1f3}
@@ -2330,7 +2330,7 @@
 
     detectMode(text = '') {
       if (!text && this.busy && this.detectedMode) return this.detectedMode;
-      const mode = norm(text || nativeText()).match(/\bMode\s*:\s*(Multi|Each)\b/i)?.[1]?.toLowerCase() || null;
+      const mode = norm(text || nativeText()).match(/\bMode\s*:\s*(Multi|Each|Container)\b/i)?.[1]?.toLowerCase() || null;
       if (mode) this.detectedMode = mode;
       return mode;
     },
@@ -2341,7 +2341,8 @@
       this.modeNoteEl.textContent =
         mode === 'multi' ? 'Multi • native QualityTools API' :
         mode === 'each' ? 'Each • native QualityTools API' :
-        'Waiting for native Multi / Each mode…';
+        mode === 'container' ? 'Container • native/manual mode' :
+        'Waiting for native MoveItems mode…';
       if (this.qtyControlsEl) this.qtyControlsEl.hidden = mode !== 'multi';
       this.paintQtyControls();
     },
@@ -2564,7 +2565,7 @@
     paintRun(barcodes = null) {
       if (!this.panel?.isConnected) return;
 
-      if (this.runBtn) this.runBtn.disabled = this.busy;
+      if (this.runBtn) this.runBtn.disabled = this.busy || this.detectMode() === 'container';
       if (this.stopBtn) this.stopBtn.disabled = !this.busy;
       if (this.clearBtn) this.clearBtn.disabled = this.busy;
       this.paintQtyControls();
@@ -3191,11 +3192,308 @@
     }
   };
 
+
+  const MODE_SWITCH_POLL_MS = 100;
+  const MODE_SWITCH_STATUS_TIMEOUT_MS = 8000;
+  const MODE_SWITCH_FRESH_TIMEOUT_MS = 2500;
+
+  const MODE_DEFINITIONS = {
+    'edit:each': {
+      title: 'Edit • Each', area: 'edit', mode: 'each', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'EACH'
+    },
+    'edit:sku': {
+      title: 'Edit • SKU', area: 'edit', mode: 'sku', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'SKU'
+    },
+    'edit:date': {
+      title: 'Edit • Date', area: 'edit', mode: 'date', path: '/app/edititems',
+      instructionId: 'EditItems', tool: 'edititems', input: 'DATELOT'
+    },
+    'edit:fcsku': {
+      title: 'Edit • FCSKU', area: 'edit', mode: 'fcsku', path: '/app/fcskuflip',
+      instructionId: 'FcSkuFlip', tool: 'fcskuflip', input: 'SKU'
+    },
+    'move:each': {
+      title: 'Move • Each', area: 'move', mode: 'each', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'EACH'
+    },
+    'move:multi': {
+      title: 'Move • Multi', area: 'move', mode: 'multi', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'MULTI'
+    },
+    'move:container': {
+      title: 'Move • Container', area: 'move', mode: 'container', path: '/app/moveitems',
+      instructionId: 'MoveItems', tool: 'moveitems', input: 'CONTAINER'
+    }
+  };
+
+  const ModeSwitch = {
+    busy: false,
+    requestedKey: '',
+    message: 'Mode switch ready',
+    kind: '',
+
+    target(definition) {
+      return `${location.origin}${definition.path}?experience=Desktop`;
+    },
+
+    currentKey() {
+      if (FcSku.match()) return 'edit:fcsku';
+
+      if (Edit.match()) {
+        const mode = Edit.mode || Edit.detect();
+        if (mode === 'datelot') return 'edit:date';
+        if (mode === 'each' || mode === 'sku') return `edit:${mode}`;
+      }
+
+      if (MoveItems.match()) {
+        const mode = MoveItems.detectMode();
+        if (mode === 'multi' || mode === 'each' || mode === 'container') return `move:${mode}`;
+      }
+
+      return '';
+    },
+
+    workBusy() {
+      return Boolean(Edit.directBusy || MoveItems.busy || FcSku.busy);
+    },
+
+    setStatus(message, kind = '') {
+      this.message = message;
+      this.kind = kind;
+      Control.paint();
+    },
+
+    workflowId(workflow, definition) {
+      return {
+        instructionId: workflow.instructionId || definition.instructionId,
+        objectId: workflow.objectId
+      };
+    },
+
+    async routeHtml(definition, label = 'Mode route') {
+      const res = await fetch(this.target(definition), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'follow'
+      });
+      if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
+      return res.text();
+    },
+
+    extractWorkflow(html, definition) {
+      const source = String(html || '')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#34;/gi, '"')
+        .replace(/&#x22;/gi, '"')
+        .replace(/\\"/g, '"')
+        .replace(/&amp;/gi, '&');
+
+      const anchor = new RegExp(`"instructionId"\\s*:\\s*"${definition.instructionId}"`, 'i').exec(source);
+      if (!anchor) return null;
+      const scope = source.slice(anchor.index, anchor.index + 2400);
+      const grab = name => scope.match(new RegExp(`"${name}"\\s*:\\s*"([^"]+)"`, 'i'))?.[1] || '';
+
+      const workflow = {
+        instructionId: grab('instructionId'),
+        tool: grab('tool').toLowerCase(),
+        objectId: grab('objectId'),
+        status: grab('status').toUpperCase(),
+        selector: /<input\b[^>]*\bname\s*=\s*["']options["']/i.test(source)
+      };
+
+      if (!workflow.objectId || workflow.instructionId !== definition.instructionId) return null;
+      if (workflow.tool && workflow.tool !== definition.tool) return null;
+      return workflow;
+    },
+
+    async bootstrap(definition) {
+      const workflow = this.extractWorkflow(await this.routeHtml(definition), definition);
+      if (!workflow) throw new Error('AFT workflow not found');
+      return workflow;
+    },
+
+    async getStatus(workflow, definition) {
+      const res = await post('/status', {
+        id: this.workflowId(workflow, definition)
+      }, 'Mode status');
+      let data;
+      try { data = await res.json(); }
+      catch { throw new Error('Mode status: invalid JSON'); }
+
+      const status = String(data?.status || '').toUpperCase();
+      if (!status) throw new Error('Mode status missing');
+      return status;
+    },
+
+    async waitStatus(workflow, definition, accepted, timeoutMs = MODE_SWITCH_STATUS_TIMEOUT_MS) {
+      const wanted = new Set(accepted);
+      const deadline = Date.now() + timeoutMs;
+      let last = workflow.status || '';
+
+      while (Date.now() < deadline) {
+        last = await this.getStatus(workflow, definition);
+        if (wanted.has(last)) return last;
+        if (!['READY', 'PROCESSING', 'COMPLETE'].includes(last)) throw new Error(`AFT workflow ${last}`);
+        await sleep(MODE_SWITCH_POLL_MS);
+      }
+
+      throw new Error(`AFT workflow timeout (${last || 'unknown'})`);
+    },
+
+    async waitSelector(workflow, definition) {
+      const deadline = Date.now() + MODE_SWITCH_STATUS_TIMEOUT_MS;
+
+      while (Date.now() < deadline) {
+        const status = await this.getStatus(workflow, definition);
+        if (status === 'READY') {
+          const refreshed = await this.bootstrap(definition);
+          if (refreshed.objectId === workflow.objectId && refreshed.selector) return refreshed;
+        } else if (status !== 'PROCESSING') {
+          throw new Error(`AFT workflow ${status}`);
+        }
+        await sleep(MODE_SWITCH_POLL_MS);
+      }
+
+      throw new Error('AFT mode selector timeout');
+    },
+
+    async sendAction(workflow, definition, action, input) {
+      await post('/action', {
+        id: this.workflowId(workflow, definition),
+        action,
+        input
+      }, `Mode ${action}`);
+    },
+
+    async end(workflow, definition) {
+      await post('/end', {
+        id: this.workflowId(workflow, definition),
+        tool: definition.tool
+      }, 'Mode end');
+    },
+
+    async waitFresh(definition, endedObjectId) {
+      const deadline = Date.now() + MODE_SWITCH_FRESH_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        const workflow = await this.bootstrap(definition);
+        if (workflow.objectId !== endedObjectId) return workflow;
+        await sleep(MODE_SWITCH_POLL_MS);
+      }
+      throw new Error('Fresh AFT workflow not created');
+    },
+
+    async ensureReady(definition, workflow = null) {
+      let current = workflow || await this.bootstrap(definition);
+
+      for (let pass = 0; pass < 4; pass++) {
+        if (current.status === 'READY') return current;
+
+        if (current.status === 'PROCESSING') {
+          current.status = await this.waitStatus(current, definition, ['READY', 'COMPLETE']);
+          if (current.status === 'READY') {
+            current = await this.bootstrap(definition);
+            continue;
+          }
+        }
+
+        if (current.status === 'COMPLETE') {
+          const endedObjectId = current.objectId;
+          await this.end(current, definition);
+          current = await this.waitFresh(definition, endedObjectId);
+          continue;
+        }
+
+        throw new Error(`Unexpected AFT state ${current.status || 'unknown'}`);
+      }
+
+      throw new Error('Could not obtain READY workflow');
+    },
+
+    async switchBackend(definition) {
+      let workflow = await this.ensureReady(definition);
+
+      // FcSkuFlip has no mode picker once it is already on its native workflow.
+      if (definition.mode === 'fcsku' && !workflow.selector) return;
+
+      if (!workflow.selector) {
+        this.setStatus(`${definition.title} • opening mode…`);
+        await this.sendAction(workflow, definition, 'SelectMode', 'SelectMode');
+        workflow = await this.waitSelector(workflow, definition);
+      }
+
+      this.setStatus(`${definition.title} • selecting…`);
+      await this.sendAction(workflow, definition, 'Input', definition.input);
+      workflow.status = await this.waitStatus(workflow, definition, ['COMPLETE']);
+
+      const endedObjectId = workflow.objectId;
+      await this.end(workflow, definition);
+      workflow = await this.waitFresh(definition, endedObjectId);
+      await this.ensureReady(definition, workflow);
+    },
+
+    async request(key) {
+      const definition = MODE_DEFINITIONS[key];
+      if (!definition) return;
+
+      if (this.busy) {
+        this.setStatus('Mode switch already running', 'warn');
+        return;
+      }
+
+      if (this.workBusy()) {
+        this.setStatus('Finish the current AFT run before changing mode', 'warn');
+        return;
+      }
+
+      if (this.currentKey() === key) {
+        this.setStatus(`${definition.title} already active`, 'ok');
+        return;
+      }
+
+      const started = performance.now();
+      this.busy = true;
+      this.requestedKey = key;
+      this.setStatus(`${definition.title} • backend switch…`);
+      traceAft('AFT_MODE_SWITCH', { key, outcome: 'start' });
+
+      try {
+        await this.switchBackend(definition);
+        this.setStatus(`${definition.title} selected • syncing page…`, 'ok');
+        traceAft('AFT_MODE_SWITCH', {
+          key,
+          outcome: 'selected',
+          ms: Math.round(performance.now() - started)
+        });
+
+        // Successful backend selection is authoritative; immediately refresh native AFT
+        // so the page and the master panel land on the requested mode automatically.
+        location.assign(this.target(definition));
+      } catch (error) {
+        const message = String(error?.message || error || 'unknown error');
+        traceAft('AFT_MODE_SWITCH', {
+          key,
+          outcome: 'failed',
+          ms: Math.round(performance.now() - started),
+          message
+        });
+        this.setStatus(`Mode switch failed • ${message}`, 'warn');
+      } finally {
+        this.busy = false;
+        this.requestedKey = '';
+        Control.paint();
+      }
+    }
+  };
+
   const Control = {
     panel: null,
     editBtn: null,
     skuBatchBtn: null,
     moveBtn: null,
+    modeButtons: [],
+    modeStatusEl: null,
     titleEl: null,
     noteEl: null,
     keys: {
@@ -3204,7 +3502,7 @@
     },
 
     relevantPage() {
-      return Edit.match() || MoveItems.match();
+      return Edit.match() || MoveItems.match() || FcSku.match();
     },
 
     enabled(id) {
@@ -3220,10 +3518,19 @@
     },
 
     currentLabel() {
+      if (FcSku.match()) return 'AFT • FCSKU';
+
       if (Edit.match()) {
         if (!this.enabled('edit')) return 'AFT • EDIT OFF';
-        const mode = Edit.mode ? Edit.mode.toUpperCase() : 'EDIT';
-        return `AFT • ${mode}`;
+        const key = ModeSwitch.currentKey();
+        const label = key === 'edit:date'
+          ? 'DATE'
+          : key === 'edit:sku'
+            ? 'SKU'
+            : key === 'edit:each'
+              ? 'EACH'
+              : 'EDIT';
+        return `AFT • ${label}`;
       }
 
       if (MoveItems.match()) {
@@ -3249,6 +3556,27 @@
           <button type="button" class="ctrl-toggle" data-toggle-edit>EditItems</button>
           <button type="button" class="ctrl-toggle" data-toggle-sku-batch hidden>QQSkuSku OFF</button>
           <button type="button" class="ctrl-toggle" data-toggle-move>MoveItems</button>
+
+          <div class="ctrl-mode-group">
+            <div class="ctrl-mode-label">EDIT MODE</div>
+            <div class="ctrl-mode-grid" data-area="edit">
+              <button type="button" class="ctrl-mode" data-mode-key="edit:each">EACH</button>
+              <button type="button" class="ctrl-mode" data-mode-key="edit:sku">SKU</button>
+              <button type="button" class="ctrl-mode" data-mode-key="edit:date">DATE</button>
+              <button type="button" class="ctrl-mode" data-mode-key="edit:fcsku">FCSKU</button>
+            </div>
+          </div>
+
+          <div class="ctrl-mode-group">
+            <div class="ctrl-mode-label">MOVE MODE</div>
+            <div class="ctrl-mode-grid" data-area="move">
+              <button type="button" class="ctrl-mode" data-mode-key="move:each">EACH</button>
+              <button type="button" class="ctrl-mode" data-mode-key="move:multi">MULTI</button>
+              <button type="button" class="ctrl-mode" data-mode-key="move:container">CONTAINER</button>
+            </div>
+          </div>
+
+          <div class="ctrl-mode-status" data-mode-status></div>
           <div class="ctrl-note" data-control-note></div>
         </div>
       `;
@@ -3258,6 +3586,8 @@
       this.editBtn = $('[data-toggle-edit]', panel);
       this.skuBatchBtn = $('[data-toggle-sku-batch]', panel);
       this.moveBtn = $('[data-toggle-move]', panel);
+      this.modeButtons = $$('[data-mode-key]', panel);
+      this.modeStatusEl = $('[data-mode-status]', panel);
       this.titleEl = $('[data-control-title]', panel);
       this.noteEl = $('[data-control-note]', panel);
 
@@ -3279,6 +3609,9 @@
         this.setEnabled('move', !this.enabled('move'));
       };
 
+      for (const button of this.modeButtons) {
+        button.onclick = () => ModeSwitch.request(button.dataset.modeKey);
+      }
     },
 
     paint() {
@@ -3291,6 +3624,8 @@
       const moveActive = MoveItems.match() && moveOn && MoveItems.active;
       const skuBatchVisible = Edit.match() && Edit.mode === 'sku' && editOn;
       const skuBatchOn = Edit.batchSkuEnabled();
+      const activeModeKey = ModeSwitch.currentKey();
+      const modeLocked = ModeSwitch.busy || ModeSwitch.workBusy();
 
       this.titleEl.textContent = this.currentLabel();
       this.editBtn.dataset.on = editOn ? '1' : '0';
@@ -3303,16 +3638,32 @@
       this.skuBatchBtn.dataset.active = skuBatchVisible && skuBatchOn ? '1' : '0';
       this.skuBatchBtn.textContent = `QQSkuSku  ${skuBatchOn ? 'ON' : 'OFF'}`;
       this.moveBtn.textContent = `MoveItems  ${moveOn ? 'ON' : 'OFF'}${moveActive ? ' • ACTIVE' : ''}`;
+
+      for (const button of this.modeButtons) {
+        const key = button.dataset.modeKey;
+        button.dataset.active = key === activeModeKey ? '1' : '0';
+        button.dataset.pending = ModeSwitch.busy && key === ModeSwitch.requestedKey ? '1' : '0';
+        button.disabled = modeLocked;
+      }
+
+      if (this.modeStatusEl) {
+        this.modeStatusEl.textContent = ModeSwitch.message;
+        this.modeStatusEl.dataset.kind = ModeSwitch.kind;
+      }
+
       this.noteEl.textContent = Edit.match()
         ? `Page: EditItems${Edit.mode ? ` / ${Edit.mode.toUpperCase()}` : ''}`
-        : MoveItems.match() ? 'Page: MoveItems / Native' : '';
+        : MoveItems.match()
+          ? `Page: MoveItems${activeModeKey.startsWith('move:') ? ` / ${activeModeKey.slice(5).toUpperCase()}` : ' / Native'}`
+          : FcSku.match() ? 'Page: FcSkuFlip' : '';
     },
 
     refresh() {
       if (!this.relevantPage()) {
         this.panel?.remove();
         this.panel = null;
-        this.editBtn = this.skuBatchBtn = this.moveBtn = this.titleEl = this.noteEl = null;
+        this.editBtn = this.skuBatchBtn = this.moveBtn = this.modeStatusEl = this.titleEl = this.noteEl = null;
+        this.modeButtons = [];
         return;
       }
 
