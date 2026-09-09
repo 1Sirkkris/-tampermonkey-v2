@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .aft-stage/patch.part0 .aft-stage/patch.part1 .aft-stage/patch.part2 | base64 -d > /tmp/aft-v0.9.25.patch
+          cat .aft-stage/patch.part0 .aft-stage/patch.part1 .aft-stage/patch.part2a .aft-stage/patch.part2b | base64 -d > /tmp/aft-v0.9.25.patch
           test "$(sha256sum /tmp/aft-v0.9.25.patch | awk '{print $1}')" = "a11cbc9c5f4acde2a644fc7eefed67ddefa155c14b5d7037b107cec18bcd2bb2"
           git apply --check /tmp/aft-v0.9.25.patch
           git apply /tmp/aft-v0.9.25.patch
