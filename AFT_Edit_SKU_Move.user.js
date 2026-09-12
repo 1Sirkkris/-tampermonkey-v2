@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.25
+// @version      0.9.26
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.25';
+  const VERSION = '0.9.26';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1499,8 +1499,8 @@
                 timeout: 6000
               });
               if (ready.state === 'READY') {
-                this.status(`RECOVERED ✓ • ${sku} failed • ready`);
-                return true;
+                this.status(`RECOVERED ✓ • ${sku} • rechecking quantity`);
+                return snap;
               }
             } catch {}
           }
@@ -1822,8 +1822,9 @@
               session = await recover(objectId, `Attempt ${attempt} backend error`);
               continue;
             }
-            await this.recoverSkuBackendError(objectId, meta.sku, attempt);
-            return;
+            session = await this.recoverSkuBackendError(objectId, meta.sku, attempt);
+            if (!session) return;
+            continue;
           }
 
           throw error;
