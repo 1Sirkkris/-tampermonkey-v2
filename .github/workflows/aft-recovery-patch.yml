@@ -29,23 +29,16 @@ jobs:
           replacements = [
               ("// @version      0.9.25", "// @version      0.9.26"),
               ("const VERSION = '0.9.25';", "const VERSION = '0.9.26';"),
-              ("""              if (ready.state === 'READY') {
-                this.status(`RECOVERED ✓ • ${sku} failed • ready`);
-                return true;
-              }""", """              if (ready.state === 'READY') {
-                this.status(`RECOVERED ✓ • ${sku} • rechecking quantity`);
-                return snap;
-              }"""),
-              ("""            await this.recoverSkuBackendError(objectId, meta.sku, attempt);
-            return;""", """            session = await this.recoverSkuBackendError(objectId, meta.sku, attempt);
-            if (!session) return;
-            continue;"""),
+              ("this.status(`RECOVERED ✓ • ${sku} failed • ready`);\n                return true;",
+               "this.status(`RECOVERED ✓ • ${sku} • rechecking quantity`);\n                return snap;"),
+              ("await this.recoverSkuBackendError(objectId, meta.sku, attempt);\n            return;",
+               "session = await this.recoverSkuBackendError(objectId, meta.sku, attempt);\n            if (!session) return;\n            continue;"),
           ]
 
           for old, new in replacements:
               count = s.count(old)
               if count != 1:
-                  raise SystemExit(f'Expected exactly one match, got {count}: {old[:80]!r}')
+                  raise SystemExit(f'Expected exactly one match, got {count}: {old[:100]!r}')
               s = s.replace(old, new, 1)
 
           guard = "if (attempt > 50) throw new Error('Stopped after 50 SKU attempts');"
@@ -64,6 +57,7 @@ jobs:
           grep -Fq "const VERSION = '0.9.26';" AFT_Edit_SKU_Move.user.js
           grep -Fq "if (attempt > 50) throw new Error('Stopped after 50 SKU attempts');" AFT_Edit_SKU_Move.user.js
           grep -Fq 'rechecking quantity' AFT_Edit_SKU_Move.user.js
+          grep -Fq 'session = await this.recoverSkuBackendError(objectId, meta.sku, attempt);' AFT_Edit_SKU_Move.user.js
 
       - name: Commit patch and remove temporary workflow
         shell: bash
