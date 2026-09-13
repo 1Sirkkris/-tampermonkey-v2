@@ -36,10 +36,6 @@ jobs:
                   "      const matches = choices.filter(choice => choice.state === wantedState);",
                   "      const choiceState = wantedState === 'INVENTORY' ? 'SELLABLE' : wantedState;\n      const matches = choices.filter(choice => choice.state === choiceState);"
               ),
-              (
-                  "        const message = String(error?.message || error);\n        this.status(`STOPPED: ${message}`);",
-                  "        const message = String(error?.message || error);\n        traceAft('AFT_RUN_ERROR', { mode: this.mode, message });\n        this.status(`STOPPED: ${message}`);"
-              ),
           ]
 
           for old, new in replacements:
@@ -63,7 +59,6 @@ jobs:
           grep -Fq "// @version      0.9.27" AFT_Edit_SKU_Move.user.js
           grep -Fq "const VERSION = '0.9.27';" AFT_Edit_SKU_Move.user.js
           grep -Fq "const choiceState = wantedState === 'INVENTORY' ? 'SELLABLE' : wantedState;" AFT_Edit_SKU_Move.user.js
-          grep -Fq "traceAft('AFT_RUN_ERROR', { mode: this.mode, message });" AFT_Edit_SKU_Move.user.js
           grep -Fq "if (attempt > 50) throw new Error('Stopped after 50 SKU attempts');" AFT_Edit_SKU_Move.user.js
 
       - name: Commit fix and remove temporary workflow
