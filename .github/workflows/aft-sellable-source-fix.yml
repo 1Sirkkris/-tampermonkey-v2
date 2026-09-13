@@ -1,0 +1,74 @@
+name: Apply approved AFT sellable source fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/aft-sellable-source-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply scoped AFT fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('AFT_Edit_SKU_Move.user.js')
+          s = path.read_text(encoding='utf-8')
+
+          replacements = [
+              ("// @version      0.9.26", "// @version      0.9.27"),
+              ("const VERSION = '0.9.26';", "const VERSION = '0.9.27';"),
+              (
+                  "      const matches = choices.filter(choice => choice.state === wantedState);",
+                  "      const choiceState = wantedState === 'INVENTORY' ? 'SELLABLE' : wantedState;\n      const matches = choices.filter(choice => choice.state === choiceState);"
+              ),
+              (
+                  "        const message = String(error?.message || error);\n        this.status(`STOPPED: ${message}`);",
+                  "        const message = String(error?.message || error);\n        traceAft('AFT_RUN_ERROR', { mode: this.mode, message });\n        this.status(`STOPPED: ${message}`);"
+              ),
+          ]
+
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, got {count}: {old[:120]!r}')
+              s = s.replace(old, new, 1)
+
+          guard = "if (attempt > 50) throw new Error('Stopped after 50 SKU attempts');"
+          if guard not in s:
+              raise SystemExit('50-attempt SKU guardrail missing')
+
+          path.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check AFT_Edit_SKU_Move.user.js
+          git diff --check
+          grep -Fq "// @version      0.9.27" AFT_Edit_SKU_Move.user.js
+          grep -Fq "const VERSION = '0.9.27';" AFT_Edit_SKU_Move.user.js
+          grep -Fq "const choiceState = wantedState === 'INVENTORY' ? 'SELLABLE' : wantedState;" AFT_Edit_SKU_Move.user.js
+          grep -Fq "traceAft('AFT_RUN_ERROR', { mode: this.mode, message });" AFT_Edit_SKU_Move.user.js
+          grep -Fq "if (attempt > 50) throw new Error('Stopped after 50 SKU attempts');" AFT_Edit_SKU_Move.user.js
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/aft-sellable-source-fix.yml
+          git add AFT_Edit_SKU_Move.user.js
+          git commit -m "fix(aft): accept sellable source alias"
+          git push origin HEAD:main
