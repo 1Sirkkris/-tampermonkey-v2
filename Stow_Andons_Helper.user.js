@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         TEST v5.5.1 Stow Andons Helper — FCSKU Conflict Alert
+// @name         TEST v5.5.3 Stow Andons Helper — FCSKU Conflict Alert
 // @name:en      TEST Stow Andons Helper — FCSKU Conflict Alert
 // @namespace    Violentmonkey Scripts
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -7,8 +7,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.2
-// @description  TEST: Dual-surface FCResearch/FC-Lite helper with duplicate-FNSKU/FCSKU conflict alerts.
+// @version      5.5.3
+// @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -16,10 +16,10 @@
 
 (() => {
   'use strict';
-  if (window.__stowAndonsCore548test || location.hash.startsWith('#fcr-tote-checker')) return;
+  if (window.__stowAndonsCore548test) return;
   window.__stowAndonsCore548test = true;
 
-  const VERSION = '5.5.2';
+  const VERSION = '5.5.3';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -81,6 +81,12 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const canonical = value => clean(value).toUpperCase();
+
+  const TOTE_LITE_HASH = '#fcr-tote-checker';
+  function isToteLiteSurface() {
+    return location.hash.startsWith(TOTE_LITE_HASH)
+      || !!document.querySelector('#fcratc-root.fcratc-tote-audit');
+  }
 
 
   const CORE_REQUEST_EVENT = 'fcr-data-core:request';
@@ -151,18 +157,32 @@
   function isContainerPage() {
     try {
       const url = new URL(location.href);
-      return /\/BWU2\/results\/?$/i.test(url.pathname) && /^(ts|cs)X/i.test(url.searchParams.get('s') || '');
+      return /\/[^/]+\/results\/?$/i.test(url.pathname) && /^(ts|cs)X/i.test(currentContainer());
     } catch {
       return false;
     }
   }
 
   function currentContainer() {
-    try { return new URL(location.href).searchParams.get('s') || ''; }
-    catch { return ''; }
+    try {
+      const fromUrl = clean(new URL(location.href).searchParams.get('s') || '');
+      if (fromUrl) return fromUrl;
+    } catch {}
+
+    if (isToteLiteSurface()) {
+      for (const selector of ['.fcratc-lite-container', '.fcratc-container']) {
+        const value = clean(document.querySelector(`#fcratc-root.fcratc-tote-audit ${selector}`)?.textContent);
+        if (/^(?:ts|cs)X[A-Z0-9]+$/i.test(value)) return value;
+      }
+    }
+    return '';
   }
 
   function topSearchInput() {
+    if (isToteLiteSurface()) {
+      const toteInput = document.querySelector('#fcratc-root.fcratc-tote-audit #fcratc-input');
+      if (toteInput && !toteInput.disabled) return toteInput;
+    }
     return $$('input[type="search"],input[type="text"],input:not([type])').find(input => {
       const rect = input.getBoundingClientRect();
       return rect.width >= 250 && rect.height > 0 && rect.top >= 0 && rect.top < 90 && !input.disabled;
@@ -242,6 +262,7 @@
       #vm-safe-hover .title{max-width:340px;font-size:12px;line-height:1.35;margin-bottom:5px}
       #vm-safe-hover .detail{margin:3px 0}.vm-detail-label{display:inline-block;min-width:68px;color:#9ca3af;font-size:10px;text-transform:uppercase}.vm-dims-sussy{padding:2px 5px;border:2px solid #f59e0b;border-radius:4px;background:#fff7ed;color:#111;font-weight:800}.vm-sort-pill{padding:2px 6px;border-radius:20px;font-weight:800}.vm-sort-yes{background:#fde047;color:#111}.vm-sort-no{background:#dc2626;color:#fff}
       .vm-drop-inline{margin-left:8px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px;font-family:Arial,sans-serif}.vm-floor-btn,.vm-tag-btn{min-height:24px;padding:4px 8px;border:1px solid #94a3b8;border-radius:7px;background:#fff;cursor:pointer;font:700 12px Arial,sans-serif}.vm-floor-btn.active{background:#0b74d1;color:#fff}.vm-tag-btn:disabled{opacity:.55;cursor:wait}.vm-drop-divider{margin:0 3px;color:#475569;font-weight:800}
+      .vm-drop-fclite{margin:0;width:100%;box-sizing:border-box;min-height:44px;padding:6px 10px;background:#eef3f8;border-bottom:1px solid #cbd5e1;color:#172033;gap:6px}.vm-drop-fclite .vm-drop-move{margin-right:2px;padding-right:8px;border-right:1px solid #94a3b8;font:900 13px Arial,sans-serif;letter-spacing:.4px}.vm-drop-fclite .vm-floor-btn,.vm-drop-fclite .vm-tag-btn{min-height:32px;padding:5px 10px;border-radius:6px;font:900 13px Arial,sans-serif}.vm-drop-fclite .vm-floor-btn.active{background:#0b74d1;border-color:#075fae;color:#fff}.vm-drop-fclite .vm-drop-divider{margin:0 4px}
       .vm-suspicious-dims-summary{display:inline-flex;align-items:center;margin-left:8px;padding:3px 8px;border:1px solid #f59e0b;border-radius:999px;background:#fff7ed;color:#7c2d12;font:800 11px Arial,sans-serif}.vm-suspicious-dims-summary.vm-loading{border-color:#94a3b8;background:#f8fafc;color:#475569}.vm-suspicious-dims-summary.vm-clear{border-color:#22c55e;background:#f0fdf4;color:#14532d}.vm-suspicious-dims-row td,.vm-suspicious-dims-row td a{background:#fef9c3!important}.vm-suspicious-dims-cell{outline:3px dashed rgba(37,99,235,.70)!important;outline-offset:-4px!important;background:#fff7ed!important}
       .vm-fcsku-conflict-summary{display:inline-flex;align-items:center;margin-left:8px;padding:3px 8px;border:2px solid #7f1d1d;border-radius:999px;background:#fff;color:#7f1d1d;font:900 11px Arial,sans-serif;letter-spacing:.2px}.vm-fcsku-conflict-row td{background-image:repeating-linear-gradient(135deg,rgba(127,29,29,.18) 0 8px,rgba(245,158,11,.10) 8px 16px)!important;box-shadow:inset 0 2px #7f1d1d,inset 0 -2px #7f1d1d}.vm-fcsku-conflict-row td a{font-weight:900!important}.vm-fcsku-conflict-cell{outline:3px solid #7f1d1d!important;outline-offset:-3px!important}
     `;
@@ -256,6 +277,7 @@
       toast.dataset.vmSafeUi = '1'; toast.dataset.fcrToolUi = '1';
       document.body.appendChild(toast);
     }
+    if (isToteLiteSurface()) return;
     if (!document.getElementById('vm-safe-hover')) {
       const hover = document.createElement('div');
       hover.id = 'vm-safe-hover';
@@ -435,7 +457,9 @@
   }
 
   function isFcliteSurface() {
-    return location.hash.startsWith('#fcr-lite') || !!document.getElementById('fcrlite-sections-app');
+    return isToteLiteSurface()
+      || location.hash.startsWith('#fcr-lite')
+      || !!document.getElementById('fcrlite-sections-app');
   }
 
   function fcliteInventoryCard() {
@@ -460,22 +484,31 @@
 
   function injectInlineControls(containerPage) {
     if (!containerPage || document.querySelector('.vm-drop-inline')) return;
-    const found = findInventoryHeading();
-    if (!found) return;
     let floor = getCookie(COOKIE.floor);
     if (!FLOORS.includes(floor)) floor = 'P2';
     setCookie(COOKIE.floor, floor);
 
-    const wrap = document.createElement('span');
-    wrap.className = 'vm-drop-inline';
+    const toteLite = isToteLiteSurface();
+    const wrap = document.createElement(toteLite ? 'div' : 'span');
+    wrap.className = `vm-drop-inline${toteLite ? ' vm-drop-fclite' : ''}`;
     wrap.dataset.vmSafeUi = '1'; wrap.dataset.fcrToolUi = '1';
-    wrap.innerHTML = `<b>Floor:</b>${FLOORS.map(item => `<button type="button" class="vm-floor-btn ${item === floor ? 'active' : ''}" data-floor="${item}">${item}</button>`).join('')}<span class="vm-drop-divider">|</span><b>Drop:</b><span id="vm-drop-buttons-wrap">${renderDropButtons()}</span>`;
-    (found.column.querySelector('span.help') || found.inventory).after(wrap);
+    wrap.innerHTML = `${toteLite ? '<b class="vm-drop-move">MOVE</b>' : ''}<b>Floor:</b>${FLOORS.map(item => `<button type="button" class="vm-floor-btn ${item === floor ? 'active' : ''}" data-floor="${item}">${item}</button>`).join('')}<span class="vm-drop-divider">|</span><b>Drop:</b><span id="vm-drop-buttons-wrap">${renderDropButtons()}</span>`;
+
+    if (toteLite) {
+      const system = document.querySelector('#fcratc-root.fcratc-tote-audit .fcratc-system');
+      if (!system) return;
+      system.prepend(wrap);
+    } else {
+      const found = findInventoryHeading();
+      if (!found) return;
+      (found.column.querySelector('span.help') || found.inventory).after(wrap);
+    }
+
     $$('.vm-floor-btn', wrap).forEach(button => button.addEventListener('click', event => {
       event.preventDefault(); event.stopPropagation(); setFloor(button.dataset.floor);
     }));
     wireDropButtons(wrap);
-    ensureSussyBadge();
+    if (!toteLite) ensureSussyBadge();
   }
 
   function inventoryTable() {
@@ -796,6 +829,7 @@
     ensureUi();
     const containerPage = isContainerPage();
     injectInlineControls(containerPage);
+    if (isToteLiteSurface()) return;
     attachHovers(containerPage);
     scanFcskuConflicts(containerPage);
     scanSussy(containerPage);
@@ -825,7 +859,9 @@
   }
 
   function mutationTouchesFcliteInventory(record) {
-    const selector = '.fcrlite-card[data-endpoint="inventory"]';
+    const selector = isToteLiteSurface()
+      ? '#fcratc-root.fcratc-tote-audit'
+      : '.fcrlite-card[data-endpoint="inventory"]';
     const touches = element => !!element && (
       element.matches?.(selector)
       || !!element.closest?.(selector)
@@ -872,7 +908,11 @@
       if (mutationNeedsRefresh(records)) scheduleRefresh();
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+    document.addEventListener('focusin', event => {
+      if (event.target?.matches?.('input[type="search"],input[type="text"],input:not([type])')) setTimeout(() => refocusSearch(0), 0);
+    });
+    window.addEventListener('popstate', scheduleRefresh);
+    window.addEventListener('hashchange', scheduleRefresh);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
