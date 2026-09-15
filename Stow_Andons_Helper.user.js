@@ -7,7 +7,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.3
+// @version      5.5.4
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -19,7 +19,7 @@
   if (window.__stowAndonsCore548test) return;
   window.__stowAndonsCore548test = true;
 
-  const VERSION = '5.5.3';
+  const VERSION = '5.5.4';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -908,9 +908,6 @@
       if (mutationNeedsRefresh(records)) scheduleRefresh();
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    document.addEventListener('focusin', event => {
-      if (event.target?.matches?.('input[type="search"],input[type="text"],input:not([type])')) setTimeout(() => refocusSearch(0), 0);
-    });
     window.addEventListener('popstate', scheduleRefresh);
     window.addEventListener('hashchange', scheduleRefresh);
   };
