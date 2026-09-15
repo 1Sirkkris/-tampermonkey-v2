@@ -9,7 +9,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Carton PrEditor | 7.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
 | SIM Markdown Toolbar | 5.1.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.4.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
-| Sideline API Move | 0.3.17 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
+| Sideline API Move | 0.3.18 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
 | AFT Edit/SKU/Move | 0.9.24 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
 | FCR Data Core | 0.2.23 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
 | FCResearch Master | 0.1.29 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
@@ -19,7 +19,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Dropzone Selector Queue | 0.2.19 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
 | BWU2 Observability Core | 0.1.13 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
 | Calm Code | 1.3.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
-| Unbind Hierarchy Queue | 1.0.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |
+| Unbind Hierarchy Queue | 1.0.5 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |
 
 Tampermonkey manager titles are intentionally version-free via `@name:en`; legacy base `@name` values stay frozen as update identity. Every active fleet script renders a shared low-profile runtime version stamp at the bottom of the page, so the actually running version is visible immediately after reload.
 

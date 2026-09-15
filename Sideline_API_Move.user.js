@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.17
+// @version      0.3.18
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.17';
+  const VERSION = '0.3.18';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -203,6 +203,10 @@
     return enabled(direct) && !direct.closest(helperSelector) ? direct : buttonByText(/change container/);
   }
 
+  function containerOverageButton() {
+    return buttonByText(/\bcontainer overage\b/);
+  }
+
   function deepRoots(start=document) {
     const roots = [start];
     const stack = [start];
@@ -374,9 +378,19 @@
   }
 
   async function closeOpenContainer(choice='yes', active=()=>true) {
-    const change = await waitFor(() => active() && changeButton(), 12000, 35);
-    if (!change || !active()) return 'cancelled';
-    click(change);
+    const action = await waitFor(() => active() && (changeButton() || containerOverageButton()), 12000, 35);
+    if (!action || !active()) return 'cancelled';
+
+    const overage = /\bcontainer overage\b/.test(buttonLabel(action));
+    click(action);
+
+    if (overage) {
+      if (!active()) return 'cancelled';
+      return await waitFor(() => active() && screen() === 'SOURCE' && scanInput(), 12000, 50)
+        ? 'overage'
+        : 'overage timeout';
+    }
+
     const answer = await waitFor(() => active() && modalButton(choice), 3500, 25);
     if (!answer || !active()) return 'cancelled';
     click(answer);
@@ -1136,8 +1150,10 @@
     try {
       if (!changeButton()) throw new Error('No open container');
       const result = await closeOpenContainer('yes');
-      if (result !== 'closed') throw new Error(result);
-      qtyStatus.textContent = 'Current tote cleared';
+      if (result !== 'closed' && result !== 'overage') throw new Error(result);
+      qtyStatus.textContent = result === 'overage'
+        ? 'Container overage created — scan next tote'
+        : 'Current tote cleared';
     } catch (err) {
       qtyStatus.textContent = `Clear failed: ${err.message}`;
     } finally {

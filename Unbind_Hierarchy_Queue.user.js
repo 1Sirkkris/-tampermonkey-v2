@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.0.4
+// @version      1.0.5
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -20,7 +20,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.4';
+  const VERSION = '1.0.5';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -56,6 +56,9 @@
   const DRAFT_KEY = 'bwu2.unbindQueue.draft.v1';
   const LOCK_KEY = 'bwu2.unbindQueue.lock.v1';
   const MINIMIZED_KEY = 'bwu2.unbindQueue.minimized.v1';
+  const SESSION_RECOVERY_KEY = 'bwu2.unbindQueue.sessionRecovery.v1';
+  const SESSION_RECOVERY_MAX_AGE_MS = 60 * 1000;
+  const SESSION_RECOVERY_MAX_ATTEMPTS = 2;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const LOGIN_PATTERN = /^[a-z][a-z0-9-]{2,31}$/i;
   const CONTAINER_PATTERN = /^tsX[A-Za-z0-9]+$/i;
@@ -141,6 +144,35 @@
 
   function saveMinimized() {
     try { localStorage.setItem(MINIMIZED_KEY, minimized ? '1' : '0'); } catch (_) {}
+  }
+
+  function readSessionRecovery() {
+    try {
+      const value = JSON.parse(localStorage.getItem(SESSION_RECOVERY_KEY) || 'null');
+      if (!value || !Number(value.at)) return null;
+      if (Date.now() - Number(value.at) > SESSION_RECOVERY_MAX_AGE_MS) {
+        localStorage.removeItem(SESSION_RECOVERY_KEY);
+        return null;
+      }
+      return value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveSessionRecovery(value) {
+    try { localStorage.setItem(SESSION_RECOVERY_KEY, JSON.stringify(value)); } catch (_) {}
+  }
+
+  function clearSessionRecovery() {
+    try { localStorage.removeItem(SESSION_RECOVERY_KEY); } catch (_) {}
+  }
+
+  function persistLogin(value) {
+    const login = normalizeLogin(value);
+    if (!login) return '';
+    try { localStorage.setItem(LOGIN_KEY, login); } catch (_) {}
+    return login;
   }
 
   function trace(event, data = {}) {
@@ -291,13 +323,12 @@
   }
 
   function currentLogin() {
-    return normalizeLogin(ui.login?.value || discoverLogin());
+    return persistLogin(ui.login?.value || discoverLogin());
   }
 
   function saveLogin() {
     const login = currentLogin();
     if (!login) return '';
-    try { localStorage.setItem(LOGIN_KEY, login); } catch (_) {}
     if (ui.login) ui.login.value = login;
     return login;
   }
@@ -410,6 +441,7 @@
         });
       }
 
+      if (phase !== 'unbind' && readSessionRecovery()?.resume) clearSessionRecovery();
       return { data, status: response.status, ms };
     } catch (error) {
       if (error instanceof RequestError) throw error;
@@ -471,18 +503,60 @@
 
   function markAttention(item, error) {
     if (error?.sessionExpired) {
+      const phase = clean(error.phase);
+      const previous = readSessionRecovery();
+      const attempts = previous?.resume ? Math.max(1, Number(previous.attempts) || 1) + 1 : 1;
+
+      state.currentId = '';
+      state.phase = 'idle';
+      state.running = false;
+      releaseLock();
+
+      if (phase === 'unbind') {
+        item.status = 'attention';
+        item.phase = 'unbind';
+        item.error = 'Session expired during unbind — verify container before retrying';
+        saveSessionRecovery({
+          at: Date.now(),
+          resume: false,
+          ambiguous: true,
+          container: item.id,
+          phase
+        });
+        state.message = 'SESSION EXPIRED DURING UNBIND — refreshing automatically; verify attention row';
+        saveState();
+        render();
+        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: false });
+        queueMicrotask(() => location.reload());
+        return;
+      }
+
       item.status = 'queued';
       item.phase = '';
       item.error = '';
       item.ms = 0;
-      state.currentId = '';
-      state.phase = 'idle';
-      state.running = false;
-      state.message = 'SESSION EXPIRED — queue preserved; refresh page, then press START';
-      releaseLock();
+
+      if (attempts > SESSION_RECOVERY_MAX_ATTEMPTS) {
+        clearSessionRecovery();
+        state.message = 'SESSION STILL EXPIRED — queue preserved; sign in again if required';
+        saveState();
+        render();
+        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: false, attempts });
+        return;
+      }
+
+      saveSessionRecovery({
+        at: Date.now(),
+        resume: true,
+        attempts,
+        container: item.id,
+        phase
+      });
+      state.message = `SESSION EXPIRED — refreshing automatically (${attempts}/${SESSION_RECOVERY_MAX_ATTEMPTS})`;
       saveState();
       render();
-      trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase: clean(error.phase) });
+      trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: true, attempts });
+      queueMicrotask(() => location.reload());
       return;
     }
 
@@ -594,6 +668,47 @@
     }
 
     if (state.running) setTimeout(runQueue, NEXT_GAP_MS);
+  }
+
+  function resumeAfterSessionReload() {
+    const recovery = readSessionRecovery();
+    if (!recovery) return;
+
+    if (!recovery.resume) {
+      clearSessionRecovery();
+      state.message = 'Session refreshed — verify attention row before retrying';
+      saveState();
+      render();
+      return;
+    }
+
+    const login = saveLogin();
+    if (!login) {
+      clearSessionRecovery();
+      state.message = 'Session refreshed — enter employee login once';
+      saveState();
+      render();
+      ui.login?.focus();
+      return;
+    }
+
+    if (!acquireLock()) {
+      state.message = 'Session refreshed — another tab owns the Unbind queue';
+      saveState();
+      render();
+      return;
+    }
+
+    state.running = true;
+    state.message = 'SESSION REFRESHED — resuming queue';
+    saveState();
+    render();
+    trace('UNBIND_QUEUE_SESSION_RESUME', {
+      container: clean(recovery.container),
+      phase: clean(recovery.phase),
+      attempts: Number(recovery.attempts) || 1
+    });
+    queueMicrotask(runQueue);
   }
 
   function startQueue() {
@@ -939,6 +1054,7 @@
     ui.login.placeholder = 'employee login — saved locally';
     ui.login.value = discoverLogin();
     ui.login.style.cssText = 'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;font:12px Consolas,monospace';
+    ui.login.addEventListener('input', () => { persistLogin(ui.login.value); });
     ui.login.addEventListener('change', () => { saveLogin(); render(); });
     isolateTextField(ui.login, event => {
       event.preventDefault();
@@ -1007,6 +1123,7 @@
     render();
     positionUi();
     if (!minimized) setTimeout(() => ui.draft.focus(), 0);
+    queueMicrotask(resumeAfterSessionReload);
   }
 
   window.addEventListener('storage', event => {
