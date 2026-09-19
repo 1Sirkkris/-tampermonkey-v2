@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.0.5
+// @version      1.0.6
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -20,7 +20,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.5';
+  const VERSION = '1.0.6';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -265,15 +265,28 @@
     return '';
   }
 
-  function discoverLogin() {
+  function cookieLogin() {
     try {
-      const stored = normalizeLogin(localStorage.getItem(LOGIN_KEY));
-      if (stored) return stored;
+      for (const part of document.cookie.split(';')) {
+        const index = part.indexOf('=');
+        if (index < 1) continue;
+        const key = clean(part.slice(0, index)).toLowerCase();
+        if (!/^(?:employeelogin|userlogin|username|login|alias|autoid)$/.test(key)) continue;
+        let value = clean(part.slice(index + 1));
+        try { value = decodeURIComponent(value); } catch (_) {}
+        const found = normalizeLogin(value);
+        if (found) return found;
+      }
     } catch (_) {}
+    return '';
+  }
 
+  function discoverLiveLogin() {
     const globals = [
       window.employeeLogin,
       window.userLogin,
+      window.autoId,
+      window.autoID,
       window.currentUser,
       window.user,
       window.employee,
@@ -286,9 +299,9 @@
     }
 
     const selectors = [
-      '[data-employee-login]', '[data-user-login]', '[data-username]',
-      'input[name="employeeLogin"]', 'input[name="userLogin"]',
-      'meta[name="employeeLogin"]', 'meta[name="username"]'
+      '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
+      'input[name="employeeLogin"]', 'input[name="userLogin"]', 'input[name="autoid"]',
+      'meta[name="employeeLogin"]', 'meta[name="username"]', 'meta[name="autoid"]'
     ];
     for (const selector of selectors) {
       const element = document.querySelector(selector);
@@ -297,17 +310,22 @@
         element.dataset?.employeeLogin ||
         element.dataset?.userLogin ||
         element.dataset?.username ||
+        element.dataset?.autoid ||
         element.value ||
         element.content
       );
       if (found) return found;
     }
 
+    const fromCookie = cookieLogin();
+    if (fromCookie) return fromCookie;
+
     for (const storage of [localStorage, sessionStorage]) {
       try {
         for (let index = 0; index < storage.length; index++) {
           const key = storage.key(index) || '';
-          if (!/(?:employee.*login|user.*login|username|alias)/i.test(key)) continue;
+          if (key === LOGIN_KEY) continue;
+          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
           if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
           const raw = storage.getItem(key);
           let found = normalizeLogin(raw);
@@ -322,8 +340,14 @@
     return '';
   }
 
+  function discoverLogin() {
+    const live = discoverLiveLogin();
+    if (live) return live;
+    try { return normalizeLogin(localStorage.getItem(LOGIN_KEY)); } catch (_) { return ''; }
+  }
+
   function currentLogin() {
-    return persistLogin(ui.login?.value || discoverLogin());
+    return persistLogin(discoverLiveLogin() || ui.login?.value || discoverLogin());
   }
 
   function saveLogin() {
@@ -441,7 +465,6 @@
         });
       }
 
-      if (phase !== 'unbind' && readSessionRecovery()?.resume) clearSessionRecovery();
       return { data, status: response.status, ms };
     } catch (error) {
       if (error instanceof RequestError) throw error;
@@ -560,6 +583,8 @@
       return;
     }
 
+    if (readSessionRecovery()?.resume) clearSessionRecovery();
+
     item.status = 'attention';
     item.phase = clean(error?.phase || state.phase);
     item.error = clean(error?.message || 'Needs attention');
@@ -625,6 +650,7 @@
       'unbind'
     );
     assertUnbind(unbound.data);
+    clearSessionRecovery();
 
     item.status = 'done';
     item.phase = 'done';
@@ -763,6 +789,7 @@
     state.running = false;
     releaseLock();
     state = defaultState();
+    clearSessionRecovery();
     saveState();
     if (ui.draft) ui.draft.value = '';
     saveDraft('');
@@ -1051,7 +1078,7 @@
     ui.login.type = 'text';
     ui.login.autocomplete = 'off';
     ui.login.spellcheck = false;
-    ui.login.placeholder = 'employee login — saved locally';
+    ui.login.placeholder = 'employee login — AutoID detected / saved fallback';
     ui.login.value = discoverLogin();
     ui.login.style.cssText = 'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;font:12px Consolas,monospace';
     ui.login.addEventListener('input', () => { persistLogin(ui.login.value); });
