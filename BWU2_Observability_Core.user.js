@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.14
+// @version      0.1.15
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.14';
+  const VERSION = '0.1.15';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -382,10 +382,10 @@
   }
 
   function isAftMoveProbe(rawUrl) {
-    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/moveitems\/?$/i.test(location.pathname)) return false;
+    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/(?:moveitems|edititems)\/?$/i.test(location.pathname)) return false;
     const url = parsedUrl(rawUrl);
     return !!url && url.origin === location.origin &&
-      (/^\/(?:action|status|end)\/?$/i.test(url.pathname) || /^\/app\/moveitems\/?$/i.test(url.pathname));
+      (/^\/(?:action|status|end)\/?$/i.test(url.pathname) || /^\/app\/(?:moveitems|edititems)\/?$/i.test(url.pathname));
   }
 
   function endpointKey(method, rawUrl) {
