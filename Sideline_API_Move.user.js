@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.23
+// @version      0.3.24
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,8 +16,27 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker') || new URLSearchParams(location.search).get('issConsoleWorker') === '1';
-  const VERSION = '0.3.23';
+  const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
+  const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
+  const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
+  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  const VERSION = '0.3.24';
+
+  function observe(type, data = {}) {
+    try {
+      window.dispatchEvent(new CustomEvent('bwu2-observability:event', {
+        detail: JSON.stringify({ type, data })
+      }));
+    } catch {}
+  }
+
+  observe('SIDELINE_WORKER_DETECT', {
+    worker:ISS_CONSOLE_WORKER,
+    byHash:ISS_WORKER_BY_HASH,
+    byQuery:ISS_WORKER_BY_QUERY,
+    byName:ISS_WORKER_BY_NAME,
+    inFrame:window.parent !== window
+  });
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
