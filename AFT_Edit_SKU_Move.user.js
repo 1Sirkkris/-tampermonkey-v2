@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.30
+// @version      0.9.31
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,8 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.30';
+  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
+  const VERSION = '0.9.31';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -3788,6 +3789,242 @@
     }
   };
 
+
+  // ISS Console worker bridge.
+  // The parent never receives auth/session material; commands execute inside AFT's own origin.
+  let issWorkerModeKey = '';
+  let issWorkerBusy = false;
+
+  function issWorkerSend(type, detail = {}) {
+    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+    try {
+      window.parent.postMessage({
+        type,
+        worker: 'aft',
+        version: VERSION,
+        ...detail
+      }, '*');
+    } catch {}
+  }
+
+  function issWorkerProgress(area, message, extra = {}) {
+    issWorkerSend('ISS_CONSOLE_PROGRESS', {
+      area,
+      message: String(message || ''),
+      ...extra
+    });
+  }
+
+  async function issWorkerEnsureMode(key) {
+    const definition = MODE_DEFINITIONS[key];
+    if (!definition) throw new Error(`Unsupported AFT mode ${key}`);
+
+    if (issWorkerModeKey !== key) {
+      issWorkerProgress(definition.area, `${definition.title} • switching backend`, { loading: true, mode: key });
+      await ModeSwitch.switchBackend(definition);
+      issWorkerModeKey = key;
+      if (definition.area === 'move') MoveItems.detectedMode = definition.mode;
+      if (definition.area === 'edit' && definition.mode === 'sku') Edit.mode = 'sku';
+      issWorkerProgress(definition.area, `${definition.title} • ready`, { loading: false, mode: key });
+    }
+
+    const workflow = await ModeSwitch.ensureReady(definition);
+    return { definition, workflow };
+  }
+
+  async function issWorkerEditRun(payload = {}) {
+    const items = Edit.parseSkuBatchQueue(Array.isArray(payload.items) ? payload.items.join('\n') : payload.items || '');
+    if (!items.length) throw new Error('No Edit items');
+    if (items.length > 500) throw new Error('Edit queue too large');
+
+    const currentState = String(payload.sourceState || 'Sellable');
+    const desiredState = String(payload.destState || 'Pending Research');
+    if (low(currentState) === low(desiredState) && low(currentState) !== 'unsellable') {
+      throw new Error('Source and destination disposition cannot match');
+    }
+
+    await issWorkerEnsureMode('edit:sku');
+    Edit.stopRequested = false;
+    Edit.directBusy = true;
+    let done = 0;
+    const results = [];
+
+    try {
+      for (let i = 0; i < items.length; i++) {
+        if (Edit.stopRequested) throw new Error('Stopped by user');
+        const sku = items[i];
+        issWorkerProgress('edit', `${i + 1}/${items.length} • ${sku}`, {
+          current: i + 1,
+          total: items.length
+        });
+        const result = await Edit.runSkuDirect({
+          sku,
+          currentState,
+          currentDamage: String(payload.sourceDamage || 'Defective'),
+          desiredState,
+          desiredDamage: String(payload.destDamage || 'Defective')
+        }, {
+          maxRecoveries: 2,
+          allowReload: false
+        });
+        done++;
+        results.push({ sku, outcome: result?.outcome || 'done' });
+      }
+      issWorkerProgress('edit', `DONE ✓ ${done}/${items.length}`, { done, total: items.length });
+      return { done, total: items.length, results };
+    } finally {
+      Edit.directBusy = false;
+    }
+  }
+
+  async function issWorkerMoveQuantity(definition, objectId, label) {
+    const html = await ModeSwitch.routeHtml(definition, label);
+    const fetchedObjectId = objectIdFromHtmlForWorker(html);
+    assertObject(objectId, fetchedObjectId, label);
+    const direct = MoveItems.quantityInfoFromRaw(html);
+    if (direct.qty) return direct.qty;
+    if (direct.verify) throw new Error(`${label}: Verify Item screen detected`);
+    const info = MoveItems.quantityInfoFromHtml(html);
+    if (info.qty) return info.qty;
+    if (info.verify) throw new Error(`${label}: Verify Item screen detected`);
+    throw new Error(`${label}: quantity not found`);
+  }
+
+  function objectIdFromHtmlForWorker(html) {
+    return objectId(html);
+  }
+
+  async function issWorkerMoveRun(payload = {}) {
+    const source = norm(payload.source);
+    const dest = norm(payload.dest);
+    const items = MoveItems.parseItems(Array.isArray(payload.items) ? payload.items.join('\n') : payload.items || '');
+    const uiMode = String(payload.mode || 'all').toLowerCase();
+    const modeKey = uiMode === 'each' ? 'move:each' : 'move:multi';
+    const qtyMode = uiMode === 'qty' ? 'user' : 'all';
+    const requestedQty = qtyMode === 'user' ? Number(payload.qty) : null;
+
+    if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(source)) throw new Error('Invalid source container');
+    if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(dest)) throw new Error('Invalid destination container');
+    if (low(source) === low(dest)) throw new Error('Source and destination cannot match');
+    if (!items.length) throw new Error('No Move items');
+    if (qtyMode === 'user' && (!Number.isSafeInteger(requestedQty) || requestedQty < 1 || requestedQty > 999999)) {
+      throw new Error('Invalid quantity');
+    }
+
+    const { definition, workflow } = await issWorkerEnsureMode(modeKey);
+    const objectId = workflow.objectId;
+    let done = 0;
+    MoveItems.stopRequested = false;
+    MoveItems.busy = true;
+
+    try {
+      issWorkerProgress('move', `Source ${source}`, { current: 0, total: items.length });
+      await MoveApi.input(objectId, source, 'Source');
+
+      for (let i = 0; i < items.length; i++) {
+        if (MoveItems.stopRequested) throw new Error('Stopped by user');
+        const barcode = items[i];
+        issWorkerProgress('move', `${i + 1}/${items.length} • Item ${barcode}`, {
+          current: i + 1,
+          total: items.length
+        });
+        await MoveApi.input(objectId, barcode, `Item ${i + 1}`);
+
+        if (definition.mode === 'multi') {
+          const availableQty = await issWorkerMoveQuantity(definition, objectId, `Quantity page ${i + 1}`);
+          const qty = qtyMode === 'user' ? requestedQty : availableQty;
+          if (qty > availableQty) {
+            throw new Error(`QTY UNAVAILABLE • ${barcode} • requested ${qty} • available ${availableQty}`);
+          }
+          issWorkerProgress('move', `${i + 1}/${items.length} • Qty ${qty}/${availableQty}`, {
+            current: i + 1,
+            total: items.length
+          });
+          await MoveApi.input(objectId, String(qty), `Quantity ${i + 1}`);
+        }
+
+        issWorkerProgress('move', `${i + 1}/${items.length} • Destination ${dest}`, {
+          current: i + 1,
+          total: items.length
+        });
+        await MoveApi.input(objectId, dest, `Destination ${i + 1}`);
+        done++;
+      }
+
+      issWorkerProgress('move', 'Finishing…', { done, total: items.length });
+      await MoveApi.done(objectId);
+      await MoveApi.end(objectId);
+      issWorkerProgress('move', `DONE ✓ ${done}/${items.length}`, { done, total: items.length });
+      return { done, total: items.length };
+    } catch (error) {
+      try { await MoveApi.end(objectId); } catch {}
+      const message = String(error?.message || error);
+      if (done > 0) {
+        error.message = `${message} • ${done} already moved • do not blindly retry completed rows`;
+      }
+      throw error;
+    } finally {
+      MoveItems.busy = false;
+    }
+  }
+
+  function installIssConsoleWorkerBridge() {
+    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+
+    window.addEventListener('message', async event => {
+      const message = event.data;
+      if (
+        event.source !== window.parent ||
+        !/fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '') ||
+        message?.type !== 'ISS_CONSOLE_RPC' ||
+        message?.worker !== 'aft'
+      ) return;
+
+      const id = String(message.id || '');
+      const command = String(message.command || '');
+      if (!id || !command) return;
+
+      if (issWorkerBusy && command !== 'stop' && command !== 'ping') {
+        issWorkerSend('ISS_CONSOLE_RPC_RESULT', { id, ok: false, error: 'AFT worker busy' });
+        return;
+      }
+
+      try {
+        let data = null;
+        if (command === 'ping') {
+          data = { ready: true, mode: issWorkerModeKey };
+        } else if (command === 'stop') {
+          Edit.stopRequested = true;
+          MoveItems.stopRequested = true;
+          data = { stopped: true };
+        } else if (command === 'mode') {
+          issWorkerBusy = true;
+          await issWorkerEnsureMode(String(message.payload?.key || ''));
+          data = { mode: issWorkerModeKey };
+        } else if (command === 'edit.run') {
+          issWorkerBusy = true;
+          data = await issWorkerEditRun(message.payload || {});
+        } else if (command === 'move.run') {
+          issWorkerBusy = true;
+          data = await issWorkerMoveRun(message.payload || {});
+        } else {
+          throw new Error(`Unknown AFT worker command: ${command}`);
+        }
+        issWorkerSend('ISS_CONSOLE_RPC_RESULT', { id, ok: true, data });
+      } catch (error) {
+        issWorkerSend('ISS_CONSOLE_RPC_RESULT', {
+          id,
+          ok: false,
+          error: String(error?.message || error || 'AFT worker error')
+        });
+      } finally {
+        if (command !== 'ping' && command !== 'stop') issWorkerBusy = false;
+      }
+    });
+
+    issWorkerSend('ISS_CONSOLE_WORKER_READY', { ready: true });
+  }
+
   const modules = [Edit, MoveItems, FcSku];
   let routeQueued = false;
 
@@ -3833,6 +4070,12 @@
     route();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
-  else start();
+  if (ISS_CONSOLE_WORKER) {
+    const workerStart = () => installIssConsoleWorkerBridge();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', workerStart, { once: true });
+    else workerStart();
+  } else {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
+  }
 })();
