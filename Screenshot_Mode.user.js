@@ -2,7 +2,7 @@
 // @name         MAIN Screenshot Mode
 // @name:en      MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.1.1
+// @version      0.1.2
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
 // @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -16,6 +16,11 @@
 // @include      /^https?:\/\/tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/jp\.item-measurement\.aft\.a2z\.com\//
 // @include      /^https?:\/\/fcmenu-(?:iad|nrt)-regionalized\.corp\.amazon\.com\//
+// @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
+// @match        https://fcmenu-iad-regionalized.corp.amazon.com/*
+// @match        http://fcmenu-iad-regionalized.corp.amazon.com/*
+// @match        https://fcmenu-nrt-regionalized.corp.amazon.com/*
+// @match        http://fcmenu-nrt-regionalized.corp.amazon.com/*
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
 // @match        https://fba-fnsku-commingling-console-na.aka.amazon.com/tool/fnsku-mappings-tool*
 // @match        https://fba-fnsku-commingling-console-jp.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -42,7 +47,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const MODE_ATTR = 'data-bwu2-screenshot-mode';
   const LEGACY_ATTR = 'data-bwu2-screenshot-owned';
   const STYLE_ID = 'bwu2-screenshot-mode-style';
@@ -77,6 +82,23 @@
   const UI_SELECTORS = [
     '#bwu2-runtime-version-stamp',
     `[${LEGACY_ATTR}]`,
+
+    // Prefix catch-alls for script-owned UI ids. This is intentionally broader
+    // than the individual selectors below so new panels/toasts from the same
+    // fleet stay invisible without needing another screenshot-mode update.
+    '[id^="fcrm-"]',
+    '[id^="fcratc-"]',
+    '[id^="vm-"]',
+    '[id^="pLevel"]',
+    '[id^="p-level-"]',
+    '[id^="sh-"]',
+    '[id^="aftm-"]',
+    '[id^="fnsku-direct-"]',
+    '[id^="moveapp-"]',
+    '[id^="bwu2-"]',
+    '[id^="aavf-"]',
+    '[id^="aft-super-"]',
+    '[id^="aft-ui-state-logger-"]',
 
     // FCResearch Master / FC-Lite / helpers.
     '[data-fcr-master-ui]',
@@ -162,7 +184,16 @@
     '#fnsku-direct-wrap',
     '.sh-panel',
     '#body > #toolbox',
-    '#bwu2-river-assistant'
+    '#bwu2-river-assistant',
+    'fcrm-prop-true',
+    '#fcratc-root',
+    '#vm-safe-gear',
+    '#pLevelOverlay',
+    '.sim-md-toolbar',
+    '.aftm{',
+    '#bwu2-observability-inline',
+    '#aavf-context-menu',
+    '#aft-super-test'
   ];
 
   const disabledStyleState = new Map();
