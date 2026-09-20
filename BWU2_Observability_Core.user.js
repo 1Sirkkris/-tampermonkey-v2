@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.16
+// @version      0.1.17
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.16';
+  const VERSION = '0.1.17';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -70,6 +70,8 @@
   const ROUTINE_NETWORK_REPORT_MS = 60000;
   const VISIBILITY_REPORT_MS = 60000;
   const BLOCKED_SECTIONS_QUIET_MS = 1200;
+  const RESEARCH_ACTION_WINDOW_MS = 2000;
+  const RESEARCH_CHAIN_MAX = 120;
   const SAMPLE_PREFIX = `${PREFIX}sample:`;
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
@@ -133,6 +135,8 @@
   let aftMoveProbeStatus = '';
   let aftMoveProbeCount = 0;
   let lastRejection = null;
+  let lastResearchAction = null;
+  let researchChainCount = 0;
 
   function gmGet(key, fallback) { try { return GM_getValue(key, fallback); } catch { return fallback; } }
   function gmSet(key, value) { try { GM_setValue(key, value); return true; } catch { return false; } }
@@ -345,6 +349,125 @@
       output[childKey] = sanitize(childValue, childKey, depth + 1, seen);
     }
     return output;
+  }
+
+  function rememberResearchAction(kind, info = {}) {
+    lastResearchAction = {
+      at: performance.now(),
+      kind: scrubText(kind || 'ui'),
+      tag: scrubText(info.tag || ''),
+      role: scrubText(info.role || ''),
+      type: scrubText(info.type || ''),
+      label: scrubText(info.label || '').slice(0, 80)
+    };
+  }
+
+  function recentResearchAction() {
+    if (!lastResearchAction) return null;
+    const ageMs = Math.round(performance.now() - lastResearchAction.at);
+    if (ageMs < 0 || ageMs > RESEARCH_ACTION_WINDOW_MS) return null;
+    const { at, ...safe } = lastResearchAction;
+    return { ...safe, ageMs };
+  }
+
+  function recordResearchChain(base, rawUrl, cause) {
+    if (!cause || researchChainCount >= RESEARCH_CHAIN_MAX || isPollNetwork(rawUrl)) return;
+    const url = parsedUrl(rawUrl);
+    if (!url) return;
+    if (/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname)) return;
+    researchChainCount++;
+    add('research.request-chain', {
+      cause,
+      request: {
+        transport: base.transport,
+        method: base.method,
+        host: scrubText(url.hostname),
+        path: sanitizePath(url.pathname),
+        status: base.status,
+        ok: base.ok,
+        ms: base.ms
+      }
+    });
+  }
+
+  function researchRuntimeSnapshot(reason = 'settled') {
+    const nameRx = /(?:api|client|service|workflow|state|store|model|controller|action|inventory|move|edit|unbind|sideline|dropzone|mapping|fcr|river|stow|bin|container)/i;
+    const globals = [];
+
+    try {
+      for (const name of Object.getOwnPropertyNames(W)) {
+        if (!nameRx.test(name) || SENSITIVE_KEY.test(name)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(W, name);
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
+        const value = descriptor.value;
+        const item = { name: scrubText(name), type: Array.isArray(value) ? 'array' : typeof value };
+
+        if (typeof value === 'function') {
+          item.arity = Math.max(0, Number(value.length) || 0);
+        } else if (value && typeof value === 'object') {
+          try {
+            item.ctor = scrubText(value.constructor?.name || '');
+            item.keys = Object.keys(value).filter(key => !SENSITIVE_KEY.test(key)).slice(0, 40).map(key => scrubText(key));
+          } catch {}
+        }
+
+        globals.push(item);
+        if (globals.length >= 60) break;
+      }
+    } catch {}
+
+    const stateScripts = [];
+    try {
+      for (const script of [...document.querySelectorAll('script[type="a-state"],script[type="application/json"],script[id*="state" i],script[id*="data" i]')].slice(0, 30)) {
+        const raw = String(script.textContent || '').trim();
+        if (!raw) continue;
+        const item = {
+          type: scrubText(script.type || ''),
+          id: scrubText(script.id || ''),
+          chars: raw.length
+        };
+        try {
+          const parsed = JSON.parse(raw);
+          item.kind = Array.isArray(parsed) ? 'array' : typeof parsed;
+          if (parsed && typeof parsed === 'object') {
+            item.keys = Object.keys(parsed).filter(key => !SENSITIVE_KEY.test(key)).slice(0, 50).map(key => scrubText(key));
+          }
+        } catch {
+          item.kind = 'text';
+        }
+        stateScripts.push(item);
+      }
+    } catch {}
+
+    const framework = { reactFiber: 0, reactProps: 0, vue: 0, angular: 0, scanned: 0 };
+    try {
+      for (const el of [...document.querySelectorAll('*')].slice(0, 250)) {
+        framework.scanned++;
+        const keys = Object.getOwnPropertyNames(el);
+        if (keys.some(key => key.startsWith('__reactFiber$'))) framework.reactFiber++;
+        if (keys.some(key => key.startsWith('__reactProps$'))) framework.reactProps++;
+        if (keys.some(key => key === '__vue__' || key.startsWith('__vue'))) framework.vue++;
+        if (keys.some(key => key === '__ngContext__')) framework.angular++;
+      }
+    } catch {}
+
+    add('research.runtime-surface', {
+      reason,
+      globals,
+      stateScripts,
+      framework,
+      forms: document.forms?.length || 0,
+      scripts: document.scripts?.length || 0
+    });
+  }
+
+  function bootResearchProbe() {
+    const capture = () => {
+      queueMicrotask(() => researchRuntimeSnapshot('dom-ready'));
+      setTimeout(() => researchRuntimeSnapshot('settled-1000ms'), 1000);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once: true });
+    else capture();
   }
 
   function parsedUrl(rawUrl) {
@@ -602,6 +725,23 @@
       while ((match = pattern.exec(raw)) && found.size < 20) found.add(Number(match[1]));
     }
     if (found.size) out.quantityNumbers = [...found];
+
+    if (out.kind === 'html' && raw) {
+      const lower = raw.toLowerCase();
+      out.markerPositions = {
+        objectId: lower.indexOf('objectid'),
+        quantity: lower.indexOf('quantity'),
+        form: lower.indexOf('<form'),
+        input: lower.indexOf('<input'),
+        verifyItem: lower.indexOf('verify item'),
+        sourceContainer: lower.indexOf('source container'),
+        destinationContainer: lower.indexOf('destination container'),
+        selectSourceState: lower.indexOf('select source inventory state'),
+        selectNewState: lower.indexOf('select new inventory state'),
+        confirmChange: lower.indexOf('confirm change')
+      };
+    }
+
     return out;
   }
 
@@ -1107,6 +1247,8 @@
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
+    lastResearchAction = null;
+    researchChainCount = 0;
     renderUi(true);
     add('session.start', { reason });
   }
@@ -1123,6 +1265,7 @@
         const fcr = !noise && isFcrNetwork(rawUrl);
         const aftMoveProbe = !noise && !fcr && isAftMoveProbe(rawUrl);
         const detailed = !noise && !fcr && !aftMoveProbe && isDetailedApi(rawUrl);
+        const researchCause = recentResearchAction();
         const started = performance.now();
 
         try {
@@ -1139,6 +1282,7 @@
             redirected: !!response.redirected,
             finalUrl: response.url ? sanitizeUrl(response.url) : null
           };
+          recordResearchChain(base, rawUrl, researchCause);
 
           if (fcr) {
             void response.clone().text()
@@ -1228,6 +1372,7 @@
         const fcr = isFcrNetwork(info.url);
         const aftMoveProbe = !fcr && isAftMoveProbe(info.url);
         const detailed = !fcr && !aftMoveProbe && isDetailedApi(info.url);
+        const researchCause = recentResearchAction();
         const started = performance.now();
 
         this.addEventListener('loadend', () => {
@@ -1240,6 +1385,7 @@
             ms: Math.round(performance.now() - started),
             finalUrl: this.responseURL ? sanitizeUrl(this.responseURL) : null
           };
+          recordResearchChain(base, info.url, researchCause);
           const cancelled = Number(base.status) === 0;
 
           if (fcr) {
@@ -1349,7 +1495,10 @@
       const action = clickTarget(event.target);
       if (!action) return;
       const info = targetInfo(action, true);
-      if (info) add('ui.click', { ...info, trusted: !!event.isTrusted });
+      if (info) {
+        add('ui.click', { ...info, trusted: !!event.isTrusted });
+        if (event.isTrusted) rememberResearchAction('click', info);
+      }
     }, true);
 
     document.addEventListener('submit', event => {
@@ -1365,6 +1514,7 @@
         action: form?.action ? sanitizeUrl(form.action) : '',
         controls: form?.elements?.length || 0
       });
+      if (event.isTrusted) rememberResearchAction('submit', info);
     }, true);
 
     document.addEventListener('change', event => {
@@ -1375,6 +1525,7 @@
 
       if (!river) {
         add('ui.change', info);
+        if (event.isTrusted) rememberResearchAction('change', info);
         return;
       }
 
@@ -1398,6 +1549,7 @@
       }
       if (element && 'checked' in element && ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase())) detail.checked = !!element.checked;
       add('ui.change', detail);
+      if (event.isTrusted) rememberResearchAction('change', info);
     }, true);
 
     document.addEventListener('keydown', event => {
@@ -1409,6 +1561,7 @@
       try { value = event.target?.value || ''; } catch {}
 
       add('ui.enter', { ...info, inputKind: classifySearchValue(value), inputLength: String(value || '').length });
+      rememberResearchAction('enter', info);
     }, true);
   }
 
@@ -2027,6 +2180,7 @@
   installMutationHealth();
   installPerformanceHealth();
   bootAftEditPageStateProbe();
+  bootResearchProbe();
   bootUi();
 
   window.addEventListener('pagehide', () => {
