@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.3
+// @version      0.1.4
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,16 +15,16 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V013__) return;
-  window.__ISS_CONSOLE_V013__ = true;
+  if (window.__ISS_CONSOLE_V014__) return;
+  window.__ISS_CONSOLE_V014__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const AFT_WORKER_URL = AFT_ORIGIN + '/app/edititems?experience=Desktop#iss-console-worker';
-  const SIDELINE_WORKER_URL = SIDELINE_ORIGIN + '/#iss-console-worker';
+  const SIDELINE_WORKER_URL = SIDELINE_ORIGIN + '/?tool=V3&issConsoleWorker=1#iss-console-worker';
   const STORE_PREFIX = 'issConsole.v1.';
   const DEFAULT_TIMEOUT = 20000;
   const LONG_TIMEOUT = 12 * 60 * 1000;
@@ -105,15 +105,31 @@
     return workers[worker]?.frame?.contentWindow || null;
   }
 
+  function observe(type, data = {}) {
+    try {
+      window.dispatchEvent(new CustomEvent('bwu2-observability:event', {
+        detail: JSON.stringify({
+          type: 'ISS_CONSOLE_' + String(type || 'EVENT').toUpperCase(),
+          data
+        })
+      }));
+    } catch {}
+  }
+
   function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
     const state = workers[worker];
     if (!state) return Promise.reject(new Error('Unknown worker'));
-    if (!state.ready || !workerFrame(worker)) return Promise.reject(new Error(worker + ' worker not ready'));
+    if (!state.ready || !workerFrame(worker)) {
+      observe('RPC_BLOCKED', { worker, command, reason:'worker-not-ready' });
+      return Promise.reject(new Error(worker + ' worker not ready'));
+    }
 
     const id = nextRpcId(worker);
+    observe('RPC_SEND', { worker, command });
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         state.pending.delete(id);
+        observe('RPC_TIMEOUT', { worker, command });
         reject(new Error(command + ' timed out'));
       }, timeout);
 
@@ -140,6 +156,22 @@
     if (label) label.textContent = worker === 'aft'
       ? 'AFT ' + (ready ? 'READY' : 'OFFLINE')
       : 'SIDELINE ' + (ready ? 'READY' : 'OFFLINE');
+
+    if (ready && worker === 'aft') {
+      for (const area of ['edit','move']) {
+        const status = $('[data-status="' + area + '"]');
+        if (status && /^Waiting for AFT worker/i.test(status.textContent || '')) {
+          panelStatus(area, 'AFT ready', 'ok');
+        }
+      }
+    } else if (ready && worker === 'sideline') {
+      const status = $('[data-status="sideline"]');
+      if (status && /^Waiting for Sideline worker/i.test(status.textContent || '')) {
+        panelStatus('sideline', 'Sideline ready', 'ok');
+      }
+    }
+
+    observe('WORKER_STATE', { worker, ready:!!ready, version:version || state.version || '' });
   }
 
   function panelStatus(area, message, kind = '') {
@@ -231,6 +263,7 @@
     if (!state || event.origin !== state.origin || event.source !== workerFrame(worker)) return;
 
     if (message.type === 'ISS_CONSOLE_WORKER_READY') {
+      observe('WORKER_READY_MESSAGE', { worker, version:message.version || '' });
       markWorker(worker, true, message.version || '');
       if (worker === 'sideline') {
         rpc('sideline', 'mode', { mode: sidelineMode }, 15000)
@@ -241,6 +274,15 @@
     }
 
     if (message.type === 'ISS_CONSOLE_PROGRESS') {
+      observe('WORKER_PROGRESS', {
+        worker,
+        area:message.area || '',
+        loading:!!message.loading,
+        mode:message.mode || '',
+        current:Number.isFinite(Number(message.current)) ? Number(message.current) : undefined,
+        total:Number.isFinite(Number(message.total)) ? Number(message.total) : undefined,
+        done:Number.isFinite(Number(message.done)) ? Number(message.done) : undefined
+      });
       handleProgress(message);
       return;
     }
@@ -250,6 +292,12 @@
     if (!pending) return;
     state.pending.delete(String(message.id || ''));
     clearTimeout(pending.timer);
+    observe('RPC_RESULT', {
+      worker,
+      command:pending.command,
+      ok:!!message.ok,
+      error:message.ok ? '' : clean(message.error || pending.command + ' failed').slice(0, 180)
+    });
     if (message.ok) pending.resolve(message.data);
     else pending.reject(new Error(message.error || pending.command + ' failed'));
   });
@@ -278,6 +326,14 @@
       }, 1000);
     });
     state.frame = frame;
+    observe('WORKER_SPAWN', {
+      worker,
+      origin:state.origin,
+      path:(() => { try { return new URL(state.url).pathname; } catch { return ''; } })()
+    });
+    frame.addEventListener('load', () => {
+      observe('WORKER_IFRAME_LOAD', { worker, ready:!!state.ready });
+    });
     document.body.appendChild(frame);
   }
 
