@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.20
+// @version      0.1.21
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.20';
+  const VERSION = '0.1.21';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1179,7 +1179,7 @@
 
     try {
       const footer = String(document.querySelector('.iss-footer')?.textContent || '');
-      const match = footer.match(/ISS\s+Console\s+v([0-9][A-Za-z0-9._+-]*)\b/i);
+      const match = footer.match(/ISS\s+Console\s+v([0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9._-]+)?)/i);
       if (match?.[1]) rememberRuntimeVersion('ISS Console', match[1], 'ui');
     } catch {}
 
