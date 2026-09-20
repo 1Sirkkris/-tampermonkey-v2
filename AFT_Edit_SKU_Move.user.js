@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.33
+// @version      0.9.34
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.33';
+  const VERSION = '0.9.34';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -4000,7 +4000,6 @@
     window.addEventListener('message', async event => {
       const message = event.data;
       if (
-        event.source !== window.parent ||
         !/fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '') ||
         message?.type !== 'ISS_CONSOLE_RPC' ||
         message?.worker !== 'aft'
@@ -4009,6 +4008,7 @@
       const id = String(message.id || '');
       const command = String(message.command || '');
       if (!id || !command) return;
+      traceAft('ISS_WORKER_RPC_RECEIVE', { command });
 
       if (issWorkerBusy && command !== 'stop' && command !== 'ping') {
         issWorkerSend('ISS_CONSOLE_RPC_RESULT', { id, ok: false, error: 'AFT worker busy' });
@@ -4018,6 +4018,7 @@
       try {
         let data = null;
         if (command === 'ping') {
+          issWorkerSend('ISS_CONSOLE_WORKER_READY', { ready: true });
           data = { ready: true, mode: issWorkerModeKey };
         } else if (command === 'stop') {
           Edit.stopRequested = true;
@@ -4036,18 +4037,22 @@
         } else {
           throw new Error(`Unknown AFT worker command: ${command}`);
         }
+        traceAft('ISS_WORKER_RPC_RESULT', { command, ok:true });
         issWorkerSend('ISS_CONSOLE_RPC_RESULT', { id, ok: true, data });
       } catch (error) {
+        const workerError = String(error?.message || error || 'AFT worker error');
+        traceAft('ISS_WORKER_RPC_RESULT', { command, ok:false, error:workerError.slice(0, 180) });
         issWorkerSend('ISS_CONSOLE_RPC_RESULT', {
           id,
           ok: false,
-          error: String(error?.message || error || 'AFT worker error')
+          error: workerError
         });
       } finally {
         if (command !== 'ping' && command !== 'stop') issWorkerBusy = false;
       }
     });
 
+    traceAft('ISS_WORKER_BRIDGE_READY', { worker:'aft' });
     issWorkerSend('ISS_CONSOLE_WORKER_READY', { ready: true });
   }
 
