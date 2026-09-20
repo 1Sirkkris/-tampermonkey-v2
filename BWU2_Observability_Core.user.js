@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.17
+// @version      0.1.18
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.17';
+  const VERSION = '0.1.18';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2065,7 +2065,7 @@
   }
 
   function mountUi() {
-    if (!isFCResearch()) return true;
+    if (!isFCResearch() || location.hash.startsWith('#iss-console')) return true;
     if (!document.documentElement) return false;
 
     injectUiStyles();
@@ -2105,7 +2105,7 @@
   }
 
   function renderUi(force = false) {
-    if (!isFCResearch()) return;
+    if (!isFCResearch() || location.hash.startsWith('#iss-console')) return;
     if (!uiRoot?.isConnected && !mountUi()) return;
 
     const count = sessionCount(force);
@@ -2123,7 +2123,7 @@
   }
 
   function bootUi() {
-    if (!isFCResearch()) return;
+    if (!isFCResearch() || location.hash.startsWith('#iss-console')) return;
 
     const start = () => {
       if (mountUi()) return;
