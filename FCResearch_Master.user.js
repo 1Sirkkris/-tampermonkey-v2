@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.29
+// @version      0.1.30
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -22,7 +22,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.29';
+  const VERSION = '0.1.30';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -56,8 +56,9 @@
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com';
   const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
   const SECTION_LOAD_PREF_KEY_PREFIX = 'fcrm_native_section_load_v2.';
-  const SECTION_LOAD_RECORD_KEY_PREFIX = 'fcrm_native_section_load_v3.';
+  const SECTION_LOAD_RECORD_KEY_PREFIX = 'fcrm_native_section_load_v4.';
   const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
+  const SECTION_AUTO_DEFAULTS = new Set(['product', 'inventory']);
   const SECTION_LOAD_TOGGLE_ATTR = 'data-fcrm-section-toggle';
   const SECTION_LOAD_ROW_ATTR = 'data-fcrm-section-row';
   const SECTION_LOAD_XHR = new WeakMap();
@@ -115,26 +116,21 @@
   }
 
   function loadSectionLoadPrefs() {
-    const prefs = Object.fromEntries(SECTION_DEFS.map(def => [def.endpoint, true]));
-    let legacy = null;
-    try {
-      legacy = GM_getValue(SECTION_LOAD_PREFS_KEY, null);
-      if (typeof legacy === 'string') legacy = JSON.parse(legacy);
-    } catch {}
+    // v4 intentionally resets the old "load almost everything" behaviour.
+    // Product + Inventory auto-load; every other section is lazy and fetched only when clicked.
+    const prefs = Object.fromEntries(
+      SECTION_DEFS.map(def => [def.endpoint, SECTION_AUTO_DEFAULTS.has(def.endpoint)])
+    );
     for (const def of SECTION_DEFS) {
       const recordKey = `${SECTION_LOAD_RECORD_KEY_PREFIX}${def.endpoint}`;
       let localRecord = null;
       let gmRecord = null;
-      let saved = null;
       try { localRecord = parseSectionLoadRecord(localStorage.getItem(recordKey)); } catch {}
       try { gmRecord = parseSectionLoadRecord(GM_getValue(recordKey, null)); } catch {}
       const record = !localRecord ? gmRecord
         : !gmRecord ? localRecord
           : localRecord.savedAt >= gmRecord.savedAt ? localRecord : gmRecord;
-      try { saved = GM_getValue(`${SECTION_LOAD_PREF_KEY_PREFIX}${def.endpoint}`, null); } catch {}
       if (record) prefs[def.endpoint] = record.enabled;
-      else if (typeof saved === 'boolean') prefs[def.endpoint] = saved;
-      else if (typeof legacy?.[def.endpoint] === 'boolean') prefs[def.endpoint] = legacy[def.endpoint];
     }
     return prefs;
   }
@@ -191,32 +187,92 @@
     return clean(new URLSearchParams(location.search).get('s') || $('#search')?.value || '');
   }
 
-  function openInventoryRescue() {
-    const search = currentSearchValue();
-    const url = new URL(location.href);
-    url.search = '';
-    if (search) url.searchParams.set('s', search);
-    url.hash = '#fcr-lite';
-    history.replaceState(null, '', url.href);
-    location.reload();
+  const lazyLoadedSections = new Set();
+  const lazyLoadingSections = new Map();
+
+  function nativeSectionContainer(endpoint) {
+    return document.querySelector(`[data-section-type="${CSS.escape(endpoint)}"]`);
   }
 
-  function showInventoryRescue(endpoint) {
-    if (!nativeSectionMode() || document.getElementById('fcrm-inventory-rescue')) return;
-    const mount = document.body || document.documentElement;
-    if (!mount) return;
+  function cleanNativeSectionMarkup(endpoint, html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    doc.querySelectorAll('script,style,.help,.filters-popover,.a-popover-preload').forEach(node => node.remove());
+    const nested = doc.querySelector(`[data-section-type="${CSS.escape(endpoint)}"]`);
+    const root = nested || doc.body;
+    const titleBox = root.querySelector?.('.a-box-group > .a-box.a-first.a-box-title');
+    if (titleBox) titleBox.remove();
+    return nested ? nested.innerHTML.trim() : doc.body.innerHTML.trim();
+  }
 
-    const panel = markUi(document.createElement('div'));
-    panel.id = 'fcrm-inventory-rescue';
-    panel.innerHTML = `
-      <span>Amazon inventory failed${endpoint === 'inventory-more' ? ' on page 2' : ''}.</span>
-      <button type="button" data-action="rescue" title="Open FC-Lite and retry only the read-only inventory pages">OPEN FCL RETRY</button>
-      <button type="button" data-action="close" aria-label="Dismiss">×</button>
-    `;
-    panel.querySelector('[data-action="rescue"]').addEventListener('click', openInventoryRescue);
-    panel.querySelector('[data-action="close"]').addEventListener('click', () => panel.remove());
-    mount.appendChild(panel);
-    usage(`inventory.rescue.offered.${endpoint}`);
+  function paintNativeSection(endpoint, data, state = 'ready') {
+    const target = nativeSectionContainer(endpoint);
+    if (!target) throw new Error(`${endpoint}: native section container missing`);
+    const html = cleanNativeSectionMarkup(endpoint, data?.html || '');
+    target.innerHTML = html || '<div class="fcrm-lazy-note">No data returned</div>';
+    target.dataset.fcrmLazyState = state;
+    target.hidden = false;
+    lazyLoadedSections.add(endpoint);
+    syncNativeSectionVisibility();
+    window.dispatchEvent(new CustomEvent(FCRLITE_SECTION_RENDERED_EVENT, {
+      detail: JSON.stringify({ endpoint, search: currentSearchValue(), complete: data?.complete !== false, source: 'fcrm-lazy' })
+    }));
+  }
+
+  async function loadNativeSection(endpoint, { force = false, reason = 'click' } = {}) {
+    if (!SECTION_ENDPOINTS.has(endpoint) || !nativeSectionMode()) return false;
+    if (!force && lazyLoadedSections.has(endpoint)) return true;
+    if (lazyLoadingSections.has(endpoint)) return lazyLoadingSections.get(endpoint);
+
+    const search = currentSearchValue();
+    if (!search) return false;
+
+    const work = (async () => {
+      lazyLoadedSections.add(endpoint);
+      syncNativeSectionVisibility();
+
+      const target = nativeSectionContainer(endpoint);
+      if (target) {
+        target.hidden = false;
+        target.dataset.fcrmLazyState = 'loading';
+        if (!clean(target.textContent)) target.innerHTML = '<div class="fcrm-lazy-note">Loading…</div>';
+      }
+
+      usage(`section.lazy.request.${endpoint}`);
+      try {
+        const timeout = endpoint === 'inventory' ? 180000 : 30000;
+        const data = await coreRequest('section', {
+          endpoint,
+          code: search,
+          preview: endpoint === 'inventory'
+        }, timeout);
+        paintNativeSection(endpoint, data, data?.complete === false ? 'partial' : 'ready');
+        usage(`section.lazy.success.${endpoint}`, Number(data?.ms) || 0);
+        scheduleRefresh();
+        return true;
+      } catch (error) {
+        lazyLoadedSections.delete(endpoint);
+        syncNativeSectionVisibility();
+        const container = nativeSectionContainer(endpoint);
+        if (container) {
+          container.hidden = false;
+          container.dataset.fcrmLazyState = 'error';
+          container.innerHTML = `<button type="button" class="fcrm-lazy-retry" data-endpoint="${escapeHtml(endpoint)}">Retry ${escapeHtml(SECTION_DEFS.find(def => def.endpoint === endpoint)?.label || endpoint)}</button><span class="fcrm-lazy-error">${escapeHtml(clean(error?.message || error || 'Request failed'))}</span>`;
+        }
+        usage(`section.lazy.error.${endpoint}`);
+        return false;
+      } finally {
+        lazyLoadingSections.delete(endpoint);
+      }
+    })();
+
+    lazyLoadingSections.set(endpoint, work);
+    return work;
+  }
+
+  async function recoverInventoryInline(endpoint) {
+    if (!nativeSectionMode()) return;
+    usage(`inventory.rescue.inline.${endpoint}`);
+    await loadNativeSection('inventory', { force: true, reason: `native-${endpoint}-5xx` });
   }
 
   function installNativeSectionBlocker() {
@@ -247,7 +303,9 @@
       }
       if (info && (info.endpoint === 'inventory' || info.endpoint === 'inventory-more')) {
         this.addEventListener('loadend', () => {
-          if (this.status >= 500 && this.status < 600) showInventoryRescue(info.endpoint);
+          if (this.status >= 500 && this.status < 600) {
+            void recoverInventoryInline(info.endpoint);
+          }
         }, { once: true });
       }
       return originalSend.apply(this, arguments);
@@ -419,10 +477,9 @@
       [${SECTION_LOAD_TOGGLE_ATTR}][aria-pressed="true"] { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; }
       [${SECTION_LOAD_TOGGLE_ATTR}][data-save-state="error"] { border-color:#b91c1c!important; background:#fee2e2!important; color:#991b1b!important; }
       [${SECTION_LOAD_TOGGLE_ATTR}]:hover { filter:brightness(.95); }
-      #fcrm-inventory-rescue { position:fixed; right:14px; bottom:14px; z-index:2147483646; display:flex; align-items:center; gap:8px; padding:8px 9px 8px 12px; border:1px solid #a16207; border-radius:8px; background:#fffbeb; color:#713f12; box-shadow:0 5px 18px rgba(0,0,0,.22); font:800 12px/1.25 Arial,sans-serif; }
-      #fcrm-inventory-rescue button { min-height:27px; padding:4px 8px; border:1px solid #92400e; border-radius:5px; background:#fff; color:#78350f; cursor:pointer; font:900 11px Arial,sans-serif; }
-      #fcrm-inventory-rescue [data-action="rescue"] { background:#f59e0b; color:#111827; }
-      #fcrm-inventory-rescue [data-action="close"] { min-width:27px; padding:3px; font-size:16px; line-height:1; }
+      .fcrm-lazy-note { margin:8px 0; padding:8px 10px; border:1px solid #cbd5e1; border-radius:5px; background:#f8fafc; color:#334155; font:700 12px Arial,sans-serif; }
+      .fcrm-lazy-retry { margin:8px 8px 8px 0; padding:5px 9px; border:1px solid #92400e; border-radius:5px; background:#f59e0b; color:#111827; cursor:pointer; font:900 11px Arial,sans-serif; }
+      .fcrm-lazy-error { color:#991b1b; font:700 11px Arial,sans-serif; }
       [${UI_ATTR}], [${UI_ATTR}] * { -webkit-user-select:none!important; -moz-user-select:none!important; user-select:none!important; }
       [${UI_ATTR}]::selection, [${UI_ATTR}] *::selection { background:transparent!important; color:inherit!important; }
     `;
@@ -441,8 +498,10 @@
       style.id = SECTION_LOAD_STYLE_ID;
       document.documentElement.appendChild(style);
     }
-    const disabled = SECTION_DEFS.filter(def => !sectionLoadEnabled(def.endpoint));
-    style.textContent = disabled.map(def =>
+    const hidden = SECTION_DEFS.filter(def =>
+      !sectionLoadEnabled(def.endpoint) && !lazyLoadedSections.has(def.endpoint)
+    );
+    style.textContent = hidden.map(def =>
       `html[data-fcrm-native-sections="1"] [data-section-type="${def.endpoint}"]{display:none!important;}`
     ).join('\n');
   }
@@ -505,14 +564,14 @@
       if (!SECTION_ENDPOINTS.has(endpoint)) return;
       const enabled = sectionLoadDraft[endpoint] !== false;
       const saveError = sectionLoadSaveStatus[endpoint] === 'error';
-      button.textContent = saveError ? '!' : enabled ? '✓' : '×';
+      button.textContent = saveError ? '!' : enabled ? 'A' : 'L';
       button.setAttribute('aria-pressed', String(enabled));
       button.dataset.saveState = saveError ? 'error' : 'saved';
       const row = button.closest(`[${SECTION_LOAD_ROW_ATTR}]`);
       if (row) row.dataset.fcrmSectionEnabled = String(enabled);
       button.title = saveError
         ? `${button.dataset.label}: SAVE FAILED — selection unchanged`
-        : `${button.dataset.label}: ${enabled ? 'ON' : 'OFF'} — saved; refresh FCResearch to apply`;
+        : `${button.dataset.label}: ${enabled ? 'AUTO — loads every search' : 'LAZY — click section to load'}`;
       button.setAttribute('aria-label', button.title);
     });
   }
@@ -523,6 +582,14 @@
       const row = sectionRowNode(label, host);
       if (!row) continue;
       row.setAttribute(SECTION_LOAD_ROW_ATTR, def.endpoint);
+      if (!row.dataset.fcrmLazyBound) {
+        row.dataset.fcrmLazyBound = '1';
+        row.addEventListener('click', event => {
+          if (event.target instanceof Element && event.target.closest(`[${SECTION_LOAD_TOGGLE_ATTR}]`)) return;
+          if (sectionLoadEnabled(def.endpoint)) return;
+          void loadNativeSection(def.endpoint, { reason: 'section-click' });
+        });
+      }
       let button = $(`:scope > [${SECTION_LOAD_TOGGLE_ATTR}]`, row);
       if (!button) {
         button = markUi(document.createElement('button'));
@@ -1568,6 +1635,14 @@
   }
 
   function startObserver() {
+    document.addEventListener('click', event => {
+      const retry = event.target instanceof Element ? event.target.closest('.fcrm-lazy-retry[data-endpoint]') : null;
+      if (!retry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void loadNativeSection(retry.dataset.endpoint || '', { force: true, reason: 'retry' });
+    }, true);
+
     const observer = new MutationObserver(records => { if (mutationNeedsRefresh(records)) scheduleRefresh(); });
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
