@@ -2,12 +2,12 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.27
+// @version      0.3.28
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
-// @run-at       document-end
+// @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js
@@ -29,13 +29,10 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.27';
+  const VERSION = '0.3.28';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
-  if (ISS_CONSOLE_LOCAL && !document.body && document.documentElement) {
-    document.documentElement.appendChild(document.createElement('body'));
-  }
-
+  function startRuntime() {
   function observe(type, data = {}) {
     try {
       window.dispatchEvent(new CustomEvent('bwu2-observability:event', {
@@ -45,6 +42,8 @@
   }
 
   observe('SIDELINE_WORKER_DETECT', {
+    script:'SIDELINE',
+    version:VERSION,
     worker:ISS_CONSOLE_WORKER,
     local:ISS_CONSOLE_LOCAL,
     byHash:ISS_WORKER_BY_HASH,
@@ -5526,6 +5525,7 @@
       try {
         let data = null;
         if (command === 'ping') {
+          issSideSend('ISS_CONSOLE_WORKER_READY', { ready:true });
           data = { ready:true, mode:issSideWorkerMode, state:issSideSnapshot() };
         } else if (command === 'mode') {
           const mode = issSideSetMode(message.payload?.mode);
@@ -5673,5 +5673,16 @@
   } else {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
     else boot();
+  }
+  }
+
+  if (ISS_CONSOLE_LOCAL) {
+    const html = document.documentElement || document.appendChild(document.createElement('html'));
+    if (!document.body) html.appendChild(document.createElement('body'));
+    startRuntime();
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startRuntime, { once:true });
+  } else {
+    startRuntime();
   }
 })();
