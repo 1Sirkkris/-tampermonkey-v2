@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.22
+// @version      0.3.23
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,8 +16,8 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
-  const VERSION = '0.3.22';
+  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker') || new URLSearchParams(location.search).get('issConsoleWorker') === '1';
+  const VERSION = '0.3.23';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
