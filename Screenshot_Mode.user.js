@@ -2,7 +2,7 @@
 // @name         MAIN Screenshot Mode
 // @name:en      MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.1.0
+// @version      0.1.1
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
 // @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -16,6 +16,18 @@
 // @include      /^https?:\/\/tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/jp\.item-measurement\.aft\.a2z\.com\//
 // @include      /^https?:\/\/fcmenu-(?:iad|nrt)-regionalized\.corp\.amazon\.com\//
+// @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
+// @match        https://fba-fnsku-commingling-console-na.aka.amazon.com/tool/fnsku-mappings-tool*
+// @match        https://fba-fnsku-commingling-console-jp.aka.amazon.com/tool/fnsku-mappings-tool*
+// @match        https://fcresearch-fe.aka.amazon.com/*
+// @match        https://qi-fcresearch-fe.corp.amazon.com/*
+// @match        https://qi-fcresearch-jp.corp.amazon.com/*
+// @match        https://qifcr.fe.aftx.amazonoperations.app/*
+// @match        https://t.corp.amazon.com/*
+// @match        https://river.amazon.com/*
+// @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/*
+// @match        https://jp.item-measurement.aft.a2z.com/*
+// @match        https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/*
 // @match        https://www.amazon.com.au/*
 // @match        https://amazon.com.au/*
 // @run-at       document-start
@@ -30,7 +42,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const MODE_ATTR = 'data-bwu2-screenshot-mode';
   const LEGACY_ATTR = 'data-bwu2-screenshot-owned';
   const STYLE_ID = 'bwu2-screenshot-mode-style';
@@ -115,8 +127,75 @@
 
     // Temporary diagnostics still present in the repo.
     '#aft-super-test',
-    '#aft-ui-state-logger-panel'
+    '#aft-ui-state-logger-panel',
+
+    // FC-Lite can enhance native FCResearch DOM outside #fcratc-root.
+    // These are elements FC-Lite itself creates; native rows/tables that merely
+    // receive an fcrlite-* class are left in place and lose their script CSS below.
+    '.fcrlite-native-tools',
+    '.fcrlite-native-info',
+    '.fcrlite-history-tools',
+    '.fcrlite-inventory-search',
+    '.fcrlite-inventory-summary',
+    '.fcrlite-inventory-sticky-shell',
+    '.fcrlite-id-map',
+    '.fcrlite-thumb-head',
+    '.fcrlite-qty-head',
+    '.fcrlite-thumb-cell',
+    '.fcrlite-asin-total'
   ];
+
+  const SCRIPT_STYLE_IDS = new Set([
+    'fcrm-clean-style',
+    'fcrm-section-load-visibility',
+    'vm-safe-trim-css',
+    'fcratc-style',
+    'p-level-overlay-style-v743',
+    'sim-md-style',
+    'aftm-style',
+    'bwu2-observability-style',
+    'aavf-styles',
+    'aft-super-test-style'
+  ]);
+
+  const SCRIPT_STYLE_SIGNATURES = [
+    '#fnsku-direct-wrap',
+    '.sh-panel',
+    '#body > #toolbox',
+    '#bwu2-river-assistant'
+  ];
+
+  const disabledStyleState = new Map();
+
+  function isScriptStyle(node) {
+    if (!(node instanceof HTMLStyleElement) || node.id === STYLE_ID) return false;
+    if (SCRIPT_STYLE_IDS.has(node.id)) return true;
+    const text = String(node.textContent || '');
+    return SCRIPT_STYLE_SIGNATURES.some(signature => text.includes(signature));
+  }
+
+  function disableScriptStyle(node) {
+    if (!isScriptStyle(node) || disabledStyleState.has(node)) return;
+    disabledStyleState.set(node, {
+      hadMedia: node.hasAttribute('media'),
+      media: node.getAttribute('media')
+    });
+    node.setAttribute('media', 'not all');
+  }
+
+  function disableScriptStyles(root = document) {
+    if (root instanceof HTMLStyleElement) disableScriptStyle(root);
+    root.querySelectorAll?.('style').forEach(disableScriptStyle);
+  }
+
+  function restoreScriptStyles() {
+    for (const [node, state] of disabledStyleState) {
+      if (!node?.isConnected) continue;
+      if (state.hadMedia) node.setAttribute('media', state.media ?? '');
+      else node.removeAttribute('media');
+    }
+    disabledStyleState.clear();
+  }
 
   function installCss() {
     if (document.getElementById(STYLE_ID)) return;
@@ -163,7 +242,9 @@
     markQueued = true;
     requestAnimationFrame(() => {
       markQueued = false;
-      if (document.documentElement.getAttribute(MODE_ATTR) === '1') markLegacyUi();
+      if (document.documentElement.getAttribute(MODE_ATTR) !== '1') return;
+      markLegacyUi();
+      disableScriptStyles();
     });
   }
 
@@ -172,13 +253,17 @@
     if (enabled) {
       document.documentElement.setAttribute(MODE_ATTR, '1');
       markLegacyUi();
+      disableScriptStyles();
       if (!observer) observer = new MutationObserver(queueLegacyMark);
       observer.observe(document.documentElement, { childList: true, subtree: true });
+      window.dispatchEvent(new CustomEvent('bwu2:screenshot-mode', { detail: { enabled: true } }));
       return;
     }
 
     document.documentElement.removeAttribute(MODE_ATTR);
     observer?.disconnect();
+    restoreScriptStyles();
+    window.dispatchEvent(new CustomEvent('bwu2:screenshot-mode', { detail: { enabled: false } }));
   }
 
   function toggleScreenshotMode() {
