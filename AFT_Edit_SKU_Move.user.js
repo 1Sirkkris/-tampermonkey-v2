@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.28
+// @version      0.9.29
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.28';
+  const VERSION = '0.9.29';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2683,7 +2683,7 @@
       localStorage.setItem(this.keys.items, remaining);
     },
 
-    quantityInfoFromHtml(html) {
+    quantityInfoFromRaw(html) {
       const raw = String(html || '');
 
       for (const pattern of MOVE_QTY_PATTERNS) {
@@ -2692,6 +2692,17 @@
           return { qty, verify: false };
         }
       }
+
+      return {
+        qty: null,
+        verify: /\bVerify item\b/i.test(raw)
+      };
+    },
+
+    quantityInfoFromHtml(html) {
+      const raw = String(html || '');
+      const direct = this.quantityInfoFromRaw(raw);
+      if (direct.qty || direct.verify) return direct;
 
       try {
         const doc = new DOMParser().parseFromString(raw, 'text/html');
@@ -2731,6 +2742,111 @@
       } catch {}
 
       return { qty: null, verify: false };
+    },
+
+    async streamQuantity(expectedObjectId, label) {
+      const res = await fetch(location.pathname + location.search, {
+        credentials: 'same-origin',
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
+      if (!res.body?.getReader || typeof TextDecoder !== 'function') return null;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = '';
+      let bytesRead = 0;
+      let chunks = 0;
+      let finished = false;
+
+      try {
+        while (true) {
+          if (this.stopRequested) {
+            try { await reader.cancel(); } catch {}
+            throw new Error('Stopped by user');
+          }
+
+          const part = await reader.read();
+          if (part.done) {
+            raw += decoder.decode();
+            finished = true;
+            break;
+          }
+
+          chunks++;
+          bytesRead += part.value?.byteLength || 0;
+          raw += decoder.decode(part.value, { stream: true });
+
+          const foundObjectId = objectId(raw);
+          if (foundObjectId && expectedObjectId && foundObjectId !== expectedObjectId) {
+            try { await reader.cancel(); } catch {}
+            throw new Error(`${label}: objectId changed`);
+          }
+
+          const info = this.quantityInfoFromRaw(raw);
+          if (foundObjectId && info.qty) {
+            try { await reader.cancel(); } catch {}
+            traceAft('AFT_MOVE_QTY_READ', {
+              label,
+              source: 'stream',
+              qty: info.qty,
+              charsRead: raw.length,
+              bytesRead,
+              chunks,
+              complete: false
+            });
+            return {
+              ...info,
+              objectId: foundObjectId,
+              raw: null,
+              complete: false
+            };
+          }
+
+          if (foundObjectId && info.verify) {
+            try { await reader.cancel(); } catch {}
+            traceAft('AFT_MOVE_QTY_READ', {
+              label,
+              source: 'stream',
+              qty: null,
+              verify: true,
+              charsRead: raw.length,
+              bytesRead,
+              chunks,
+              complete: false
+            });
+            return {
+              ...info,
+              objectId: foundObjectId,
+              raw: null,
+              complete: false
+            };
+          }
+        }
+      } finally {
+        if (!finished) {
+          try { reader.releaseLock(); } catch {}
+        }
+      }
+
+      const foundObjectId = objectId(raw);
+      const info = this.quantityInfoFromRaw(raw);
+      traceAft('AFT_MOVE_QTY_READ', {
+        label,
+        source: 'stream-full',
+        qty: info.qty,
+        verify: info.verify,
+        charsRead: raw.length,
+        bytesRead,
+        chunks,
+        complete: true
+      });
+      return {
+        ...info,
+        objectId: foundObjectId,
+        raw,
+        complete: true
+      };
     },
 
     async renderedQuantity(expectedObjectId, label) {
@@ -2799,6 +2915,41 @@
     async getNativeQuantity(expectedObjectId, label) {
       if (this.stopRequested) throw new Error('Stopped by user');
 
+      let streamed = null;
+      try {
+        streamed = await this.streamQuantity(expectedObjectId, label);
+      } catch (error) {
+        const message = String(error?.message || error);
+        if (/objectId changed|Stopped by user|GET HTTP/i.test(message)) throw error;
+        traceAft('AFT_MOVE_QTY_READ', {
+          label,
+          source: 'stream-fallback',
+          error: message.slice(0, 180)
+        });
+      }
+
+      if (streamed) {
+        assertObject(expectedObjectId, streamed.objectId, label);
+        if (streamed.qty) return streamed.qty;
+        if (streamed.verify) throw new Error(`${label}: Verify Item screen detected`);
+
+        if (streamed.complete && streamed.raw != null) {
+          const info = this.quantityInfoFromHtml(streamed.raw);
+          if (info.qty) {
+            traceAft('AFT_MOVE_QTY_READ', {
+              label,
+              source: 'full-dom-fallback',
+              qty: info.qty,
+              charsRead: streamed.raw.length
+            });
+            return info.qty;
+          }
+          if (info.verify) throw new Error(`${label}: Verify Item screen detected`);
+          return this.renderedQuantity(expectedObjectId, label);
+        }
+      }
+
+      // Compatibility fallback for browsers without a readable response stream.
       const html = await getHtml(label);
       const fetchedObjectId = objectId(html);
       assertObject(expectedObjectId, fetchedObjectId, label);
