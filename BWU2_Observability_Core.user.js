@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.19
+// @version      0.1.20
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.19';
+  const VERSION = '0.1.20';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -137,6 +137,10 @@
   let lastRejection = null;
   let lastResearchAction = null;
   let researchChainCount = 0;
+  let runtimeVersionObserver = null;
+  let runtimeVersionTimer = 0;
+  let lastRuntimeVersionSignature = '';
+  const runtimeVersions = new Map([['OBS', { name:'OBS', version:VERSION, source:'self' }]]);
 
   function gmGet(key, fallback) { try { return GM_getValue(key, fallback); } catch { return fallback; } }
   function gmSet(key, value) { try { GM_setValue(key, value); return true; } catch { return false; } }
@@ -228,6 +232,7 @@
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
+    lastRuntimeVersionSignature = '';
     gmSet(pageCountKey, 0);
     return true;
   }
@@ -456,6 +461,7 @@
       globals,
       stateScripts,
       framework,
+      runtimeScripts: collectRuntimeVersions(),
       forms: document.forms?.length || 0,
       scripts: document.scripts?.length || 0
     });
@@ -1145,6 +1151,92 @@
     lastGlobalCount++;
     scheduleFlush();
     return true;
+  }
+
+  function rememberRuntimeVersion(name, version, source = 'event') {
+    const safeName = scrubText(name || '').trim().slice(0, 60);
+    const safeVersion = scrubText(version || '').trim().slice(0, 60);
+    if (!safeName || !safeVersion) return false;
+
+    const key = safeName.toUpperCase();
+    const previous = runtimeVersions.get(key);
+    if (previous?.version === safeVersion) return false;
+
+    runtimeVersions.set(key, { name:safeName, version:safeVersion, source:scrubText(source || 'event').slice(0, 30) });
+    return true;
+  }
+
+  function collectRuntimeVersions() {
+    try {
+      const host = document.getElementById('bwu2-runtime-version-stamp');
+      for (const node of host?.children || []) {
+        const name = String(node.dataset?.bwu2RuntimeKey || '').trim();
+        const text = String(node.textContent || '');
+        const match = text.match(/(?:^|\s)v([0-9][A-Za-z0-9._+-]*)\b/i);
+        if (name && match?.[1]) rememberRuntimeVersion(name, match[1], 'stamp');
+      }
+    } catch {}
+
+    try {
+      const footer = String(document.querySelector('.iss-footer')?.textContent || '');
+      const match = footer.match(/ISS\s+Console\s+v([0-9][A-Za-z0-9._+-]*)\b/i);
+      if (match?.[1]) rememberRuntimeVersion('ISS Console', match[1], 'ui');
+    } catch {}
+
+    return [...runtimeVersions.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(item => ({ name:item.name, version:item.version, source:item.source }));
+  }
+
+  function flushRuntimeVersions(reason = 'change') {
+    runtimeVersionTimer = 0;
+    const scripts = collectRuntimeVersions();
+    const signature = scripts.map(item => item.name + '@' + item.version).join('|');
+    if (signature === lastRuntimeVersionSignature) return;
+    lastRuntimeVersionSignature = signature;
+    add('runtime.scripts', { reason, scripts });
+  }
+
+  function scheduleRuntimeVersions(reason = 'change') {
+    clearTimeout(runtimeVersionTimer);
+    runtimeVersionTimer = setTimeout(() => flushRuntimeVersions(reason), 40);
+  }
+
+  function runtimeVersionMutationRelevant(record) {
+    const target = record.target?.nodeType === 1 ? record.target : record.target?.parentElement;
+    if (target?.closest?.('#bwu2-runtime-version-stamp,.iss-footer')) return true;
+
+    for (const node of record.addedNodes || []) {
+      if (node?.nodeType !== 1) continue;
+      if (node.matches?.('#bwu2-runtime-version-stamp,.iss-footer')) return true;
+      if (node.querySelector?.('#bwu2-runtime-version-stamp,.iss-footer')) return true;
+    }
+    return false;
+  }
+
+  function bootRuntimeVersionTrace() {
+    const start = () => {
+      if (!document.documentElement) {
+        setTimeout(start, 25);
+        return;
+      }
+
+      flushRuntimeVersions('boot');
+      if (runtimeVersionObserver) return;
+
+      runtimeVersionObserver = new MutationObserver(records => {
+        if (records.some(runtimeVersionMutationRelevant)) scheduleRuntimeVersions('dom-change');
+      });
+      runtimeVersionObserver.observe(document.documentElement, {
+        childList:true,
+        subtree:true,
+        characterData:true
+      });
+
+      setTimeout(() => flushRuntimeVersions('settled-1000ms'), 1000);
+    };
+
+    start();
   }
 
   function collectSession(sessionId = activeSessionId) {
@@ -1971,7 +2063,20 @@
   }
 
   function installScriptBus() {
-    const emit = (type, data = {}) => add(`script.${String(type || 'event').slice(0, 80)}`, data);
+    const emit = (type, data = {}) => {
+      const version = data && typeof data === 'object' ? scrubText(data.version || '') : '';
+      const scriptName = data && typeof data === 'object'
+        ? (typeof data.script === 'string'
+            ? data.script
+            : (typeof data.worker === 'string' ? data.worker.toUpperCase() : ''))
+        : '';
+
+      if (version && scriptName && rememberRuntimeVersion(scriptName, version, 'script-event')) {
+        scheduleRuntimeVersions('script-event');
+      }
+
+      return add(`script.${String(type || 'event').slice(0, 80)}`, data);
+    };
 
     try { W.BWU2Observe = emit; } catch {}
     try {
@@ -2193,6 +2298,7 @@
   installFetchTrace();
   installXhrTrace();
   installScriptBus();
+  bootRuntimeVersionTrace();
   installFcrDataCoreTrace();
   installRouteTrace();
   installErrorTrace();
@@ -2221,10 +2327,12 @@
     flushPage();
     if (mutationObserver) mutationObserver.disconnect();
     if (uiObserver) uiObserver.disconnect();
+    if (runtimeVersionObserver) runtimeVersionObserver.disconnect();
     if (performanceObserver) performanceObserver.disconnect();
     if (mutationTimer) clearInterval(mutationTimer);
     if (eventLoopTimer) clearInterval(eventLoopTimer);
     clearTimeout(countSyncTimer);
+    clearTimeout(runtimeVersionTimer);
     gmUnlisten(countListenerId);
   }, { once: true });
 })();
