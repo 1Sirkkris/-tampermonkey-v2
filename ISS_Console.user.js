@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.1
+// @version      0.1.2
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V011__) return;
-  window.__ISS_CONSOLE_V011__ = true;
+  if (window.__ISS_CONSOLE_V012__) return;
+  window.__ISS_CONSOLE_V012__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -87,8 +87,11 @@
 
   let rpcSeq = 0;
   let activePanel = storeGet('activePanel', 'edit');
-  let moveMode = storeGet('moveMode', 'all');
-  let sidelineMode = storeGet('sidelineMode', 'lazy');
+  let editMode = ['each','sku'].includes(storeGet('editMode', 'sku')) ? storeGet('editMode', 'sku') : 'sku';
+  let moveMode = ['all','qty'].includes(storeGet('moveMode', 'all')) ? storeGet('moveMode', 'all') : 'all';
+  let sidelineMode = ['scrubber','queue','lazy','live'].includes(storeGet('sidelineMode', 'lazy'))
+    ? storeGet('sidelineMode', 'lazy')
+    : 'lazy';
   let built = false;
 
   function nextRpcId(worker) {
@@ -274,13 +277,20 @@
     document.body.appendChild(frame);
   }
 
-  function createSelectOptions(values) {
-    return values.map(value => '<option value="' + esc(value) + '">' + esc(value) + '</option>').join('');
+  function choiceButtons(attribute, values) {
+    return values.map(value => {
+      const label = value === 'Pending Research' ? 'Pending' : value;
+      return '<button type="button" ' + attribute + '="' + esc(value) + '">' + esc(label) + '</button>';
+    }).join('');
   }
 
   function appMarkup() {
     const states = ['Sellable','Pending Research','Unsellable'];
     const damages = ['Amazon Damage','Defective','Distributor Damage','Expired'];
+    const stateSourceButtons = choiceButtons('data-edit-source-value', states);
+    const stateDestButtons = choiceButtons('data-edit-dest-value', states);
+    const damageSourceButtons = choiceButtons('data-edit-source-damage-value', damages);
+    const damageDestButtons = choiceButtons('data-edit-dest-damage-value', damages);
     return [
       '<div id="iss-shell">',
       '  <header class="iss-topbar">',
@@ -297,24 +307,30 @@
       '  <div class="iss-accent"></div>',
       '  <main id="iss-grid" data-active="' + esc(activePanel) + '">',
       '    <section class="iss-panel" data-panel="edit" data-active="' + (activePanel === 'edit' ? '1' : '0') + '">',
-      '      <div class="iss-panel-head"><div><span class="iss-kicker">EDIT ITEMS</span><strong>Disposition</strong></div><span class="iss-engine">SKU</span></div>',
+      '      <div class="iss-panel-head"><div><strong class="iss-panel-title">EDIT</strong><span class="iss-panel-subtitle">Edit Items • Disposition</span></div><span class="iss-engine" data-edit-engine>' + esc(editMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
-      '        <label class="iss-field"><span>SOURCE</span><select data-edit-source>' + createSelectOptions(states) + '</select></label>',
-      '        <label class="iss-field iss-damage" data-edit-source-damage-wrap><span>SOURCE DISPOSITION</span><select data-edit-source-damage>' + createSelectOptions(damages) + '</select></label>',
+      '        <div class="iss-segment iss-segment-edit" data-edit-modes><button type="button" data-edit-mode="each">EACH</button><button type="button" data-edit-mode="sku">SKU</button></div>',
+      '        <input type="hidden" data-edit-source value="Sellable">',
+      '        <input type="hidden" data-edit-source-damage value="Defective">',
+      '        <input type="hidden" data-edit-dest value="Pending Research">',
+      '        <input type="hidden" data-edit-dest-damage value="Defective">',
+      '        <div class="iss-choice-field" data-edit-source-wrap><span>SOURCE</span><div class="iss-choice-group iss-choice-state">' + stateSourceButtons + '</div></div>',
+      '        <div class="iss-auto-source" data-edit-auto-source hidden><span>SOURCE</span><strong>AUTO-DETECT FROM ITEM</strong></div>',
+      '        <div class="iss-choice-field iss-damage" data-edit-source-damage-wrap><span>SOURCE DISPOSITION</span><div class="iss-choice-group iss-choice-damage">' + damageSourceButtons + '</div></div>',
       '        <div class="iss-flow-arrow">↓</div>',
-      '        <label class="iss-field"><span>DESTINATION</span><select data-edit-dest>' + createSelectOptions(states) + '</select></label>',
-      '        <label class="iss-field iss-damage" data-edit-dest-damage-wrap><span>DESTINATION DISPOSITION</span><select data-edit-dest-damage>' + createSelectOptions(damages) + '</select></label>',
+      '        <div class="iss-choice-field"><span>DESTINATION</span><div class="iss-choice-group iss-choice-state">' + stateDestButtons + '</div></div>',
+      '        <div class="iss-choice-field iss-damage" data-edit-dest-damage-wrap><span>DESTINATION DISPOSITION</span><div class="iss-choice-group iss-choice-damage">' + damageDestButtons + '</div></div>',
       '        <div class="iss-flow-arrow">↓</div>',
-      '        <label class="iss-field iss-grow"><span>ITEM BARCODES / ASIN / FNSKU</span><textarea data-edit-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
-      '        <div class="iss-actions"><button type="button" class="iss-primary" data-edit-run>RUN EDIT</button><button type="button" data-stop="edit">STOP</button><button type="button" data-clear="edit">CLEAR</button></div>',
+      '        <label class="iss-field iss-grow"><span data-edit-items-label>ITEM BARCODES / ASIN / FNSKU</span><textarea data-edit-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
+      '        <div class="iss-actions"><button type="button" class="iss-primary" data-edit-run>RUN SKU</button><button type="button" data-stop="edit">STOP</button><button type="button" data-clear="edit">CLEAR</button></div>',
       '        <div class="iss-status" data-status="edit" data-kind="">Ready</div>',
       '      </div>',
       '      <div class="iss-loading"><span class="iss-spinner"></span><b data-loading-label>Working…</b></div>',
       '    </section>',
       '    <section class="iss-panel" data-panel="move" data-active="' + (activePanel === 'move' ? '1' : '0') + '">',
-      '      <div class="iss-panel-head"><div><span class="iss-kicker">MOVE ITEMS</span><strong>Container move</strong></div><span class="iss-engine" data-move-engine>' + esc(moveMode.toUpperCase()) + '</span></div>',
+      '      <div class="iss-panel-head"><div><strong class="iss-panel-title">MOVE</strong><span class="iss-panel-subtitle">Move Items • Container move</span></div><span class="iss-engine" data-move-engine>' + esc(moveMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
-      '        <div class="iss-segment" data-move-modes><button type="button" data-move-mode="all">ALL</button><button type="button" data-move-mode="qty">QTY</button><button type="button" data-move-mode="each">EACH</button></div>',
+      '        <div class="iss-segment iss-segment-move" data-move-modes><button type="button" data-move-mode="all">ALL</button><button type="button" data-move-mode="qty">QTY</button></div>',
       '        <label class="iss-field"><span>SOURCE</span><input data-move-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field"><span>DESTINATION</span><input data-move-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
@@ -327,7 +343,7 @@
       '      <div class="iss-loading"><span class="iss-spinner"></span><b data-loading-label>Switching mode…</b></div>',
       '    </section>',
       '    <section class="iss-panel" data-panel="sideline" data-active="' + (activePanel === 'sideline' ? '1' : '0') + '">',
-      '      <div class="iss-panel-head"><div><span class="iss-kicker">SIDELINE</span><strong>Container workflow</strong></div><span class="iss-engine" data-side-engine>' + esc(sidelineMode.toUpperCase()) + '</span></div>',
+      '      <div class="iss-panel-head"><div><strong class="iss-panel-title">SIDELINE</strong><span class="iss-panel-subtitle">Container workflow</span></div><span class="iss-engine" data-side-engine>' + esc(sidelineMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
       '        <div class="iss-segment iss-segment-side" data-side-modes><button type="button" data-side-mode="scrubber">SCRUBBER</button><button type="button" data-side-mode="queue">QUEUE</button><button type="button" data-side-mode="lazy">LAZY</button><button type="button" data-side-mode="live">LIVE</button></div>',
       '        <label class="iss-field"><span data-side-source-label>SOURCE</span><input data-side-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
@@ -363,17 +379,18 @@
       '#iss-grid[data-active="edit"]{grid-template-columns:1.85fr 1fr 1fr}#iss-grid[data-active="move"]{grid-template-columns:1fr 1.85fr 1fr}#iss-grid[data-active="sideline"]{grid-template-columns:1fr 1fr 1.85fr}',
       '.iss-panel{position:relative;min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid #b8c2cc;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.09);overflow:hidden;transition:border-color .18s ease,box-shadow .18s ease}',
       '.iss-panel[data-active="1"]{border-color:#4b789f;box-shadow:0 2px 8px rgba(29,68,102,.18)}',
-      '.iss-panel-head{min-height:58px;padding:9px 11px 9px 13px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #cbd2d9;background:#f3f4f5;box-shadow:inset 4px 0 #8798a8}',
-      '.iss-panel[data-active="1"] .iss-panel-head{box-shadow:inset 4px 0 #146eb4;background:#eef4f8}.iss-panel-head>div{display:grid;gap:2px}.iss-kicker{font-size:10px;font-weight:900;letter-spacing:.6px;color:#6d7882}.iss-panel-head strong{font-size:15px;color:#20364a}.iss-engine{padding:3px 7px;border:1px solid #b4bec8;border-radius:3px;background:#fff;color:#425365;font-size:10px;font-weight:900}',
-      '.iss-panel-body{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px}.iss-field{display:grid;gap:5px}.iss-field>span,.iss-inline-field>span{font-size:10px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-field input,.iss-field select,.iss-field textarea,.iss-inline-field input{width:100%;border:1px solid #aeb9c3;border-radius:3px;background:#fff;color:#111827;font:700 13px Arial,sans-serif;outline:none}.iss-field input,.iss-field select{height:38px;padding:0 9px}.iss-field textarea{min-height:150px;flex:1;padding:9px;resize:vertical;font-family:Consolas,monospace;line-height:1.45}.iss-field input:focus,.iss-field select:focus,.iss-field textarea:focus,.iss-inline-field input:focus{border-color:#146eb4;box-shadow:0 0 0 2px rgba(20,110,180,.13)}',
-      '.iss-field input:disabled,.iss-field textarea:disabled,.iss-field select:disabled{background:#eceff1;color:#8a949e;border-color:#c8ced4}.iss-grow{flex:1}.iss-flow-arrow{text-align:center;height:12px;color:#7b8793;font-weight:900;line-height:12px}',
-      '.iss-damage{display:none}.iss-damage[data-show="1"]{display:grid}',
-      '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
+      '.iss-panel-head{min-height:68px;padding:10px 12px 10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #cbd2d9;background:#f3f4f5;box-shadow:inset 4px 0 #8798a8}',
+      '.iss-panel[data-active="1"] .iss-panel-head{box-shadow:inset 5px 0 #146eb4;background:#eef4f8}.iss-panel-head>div{display:grid;gap:1px}.iss-panel-title{font-size:23px;line-height:1;font-weight:900;letter-spacing:.3px;color:#17324d}.iss-panel-subtitle{font-size:10px;font-weight:800;letter-spacing:.25px;color:#667583}.iss-engine{padding:4px 8px;border:1px solid #aeb9c3;border-radius:3px;background:#fff;color:#33495d;font-size:10px;font-weight:900}',
+      '.iss-panel-body{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px}.iss-field,.iss-choice-field{display:grid;gap:5px}.iss-field>span,.iss-choice-field>span,.iss-inline-field>span,.iss-auto-source>span{font-size:10px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-field input,.iss-field textarea,.iss-inline-field input{width:100%;border:1px solid #aeb9c3;border-radius:3px;background:#fff;color:#111827;font:700 13px Arial,sans-serif;outline:none}.iss-field input{height:38px;padding:0 9px}.iss-field textarea{min-height:150px;flex:1;padding:9px;resize:vertical;font-family:Consolas,monospace;line-height:1.45}.iss-field input:focus,.iss-field textarea:focus,.iss-inline-field input:focus{border-color:#146eb4;box-shadow:0 0 0 2px rgba(20,110,180,.13)}',
+      '.iss-field input:disabled,.iss-field textarea:disabled{background:#eceff1;color:#8a949e;border-color:#c8ced4}.iss-grow{flex:1}.iss-flow-arrow{text-align:center;height:12px;color:#7b8793;font-weight:900;line-height:12px}',
+      '.iss-damage{display:none}.iss-damage[data-show="1"]{display:grid}.iss-auto-source{display:grid;gap:5px}.iss-auto-source[hidden]{display:none!important}.iss-auto-source strong{height:36px;display:flex;align-items:center;padding:0 9px;border:1px solid #c4cbd1;border-radius:3px;background:#eef1f3;color:#65717c;font-size:11px;letter-spacing:.2px}',
+      '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
+      '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit,.iss-segment-move{grid-template-columns:repeat(2,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-check{display:none;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#495868}.iss-check[data-show="1"]{display:flex}.iss-check input{width:16px;height:16px}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}',
-      '.iss-loading{position:absolute;inset:58px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(229,233,236,.68);backdrop-filter:grayscale(.38) saturate(.75) brightness(.96);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:4px 8px;border:1px solid rgba(81,100,116,.28);border-radius:3px;background:rgba(255,255,255,.88);font-size:10px;color:#3f5366}.iss-spinner{width:42px;height:42px;border:5px solid rgba(255,255,255,.85);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 9px rgba(0,0,0,.17);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
+      '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
       '.iss-footer{height:32px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #c8d0d8;background:#f7f8f9;color:#687683;font-size:10px;font-weight:800}',
       '.iss-worker-frame{position:fixed!important;width:2px!important;height:2px!important;left:-10000px!important;top:-10000px!important;opacity:0!important;pointer-events:none!important;border:0!important}',
       '@media(max-width:1380px){body{min-width:980px}#iss-grid{gap:9px;padding-left:10px;padding-right:10px}#iss-grid[data-active="edit"]{grid-template-columns:1.6fr 1fr 1fr}#iss-grid[data-active="move"]{grid-template-columns:1fr 1.6fr 1fr}#iss-grid[data-active="sideline"]{grid-template-columns:1fr 1fr 1.6fr}.iss-panel-body{padding:9px}.iss-topbar{padding:0 14px}}'
@@ -395,11 +412,92 @@
     return true;
   }
 
-  function syncEditDamageUi() {
+  function paintEditChoices() {
+    const groups = [
+      ['[data-edit-source-value]', $('[data-edit-source]')?.value, 'editSourceValue'],
+      ['[data-edit-source-damage-value]', $('[data-edit-source-damage]')?.value, 'editSourceDamageValue'],
+      ['[data-edit-dest-value]', $('[data-edit-dest]')?.value, 'editDestValue'],
+      ['[data-edit-dest-damage-value]', $('[data-edit-dest-damage]')?.value, 'editDestDamageValue']
+    ];
+    for (const [selector, selected, key] of groups) {
+      for (const button of $$(selector)) {
+        button.dataset.active = button.dataset[key] === selected ? '1' : '0';
+      }
+    }
+    for (const button of $$('[data-edit-mode]')) button.dataset.active = button.dataset.editMode === editMode ? '1' : '0';
+  }
+
+  function syncEditUi(save = true) {
     const source = $('[data-edit-source]');
     const dest = $('[data-edit-dest]');
-    $('[data-edit-source-damage-wrap]')?.setAttribute('data-show', source?.value === 'Unsellable' ? '1' : '0');
-    $('[data-edit-dest-damage-wrap]')?.setAttribute('data-show', dest?.value === 'Unsellable' ? '1' : '0');
+    const each = editMode === 'each';
+    const sourceWrap = $('[data-edit-source-wrap]');
+    const autoSource = $('[data-edit-auto-source]');
+    const sourceDamage = $('[data-edit-source-damage-wrap]');
+    const destDamage = $('[data-edit-dest-damage-wrap]');
+    const itemLabel = $('[data-edit-items-label]');
+    const items = $('[data-edit-items]');
+    const run = $('[data-edit-run]');
+
+    if (sourceWrap) sourceWrap.hidden = each;
+    if (autoSource) autoSource.hidden = !each;
+    sourceDamage?.setAttribute('data-show', !each && source?.value === 'Unsellable' ? '1' : '0');
+    destDamage?.setAttribute('data-show', dest?.value === 'Unsellable' ? '1' : '0');
+
+    if (itemLabel) itemLabel.textContent = each
+      ? 'ITEM ROWS — TOTE ASIN [FNSKU]'
+      : 'ITEM BARCODES / ASIN / FNSKU / FCSKU';
+    if (items) items.placeholder = each
+      ? 'tsX...  B0...  [X0...] — one row per item'
+      : 'Scan or paste one per line';
+    if (run) run.textContent = each ? 'RUN EACH' : 'RUN SKU';
+    const engine = $('[data-edit-engine]');
+    if (engine) engine.textContent = editMode.toUpperCase();
+
+    paintEditChoices();
+    if (save) storeSet('editMode', editMode);
+  }
+
+  function setEditChoice(kind, value) {
+    const map = {
+      source: ['[data-edit-source]', 'editSource'],
+      sourceDamage: ['[data-edit-source-damage]', 'editSourceDamage'],
+      dest: ['[data-edit-dest]', 'editDest'],
+      destDamage: ['[data-edit-dest-damage]', 'editDestDamage']
+    };
+    const [selector, storeKey] = map[kind] || [];
+    const input = selector ? $(selector) : null;
+    if (!input) return;
+    input.value = value;
+    storeSet(storeKey, value);
+    syncEditUi(false);
+  }
+
+  async function switchEditMode(mode) {
+    if (!['each','sku'].includes(mode)) return;
+    if (editMode === mode) {
+      syncEditUi();
+      return;
+    }
+
+    const previous = editMode;
+    editMode = mode;
+    syncEditUi();
+    setActivePanel('edit');
+    setPanelLoading('edit', true, 'Switching ' + mode.toUpperCase() + '…');
+    panelStatus('edit', 'Switching EditItems mode…', 'working');
+
+    try {
+      await rpc('aft', 'mode', { key: 'edit:' + mode }, 30000);
+      panelStatus('edit', mode.toUpperCase() + ' ready', 'ok');
+    } catch (error) {
+      editMode = previous;
+      syncEditUi();
+      panelStatus('edit', error.message, 'error');
+    } finally {
+      setPanelLoading('edit', false);
+      syncEditUi(false);
+    }
   }
 
   function paintMoveMode() {
@@ -410,37 +508,11 @@
   }
 
   async function switchMoveMode(mode) {
-    if (!['all','qty','each'].includes(mode) || moveMode === mode) {
-      moveMode = mode;
-      paintMoveMode();
-      return;
-    }
-    const previous = moveMode;
-    const previousBackend = previous === 'each' ? 'move:each' : 'move:multi';
-    const nextBackend = mode === 'each' ? 'move:each' : 'move:multi';
-
+    if (!['all','qty'].includes(mode)) return;
+    moveMode = mode;
+    paintMoveMode();
     setActivePanel('move');
-    if (previousBackend === nextBackend) {
-      moveMode = mode;
-      paintMoveMode();
-      panelStatus('move', mode.toUpperCase() + ' selected', 'ok');
-      return;
-    }
-
-    setPanelLoading('move', true, 'Switching ' + mode.toUpperCase() + '…');
-    panelStatus('move', 'Switching backend mode…', 'working');
-    try {
-      await rpc('aft', 'mode', { key: nextBackend }, 30000);
-      moveMode = mode;
-      paintMoveMode();
-      panelStatus('move', mode.toUpperCase() + ' ready', 'ok');
-    } catch (error) {
-      moveMode = previous;
-      paintMoveMode();
-      panelStatus('move', error.message, 'error');
-    } finally {
-      setPanelLoading('move', false);
-    }
+    panelStatus('move', mode === 'qty' ? 'QTY mode selected' : 'ALL quantity selected', 'ok');
   }
 
   function syncSidelineModeUi(save = true) {
@@ -475,19 +547,21 @@
   }
 
   async function switchSidelineMode(mode) {
-    if (!['scrubber','queue','lazy','live'].includes(mode) || sidelineMode === mode) {
-      sidelineMode = mode;
+    if (!['scrubber','queue','lazy','live'].includes(mode)) return;
+    if (sidelineMode === mode) {
       syncSidelineModeUi();
       return;
     }
+
     const previous = sidelineMode;
+    sidelineMode = mode;
+    syncSidelineModeUi();
     setActivePanel('sideline');
     setPanelLoading('sideline', true, 'Switching ' + mode.toUpperCase() + '…');
     panelStatus('sideline', 'Switching Sideline mode…', 'working');
+
     try {
       await rpc('sideline', 'mode', { mode }, 20000);
-      sidelineMode = mode;
-      syncSidelineModeUi();
       panelStatus('sideline', mode.toUpperCase() + ' ready', 'ok');
     } catch (error) {
       sidelineMode = previous;
@@ -495,6 +569,7 @@
       panelStatus('sideline', error.message, 'error');
     } finally {
       setPanelLoading('sideline', false);
+      syncSidelineModeUi(false);
     }
   }
 
@@ -509,6 +584,7 @@
     panelStatus('edit', 'Starting EditItems…', 'working');
     try {
       const result = await rpc('aft', 'edit.run', {
+        mode: editMode,
         sourceState,
         sourceDamage: $('[data-edit-source-damage]')?.value || 'Defective',
         destState,
@@ -709,8 +785,21 @@
       location.reload();
     });
 
-    $('[data-edit-source]')?.addEventListener('change', syncEditDamageUi);
-    $('[data-edit-dest]')?.addEventListener('change', syncEditDamageUi);
+    for (const button of $$('[data-edit-mode]')) {
+      button.addEventListener('click', () => switchEditMode(button.dataset.editMode));
+    }
+    for (const button of $$('[data-edit-source-value]')) {
+      button.addEventListener('click', () => setEditChoice('source', button.dataset.editSourceValue));
+    }
+    for (const button of $$('[data-edit-source-damage-value]')) {
+      button.addEventListener('click', () => setEditChoice('sourceDamage', button.dataset.editSourceDamageValue));
+    }
+    for (const button of $$('[data-edit-dest-value]')) {
+      button.addEventListener('click', () => setEditChoice('dest', button.dataset.editDestValue));
+    }
+    for (const button of $$('[data-edit-dest-damage-value]')) {
+      button.addEventListener('click', () => setEditChoice('destDamage', button.dataset.editDestDamageValue));
+    }
     $('[data-edit-run]')?.addEventListener('click', runEdit);
     $('[data-edit-items]')?.addEventListener('keydown', event => textareaScannerHandler(event, 'edit'));
 
@@ -770,14 +859,10 @@
     $('[data-move-qty]').value = storeGet('moveQty', '');
     $('[data-clear-source]').checked = storeGet('sideClearSource', '0') === '1';
 
-    $('[data-edit-source]').addEventListener('change', event => storeSet('editSource', event.target.value));
-    $('[data-edit-dest]').addEventListener('change', event => storeSet('editDest', event.target.value));
-    $('[data-edit-source-damage]').addEventListener('change', event => storeSet('editSourceDamage', event.target.value));
-    $('[data-edit-dest-damage]').addEventListener('change', event => storeSet('editDestDamage', event.target.value));
     $('[data-move-qty]').addEventListener('input', event => storeSet('moveQty', event.target.value));
     $('[data-clear-source]').addEventListener('change', event => storeSet('sideClearSource', event.target.checked ? '1' : '0'));
 
-    syncEditDamageUi();
+    syncEditUi(false);
     paintMoveMode();
     syncSidelineModeUi(false);
     setActivePanel(activePanel);
