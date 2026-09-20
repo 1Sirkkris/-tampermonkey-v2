@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.20
+// @version      0.3.21
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -17,7 +17,7 @@
   window.__sidelineApiMoveTest_v0201 = true;
 
   const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
-  const VERSION = '0.3.20';
+  const VERSION = '0.3.21';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -620,9 +620,9 @@
     } catch {}
   }
 
-  function mountDock() {
+  function mountDock(restoreSavedState = true) {
     if ($('#sh-dock')) return;
-    restorePanelStates();
+    if (restoreSavedState) restorePanelStates();
     const dock = document.createElement('div');
     dock.id = 'sh-dock';
     for (const [key,label] of [['queue','Tote'],['scrub','Scrub'],['lazy','Lazy'],['live','Live'],['qty','QTY']]) {
@@ -5416,7 +5416,8 @@
         if (command === 'ping') {
           data = { ready:true, mode:issSideWorkerMode, state:issSideSnapshot() };
         } else if (command === 'mode') {
-          data = { mode: issSideSetMode(message.payload?.mode) };
+          const mode = issSideSetMode(message.payload?.mode);
+          data = { mode, state: issSideSnapshot() };
         } else if (command === 'stop') {
           if (lazy.running || lazy.activeRun) stopLazyForModeSwitch('stopped from ISS Console');
           if (live.running || live.sourceReady) stopLive();
@@ -5461,12 +5462,15 @@
   }
 
   // Boot
-  function boot() {
+  function boot(workerMode = false) {
     document.addEventListener('click', handleUniversalReturnClick, true);
-    mountDock();
+    if (workerMode) {
+      for (const key of ['queue','scrub','qty','lazy','live']) feature[key] = false;
+    }
+    mountDock(!workerMode);
     applyPanels();
     renderScrub();
-    if (feature.scrub) startScrubSession();
+    if (!workerMode && feature.scrub) startScrubSession();
     refreshItems();
 
     const isHelperMutationTarget = node => {
@@ -5540,7 +5544,10 @@
   }
 
   if (ISS_CONSOLE_WORKER) {
-    const workerBoot = () => installIssConsoleSidelineWorkerBridge();
+    const workerBoot = () => {
+      boot(true);
+      installIssConsoleSidelineWorkerBridge();
+    };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', workerBoot, { once:true });
     else workerBoot();
   } else {
