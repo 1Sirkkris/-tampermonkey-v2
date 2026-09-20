@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.18
+// @version      0.1.19
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.18';
+  const VERSION = '0.1.19';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1979,10 +1979,31 @@
     } catch {}
 
     window.addEventListener('message', event => {
-      if (event.source !== window) return;
-
       const message = event.data;
       if (!message || typeof message !== 'object') return;
+
+      if (event.source !== window) {
+        const workerOrigin =
+          event.origin === 'https://aft-qt-jp.aka.nrt.corp.amazon.com' ||
+          event.origin === 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
+        if (!workerOrigin || !/^ISS_CONSOLE_/.test(String(message.type || ''))) return;
+
+        const safe = {
+          messageType: scrubText(message.type || ''),
+          worker: scrubText(message.worker || ''),
+          version: scrubText(message.version || ''),
+          ok: typeof message.ok === 'boolean' ? message.ok : undefined,
+          area: scrubText(message.area || ''),
+          mode: scrubText(message.mode || ''),
+          loading: typeof message.loading === 'boolean' ? message.loading : undefined,
+          current: Number.isFinite(Number(message.current)) ? Number(message.current) : undefined,
+          total: Number.isFinite(Number(message.total)) ? Number(message.total) : undefined,
+          done: Number.isFinite(Number(message.done)) ? Number(message.done) : undefined,
+          error: message.error ? scrubText(message.error).slice(0, 180) : ''
+        };
+        emit('ISS_CONSOLE_WORKER_MESSAGE', safe);
+        return;
+      }
 
       if (message.__BWU2_OBS__ === true || message.__BWU2_TRACE__ === true) {
         emit(message.type || 'message', message.data || {});
