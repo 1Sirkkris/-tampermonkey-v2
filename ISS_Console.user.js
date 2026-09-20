@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.0
+// @version      0.1.1
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V010__) return;
-  window.__ISS_CONSOLE_V010__ = true;
+  if (window.__ISS_CONSOLE_V011__) return;
+  window.__ISS_CONSOLE_V011__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -705,9 +705,8 @@
     }
 
     $('[data-exit]')?.addEventListener('click', () => {
-      const url = new URL(location.href);
-      url.hash = '';
-      location.assign(url.href);
+      location.hash = '';
+      location.reload();
     });
 
     $('[data-edit-source]')?.addEventListener('change', syncEditDamageUi);
