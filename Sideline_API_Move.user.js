@@ -2,25 +2,35 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.24
+// @version      0.3.25
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
+// @include      /^https?:\/\/.*fcresearch.*\//
+// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-end
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
+
+  const IS_POIROT = location.hostname === 'aft-poirot-website-nrt.nrt.proxy.amazon.com';
+  const IS_FCR = /fcresearch/i.test(location.hostname) || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
+  const ISS_CONSOLE_LOCAL = IS_FCR && location.hash.startsWith('#iss-console');
+  if (!IS_POIROT && !ISS_CONSOLE_LOCAL) return;
+
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
   const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
-  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.24';
+  const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  const VERSION = '0.3.25';
+  const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function observe(type, data = {}) {
     try {
@@ -32,6 +42,7 @@
 
   observe('SIDELINE_WORKER_DETECT', {
     worker:ISS_CONSOLE_WORKER,
+    local:ISS_CONSOLE_LOCAL,
     byHash:ISS_WORKER_BY_HASH,
     byQuery:ISS_WORKER_BY_QUERY,
     byName:ISS_WORKER_BY_NAME,
@@ -89,6 +100,66 @@
     const text = String(value);
     if (el.textContent !== text) el.textContent = text;
   }
+  function sidelineFetch(path, options = {}) {
+    if (!ISS_CONSOLE_LOCAL) return fetch(path, options);
+
+    const url = /^https?:\/\//i.test(String(path || '')) ? String(path) : POIROT_ORIGIN + String(path || '');
+    const method = String(options.method || 'GET').toUpperCase();
+    const headers = options.headers || {};
+    const body = options.body == null ? undefined : String(options.body);
+
+    return new Promise((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(makeAbortError('Run cancelled'));
+        return;
+      }
+
+      let settled = false;
+      const request = GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data:body,
+        anonymous:false,
+        onload:response => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve({
+            ok:response.status >= 200 && response.status < 300,
+            status:response.status,
+            url:response.finalUrl || url,
+            text:async () => String(response.responseText || '')
+          });
+        },
+        onerror:error => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
+        },
+        ontimeout:() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error('Poirot request timed out'));
+        }
+      });
+
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        try { request.abort(); } catch {}
+        cleanup();
+        reject(makeAbortError('Run cancelled'));
+      };
+      const cleanup = () => {
+        try { options.signal?.removeEventListener('abort', abort); } catch {}
+      };
+      try { options.signal?.addEventListener('abort', abort, { once:true }); } catch {}
+    });
+  }
+
 
   function makeAbortError(message='Run cancelled') {
     const error = new Error(message);
@@ -120,7 +191,7 @@
   async function postJson(path, body, state, run=state.activeRun, cancelMessage='Run cancelled') {
     if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
 
-    const response = await fetch(path, {
+    const response = await sidelineFetch(path, {
       method:'POST',
       credentials:'same-origin',
       headers:{'content-type':'application/json'},
@@ -2685,7 +2756,7 @@
       entry.controller = controller;
       lazyPreResolve.controllers.add(controller);
 
-      fetch(API_SCAN_ITEM, {
+      sidelineFetch(API_SCAN_ITEM, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -3527,7 +3598,7 @@
 
     let response;
     try {
-      response = await fetch(API_SCAN_SOURCE, {
+      response = await sidelineFetch(API_SCAN_SOURCE, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -3595,7 +3666,7 @@
 
     let response;
     try {
-      response = await fetch(API_CLOSE_CONTAINER, {
+      response = await sidelineFetch(API_CLOSE_CONTAINER, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -5218,14 +5289,16 @@
   let issSideProgressTimer = 0;
 
   function issSideSend(type, detail = {}) {
-    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+    if (!ISS_CONSOLE_WORKER) return;
     try {
-      window.parent.postMessage({
+      const target = ISS_CONSOLE_LOCAL ? window : window.parent;
+      const targetOrigin = ISS_CONSOLE_LOCAL ? location.origin : '*';
+      target.postMessage({
         type,
         worker: 'sideline',
         version: VERSION,
         ...detail
-      }, '*');
+      }, targetOrigin);
     } catch {}
   }
 
@@ -5422,13 +5495,17 @@
   }
 
   function installIssConsoleSidelineWorkerBridge() {
-    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+    if (!ISS_CONSOLE_WORKER) return;
 
     window.addEventListener('message', async event => {
       const message = event.data;
+      const sourceOk = ISS_CONSOLE_LOCAL ? event.source === window : event.source === window.parent;
+      const originOk = ISS_CONSOLE_LOCAL
+        ? event.origin === location.origin
+        : /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
       if (
-        event.source !== window.parent ||
-        !/fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '') ||
+        !sourceOk ||
+        !originOk ||
         message?.type !== 'ISS_CONSOLE_RPC' ||
         message?.worker !== 'sideline'
       ) return;
@@ -5499,6 +5576,11 @@
     document.addEventListener('click', handleUniversalReturnClick, true);
     if (workerMode) {
       for (const key of ['queue','scrub','qty','lazy','live']) feature[key] = false;
+      if (ISS_CONSOLE_LOCAL) {
+        const style = document.createElement('style');
+        style.textContent = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast,#sh-lazy-running-indicator,#sh-move-corner{display:none!important}';
+        (document.head || document.documentElement).appendChild(style);
+      }
     }
     mountDock(!workerMode);
     applyPanels();
