@@ -2,13 +2,12 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.32
+// @version      0.9.33
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
 // @include      *://aft-qt-*.corp.amazon.com/app/moveitems*
 // @run-at       document-start
-// @noframes
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js
@@ -17,13 +16,13 @@
 (() => {
   'use strict';
 
-  if (window.top !== window.self) return; // Move qty iframe
+  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
+  if (window.top !== window.self && !ISS_CONSOLE_WORKER) return; // ignore ordinary app iframes; allow trusted ISS Console worker
   if (window.__AFT_MASTER_V098__) return;
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
-  const VERSION = '0.9.32';
+  const VERSION = '0.9.33';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
