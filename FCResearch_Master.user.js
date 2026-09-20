@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.30
+// @version      0.1.31
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,10 +19,10 @@
 (() => {
   'use strict';
 
-  if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker')) return;
+  if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.30';
+  const VERSION = '0.1.31';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
