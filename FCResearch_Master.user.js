@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.33
+// @version      0.1.34
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -11,6 +11,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
@@ -22,7 +23,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.33';
+  const VERSION = '0.1.34';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -398,35 +399,26 @@
 
 
   function openIssConsole() {
-    location.hash = '#iss-console';
-    location.reload();
+    const url = new URL(location.href);
+    url.hash = '#iss-console';
+    try {
+      history.replaceState(null, '', url.href);
+      location.reload();
+    } catch {
+      location.href = url.href;
+    }
   }
 
-  function ensureIssConsoleWeightLink(panel) {
-    if (!nativeSectionMode() || !panel) return;
-    const weight = panel.get('Weight');
-    const cell = weight?.labelCell;
-    if (!cell || cell.dataset.fcrmIssConsole === '1') return;
-
-    cell.dataset.fcrmIssConsole = '1';
-    cell.classList.add('fcrm-iss-weight-link');
-    cell.setAttribute('role', 'link');
-    cell.tabIndex = 0;
-    cell.title = 'Open ISS Console';
-
-    const suffix = markUi(document.createElement('span'));
-    suffix.className = 'fcrm-iss-weight-suffix';
-    suffix.textContent = ' | ISS';
-    cell.appendChild(suffix);
-
-    const open = event => {
-      if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+  function installWeightLauncher() {
+    document.addEventListener('click', event => {
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const cell = event.target.closest('th,td');
+      if (!cell || clean(cell.textContent).toLowerCase() !== 'weight') return;
+      if (!cell.closest('[data-section-type="product"]')) return;
       event.preventDefault();
       event.stopPropagation();
       openIssConsole();
-    };
-    cell.addEventListener('click', open);
-    cell.addEventListener('keydown', open);
+    }, true);
   }
 
 
@@ -464,10 +456,6 @@
       td.poch__band { background:rgba(255,0,0,.14)!important; box-shadow:inset 0 0 0 1px rgba(255,0,0,.22); color:#5a0000; }
       td.poch__dateold { background:rgba(255,0,0,.22)!important; box-shadow:inset 0 0 0 1px rgba(255,0,0,.38)!important; font-weight:700; color:#6a0000; }
       .fcrm-inline { display:inline-flex; align-items:center; gap:7px; margin-left:8px; vertical-align:middle; }
-      .fcrm-iss-weight-link { cursor:pointer!important; }
-      .fcrm-iss-weight-link:hover { text-decoration:underline; }
-      .fcrm-iss-weight-link:focus { outline:1px dotted currentColor; outline-offset:-2px; }
-      .fcrm-iss-weight-suffix { color:#146eb4; font-weight:700; white-space:nowrap; }
       .fcrm-qty { width:3.35ch; min-width:30px; height:17px; padding:0 2px; text-align:center; border:1px solid transparent; border-radius:4px; background:transparent; color:transparent; caret-color:transparent; font:12px Arial,sans-serif; opacity:.20; appearance:textfield; }
       .fcrm-qty:hover { opacity:.28; }
       .fcrm-qty:focus { color:#111827; caret-color:#111827; opacity:1; outline:none; background:rgba(120,138,160,.04); border-color:rgba(60,72,88,.12); }
@@ -748,9 +736,7 @@
       const labelCell = $('th', row) || row.cells?.[0];
       const valueCell = $('td', row) || row.cells?.[1] || row.lastElementChild;
       if (!labelCell || !valueCell) continue;
-      const labelClone = labelCell.cloneNode(true);
-      $$(UI_SELECTOR, labelClone).forEach(node => node.remove());
-      const label = clean(labelClone.textContent || labelClone.innerText || labelCell.textContent || '');
+      const label = clean(labelCell.textContent || labelCell.innerText || '');
       if (!label) continue;
       rows.set(norm(label), { row, labelCell, valueCell, label, ...cleanProductCell(valueCell) });
     }
@@ -1600,7 +1586,6 @@
       const jobs = [];
       const panel = readProductPanel();
       if (panel) {
-        ensureIssConsoleWeightLink(panel);
         const changed = panel.signature !== lastProductSignature;
         lastProductSignature = panel.signature;
         if (changed) {
@@ -1699,6 +1684,7 @@
     injectStyles();
     installCopyCleaner();
     installAltPrint();
+    installWeightLauncher();
     startObserver();
     ensureSectionLoadControls();
     usage('open');
