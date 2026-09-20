@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.39
+// @version      0.1.40
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -11,7 +11,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js?v=0.1.7
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
