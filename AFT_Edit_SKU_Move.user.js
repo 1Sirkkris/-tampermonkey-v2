@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.27
+// @version      0.9.28
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.27';
+  const VERSION = '0.9.28';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -111,7 +111,25 @@
       credentials: 'same-origin', cache: 'no-store'
     });
     if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
-    return res.text();
+    const html = await res.text();
+
+    if (/\/app\/(?:edititems|moveitems)/i.test(location.pathname)) {
+      const lower = html.toLowerCase();
+      traceAft('AFT_PAGE_MARKERS', {
+        label,
+        path: location.pathname,
+        chars: html.length,
+        objectIdAt: lower.indexOf('objectid'),
+        quantityAt: lower.indexOf('quantity'),
+        sourceStateAt: lower.indexOf('select source inventory state'),
+        newStateAt: lower.indexOf('select new inventory state'),
+        confirmAt: lower.indexOf('confirm change'),
+        successAt: lower.indexOf('success'),
+        verifyAt: lower.indexOf('verify item')
+      });
+    }
+
+    return html;
   }
 
   function objectId(html) {
@@ -468,6 +486,19 @@
 
     fetchState(label) {
       return EditApi.page(label, text => this.classify(text));
+    },
+
+    liveSnapshot() {
+      const objectId = currentObjectId();
+      if (!objectId) return null;
+      const text = nativeText();
+      return {
+        doc: document,
+        text,
+        state: this.classify(text),
+        objectId,
+        live: true
+      };
     },
 
     async snapshot(expectedObjectId, label) {
@@ -1352,6 +1383,20 @@
       const out = Object.create(null);
       if (!doc.body) return out;
 
+      // Native EditItems exposes authoritative source quantities on the workflow radio labels.
+      // Prefer those exact controls; retain broad scanning only as a compatibility fallback.
+      for (const choice of this.readSkuSourceChoices(doc)) {
+        const key = choice.state === 'SELLABLE'
+          ? 'sellable'
+          : choice.state === 'PENDING_RESEARCH'
+            ? 'pending research'
+            : choice.state === 'UNSELLABLE'
+              ? 'unsellable'
+              : '';
+        if (!key || !Number.isInteger(choice.qty)) continue;
+        out[key] = { qty: choice.qty, len: choice.label.length, structured: true };
+      }
+
       const aliases = [
         ['sellable', /^(?:Inventory|Sellable)$/i],
         ['pending research', /^Pending Research$/i],
@@ -1365,9 +1410,9 @@
         const label = norm(qm[1]);
         const qty = Number(qm[2]);
         for (const [key, rx] of aliases) {
+          if (out[key]) break;
           if (rx.test(label)) {
-            const prev = out[key];
-            if (!prev || t.length < prev.len) out[key] = { qty, len: t.length };
+            out[key] = { qty, len: t.length, structured: false };
             break;
           }
         }
@@ -1414,10 +1459,13 @@
         else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
         if (!state) continue;
 
+        const qtyMatch = label.match(/\bQuantity\s*:\s*(\d{1,7})\b/i);
         out.push({
           state,
           label,
-          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : ''
+          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : '',
+          qty: qtyMatch ? Number(qtyMatch[1]) : null,
+          disabled: !!radio.disabled
         });
       }
 
@@ -1664,6 +1712,22 @@
 
     async acquireSkuObject() {
       let last = null;
+
+      const live = this.liveSnapshot();
+      if (live?.state === 'item' && live.objectId) {
+        try {
+          const ready = await EditApi.wait(live.objectId, 'SKU preflight');
+          if (ready.state === 'READY') {
+            traceAft('AFT_STATE_SOURCE', {
+              label: 'SKU preflight',
+              source: 'live',
+              state: live.state
+            });
+            return live;
+          }
+        } catch {}
+      }
+
       for (let attempt = 0; attempt < 7; attempt++) {
         if (this.stopRequested) throw new Error('Stopped by user');
         const snap = await this.fetchState(attempt ? `SKU page ${attempt}` : 'SKU preflight');
@@ -1735,6 +1799,16 @@
           this.setStartQty(inventory);
           const qty = this.readEditQty(sourcePage, currentLabel);
           if (qty != null && initialQty == null) initialQty = qty;
+          traceAft('AFT_SKU_QTY', {
+            sku: meta.sku,
+            attempt,
+            currentState,
+            qty,
+            initialQty,
+            sellable: inventory.sellable?.qty ?? null,
+            pendingResearch: inventory['pending research']?.qty ?? null,
+            unsellable: inventory.unsellable?.qty ?? null
+          });
           this.tracker?.done('Qty');
 
           if (qty === 0) {
