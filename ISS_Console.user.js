@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.6
+// @version      0.1.7
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V016__) return;
-  window.__ISS_CONSOLE_V016__ = true;
+  if (window.__ISS_CONSOLE_V017__) return;
+  window.__ISS_CONSOLE_V017__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -266,7 +266,7 @@
     const state = workers[worker];
     if (!state) return;
     const originOk = state.local ? event.origin === location.origin : event.origin === state.origin;
-    const sourceOk = state.local ? event.source === window : event.source === workerFrame(worker);
+    const sourceOk = state.local ? true : event.source === workerFrame(worker);
     if (!originOk || !sourceOk) return;
 
     if (message.type === 'ISS_CONSOLE_WORKER_READY') {
@@ -315,8 +315,10 @@
 
     if (state.local) {
       observe('WORKER_SPAWN', { worker, origin:location.origin, path:'local' });
-      setTimeout(() => {
-        if (state.ready) return;
+      let attempts = 0;
+      const ping = () => {
+        if (state.ready || attempts >= 16) return;
+        attempts++;
         try {
           window.postMessage({
             type:'ISS_CONSOLE_RPC',
@@ -325,8 +327,11 @@
             command:'ping',
             payload:{}
           }, location.origin);
+          observe('WORKER_PING', { worker, attempt:attempts });
         } catch {}
-      }, 1200);
+        if (!state.ready) setTimeout(ping, attempts === 1 ? 250 : 500);
+      };
+      setTimeout(ping, 150);
       return;
     }
 
