@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.15
+// @version      0.1.16
 // @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.15';
+  const VERSION = '0.1.16';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -647,6 +647,158 @@
       request: summarizeAftMoveRequest(body),
       response
     });
+  }
+
+  function aftSafeControlValue(element) {
+    let raw = '';
+    try { raw = String(element?.value ?? '').trim(); } catch {}
+    if (!raw) return { kind: 'empty', length: 0 };
+    if (/^\d{1,7}$/.test(raw)) return { kind: 'numeric', length: raw.length, number: Number(raw) };
+    if (/^(?:INVENTORY|SELLABLE|PENDING_RESEARCH|UNSELLABLE|PENDING_REPAIR|PENDING_WORKORDER|IN_QUARANTINE|Confirm|Done|Continue|Start over)$/i.test(raw)) {
+      return { kind: 'enum', length: raw.length, value: scrubText(raw) };
+    }
+    return {
+      kind: classifySearchValue(raw),
+      length: raw.length,
+      fingerprint: fingerprint(raw, 'aft-control')
+    };
+  }
+
+  function aftControlLabel(element) {
+    const parts = [];
+    try {
+      for (const label of element?.labels || []) parts.push(label.textContent || '');
+    } catch {}
+    if (!parts.length) {
+      try { parts.push(element?.closest?.('label')?.textContent || element?.parentElement?.textContent || ''); } catch {}
+    }
+    return scrubText(cleanText(parts.join(' ')).slice(0, 220));
+  }
+
+  function aftInterestingStateScripts() {
+    const out = [];
+    const scripts = [...document.querySelectorAll('script[type="a-state"], script[type="application/json"]')].slice(0, 40);
+    for (const script of scripts) {
+      const raw = String(script.textContent || '').trim();
+      if (!raw || !/(?:quantity|qty|inventory|pending|unsellable|objectId|instruction|workflow|state|option|disposition|owner)/i.test(raw)) continue;
+
+      const item = {
+        type: scrubText(script.getAttribute('type') || ''),
+        id: scrubText(script.id || ''),
+        dataState: scrubText(script.getAttribute('data-a-state') || ''),
+        chars: raw.length
+      };
+      try {
+        item.value = boundedRiverValue(JSON.parse(raw));
+      } catch {
+        item.tokens = [...new Set(
+          (raw.match(/\b(?:quantity|qty|inventory|pending_research|unsellable|objectId|instructionId|workflow|state|option|disposition|owner)\b/gi) || [])
+            .map(value => value.toLowerCase())
+        )].slice(0, 30);
+      }
+      out.push(item);
+      if (out.length >= 16) break;
+    }
+    return out;
+  }
+
+  function aftPageStateSnapshot(reason = 'page-ready') {
+    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/edititems\/?$/i.test(location.pathname)) return;
+
+    const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
+      .map(node => scrubText(cleanText(node.textContent || '').slice(0, 180)))
+      .filter(Boolean)
+      .slice(0, 16);
+
+    const radios = [...document.querySelectorAll('input[type="radio"]')].slice(0, 30).map(radio => ({
+      name: scrubText(radio.name || ''),
+      checked: !!radio.checked,
+      disabled: !!radio.disabled,
+      label: aftControlLabel(radio),
+      value: aftSafeControlValue(radio)
+    }));
+
+    const forms = [...document.forms].slice(0, 12).map(form => ({
+      method: scrubText(form.method || ''),
+      action: form.action ? sanitizeUrl(form.action) : '',
+      controls: [...form.elements].slice(0, 40).map(control => ({
+        tag: String(control.tagName || '').toLowerCase(),
+        type: scrubText(control.getAttribute?.('type') || ''),
+        name: scrubText(control.getAttribute?.('name') || ''),
+        id: scrubText(control.id || ''),
+        checked: 'checked' in control ? !!control.checked : undefined,
+        disabled: !!control.disabled,
+        label: aftControlLabel(control),
+        value: aftSafeControlValue(control)
+      }))
+    }));
+
+    const quantityLabels = [...new Set(
+      [...document.querySelectorAll('label,li,tr,div')]
+        .map(node => cleanText(node.textContent || ''))
+        .filter(text => /\bQuantity\s*:\s*\d{1,7}\b/i.test(text))
+        .map(text => scrubText(text.slice(0, 240)))
+    )].slice(0, 20);
+
+    const globals = [];
+    try {
+      for (const name of Object.getOwnPropertyNames(window)) {
+        if (!/(?:initial.*state|bootstrap.*data|workflow|instruction|inventory|edititems|quantity|(?:^|[_$])aft(?:[_$]|$))/i.test(name)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(window, name);
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
+        const value = descriptor.value;
+        if (typeof value === 'function') continue;
+        const entry = { name: scrubText(name), type: Array.isArray(value) ? 'array' : typeof value };
+        if (value && typeof value === 'object') {
+          const proto = Object.getPrototypeOf(value);
+          if (Array.isArray(value) || proto === Object.prototype || proto === null) {
+            entry.value = boundedRiverValue(value);
+          } else {
+            entry.keys = Object.keys(value).slice(0, 40).map(key => scrubText(key));
+          }
+        } else if (['string','number','boolean'].includes(typeof value)) {
+          entry.value = boundedRiverValue(value, name);
+        }
+        globals.push(entry);
+        if (globals.length >= 20) break;
+      }
+    } catch {}
+
+    let navigation = null;
+    try {
+      const nav = performance.getEntriesByType?.('navigation')?.[0];
+      if (nav) {
+        navigation = {
+          transferSize: Number(nav.transferSize) || 0,
+          encodedBodySize: Number(nav.encodedBodySize) || 0,
+          decodedBodySize: Number(nav.decodedBodySize) || 0,
+          durationMs: Math.round(Number(nav.duration) || 0)
+        };
+      }
+    } catch {}
+
+    add('aft.edit.page-state', {
+      reason,
+      readyState: document.readyState,
+      title: sanitizeTitle(document.title || ''),
+      headings,
+      quantityLabels,
+      radios,
+      forms,
+      stateScripts: aftInterestingStateScripts(),
+      globals,
+      navigation
+    });
+  }
+
+  function bootAftEditPageStateProbe() {
+    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/edititems\/?$/i.test(location.pathname)) return;
+    const capture = () => {
+      queueMicrotask(() => aftPageStateSnapshot('dom-ready'));
+      setTimeout(() => aftPageStateSnapshot('settled-250ms'), 250);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once: true });
+    else capture();
   }
 
   function summarizeFcrResponse(text, contentType = '') {
@@ -1874,6 +2026,7 @@
   installViewportTrace();
   installMutationHealth();
   installPerformanceHealth();
+  bootAftEditPageStateProbe();
   bootUi();
 
   window.addEventListener('pagehide', () => {
