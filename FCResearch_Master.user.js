@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.31
+// @version      0.1.32
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -22,7 +22,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.31';
+  const VERSION = '0.1.32';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -397,6 +397,24 @@
   }
 
 
+  function ensureIssConsoleLauncher() {
+    if (!nativeSectionMode() || document.getElementById('fcrm-iss-console-launch')) return;
+    const anchor = $('.warehouse-id') || $('.logo-research');
+    if (!anchor?.parentElement) return;
+
+    const button = markUi(document.createElement('button'));
+    button.id = 'fcrm-iss-console-launch';
+    button.type = 'button';
+    button.textContent = 'ISS Console';
+    button.title = 'Open standalone ISS Console';
+    button.addEventListener('click', () => {
+      location.hash = '#iss-console';
+      location.reload();
+    });
+    anchor.insertAdjacentElement('afterend', button);
+  }
+
+
   function selectionTouchesNode(selection, node) {
     if (!selection || !node) return false;
     for (let index = 0; index < selection.rangeCount; index++) {
@@ -431,6 +449,8 @@
       td.poch__band { background:rgba(255,0,0,.14)!important; box-shadow:inset 0 0 0 1px rgba(255,0,0,.22); color:#5a0000; }
       td.poch__dateold { background:rgba(255,0,0,.22)!important; box-shadow:inset 0 0 0 1px rgba(255,0,0,.38)!important; font-weight:700; color:#6a0000; }
       .fcrm-inline { display:inline-flex; align-items:center; gap:7px; margin-left:8px; vertical-align:middle; }
+      #fcrm-iss-console-launch { margin-left:8px; padding:4px 9px; border:1px solid #8796a5; border-radius:3px; background:#f7f8fa; color:#21364a; font:800 11px Arial,sans-serif; cursor:pointer; vertical-align:middle; }
+      #fcrm-iss-console-launch:hover { border-color:#146eb4; background:#eef4f8; color:#0f5f9d; }
       .fcrm-qty { width:3.35ch; min-width:30px; height:17px; padding:0 2px; text-align:center; border:1px solid transparent; border-radius:4px; background:transparent; color:transparent; caret-color:transparent; font:12px Arial,sans-serif; opacity:.20; appearance:textfield; }
       .fcrm-qty:hover { opacity:.28; }
       .fcrm-qty:focus { color:#111827; caret-color:#111827; opacity:1; outline:none; background:rgba(120,138,160,.04); border-color:rgba(60,72,88,.12); }
@@ -1558,6 +1578,7 @@
     refreshBusy = true;
     try {
       ensureSectionLoadControls();
+      ensureIssConsoleLauncher();
       const jobs = [];
       const panel = readProductPanel();
       if (panel) {
@@ -1661,6 +1682,7 @@
     installAltPrint();
     startObserver();
     ensureSectionLoadControls();
+    ensureIssConsoleLauncher();
     usage('open');
     refreshPage();
   }
