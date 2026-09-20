@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.31
+// @version      0.9.32
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -23,7 +23,7 @@
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
   const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
-  const VERSION = '0.9.31';
+  const VERSION = '0.9.32';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -3824,7 +3824,7 @@
       await ModeSwitch.switchBackend(definition);
       issWorkerModeKey = key;
       if (definition.area === 'move') MoveItems.detectedMode = definition.mode;
-      if (definition.area === 'edit' && definition.mode === 'sku') Edit.mode = 'sku';
+      if (definition.area === 'edit' && ['each','sku'].includes(definition.mode)) Edit.mode = definition.mode;
       issWorkerProgress(definition.area, `${definition.title} • ready`, { loading: false, mode: key });
     }
 
@@ -3833,36 +3833,62 @@
   }
 
   async function issWorkerEditRun(payload = {}) {
-    const items = Edit.parseSkuBatchQueue(Array.isArray(payload.items) ? payload.items.join('\n') : payload.items || '');
-    if (!items.length) throw new Error('No Edit items');
-    if (items.length > 500) throw new Error('Edit queue too large');
-
-    const currentState = String(payload.sourceState || 'Sellable');
+    const mode = String(payload.mode || 'sku').toLowerCase() === 'each' ? 'each' : 'sku';
+    const rawItems = Array.isArray(payload.items) ? payload.items.join('\n') : payload.items || '';
     const desiredState = String(payload.destState || 'Pending Research');
-    if (low(currentState) === low(desiredState) && low(currentState) !== 'unsellable') {
-      throw new Error('Source and destination disposition cannot match');
-    }
+    const desiredDamage = String(payload.destDamage || 'Defective');
 
-    await issWorkerEnsureMode('edit:sku');
+    await issWorkerEnsureMode(`edit:${mode}`);
     Edit.stopRequested = false;
     Edit.directBusy = true;
-    let done = 0;
-    const results = [];
 
     try {
+      if (mode === 'each') {
+        const items = Edit.parseEachQueue(rawItems);
+        if (!items.length) throw new Error('EACH needs: TOTE ASIN [FNSKU] — one row per item');
+        if (items.length > 500) throw new Error('Edit queue too large');
+
+        issWorkerProgress('edit', `EACH • starting ${items.length} row${items.length === 1 ? '' : 's'}`, {
+          current: 0,
+          total: items.length,
+          mode
+        });
+
+        await Edit.runEachQueue(items, { desiredState, desiredDamage });
+
+        issWorkerProgress('edit', `DONE ✓ ${items.length}/${items.length}`, {
+          done: items.length,
+          total: items.length,
+          mode
+        });
+        return { done: items.length, total: items.length, mode };
+      }
+
+      const items = Edit.parseSkuBatchQueue(rawItems);
+      if (!items.length) throw new Error('No Edit items');
+      if (items.length > 500) throw new Error('Edit queue too large');
+
+      const currentState = String(payload.sourceState || 'Sellable');
+      if (low(currentState) === low(desiredState) && low(currentState) !== 'unsellable') {
+        throw new Error('Source and destination disposition cannot match');
+      }
+
+      let done = 0;
+      const results = [];
       for (let i = 0; i < items.length; i++) {
         if (Edit.stopRequested) throw new Error('Stopped by user');
         const sku = items[i];
         issWorkerProgress('edit', `${i + 1}/${items.length} • ${sku}`, {
           current: i + 1,
-          total: items.length
+          total: items.length,
+          mode
         });
         const result = await Edit.runSkuDirect({
           sku,
           currentState,
           currentDamage: String(payload.sourceDamage || 'Defective'),
           desiredState,
-          desiredDamage: String(payload.destDamage || 'Defective')
+          desiredDamage
         }, {
           maxRecoveries: 2,
           allowReload: false
@@ -3870,8 +3896,8 @@
         done++;
         results.push({ sku, outcome: result?.outcome || 'done' });
       }
-      issWorkerProgress('edit', `DONE ✓ ${done}/${items.length}`, { done, total: items.length });
-      return { done, total: items.length, results };
+      issWorkerProgress('edit', `DONE ✓ ${done}/${items.length}`, { done, total: items.length, mode });
+      return { done, total: items.length, results, mode };
     } finally {
       Edit.directBusy = false;
     }
@@ -3899,7 +3925,8 @@
     const dest = norm(payload.dest);
     const items = MoveItems.parseItems(Array.isArray(payload.items) ? payload.items.join('\n') : payload.items || '');
     const uiMode = String(payload.mode || 'all').toLowerCase();
-    const modeKey = uiMode === 'each' ? 'move:each' : 'move:multi';
+    if (!['all','qty'].includes(uiMode)) throw new Error(`Unsupported Move mode ${uiMode}`);
+    const modeKey = 'move:multi';
     const qtyMode = uiMode === 'qty' ? 'user' : 'all';
     const requestedQty = qtyMode === 'user' ? Number(payload.qty) : null;
 
