@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.2
+// @version      0.1.3
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V012__) return;
-  window.__ISS_CONSOLE_V012__ = true;
+  if (window.__ISS_CONSOLE_V013__) return;
+  window.__ISS_CONSOLE_V013__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -28,6 +28,7 @@
   const STORE_PREFIX = 'issConsole.v1.';
   const DEFAULT_TIMEOUT = 20000;
   const LONG_TIMEOUT = 12 * 60 * 1000;
+  const SIDELINE_START_TRIGGER = '123START';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -92,6 +93,7 @@
   let sidelineMode = ['scrubber','queue','lazy','live'].includes(storeGet('sidelineMode', 'lazy'))
     ? storeGet('sidelineMode', 'lazy')
     : 'lazy';
+  let sidelineRunBusy = false;
   let built = false;
 
   function nextRpcId(worker) {
@@ -147,14 +149,16 @@
     el.dataset.kind = kind;
   }
 
-  function setPanelLoading(area, on, message = '') {
+  function setPanelLoading(area, on, message = '', options = {}) {
     const panel = $('[data-panel="' + area + '"]');
     if (!panel) return;
+    const lock = options.lock !== false;
     panel.dataset.loading = on ? '1' : '0';
     if (message) {
       const label = $('[data-loading-label]', panel);
       if (label) label.textContent = message;
     }
+    if (!lock && on) return;
     for (const el of $$('input,select,textarea,button', panel)) {
       if (el.matches('[data-stop]')) continue;
       if (el.dataset.keepEnabled === '1') continue;
@@ -351,7 +355,7 @@
       '        <label class="iss-field"><span>DESTINATION</span><input data-side-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
-      '        <label class="iss-check" data-clear-source-wrap><input type="checkbox" data-clear-source><span>Clear source after successful Lazy run</span></label>',
+      '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><input type="checkbox" data-clear-source hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
       '      </div>',
@@ -387,7 +391,7 @@
       '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
       '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit,.iss-segment-move{grid-template-columns:repeat(2,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
-      '.iss-check{display:none;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#495868}.iss-check[data-show="1"]{display:flex}.iss-check input{width:16px;height:16px}',
+      '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:block}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}',
       '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
@@ -515,6 +519,14 @@
     panelStatus('move', mode === 'qty' ? 'QTY mode selected' : 'ALL quantity selected', 'ok');
   }
 
+  function paintClearSourceToggle() {
+    const box = $('[data-clear-source]');
+    const button = $('[data-clear-source-toggle]');
+    if (!box || !button) return;
+    button.dataset.active = box.checked ? '1' : '0';
+    button.textContent = 'CLEAR SOURCE: ' + (box.checked ? 'ON' : 'OFF');
+  }
+
   function syncSidelineModeUi(save = true) {
     for (const button of $$('[data-side-mode]')) button.dataset.active = button.dataset.sideMode === sidelineMode ? '1' : '0';
     $('[data-side-engine]').textContent = sidelineMode.toUpperCase();
@@ -534,6 +546,7 @@
     if (sourceLabel) sourceLabel.textContent = sidelineMode === 'scrubber' ? 'TOTE' : 'SOURCE';
     if (itemsLabel) itemsLabel.textContent = sidelineMode === 'queue' ? 'CONTAINERS' : 'ITEM BARCODES';
     if (clearWrap) clearWrap.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
+    paintClearSourceToggle();
 
     if (run) {
       run.disabled = sidelineMode === 'scrubber';
@@ -676,7 +689,8 @@
       if (upper(source) === upper(dest)) return panelStatus('sideline', 'Source and destination cannot match', 'error');
       if (!items.length) return panelStatus('sideline', 'Scan/paste at least one item', 'error');
 
-      setPanelLoading('sideline', true, 'Running Lazy…');
+      sidelineRunBusy = true;
+      setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       panelStatus('sideline', 'Starting Lazy…', 'working');
       try {
         const result = await rpc('sideline', 'lazy.run', {
@@ -689,6 +703,7 @@
       } catch (error) {
         panelStatus('sideline', error.message, 'error');
       } finally {
+        sidelineRunBusy = false;
         setPanelLoading('sideline', false);
       }
     }
@@ -755,6 +770,51 @@
     $('[data-side-source]')?.focus();
   }
 
+  function currentTextareaLine(el) {
+    const value = el.value;
+    const pos = el.selectionStart ?? value.length;
+    const start = value.lastIndexOf('\n', Math.max(0, pos - 1)) + 1;
+    const next = value.indexOf('\n', pos);
+    const end = next < 0 ? value.length : next;
+    return { value, start, end, code:clean(value.slice(start, end)) };
+  }
+
+  function removeTextareaLine(el, line) {
+    let before = line.value.slice(0, line.start);
+    let after = line.value.slice(line.end);
+    if (before.endsWith('\n') && after.startsWith('\n')) after = after.slice(1);
+    el.value = before + after;
+    el.focus();
+    el.setSelectionRange?.(el.value.length, el.value.length);
+  }
+
+  async function handleLazyTriggerScan(el, code) {
+    const source = clean($('[data-side-source]')?.value);
+    const dest = clean($('[data-side-dest]')?.value);
+    const normalized = upper(code);
+    const trigger =
+      normalized === upper(source) ||
+      normalized === upper(dest) ||
+      normalized === upper(SIDELINE_START_TRIGGER);
+
+    if (!trigger) return false;
+
+    if (sidelineRunBusy) {
+      try {
+        await rpc('sideline', 'lazy.scan', { code }, 15000);
+        panelStatus('sideline', code + ' accepted', 'working');
+      } catch (error) {
+        panelStatus('sideline', error.message, 'error');
+      }
+      return true;
+    }
+
+    const items = collectLines(el.value);
+    if (!validContainer(source) || !validContainer(dest) || !items.length) return true;
+    void runSideline();
+    return true;
+  }
+
   function textareaScannerHandler(event, area) {
     if (event.key !== 'Enter' || event.shiftKey) return;
     if (area === 'sideline' && sidelineMode === 'live') {
@@ -763,9 +823,27 @@
       if (value) liveItemScan(value);
       return;
     }
+
+    const el = event.currentTarget;
+    if (area === 'sideline' && sidelineMode === 'lazy') {
+      const line = currentTextareaLine(el);
+      const source = clean($('[data-side-source]')?.value);
+      const dest = clean($('[data-side-dest]')?.value);
+      const isTrigger =
+        upper(line.code) === upper(source) ||
+        upper(line.code) === upper(dest) ||
+        upper(line.code) === upper(SIDELINE_START_TRIGGER);
+      if (line.code && isTrigger) {
+        event.preventDefault();
+        event.stopPropagation();
+        removeTextareaLine(el, line);
+        void handleLazyTriggerScan(el, line.code);
+        return;
+      }
+    }
+
     // Scanner Enter becomes a newline, then focus stays here for the next scan.
     event.preventDefault();
-    const el = event.currentTarget;
     const start = el.selectionStart ?? el.value.length;
     const end = el.selectionEnd ?? start;
     const before = el.value.slice(0, start).replace(/[\t ]+$/,'');
@@ -860,7 +938,16 @@
     $('[data-clear-source]').checked = storeGet('sideClearSource', '0') === '1';
 
     $('[data-move-qty]').addEventListener('input', event => storeSet('moveQty', event.target.value));
-    $('[data-clear-source]').addEventListener('change', event => storeSet('sideClearSource', event.target.checked ? '1' : '0'));
+    $('[data-clear-source]').addEventListener('change', event => {
+      storeSet('sideClearSource', event.target.checked ? '1' : '0');
+      paintClearSourceToggle();
+    });
+    $('[data-clear-source-toggle]')?.addEventListener('click', () => {
+      const box = $('[data-clear-source]');
+      if (!box) return;
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event('change', { bubbles:true }));
+    });
 
     syncEditUi(false);
     paintMoveMode();
