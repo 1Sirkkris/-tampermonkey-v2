@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.18
+// @version      0.3.19
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.18';
+  const VERSION = '0.3.19';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -486,10 +486,10 @@
   50%{border-color:#f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.28)}
 }
 
-#sh-lazy-running-indicator{position:fixed;inset:0;z-index:2147483644;pointer-events:none;background:rgba(15,23,42,.09);box-shadow:inset 0 0 0 4px rgba(20,110,180,.34);animation:shLazyPulse 1.2s ease-in-out infinite}
-#sh-lazy-running-indicator .sh-lazy-spinner{position:absolute;left:50%;top:46%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;border:5px solid rgba(255,255,255,.48);border-top-color:#146eb4;border-right-color:#146eb4;box-shadow:0 2px 10px rgba(0,0,0,.22);animation:shLazySpin .72s linear infinite}
+#sh-lazy-running-indicator{position:fixed;inset:0;z-index:2147483644;pointer-events:none;background:rgba(15,23,42,.18);backdrop-filter:grayscale(.34) saturate(.74) brightness(.92);box-shadow:inset 0 0 0 5px rgba(20,110,180,.46),inset 0 0 90px rgba(15,23,42,.10);animation:shLazyPulse 1.15s ease-in-out infinite}
+#sh-lazy-running-indicator .sh-lazy-spinner{position:absolute;left:50%;top:46%;width:48px;height:48px;margin:-24px 0 0 -24px;box-sizing:border-box;border-radius:50%;border:6px solid rgba(255,255,255,.76);border-top-color:#146eb4;border-right-color:#146eb4;background:rgba(255,255,255,.18);box-shadow:0 3px 16px rgba(0,0,0,.34),0 0 0 5px rgba(255,255,255,.10);animation:shLazySpin .68s linear infinite}
 @keyframes shLazySpin{to{transform:rotate(360deg)}}
-@keyframes shLazyPulse{0%,100%{box-shadow:inset 0 0 0 4px rgba(20,110,180,.28)}50%{box-shadow:inset 0 0 0 5px rgba(20,110,180,.48)}}
+@keyframes shLazyPulse{0%,100%{box-shadow:inset 0 0 0 5px rgba(20,110,180,.40),inset 0 0 90px rgba(15,23,42,.09)}50%{box-shadow:inset 0 0 0 6px rgba(20,110,180,.58),inset 0 0 110px rgba(15,23,42,.13)}}
 #sh-move-corner{position:fixed;right:416px;bottom:12px;z-index:2147483647;width:68px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #146eb4;border-radius:8px;background:#eff6ff;color:#0f3d73;box-shadow:0 2px 9px #0005;font:900 10px Arial,sans-serif;letter-spacing:.3px;pointer-events:none}
 @media(max-width:500px){#sh-move-corner{right:3px;top:3px;bottom:auto}}
 #sh-move-corner .sh-move-wheel{width:14px;height:14px;box-sizing:border-box;border:3px solid #bfdbfe;border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;animation:shMoveCornerSpin .7s linear infinite}
