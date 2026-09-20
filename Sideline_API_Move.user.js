@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.28
+// @version      0.3.29
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.28';
+  const VERSION = '0.3.29';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -5502,7 +5502,7 @@
 
     window.addEventListener('message', async event => {
       const message = event.data;
-      const sourceOk = ISS_CONSOLE_LOCAL ? event.source === window : event.source === window.parent;
+      const sourceOk = ISS_CONSOLE_LOCAL ? true : event.source === window.parent;
       const originOk = ISS_CONSOLE_LOCAL
         ? event.origin === location.origin
         : /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
@@ -5571,6 +5571,7 @@
       }
     });
 
+    observe('SIDELINE_WORKER_BRIDGE_READY', { version:VERSION, local:ISS_CONSOLE_LOCAL });
     issSideStartProgress();
     issSideSend('ISS_CONSOLE_WORKER_READY', { ready:true });
   }
