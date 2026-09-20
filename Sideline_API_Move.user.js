@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.19
+// @version      0.3.20
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,8 @@
   if (window.__sidelineApiMoveTest_v0201) return;
   window.__sidelineApiMoveTest_v0201 = true;
 
-  const VERSION = '0.3.19';
+  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
+  const VERSION = '0.3.20';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -5191,6 +5192,274 @@
     universalReturnToSource(returnModeFromButton(button));
   }
 
+
+  // ISS Console worker bridge. Runs Sideline commands inside Poirot's own authenticated origin.
+  let issSideWorkerBusy = false;
+  let issSideWorkerMode = '';
+  let issSideProgressTimer = 0;
+
+  function issSideSend(type, detail = {}) {
+    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+    try {
+      window.parent.postMessage({
+        type,
+        worker: 'sideline',
+        version: VERSION,
+        ...detail
+      }, '*');
+    } catch {}
+  }
+
+  function issSideSnapshot() {
+    if (issSideWorkerMode === 'lazy') {
+      return {
+        mode: 'lazy',
+        running: !!lazy.running,
+        message: clean(lazy.error || lazy.note || 'Ready'),
+        current: Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
+        total: lazy.items.length
+      };
+    }
+    if (issSideWorkerMode === 'live') {
+      return {
+        mode: 'live',
+        running: !!live.running,
+        message: clean(live.error || live.note || 'Ready'),
+        moved: live.moved,
+        queued: live.queue.length + (live.current ? 1 : 0) + live.datePending.length
+      };
+    }
+    if (issSideWorkerMode === 'queue') {
+      return {
+        mode: 'queue',
+        running: !!q.running,
+        message: clean(qError?.textContent || qStatus?.textContent || 'Ready'),
+        current: Math.min(q.index, q.list.length),
+        total: q.list.length
+      };
+    }
+    if (issSideWorkerMode === 'scrubber') {
+      return {
+        mode: 'scrubber',
+        running: feature.scrub && !scrub.halted,
+        message: clean(scrubError?.textContent || scrubStatus?.textContent || 'Ready'),
+        cleared: scrub.cleared,
+        pending: scrubPendingCount()
+      };
+    }
+    return { mode: issSideWorkerMode || '', running: false, message: 'Ready' };
+  }
+
+  function issSideEmitProgress() {
+    const snapshot = issSideSnapshot();
+    issSideSend('ISS_CONSOLE_PROGRESS', {
+      area: 'sideline',
+      message: snapshot.message,
+      ...snapshot
+    });
+  }
+
+  function issSideStartProgress() {
+    clearInterval(issSideProgressTimer);
+    issSideProgressTimer = setInterval(issSideEmitProgress, 450);
+    issSideEmitProgress();
+  }
+
+  function issSideStopQueue(note = 'stopped') {
+    q.runSeq++;
+    q.running = false;
+    q.paused = false;
+    if (shared.owner === 'queue') shared.owner = '';
+    renderQueue(note);
+  }
+
+  function issSideSetMode(mode) {
+    const wanted = String(mode || '').toLowerCase();
+    if (!['scrubber','queue','lazy','live'].includes(wanted)) {
+      throw new Error(`Unsupported Sideline mode ${wanted || 'blank'}`);
+    }
+    if (issSideWorkerBusy && wanted !== issSideWorkerMode) {
+      throw new Error('Sideline worker busy');
+    }
+
+    if (wanted !== 'queue' && q.running) issSideStopQueue('mode switched');
+    if (wanted !== 'scrubber' && feature.scrub) {
+      feature.scrub = false;
+      stopScrubSession('mode switched');
+    }
+    if (wanted !== 'lazy' && (lazy.running || lazy.activeRun || feature.lazy)) {
+      stopLazyForModeSwitch('mode switched');
+      feature.lazy = false;
+    }
+    if (wanted !== 'live' && (live.running || live.sourceReady || feature.live)) {
+      deactivateLiveForModeSwitch('mode switched');
+      feature.live = false;
+    }
+
+    feature.queue = wanted === 'queue';
+    feature.scrub = wanted === 'scrubber';
+    feature.lazy = wanted === 'lazy';
+    feature.live = wanted === 'live';
+    feature.qty = false;
+    issSideWorkerMode = wanted;
+
+    if (wanted === 'scrubber') startScrubSession();
+    applyPanels();
+    issSideEmitProgress();
+    return wanted;
+  }
+
+  async function issSideLazyRun(payload = {}) {
+    issSideSetMode('lazy');
+    resetLazy('ISS Console ready');
+
+    lSrc.value = clean(payload.source);
+    lDest.value = clean(payload.dest);
+    lItems.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
+      .map(clean).filter(Boolean).join('\n');
+    if (typeof payload.clearSource === 'boolean') lClear.checked = payload.clearSource;
+
+    issSideEmitProgress();
+    await startLazy();
+
+    if (lazy.error) throw new Error(lazy.error);
+    const moved = lazy.items.filter(item => item.status === 'MOVED').reduce((sum,item) => sum + itemQty(item), 0);
+    const failed = lazy.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status)).reduce((sum,item) => sum + itemQty(item), 0);
+    return { moved, failed, message: clean(lazy.note || 'complete') };
+  }
+
+  async function issSideLiveConfigure(payload = {}) {
+    issSideSetMode('live');
+    resetLive('ISS Console ready');
+
+    liveSrc.value = clean(payload.source);
+    await acceptLiveSource();
+    if (!live.sourceReady) throw new Error(live.error || 'Live source validation failed');
+
+    liveDest.value = clean(payload.dest);
+    acceptLiveDestination();
+    if (!live.running) throw new Error(live.error || 'Live destination validation failed');
+
+    return { ready: true, source: live.src, dest: live.dest };
+  }
+
+  function issSideLiveItem(payload = {}) {
+    if (issSideWorkerMode !== 'live' || !live.running) throw new Error('Live is not ready');
+    const code = clean(payload.item);
+    if (!code) throw new Error('Item required');
+    enqueueLiveBarcode(code);
+    return { queued: code };
+  }
+
+  async function issSideQueueRun(payload = {}) {
+    issSideSetMode('queue');
+    qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
+      .map(clean).filter(Boolean).join('\n');
+
+    q.runSeq++;
+    const run = q.runSeq;
+    q.list = parseContainers(qText.value);
+    q.index = 0;
+    q.failed = [];
+    q.running = !!q.list.length;
+    q.paused = false;
+    renderQueue(q.running ? 'starting API queue' : 'no containers');
+    if (!q.running) return { done: 0, total: 0, failed: [] };
+
+    queuePump(run);
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (q.running && q.runSeq === run && Date.now() < deadline) await sleep(120);
+    if (q.running && Date.now() >= deadline) {
+      issSideStopQueue('timeout');
+      throw new Error('Queue timed out');
+    }
+    return { done: q.index, total: q.list.length, failed: [...q.failed] };
+  }
+
+  function issSideScrubScan(payload = {}) {
+    if (issSideWorkerMode !== 'scrubber') issSideSetMode('scrubber');
+    const code = clean(payload.item || payload.source);
+    if (!validContainer(code)) throw new Error('Tote must start with csX or tsX');
+    if (scrub.halted) throw new Error(scrub.error || 'Scrubber stopped');
+
+    scrub.items.push({ code, state:'QUEUED', reason:'', sourceMeta:null });
+    scrub.note = `${code} queued`;
+    renderScrub();
+    pumpScrubValidation(scrub.session);
+    pumpScrubClose(scrub.session);
+    return { queued: code };
+  }
+
+  function installIssConsoleSidelineWorkerBridge() {
+    if (!ISS_CONSOLE_WORKER || window.parent === window) return;
+
+    window.addEventListener('message', async event => {
+      const message = event.data;
+      if (
+        event.source !== window.parent ||
+        !/fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '') ||
+        message?.type !== 'ISS_CONSOLE_RPC' ||
+        message?.worker !== 'sideline'
+      ) return;
+
+      const id = String(message.id || '');
+      const command = String(message.command || '');
+      if (!id || !command) return;
+
+      if (issSideWorkerBusy && !['ping','stop','live.item'].includes(command)) {
+        issSideSend('ISS_CONSOLE_RPC_RESULT', { id, ok:false, error:'Sideline worker busy' });
+        return;
+      }
+
+      try {
+        let data = null;
+        if (command === 'ping') {
+          data = { ready:true, mode:issSideWorkerMode, state:issSideSnapshot() };
+        } else if (command === 'mode') {
+          data = { mode: issSideSetMode(message.payload?.mode) };
+        } else if (command === 'stop') {
+          if (lazy.running || lazy.activeRun) stopLazyForModeSwitch('stopped from ISS Console');
+          if (live.running || live.sourceReady) stopLive();
+          if (q.running) issSideStopQueue('stopped from ISS Console');
+          if (feature.scrub) {
+            feature.scrub = false;
+            stopScrubSession('stopped from ISS Console');
+          }
+          data = { stopped:true };
+        } else if (command === 'lazy.run') {
+          issSideWorkerBusy = true;
+          data = await issSideLazyRun(message.payload || {});
+        } else if (command === 'live.configure') {
+          issSideWorkerBusy = true;
+          data = await issSideLiveConfigure(message.payload || {});
+        } else if (command === 'live.item') {
+          data = issSideLiveItem(message.payload || {});
+        } else if (command === 'queue.run') {
+          issSideWorkerBusy = true;
+          data = await issSideQueueRun(message.payload || {});
+        } else if (command === 'scrub.scan') {
+          data = issSideScrubScan(message.payload || {});
+        } else {
+          throw new Error(`Unknown Sideline worker command: ${command}`);
+        }
+
+        issSideSend('ISS_CONSOLE_RPC_RESULT', { id, ok:true, data });
+      } catch (error) {
+        issSideSend('ISS_CONSOLE_RPC_RESULT', {
+          id,
+          ok:false,
+          error:String(error?.message || error || 'Sideline worker error')
+        });
+      } finally {
+        if (!['ping','stop','live.item','scrub.scan','mode'].includes(command)) issSideWorkerBusy = false;
+        issSideEmitProgress();
+      }
+    });
+
+    issSideStartProgress();
+    issSideSend('ISS_CONSOLE_WORKER_READY', { ready:true });
+  }
+
   // Boot
   function boot() {
     document.addEventListener('click', handleUniversalReturnClick, true);
@@ -5270,6 +5539,12 @@
     armRecoveryWatchdog(15000);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
-  else boot();
+  if (ISS_CONSOLE_WORKER) {
+    const workerBoot = () => installIssConsoleSidelineWorkerBridge();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', workerBoot, { once:true });
+    else workerBoot();
+  } else {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
+    else boot();
+  }
 })();
