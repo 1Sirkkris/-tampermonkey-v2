@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.21
+// @version      0.3.22
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -17,7 +17,7 @@
   window.__sidelineApiMoveTest_v0201 = true;
 
   const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
-  const VERSION = '0.3.21';
+  const VERSION = '0.3.22';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -5317,7 +5317,10 @@
     lDest.value = clean(payload.dest);
     lItems.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
       .map(clean).filter(Boolean).join('\n');
-    if (typeof payload.clearSource === 'boolean') lClear.checked = payload.clearSource;
+    if (typeof payload.clearSource === 'boolean') {
+      lClear.checked = payload.clearSource;
+      lClear.dispatchEvent(new Event('change', { bubbles:true }));
+    }
 
     issSideEmitProgress();
     await startLazy();
@@ -5326,6 +5329,15 @@
     const moved = lazy.items.filter(item => item.status === 'MOVED').reduce((sum,item) => sum + itemQty(item), 0);
     const failed = lazy.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status)).reduce((sum,item) => sum + itemQty(item), 0);
     return { moved, failed, message: clean(lazy.note || 'complete') };
+  }
+
+  function issSideLazyScan(payload = {}) {
+    const code = clean(payload.code || payload.item || '');
+    if (!code) throw new Error('Scan required');
+    const accepted = acceptCollapsedLazyScan(code);
+    if (!accepted) throw new Error('Lazy scan not accepted in current state');
+    issSideEmitProgress();
+    return { accepted:true, code };
   }
 
   async function issSideLiveConfigure(payload = {}) {
@@ -5406,7 +5418,7 @@
       const command = String(message.command || '');
       if (!id || !command) return;
 
-      if (issSideWorkerBusy && !['ping','stop','live.item'].includes(command)) {
+      if (issSideWorkerBusy && !['ping','stop','live.item','lazy.scan'].includes(command)) {
         issSideSend('ISS_CONSOLE_RPC_RESULT', { id, ok:false, error:'Sideline worker busy' });
         return;
       }
@@ -5430,6 +5442,8 @@
         } else if (command === 'lazy.run') {
           issSideWorkerBusy = true;
           data = await issSideLazyRun(message.payload || {});
+        } else if (command === 'lazy.scan') {
+          data = issSideLazyScan(message.payload || {});
         } else if (command === 'live.configure') {
           issSideWorkerBusy = true;
           data = await issSideLiveConfigure(message.payload || {});
@@ -5452,7 +5466,7 @@
           error:String(error?.message || error || 'Sideline worker error')
         });
       } finally {
-        if (!['ping','stop','live.item','scrub.scan','mode'].includes(command)) issSideWorkerBusy = false;
+        if (!['ping','stop','live.item','lazy.scan','scrub.scan','mode'].includes(command)) issSideWorkerBusy = false;
         issSideEmitProgress();
       }
     });
