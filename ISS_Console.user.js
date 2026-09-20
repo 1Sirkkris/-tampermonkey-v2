@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.5
+// @version      0.1.6
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V015__) return;
-  window.__ISS_CONSOLE_V015__ = true;
+  if (window.__ISS_CONSOLE_V016__) return;
+  window.__ISS_CONSOLE_V016__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -77,9 +77,10 @@
       pending: new Map()
     },
     sideline: {
-      origin: SIDELINE_ORIGIN,
+      origin: location.origin,
       url: SIDELINE_WORKER_URL,
       frame: null,
+      local: true,
       ready: false,
       version: '',
       pending: new Map()
@@ -102,7 +103,10 @@
   }
 
   function workerFrame(worker) {
-    return workers[worker]?.frame?.contentWindow || null;
+    const state = workers[worker];
+    if (!state) return null;
+    if (state.local) return window;
+    return state.frame?.contentWindow || null;
   }
 
   function observe(type, data = {}) {
@@ -140,7 +144,7 @@
         id,
         command,
         payload
-      }, state.origin);
+      }, state.local ? location.origin : state.origin);
     });
   }
 
@@ -260,7 +264,10 @@
     if (!message || typeof message !== 'object') return;
     const worker = message.worker;
     const state = workers[worker];
-    if (!state || event.origin !== state.origin || event.source !== workerFrame(worker)) return;
+    if (!state) return;
+    const originOk = state.local ? event.origin === location.origin : event.origin === state.origin;
+    const sourceOk = state.local ? event.source === window : event.source === workerFrame(worker);
+    if (!originOk || !sourceOk) return;
 
     if (message.type === 'ISS_CONSOLE_WORKER_READY') {
       observe('WORKER_READY_MESSAGE', { worker, version:message.version || '' });
@@ -304,7 +311,26 @@
 
   function spawnWorker(worker) {
     const state = workers[worker];
-    if (!state || state.frame) return;
+    if (!state) return;
+
+    if (state.local) {
+      observe('WORKER_SPAWN', { worker, origin:location.origin, path:'local' });
+      setTimeout(() => {
+        if (state.ready) return;
+        try {
+          window.postMessage({
+            type:'ISS_CONSOLE_RPC',
+            worker,
+            id:nextRpcId(worker),
+            command:'ping',
+            payload:{}
+          }, location.origin);
+        } catch {}
+      }, 1200);
+      return;
+    }
+
+    if (state.frame) return;
     const frame = document.createElement('iframe');
     frame.className = 'iss-worker-frame';
     frame.name = 'iss-console-' + worker + '-worker';
