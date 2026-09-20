@@ -23,7 +23,7 @@
   if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__fcrMasterCore_v018test = true;
 
-  const VERSION = '0.1.39';
+  const VERSION = '0.1.40';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
