@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.19
+// @version      0.1.20
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.19';
+  const VERSION = '0.1.20';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0119__) return;
-  window.__ISS_CONSOLE_V0119__ = true;
+  if (window.__ISS_CONSOLE_V0120__) return;
+  window.__ISS_CONSOLE_V0120__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -1173,7 +1173,7 @@
       return;
     }
     if (area === 'move') {
-      for (const el of $('[data-move-source],[data-move-dest],[data-move-items],[data-move-qty]')) el.value = '';
+      for (const el of document.querySelectorAll('[data-move-source],[data-move-dest],[data-move-items],[data-move-qty]')) el.value = '';
       panelStatus('move', 'Cleared', '');
       $('[data-move-source]')?.focus();
       return;
@@ -1186,7 +1186,7 @@
       return;
     }
 
-    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    for (const el of document.querySelectorAll('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     sidelineRunBusy = false;
     sidelineAttention = '';
     sidelineItemsSignature = '';
@@ -1433,7 +1433,7 @@
         .catch(error => panelStatus('sideline', error.message, 'error'));
     });
 
-    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) {
+    for (const el of document.querySelectorAll('[data-side-source],[data-side-dest],[data-side-items]')) {
       el.addEventListener('input', () => {
         if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
       });
