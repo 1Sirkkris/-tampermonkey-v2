@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.35
+// @version      0.3.36
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.35';
+  const VERSION = '0.3.36';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -5331,6 +5331,7 @@
   let issSideWorkerBusy = false;
   let issSideWorkerMode = '';
   let issSideProgressTimer = 0;
+  let issSideControlSeq = 0;
 
   function issSideSend(type, detail = {}) {
     if (!ISS_CONSOLE_WORKER) return;
@@ -5488,6 +5489,7 @@
   async function issSideLazyRun(payload = {}) {
     issSideSetMode('lazy');
     resetLazy('ISS Console ready');
+    const controlSeq = issSideControlSeq;
 
     lSrc.value = clean(payload.source);
     lDest.value = clean(payload.dest);
@@ -5503,6 +5505,11 @@
     issSideEmitProgress();
     await startLazy();
 
+    if (controlSeq !== issSideControlSeq) {
+      const error = new Error('Run cancelled');
+      error.issCancelled = true;
+      throw error;
+    }
     if (lazy.error) throw new Error(lazy.error);
     const moved = lazy.items.filter(item => item.status === 'MOVED').reduce((sum,item) => sum + itemQty(item), 0);
     const failed = lazy.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status)).reduce((sum,item) => sum + itemQty(item), 0);
@@ -5589,6 +5596,7 @@
 
   function issSideReset(payload = {}) {
     const mode = String(payload.mode || issSideWorkerMode || '').toLowerCase();
+    issSideControlSeq++;
 
     if (mode === 'lazy') {
       resetLazy('ISS Console reset');
@@ -5612,6 +5620,7 @@
 
   async function issSideQueueRun(payload = {}) {
     issSideSetMode('queue');
+    const controlSeq = issSideControlSeq;
     qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
       .map(clean).filter(Boolean).join('\n');
 
@@ -5631,6 +5640,11 @@
     if (q.running && Date.now() >= deadline) {
       issSideStopQueue('timeout');
       throw new Error('Queue timed out');
+    }
+    if (controlSeq !== issSideControlSeq) {
+      const error = new Error('Run cancelled');
+      error.issCancelled = true;
+      throw error;
     }
     return { done: q.index, total: q.list.length, failed: [...q.failed] };
   }
@@ -5683,6 +5697,7 @@
           const mode = issSideSetMode(message.payload?.mode);
           data = { mode, state: issSideSnapshot() };
         } else if (command === 'stop') {
+          issSideControlSeq++;
           if (lazy.running || lazy.activeRun) stopLazyForModeSwitch('stopped from ISS Console');
           if (live.running || live.sourceReady) stopLive();
           if (q.running) issSideStopQueue('stopped from ISS Console');
@@ -5723,10 +5738,11 @@
         issSideSend('ISS_CONSOLE_RPC_RESULT', {
           id,
           ok:false,
-          error:String(error?.message || error || 'Sideline worker error')
+          error:String(error?.message || error || 'Sideline worker error'),
+          data:error?.issCancelled ? { cancelled:true } : null
         });
       } finally {
-        if (!['ping','stop','live.item','lazy.scan','scrub.scan','mode'].includes(command)) issSideWorkerBusy = false;
+        if (['lazy.run','live.configure','queue.run'].includes(command)) issSideWorkerBusy = false;
         issSideEmitProgress();
       }
     });
