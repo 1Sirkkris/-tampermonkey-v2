@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.12
+// @version      0.1.13
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.12';
+  const VERSION = '0.1.13';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0112__) return;
-  window.__ISS_CONSOLE_V0112__ = true;
+  if (window.__ISS_CONSOLE_V0113__) return;
+  window.__ISS_CONSOLE_V0113__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -1044,6 +1044,24 @@
     }
 
     const el = event.currentTarget;
+    if (area === 'move') {
+      const line = currentTextareaLine(el);
+      const dest = clean($('[data-move-dest]')?.value);
+      if (line.code && validContainer(dest) && upper(line.code) === upper(dest)) {
+        event.preventDefault();
+        event.stopPropagation();
+        removeTextareaLine(el, line);
+        const items = collectLines(el.value);
+        if (!items.length) {
+          panelStatus('move', 'Scan item(s) before confirming destination', 'error');
+          return;
+        }
+        panelStatus('move', 'Destination confirmed • starting MoveItems…', 'working');
+        void runMove();
+        return;
+      }
+    }
+
     if (area === 'sideline' && sidelineMode === 'lazy') {
       const line = currentTextareaLine(el);
       const source = clean($('[data-side-source]')?.value);
@@ -1113,6 +1131,7 @@
       if (event.key !== 'Enter') return;
       event.preventDefault();
       $('[data-move-items]')?.focus();
+      panelStatus('move', 'Scan item(s) • rescan destination to start', 'ok');
     });
     $('[data-move-items]')?.addEventListener('keydown', event => textareaScannerHandler(event, 'move'));
     $('[data-move-run]')?.addEventListener('click', runMove);
