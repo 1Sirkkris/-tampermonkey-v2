@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.70
+// @version      0.1.71
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.70';
+  const VERSION = '0.1.71';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -695,6 +695,48 @@
     return status === 'error' && /(?:measurement login required|token expired|authentication required|login popup)/i.test(clean(message));
   }
 
+  async function runMadcatAuthBadgeTest(row, button, previousState, previousMessage = '') {
+    if (!row?.isConnected || !button?.isConnected || button.dataset.authTestBusy === '1') return;
+    const fnsku = clean(row._fcratcMadcatFnsku);
+    const asin = clean(row._fcratcMadcatAsin);
+    const identifier = fnsku || asin;
+    if (!identifier) {
+      button.textContent = 'NO ID';
+      button.title = 'MADCAT auth self-test needs an ASIN/FNSKU';
+      return;
+    }
+
+    button.dataset.authTestBusy = '1';
+    button.textContent = 'KILL…';
+    button.title = 'MADCAT auth self-test running';
+    usage('madcat.auth.self-test.hotkey');
+
+    try {
+      await coreRequest(
+        'madcatAuthSelfTest',
+        { identifier },
+        30000,
+        '',
+        progress => {
+          if (!button.isConnected) return;
+          const phase = clean(progress?.phase);
+          if (phase === 'token-cleared') button.textContent = 'KILLED';
+          else if (phase === 'silent-fetch-started') button.textContent = 'AUTO…';
+          else if (phase === 'pass') button.textContent = 'PASS ✓';
+        }
+      );
+
+      if (!row.isConnected) return;
+      button.textContent = 'PASS ✓';
+      button.title = 'Silent MADCAT auth recovery passed • verifying with a real MADCAT read…';
+      await checkMadcat(row, fnsku, asin, true, false);
+    } catch (error) {
+      if (!row.isConnected) return;
+      const detail = clean(error?.message || 'MADCAT auth self-test failed');
+      paintMadcat(row, 'error', 'AUTH SELF-TEST FAILED: ' + detail);
+    }
+  }
+
   function paintMadcat(row, state, message = '') {
     if (!row?.isConnected) return;
     const cell = row.querySelector('.madcat');
@@ -718,8 +760,9 @@
                 : 'ERROR ↻';
 
     const retryable = value === 'history-yes' || value === 'history-no' || value === 'error';
-    button.disabled = !retryable;
-    button.title = value === 'yes'
+    button.disabled = false;
+    button.setAttribute('aria-disabled', retryable ? 'false' : 'true');
+    button.title = (value === 'yes'
       ? 'RAW Item Measurement: MADCAT found within the past 30 days'
       : value === 'no'
         ? 'RAW Item Measurement: no MADCAT found within the past 30 days'
@@ -731,16 +774,23 @@
               ? 'Refreshing Item Measurement authentication…'
               : value === 'error'
                 ? `${message || 'MADCAT check failed'} — click to ${madcatRetryNeedsAuth(value, message) ? 'refresh auth and retry' : 'retry'}`
-                : 'Checking global raw MADCAT measurements from the past 30 days';
+                : 'Checking global raw MADCAT measurements from the past 30 days'
+    ) + '\nCtrl+Click = kill local MADCAT token → test silent recovery → verify real MADCAT read';
 
-    if (retryable) {
-      button.addEventListener('click', () => {
-        const fnsku = clean(row._fcratcMadcatFnsku);
-        const asin = clean(row._fcratcMadcatAsin);
-        const measurementId = fnsku || asin;
-        checkMadcat(row, fnsku, asin, true, Boolean(measurementId) && madcatRetryNeedsAuth(value, message));
-      }, { once: true });
-    }
+    button.addEventListener('click', event => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        runMadcatAuthBadgeTest(row, button, value, message);
+        return;
+      }
+      if (!retryable) return;
+
+      const fnsku = clean(row._fcratcMadcatFnsku);
+      const asin = clean(row._fcratcMadcatAsin);
+      const measurementId = fnsku || asin;
+      checkMadcat(row, fnsku, asin, true, Boolean(measurementId) && madcatRetryNeedsAuth(value, message));
+    });
 
     cell.replaceChildren(button);
   }
