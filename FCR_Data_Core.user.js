@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.24
+// @version      0.2.25
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.24';
+  const VERSION = '0.2.25';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -85,6 +85,9 @@
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_KEEPALIVE_TTL_MS = 5 * 60 * 1000;
   const MEASUREMENT_KEEPALIVE_HEARTBEAT_MS = 60 * 1000;
+  const MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS = 10 * 60 * 1000;
+  const MEASUREMENT_KEEPALIVE_REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
+  const MEASUREMENT_KEEPALIVE_VERIFY_MS = 15 * 1000;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
   const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
@@ -147,6 +150,7 @@
 
   const measurementKeepaliveOwner = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let measurementKeepaliveHeartbeat = 0;
+  let measurementKeepaliveLastRefreshAt = 0;
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
@@ -215,6 +219,38 @@ function releaseMeasurementKeepaliveOwner() {
   try { GM_deleteValue(MEASUREMENT_KEEPALIVE_OWNER_KEY); } catch {}
 }
 
+function refreshMeasurementKeepaliveFrame(frame, identifier, reason = 'watchdog') {
+  if (!frame?.isConnected) return false;
+  const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
+  if (!wanted) return false;
+
+  const now = Date.now();
+  if (measurementKeepaliveLastRefreshAt && now - measurementKeepaliveLastRefreshAt < MEASUREMENT_KEEPALIVE_REFRESH_COOLDOWN_MS) return false;
+
+  const before = readMeasurementAuth();
+  const beforeCapturedAt = Number(before?.capturedAt) || 0;
+  const beforeExpiresAt = Number(before?.exp) || 0;
+
+  const url = new URL(measurementKeepaliveUrl(wanted));
+  url.searchParams.set('fcrMadcatRefresh', String(now));
+  measurementKeepaliveLastRefreshAt = now;
+  frame.src = url.href;
+  recordUsage('madcat.auth.keepalive-refresh');
+
+  setTimeout(() => {
+    const after = readMeasurementAuth();
+    const refreshed =
+      Number(after?.capturedAt) > beforeCapturedAt &&
+      Number(after?.exp) > Math.max(beforeExpiresAt, Date.now() + MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS);
+
+    recordUsage(refreshed
+      ? 'madcat.auth.keepalive-renewed'
+      : 'madcat.auth.keepalive-refresh-miss');
+  }, MEASUREMENT_KEEPALIVE_VERIFY_MS);
+
+  return true;
+}
+
 function ensureMeasurementKeepalive(identifier) {
   const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
   if (!wanted) return false;
@@ -260,6 +296,12 @@ function ensureMeasurementKeepalive(identifier) {
           return;
         }
         writeMeasurementKeepaliveOwner();
+
+        const auth = readMeasurementAuth();
+        const expiresIn = Number(auth?.exp) - Date.now();
+        if (!auth || expiresIn <= MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS) {
+          refreshMeasurementKeepaliveFrame(node, wanted, auth ? 'renew-soon' : 'missing-auth');
+        }
       }, MEASUREMENT_KEEPALIVE_HEARTBEAT_MS);
     }
 
@@ -356,7 +398,7 @@ function gestureMeasurementIdentifier(target) {
     return auth;
   }
 
-  // Auth renewal is intentionally user-triggered only; never steal focus from normal FCResearch clicks/Enter presses.
+  // Silent keepalive is primary. A visible bridge is only a user-gesture fallback if silent renewal misses.
 
   function decodeJwtPayload(token) {
     try {
