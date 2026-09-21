@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.23
+// @version      0.1.24
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.23';
+  const VERSION = '0.1.24';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2163,7 +2163,37 @@
     });
   }
 
+  function recordMadcatAuthTestEvent(detail) {
+    if (!detail || typeof detail !== 'object') return;
+    const phase = scrubText(detail.phase || '').slice(0, 60);
+    if (!phase) return;
+
+    const data = {
+      phase,
+      coreVersion:scrubText(detail.coreVersion || ''),
+      at:Math.max(0, Number(detail.at) || 0)
+    };
+
+    for (const key of [
+      'elapsedMs',
+      'beforeRemainingMs',
+      'beforeExpiresAt',
+      'afterExpiresAt',
+      'expiryDeltaMs'
+    ]) {
+      if (Number.isFinite(Number(detail[key]))) data[key] = Number(detail[key]);
+    }
+    if (typeof detail.restored === 'boolean') data.restored = detail.restored;
+    if (detail.error) data.error = scrubText(detail.error).slice(0, 180);
+
+    add('fcr.madcat.auth-test', data);
+  }
+
   function installFcrDataCoreTrace() {
+    window.addEventListener('fcr-madcat-auth:test', event => {
+      recordMadcatAuthTestEvent(parseEventDetail(event.detail));
+    }, true);
+
     window.addEventListener('fcr-data-core:request', event => {
       const message = parseEventDetail(event.detail);
       if (!message?.id || !trackedCoreType(message.type)) return;
@@ -2195,6 +2225,20 @@
       };
 
       if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);
+
+      if (pending.type === 'madcatAuthSelfTest') {
+        const result = message.data && typeof message.data === 'object' ? message.data : {};
+        add('fcr.madcat.auth-test-result', {
+          ok:!!message.ok,
+          elapsedMs:Number.isFinite(Number(result.elapsedMs)) ? Number(result.elapsedMs) : elapsedMs,
+          beforeExpiresAt:Number.isFinite(Number(result.beforeExpiresAt)) ? Number(result.beforeExpiresAt) : 0,
+          afterExpiresAt:Number.isFinite(Number(result.afterExpiresAt)) ? Number(result.afterExpiresAt) : 0,
+          expiryDeltaMs:Number.isFinite(Number(result.expiryDeltaMs)) ? Number(result.expiryDeltaMs) : 0,
+          coreVersion:scrubText(message.version || ''),
+          error
+        });
+        return;
+      }
 
       if (error === 'fcr-data-core:cancelled') {
         add('fcr.core.cancelled', response);
