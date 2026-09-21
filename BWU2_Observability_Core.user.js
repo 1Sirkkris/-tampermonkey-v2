@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.24
+// @version      0.1.25
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.24';
+  const VERSION = '0.1.25';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2176,6 +2176,7 @@
 
     for (const key of [
       'elapsedMs',
+      'remainingMs',
       'beforeRemainingMs',
       'beforeExpiresAt',
       'afterExpiresAt',
@@ -2183,7 +2184,11 @@
     ]) {
       if (Number.isFinite(Number(detail[key]))) data[key] = Number(detail[key]);
     }
-    if (typeof detail.restored === 'boolean') data.restored = detail.restored;
+    for (const key of ['renewed','recovered','sameToken','restored']) {
+      if (typeof detail[key] === 'boolean') data[key] = detail[key];
+    }
+    if (detail.method) data.method = scrubText(detail.method).slice(0, 80);
+    if (detail.captureSource) data.captureSource = scrubText(detail.captureSource).slice(0, 80);
     if (detail.error) data.error = scrubText(detail.error).slice(0, 180);
 
     add('fcr.madcat.auth-test', data);
@@ -2230,6 +2235,11 @@
         const result = message.data && typeof message.data === 'object' ? message.data : {};
         add('fcr.madcat.auth-test-result', {
           ok:!!message.ok,
+          renewed:typeof result.renewed === 'boolean' ? result.renewed : undefined,
+          recovered:typeof result.recovered === 'boolean' ? result.recovered : undefined,
+          sameToken:typeof result.sameToken === 'boolean' ? result.sameToken : undefined,
+          method:scrubText(result.method || ''),
+          captureSource:scrubText(result.captureSource || ''),
           elapsedMs:Number.isFinite(Number(result.elapsedMs)) ? Number(result.elapsedMs) : elapsedMs,
           beforeExpiresAt:Number.isFinite(Number(result.beforeExpiresAt)) ? Number(result.beforeExpiresAt) : 0,
           afterExpiresAt:Number.isFinite(Number(result.afterExpiresAt)) ? Number(result.afterExpiresAt) : 0,
