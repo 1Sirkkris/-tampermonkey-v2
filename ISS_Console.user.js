@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.22
+// @version      0.1.23
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.22';
+  const VERSION = '0.1.23';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0122__) return;
-  window.__ISS_CONSOLE_V0122__ = true;
+  if (window.__ISS_CONSOLE_V0123__) return;
+  window.__ISS_CONSOLE_V0123__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -495,7 +495,8 @@
     if (!['edit','move','sideline'].includes(area)) return;
 
     const attention = area === 'sideline' ? String(message.attention || '') : '';
-    panelStatus(area, message.message || 'Working…', attention ? 'attention' : (message.error ? 'error' : 'working'));
+    const needsUser = ['rescan-destination','live-destination'].includes(attention);
+    panelStatus(area, message.message || 'Working…', needsUser ? 'attention' : (message.error ? 'error' : 'working'));
 
     if (area === 'sideline') {
       const previousAttention = sidelineAttention;
@@ -518,6 +519,9 @@
           items?.focus();
           items?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
         }
+      } else if (attention === 'predicant-recovery') {
+        setPanelLoading('sideline', true, 'Destination confirmed • emptying destination…');
+        panelStatus('sideline', message.message || 'Destination confirmed • emptying destination…', 'working');
       } else if (attention === 'live-destination') {
         const issue = message.issue || {};
         const destInput = $('[data-side-dest]');
@@ -533,6 +537,9 @@
           destInput?.select?.();
           destInput?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
         }
+      } else if (previousAttention === 'predicant-recovery' && sidelineRunBusy) {
+        setPanelLoading('sideline', false);
+        setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       } else if (previousAttention === 'rescan-destination' && sidelineRunBusy) {
         setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       }
@@ -1354,10 +1361,25 @@
     if (!trigger) return false;
 
     if (sidelineRunBusy) {
+      const confirmingPredicant =
+        sidelineAttention === 'rescan-destination' &&
+        normalized === upper(dest);
+
+      if (confirmingPredicant) {
+        setPanelLoading('sideline', true, 'Confirming destination…');
+        panelStatus('sideline', 'Destination scanned • confirming…', 'working');
+      }
+
       try {
-        await rpc('sideline', 'lazy.scan', { code }, 15000);
-        panelStatus('sideline', code + ' accepted', 'working');
+        const result = await rpc('sideline', 'lazy.scan', { code }, 15000);
+        if (result?.recovery) {
+          setPanelLoading('sideline', true, 'Destination confirmed • emptying destination…');
+          panelStatus('sideline', 'Destination confirmed • emptying destination…', 'working');
+        } else {
+          panelStatus('sideline', code + ' accepted', 'working');
+        }
       } catch (error) {
+        if (confirmingPredicant) setPanelLoading('sideline', false);
         panelStatus('sideline', error.message, 'error');
       }
       return true;
