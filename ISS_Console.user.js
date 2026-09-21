@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.20
+// @version      0.1.21
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.20';
+  const VERSION = '0.1.21';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0120__) return;
-  window.__ISS_CONSOLE_V0120__ = true;
+  if (window.__ISS_CONSOLE_V0121__) return;
+  window.__ISS_CONSOLE_V0121__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -1379,7 +1379,7 @@
     $('[data-side-run]')?.addEventListener('click', runSideline);
 
     for (const button of $$('[data-stop]')) button.addEventListener('click', () => stopArea(button.dataset.stop));
-    for (const button of $('[data-clear]')) button.addEventListener('click', () => { void clearArea(button.dataset.clear); });
+    for (const button of document.querySelectorAll('[data-clear]')) button.addEventListener('click', () => { void clearArea(button.dataset.clear); });
   }
 
   function hydrate() {
