@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.10
+// @version      0.1.11
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.11';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0110__) return;
-  window.__ISS_CONSOLE_V0110__ = true;
+  if (window.__ISS_CONSOLE_V0111__) return;
+  window.__ISS_CONSOLE_V0111__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -784,7 +784,10 @@
         destDamage: $('[data-edit-dest-damage]')?.value || 'Defective',
         items
       }, LONG_TIMEOUT);
-      panelStatus('edit', 'DONE ✓ ' + result.done + '/' + result.total, 'ok');
+      const editItems = $('[data-edit-items]');
+      if (editItems) editItems.value = '';
+      panelStatus('edit', 'SUCCESS ✓ → ' + destState + ' • ' + result.done + '/' + result.total, 'ok');
+      editItems?.focus();
     } catch (error) {
       panelStatus('edit', error.message, 'error');
     } finally {
@@ -809,7 +812,16 @@
     panelStatus('move', 'Starting MoveItems…', 'working');
     try {
       const result = await rpc('aft', 'move.run', { source, dest, items, mode: moveMode, qty }, LONG_TIMEOUT);
-      panelStatus('move', 'DONE ✓ ' + result.done + '/' + result.total, 'ok');
+      const moveSource = $('[data-move-source]');
+      const moveDest = $('[data-move-dest]');
+      const moveItems = $('[data-move-items]');
+      const moveQty = $('[data-move-qty]');
+      if (moveSource) moveSource.value = '';
+      if (moveDest) moveDest.value = '';
+      if (moveItems) moveItems.value = '';
+      if (moveQty) moveQty.value = '';
+      panelStatus('move', 'SUCCESS ✓ → ' + dest + ' • ' + result.done + '/' + result.total + ' moved', 'ok');
+      moveSource?.focus();
     } catch (error) {
       panelStatus('move', error.message, 'error');
     } finally {
