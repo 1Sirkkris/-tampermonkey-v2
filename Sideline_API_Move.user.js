@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.34
+// @version      0.3.35
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.34';
+  const VERSION = '0.3.35';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -5528,6 +5528,7 @@
   async function issSideLiveConfigure(payload = {}) {
     issSideSetMode('live');
     resetLive('ISS Console ready');
+    if (typeof payload.delayEnabled === 'boolean') live.delayEnabled = payload.delayEnabled;
 
     liveSrc.value = clean(payload.source);
     await acceptLiveSource();
@@ -5564,6 +5565,49 @@
 
     issSideEmitProgress();
     return { ready:true, source:live.src, dest:live.dest };
+  }
+
+  function issSideLiveDelay(payload = {}) {
+    if (issSideWorkerMode !== 'live') issSideSetMode('live');
+    live.delayEnabled = payload.enabled !== false;
+    if (!live.delayEnabled) live.nextMoveAt = 0;
+    live.note = live.delayEnabled
+      ? 'move delay ON — 5–11s pacing'
+      : 'move delay OFF — no artificial pacing';
+    renderLive();
+    issSideEmitProgress();
+    return { enabled:live.delayEnabled };
+  }
+
+  function issSideLiveSkip() {
+    if (issSideWorkerMode !== 'live' || !live.running) throw new Error('Live is not running');
+    if (!live.current) throw new Error('No current Live item to skip');
+    skipLiveCurrent();
+    issSideEmitProgress();
+    return { skipped:true };
+  }
+
+  function issSideReset(payload = {}) {
+    const mode = String(payload.mode || issSideWorkerMode || '').toLowerCase();
+
+    if (mode === 'lazy') {
+      resetLazy('ISS Console reset');
+    } else if (mode === 'live') {
+      resetLive('ISS Console reset');
+    } else if (mode === 'queue') {
+      issSideStopQueue('reset');
+      q.list = [];
+      q.index = 0;
+      q.failed = [];
+      qText.value = '';
+      renderQueue('reset');
+    } else if (mode === 'scrubber') {
+      stopScrubSession('reset');
+      if (feature.scrub) startScrubSession();
+    }
+
+    issSideEmitProgress();
+    return { reset:true, mode };
   }
 
   async function issSideQueueRun(payload = {}) {
@@ -5625,7 +5669,7 @@
       const command = String(message.command || '');
       if (!id || !command) return;
 
-      if (issSideWorkerBusy && !['ping','stop','live.item','live.destination','lazy.scan'].includes(command)) {
+      if (issSideWorkerBusy && !['ping','stop','reset','live.item','live.destination','live.delay','live.skip','lazy.scan'].includes(command)) {
         issSideSend('ISS_CONSOLE_RPC_RESULT', { id, ok:false, error:'Sideline worker busy' });
         return;
       }
@@ -5659,6 +5703,12 @@
           data = issSideLiveItem(message.payload || {});
         } else if (command === 'live.destination') {
           data = issSideLiveDestination(message.payload || {});
+        } else if (command === 'live.delay') {
+          data = issSideLiveDelay(message.payload || {});
+        } else if (command === 'live.skip') {
+          data = issSideLiveSkip();
+        } else if (command === 'reset') {
+          data = issSideReset(message.payload || {});
         } else if (command === 'queue.run') {
           issSideWorkerBusy = true;
           data = await issSideQueueRun(message.payload || {});
