@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.30
+// @version      0.3.31
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.30';
+  const VERSION = '0.3.31';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -5305,15 +5305,29 @@
     } catch {}
   }
 
+  function issSideLazyItems() {
+    return lazy.items.map(item => ({
+      code:clean(item.code),
+      qty:itemQty(item),
+      status:clean(item.status || ''),
+      asin:clean(item.ctx?.asin || ''),
+      fnsku:clean(item.ctx?.fnsku || ''),
+      issue:clean(item.failReason || ''),
+      dateType:clean(item.ctx?.dateType || '')
+    }));
+  }
+
   function issSideSnapshot() {
     if (issSideWorkerMode === 'lazy') {
+      const items = issSideLazyItems();
       return {
         mode: 'lazy',
         running: !!lazy.running,
         message: clean(lazy.error || lazy.note || 'Ready'),
         attention: lazy.predicant ? 'rescan-destination' : '',
         current: Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
-        total: lazy.items.length
+        total: lazy.items.length,
+        items
       };
     }
     if (issSideWorkerMode === 'live') {
@@ -5424,7 +5438,14 @@
     if (lazy.error) throw new Error(lazy.error);
     const moved = lazy.items.filter(item => item.status === 'MOVED').reduce((sum,item) => sum + itemQty(item), 0);
     const failed = lazy.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status)).reduce((sum,item) => sum + itemQty(item), 0);
-    return { moved, failed, message: clean(lazy.note || 'complete') };
+    const items = issSideLazyItems();
+    return {
+      moved,
+      failed,
+      message: clean(lazy.note || 'complete'),
+      items,
+      failures: items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status))
+    };
   }
 
   function issSideLazyScan(payload = {}) {
@@ -5584,7 +5605,7 @@
       for (const key of ['queue','scrub','qty','lazy','live']) feature[key] = false;
       if (ISS_CONSOLE_LOCAL) {
         const style = document.createElement('style');
-        style.textContent = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-og-expiry,#sh-invalid-toast,#sh-lazy-running-indicator,#sh-move-corner{display:none!important}';
+        style.textContent = '#sh-dock,#sh-queue,#sh-scrub,#sh-qty,#sh-lazy,#sh-live,#sh-scrub-warning,#sh-invalid-toast,#sh-lazy-running-indicator,#sh-move-corner{display:none!important}';
         (document.head || document.documentElement).appendChild(style);
       }
     }
