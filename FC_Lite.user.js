@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.68
+// @version      0.1.69
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.68';
+  const VERSION = '0.1.69';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -261,7 +261,7 @@
     clearQueuedScans();
     sessionSerial++;
     inventoryLoadSerial++;
-    containerLoading = false;
+    containerLoading = true;
     container = wanted;
     containerRows = [];
     containerLookup = new Map();
@@ -519,8 +519,9 @@
 
   function focusScanner() {
     if (!scanInput) return;
-    scanInput.focus({ preventScroll: true });
-    scanInput.select();
+    const scanInProgress = clean(scanInput.value).length > 0;
+    if (document.activeElement !== scanInput) scanInput.focus({ preventScroll: true });
+    if (!scanInProgress) scanInput.select();
   }
 
 
