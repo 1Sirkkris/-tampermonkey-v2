@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.69
+// @version      0.1.70
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.69';
+  const VERSION = '0.1.70';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1197,6 +1197,9 @@
       .fcratc-core-status.bad { background:#991b1b; }
       .fcratc-copy-stats { height:33px; padding:0 10px; border:1px solid #a8bdd5; border-radius:6px; background:#e8f1fb; color:#163a63; font-size:12.5px; font-weight:900; cursor:pointer; }
       .fcratc-copy-stats:hover { background:#d8e8f8; }
+      .fcratc-madcat-test { height:33px; padding:0 10px; border:1px solid #d97706; border-radius:6px; background:#fff7ed; color:#9a3412; font-size:12.5px; font-weight:900; cursor:pointer; }
+      .fcratc-madcat-test:hover { background:#ffedd5; }
+      .fcratc-madcat-test:disabled { opacity:.65; cursor:wait; }
       .fcratc-full-fcr {
         margin-left:0;
         height:33px;
@@ -1739,6 +1742,7 @@
         font-size:20px;
       }
       #fcratc-root.fcratc-tote-audit .fcratc-copy-stats,
+      #fcratc-root.fcratc-tote-audit .fcratc-madcat-test,
       #fcratc-root.fcratc-tote-audit .fcratc-tote-toggle,
       #fcratc-root.fcratc-tote-audit .fcratc-full-fcr {
         min-height:50px;
@@ -3075,6 +3079,7 @@
         <span class="fcratc-lite-container">NO CONTAINER</span>
         <span class="fcratc-core-status" title="Shared FCR Data Core status">CORE …</span>
         <button type="button" class="fcratc-tote-toggle active" title="Tote Audit active — click to return to FC-Lite sections">TOTE AUDIT ON</button>
+        <button type="button" class="fcratc-madcat-test" title="Reversible MADCAT auth test: deletes the local token, silently reacquires it, and restores the original token if the test fails">TEST MADCAT</button>
         <button type="button" class="fcratc-copy-stats" title="Copy temporary local usage stats">COPY STATS</button>
         <button type="button" class="fcratc-full-fcr" title="Open this container in normal FCResearch">FULL FCRESEARCH ↗</button>
       </div>
@@ -3130,6 +3135,38 @@
     root.querySelector('.fcratc-lite-brand').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-full-fcr').addEventListener('click', returnToFullFCResearch);
     root.querySelector('.fcratc-tote-toggle').addEventListener('click', () => openSectionsMode(container));
+    root.querySelector('.fcratc-madcat-test').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const old = button.textContent;
+      button.disabled = true;
+      button.textContent = 'AUTH TEST…';
+      try {
+        const result = await coreRequest(
+          'madcatAuthSelfTest',
+          {},
+          30000,
+          '',
+          progress => {
+            const phase = clean(progress?.phase);
+            if (phase === 'token-cleared') button.textContent = 'TOKEN KILLED';
+            else if (phase === 'silent-fetch-started') button.textContent = 'AUTO FETCH…';
+            else if (phase === 'pass') button.textContent = 'AUTH PASS ✓';
+          }
+        );
+        button.textContent = 'AUTH PASS ✓';
+        button.title = `MADCAT auth self-test PASS • restored silently in ${Math.max(0, Number(result?.elapsedMs) || 0)} ms`;
+      } catch (error) {
+        button.textContent = 'AUTH FAIL';
+        button.title = clean(error?.message || 'MADCAT auth self-test failed');
+      } finally {
+        button.disabled = false;
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          button.textContent = old;
+        }, 3000);
+      }
+    });
+
     root.querySelector('.fcratc-copy-stats').addEventListener('click', async event => {
       const button = event.currentTarget;
       const old = button.textContent;
