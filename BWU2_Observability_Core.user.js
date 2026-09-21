@@ -2,8 +2,8 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.21
-// @description  Lightweight cross-tool observability core with bounded RIVER workflow-state tracing. Silent except tiny FCResearch counter/export/clear control.
+// @version      0.1.22
+// @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.21';
+  const VERSION = '0.1.22';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -55,7 +55,7 @@
   const PAGE_PREFIX = `${PREFIX}page:`;
   const COUNT_PREFIX = `${PREFIX}count:`;
   const REVISION_KEY = `${PREFIX}revision`;
-  const MAX_EVENTS = 3000;
+  const MAX_EVENTS = 6000;
   const WARN_AT = Math.floor(MAX_EVENTS * 0.80);
   const FLUSH_MS = 300;
   const MAX_BODY_CHARS = 5000;
@@ -63,7 +63,10 @@
   const EVENT_LOOP_WARN_MS = 500;
   const EVENT_LOOP_MIN_GAP_MS = 10000;
   const FCR_NETWORK_QUIET_MS = 1200;
-  const FCR_CORE_QUIET_MS = 1200;
+  const FCR_CORE_QUIET_MS = 10000;
+  const WORKER_PROGRESS_HEARTBEAT_MS = 60000;
+  const FCLITE_USAGE_SUMMARY_MS = 30000;
+  const UI_ENTER_BURST_GAP_MS = 5000;
   const SLOW_NETWORK_MS = 1500;
   const VISIBILITY_DEBOUNCE_MS = 750;
   const VIEWPORT_DEBOUNCE_MS = 500;
@@ -131,6 +134,10 @@
   const corePending = new Map();
   let coreSuccessTimer = 0;
   let coreSuccessStats = new Map();
+  let workerProgressStates = new Map();
+  let fcliteUsageTimer = 0;
+  let fcliteUsageStats = new Map();
+  let uiEnterBatches = new Map();
   let aftMoveProbeAction = 0;
   let aftMoveProbeStatus = '';
   let aftMoveProbeCount = 0;
@@ -229,6 +236,11 @@
     clearTimeout(coreSuccessTimer);
     coreSuccessTimer = 0;
     coreSuccessStats = new Map();
+    workerProgressStates = new Map();
+    clearTimeout(fcliteUsageTimer);
+    fcliteUsageTimer = 0;
+    fcliteUsageStats = new Map();
+    uiEnterBatches = new Map();
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
@@ -783,6 +795,9 @@
       const signature = `${aftMoveProbeAction}|${response.status || ''}|${JSON.stringify(response.quantityNumbers || [])}`;
       if (signature === aftMoveProbeStatus) return;
       aftMoveProbeStatus = signature;
+
+      const status = Number(base?.status) || 0;
+      if (status >= 200 && status < 300) return;
     }
 
     aftMoveProbeCount++;
@@ -1153,6 +1168,134 @@
     return true;
   }
 
+  function recordWorkerProgress(data = {}) {
+    const safe = sanitize(data);
+    const key = [safe?.worker || '', safe?.area || ''].join('|');
+    const signature = JSON.stringify(safe || {});
+    const now = Date.now();
+    const previous = workerProgressStates.get(key);
+
+    if (previous?.signature === signature) {
+      previous.suppressed++;
+      previous.lastSeen = now;
+      if (now - previous.lastLogged < WORKER_PROGRESS_HEARTBEAT_MS) return false;
+
+      const heartbeat = {
+        ...safe,
+        heartbeat:true,
+        suppressedRepeats:previous.suppressed,
+        stableMs:Math.max(0, now - previous.stateSince)
+      };
+      previous.suppressed = 0;
+      previous.lastLogged = now;
+      return add('script.ISS_CONSOLE_WORKER_PROGRESS', heartbeat);
+    }
+
+    const payload = { ...safe };
+    if (previous?.suppressed) {
+      payload.previousSuppressedRepeats = previous.suppressed;
+      payload.previousStableMs = Math.max(0, now - previous.stateSince);
+    }
+
+    workerProgressStates.set(key, {
+      signature,
+      stateSince:now,
+      lastSeen:now,
+      lastLogged:now,
+      suppressed:0
+    });
+    return add('script.ISS_CONSOLE_WORKER_PROGRESS', payload);
+  }
+
+  function recordUiEnter(data = {}) {
+    const safe = sanitize(data);
+    if (!['item','container'].includes(String(safe?.inputKind || ''))) return add('ui.enter', safe);
+
+    const key = JSON.stringify([
+      safe?.tag || '',
+      safe?.id || '',
+      safe?.name || '',
+      safe?.label || '',
+      safe?.inputKind || ''
+    ]);
+    const now = Date.now();
+    const previous = uiEnterBatches.get(key);
+
+    if (
+      previous?.event?.data &&
+      pageEvents.includes(previous.event) &&
+      now - previous.lastTs <= UI_ENTER_BURST_GAP_MS
+    ) {
+      const gap = Math.max(0, now - previous.lastTs);
+      previous.lastTs = now;
+      previous.event.data.count = (Number(previous.event.data.count) || 1) + 1;
+      previous.event.data.lastAt = new Date(now).toISOString();
+      previous.event.data.spanMs = Math.max(0, now - previous.firstTs);
+      previous.event.data.minGapMs = previous.event.data.minGapMs == null
+        ? gap
+        : Math.min(Number(previous.event.data.minGapMs) || gap, gap);
+      previous.event.data.maxGapMs = Math.max(Number(previous.event.data.maxGapMs) || 0, gap);
+      scheduleFlush();
+      return true;
+    }
+
+    if (!add('ui.enter', { ...safe, count:1, spanMs:0 })) return false;
+    const event = pageEvents[pageEvents.length - 1];
+    if (event?.data) event.data.lastAt = event.at;
+    uiEnterBatches.set(key, { event, firstTs:now, lastTs:now });
+    return true;
+  }
+
+  function recordFcrUsage(detail = {}) {
+    const key = String(detail?.key || '');
+    if (!/^fclite\.item\.(?:scan|in|out)$/i.test(key)) return add('fcr.usage', detail);
+
+    const safeKey = scrubText(key).slice(0, 100);
+    const stat = fcliteUsageStats.get(safeKey) || {
+      key:safeKey,
+      count:0,
+      totalMs:0,
+      maxMs:0,
+      firstAt:Date.now(),
+      lastAt:0
+    };
+    const count = Math.max(1, Number(detail?.count) || 1);
+    const ms = Math.max(0, Number(detail?.ms) || 0);
+    stat.count += count;
+    stat.totalMs += ms;
+    stat.maxMs = Math.max(stat.maxMs, ms);
+    stat.lastAt = Date.now();
+    fcliteUsageStats.set(safeKey, stat);
+
+    if (!fcliteUsageTimer) {
+      fcliteUsageTimer = setTimeout(flushFcliteUsageSummary, FCLITE_USAGE_SUMMARY_MS);
+    }
+    return true;
+  }
+
+  function flushFcliteUsageSummary() {
+    clearTimeout(fcliteUsageTimer);
+    fcliteUsageTimer = 0;
+    if (!fcliteUsageStats.size) return;
+
+    const now = Date.now();
+    const operations = [...fcliteUsageStats.values()]
+      .map(stat => ({
+        key:stat.key,
+        count:stat.count,
+        averageMs:stat.count ? Math.round(stat.totalMs / stat.count) : 0,
+        maxMs:Math.round(stat.maxMs),
+        spanMs:Math.max(0, (stat.lastAt || now) - stat.firstAt)
+      }))
+      .sort((a,b) => a.key.localeCompare(b.key));
+
+    fcliteUsageStats = new Map();
+    add('fcr.usage.summary', {
+      windowMs:FCLITE_USAGE_SUMMARY_MS,
+      operations
+    });
+  }
+
   function rememberRuntimeVersion(name, version, source = 'event') {
     const safeName = scrubText(name || '').trim().slice(0, 60);
     const safeVersion = scrubText(version || '').trim().slice(0, 60);
@@ -1241,6 +1384,7 @@
 
   function collectSession(sessionId = activeSessionId) {
     flushCoreSuccessSummary();
+    flushFcliteUsageSummary();
     flushPage();
     const events = [];
 
@@ -1652,7 +1796,7 @@
       let value = '';
       try { value = event.target?.value || ''; } catch {}
 
-      add('ui.enter', { ...info, inputKind: classifySearchValue(value), inputLength: String(value || '').length });
+      recordUiEnter({ ...info, inputKind: classifySearchValue(value), inputLength: String(value || '').length });
       rememberResearchAction('enter', info);
     }, true);
   }
@@ -1992,7 +2136,7 @@
     const lifetimeMs = Math.max(0, Number(data.lifetimeMs) || (issuedAt && expiresAt ? expiresAt - issuedAt : 0));
     const remainingMs = Math.max(0, Number(data.expiresInMs) || 0);
     const captureAgeMs = Math.max(0, Number(data.captureAgeMs) || (capturedAt ? Date.now() - capturedAt : 0));
-    const signature = JSON.stringify([available, issuedAt, expiresAt, capturedAt]);
+    const signature = JSON.stringify([available, issuedAt, expiresAt, !!data.renewSoon, !!data.bridgeRecent]);
     const stateKey = `${SAMPLE_PREFIX}${activeSessionId}:madcat-auth-state`;
     if (gmGet(stateKey, '') === signature) return;
     gmSet(stateKey, signature);
@@ -2075,7 +2219,9 @@
         scheduleRuntimeVersions('script-event');
       }
 
-      return add(`script.${String(type || 'event').slice(0, 80)}`, data);
+      const eventType = String(type || 'event').slice(0, 80);
+      if (eventType === 'ISS_CONSOLE_WORKER_PROGRESS') return recordWorkerProgress(data);
+      return add(`script.${eventType}`, data);
     };
 
     try { W.BWU2Observe = emit; } catch {}
@@ -2092,6 +2238,8 @@
           event.origin === 'https://aft-qt-jp.aka.nrt.corp.amazon.com' ||
           event.origin === 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
         if (!workerOrigin || !/^ISS_CONSOLE_/.test(String(message.type || ''))) return;
+
+        if (message.type === 'ISS_CONSOLE_PROGRESS') return;
 
         const safe = {
           messageType: scrubText(message.type || ''),
@@ -2133,7 +2281,7 @@
         blockedSectionsTimer = setTimeout(flushBlockedSectionsSummary, BLOCKED_SECTIONS_QUIET_MS);
         return;
       }
-      add('fcr.usage', detail);
+      recordFcrUsage(detail);
     }, true);
   }
 
@@ -2213,7 +2361,7 @@
     host.id = 'bwu2-observability-inline';
     host.dataset.fcrToolUi = '1';
     host.innerHTML =
-      '<button type="button" id="bwu2-observability-count" title="Download current observability log and start a fresh session">OBS 0/3000</button>' +
+      '<button type="button" id="bwu2-observability-count" title="Download current observability log and start a fresh session">OBS 0/6000</button>' +
       '<span aria-hidden="true">·</span>' +
       '<button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
 
