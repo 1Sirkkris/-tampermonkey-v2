@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.26
+// @version      0.2.27
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.26';
+  const VERSION = '0.2.27';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -50,6 +50,7 @@
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
+  const MEASUREMENT_AUTH_CAPTURE_DIAG_KEY = 'fcr-data-core:measurement-auth-capture-diag-v1';
   const MEASUREMENT_AUTH_TEST_EVENT = 'fcr-madcat-auth:test';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
   const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
@@ -152,6 +153,7 @@
   const measurementKeepaliveOwner = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let measurementKeepaliveHeartbeat = 0;
   let measurementKeepaliveLastRefreshAt = 0;
+  let measurementAuthSelfTestPromise = null;
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
@@ -343,7 +345,17 @@ function gestureMeasurementIdentifier(target) {
     } catch {}
   }
 
-  async function runMeasurementAuthSelfTest(payload = {}, context = {}) {
+  function readMeasurementCaptureDiag() {
+    try {
+      const raw = GM_getValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY, '');
+      const value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+      return value && typeof value === 'object' ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function runMeasurementAuthSelfTestInner(payload = {}, context = {}) {
     const identifier = measurementIdentifierCandidate(payload.identifier || readMeasurementIdentifier());
     if (!identifier) throw new Error('MADCAT self-test needs a remembered ASIN/FNSKU');
 
@@ -357,16 +369,14 @@ function gestureMeasurementIdentifier(target) {
     const startedAt = Date.now();
     const beforeExpiresAt = Number(before.exp) || 0;
     const beforeCapturedAt = Number(before.capturedAt) || 0;
+    const beforeRemainingMs = Math.max(0, beforeExpiresAt - startedAt);
     const report = (phase, data = {}) => {
       const payloadOut = { phase, ...data };
       emitMeasurementAuthTest(phase, payloadOut);
       try { context.progress?.(payloadOut); } catch {}
     };
 
-    report('start', {
-      beforeExpiresAt,
-      beforeRemainingMs:Math.max(0, beforeExpiresAt - startedAt)
-    });
+    report('start', { beforeExpiresAt, beforeRemainingMs });
 
     const frame = document.createElement('iframe');
     frame.id = 'fcr-madcat-auth-selftest-frame';
@@ -378,15 +388,16 @@ function gestureMeasurementIdentifier(target) {
     frame.src = url.href;
 
     try {
+      try { GM_deleteValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY); } catch {}
       clearMeasurementAuth();
       report('token-cleared');
 
       (document.body || document.documentElement).appendChild(frame);
       report('silent-fetch-started');
 
-      const deadline = Date.now() + 20000;
+      const firstDeadline = Date.now() + 20000;
       let after = null;
-      while (Date.now() < deadline) {
+      while (Date.now() < firstDeadline) {
         await new Promise(resolve => setTimeout(resolve, 250));
         after = readMeasurementAuth();
         if (after && Number(after.capturedAt) > beforeCapturedAt) break;
@@ -394,24 +405,87 @@ function gestureMeasurementIdentifier(target) {
 
       if (!after) throw new Error('Silent MADCAT auth fetch did not restore token within 20s');
 
-      const elapsedMs = Date.now() - startedAt;
-      const afterExpiresAt = Number(after.exp) || 0;
-      report('pass', {
-        elapsedMs,
-        beforeExpiresAt,
-        afterExpiresAt,
-        expiryDeltaMs:afterExpiresAt - beforeExpiresAt
-      });
-      recordUsage('madcat.auth.self-test.pass', elapsedMs);
+      // Give the Measurement app a brief chance to replace an immediately re-read
+      // storage token with a token produced by its network/auth flow.
+      if (after.token === before.token || Number(after.exp) <= beforeExpiresAt) {
+        const settleDeadline = Date.now() + 2500;
+        while (Date.now() < settleDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          const candidate = readMeasurementAuth();
+          if (candidate) after = candidate;
+          if (candidate && candidate.token !== before.token && Number(candidate.exp) > beforeExpiresAt) break;
+        }
+      }
 
-      ensureMeasurementKeepalive(identifier);
-      return {
+      let capture = readMeasurementCaptureDiag();
+      let sameToken = after.token === before.token;
+      let afterExpiresAt = Number(after.exp) || 0;
+      let renewed = !sameToken && afterExpiresAt > beforeExpiresAt;
+      let method = renewed ? 'silent-refresh' : 'same-token-recovery';
+
+      if (!renewed) {
+        report('same-token', {
+          elapsedMs:Date.now() - startedAt,
+          beforeExpiresAt,
+          afterExpiresAt,
+          expiryDeltaMs:afterExpiresAt - beforeExpiresAt,
+          sameToken,
+          captureSource:clean(capture.source || 'unknown')
+        });
+
+        // If expiry is close, cheaply prove the user's "one token until expiry" theory:
+        // wait for the old token to expire, reload the hidden Measurement page once,
+        // and see whether the site itself issues a later token.
+        const untilOldExpiry = beforeExpiresAt - Date.now();
+        if (untilOldExpiry >= 0 && untilOldExpiry <= 60_000) {
+          report('expiry-probe-wait', {
+            remainingMs:untilOldExpiry,
+            beforeExpiresAt,
+            captureSource:clean(capture.source || 'unknown')
+          });
+          if (untilOldExpiry > 0) await new Promise(resolve => setTimeout(resolve, untilOldExpiry + 750));
+
+          const probeUrl = new URL(url.href);
+          probeUrl.searchParams.set('fcrMadcatExpiryProbe', String(Date.now()));
+          frame.src = probeUrl.href;
+          report('expiry-reload', { beforeExpiresAt });
+
+          const probeDeadline = Date.now() + 15000;
+          while (Date.now() < probeDeadline) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            const candidate = readMeasurementAuth();
+            if (!candidate) continue;
+            after = candidate;
+            if (candidate.token !== before.token && Number(candidate.exp) > beforeExpiresAt) break;
+          }
+
+          capture = readMeasurementCaptureDiag();
+          sameToken = !!after && after.token === before.token;
+          afterExpiresAt = Number(after?.exp) || 0;
+          renewed = !!after && !sameToken && afterExpiresAt > beforeExpiresAt;
+          if (renewed) method = 'post-expiry-reload';
+        }
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      const result = {
         ok:true,
+        renewed,
+        recovered:!!after,
+        sameToken,
+        method,
+        captureSource:clean(capture.source || 'unknown'),
         elapsedMs,
         beforeExpiresAt,
         afterExpiresAt,
         expiryDeltaMs:afterExpiresAt - beforeExpiresAt
       };
+
+      report(renewed ? 'pass' : 'not-renewed', result);
+      recordUsage(renewed ? 'madcat.auth.self-test.pass' : 'madcat.auth.self-test.not-renewed', elapsedMs);
+
+      ensureMeasurementKeepalive(identifier);
+      return result;
     } catch (error) {
       let restored = false;
       try {
@@ -436,6 +510,16 @@ function gestureMeasurementIdentifier(target) {
       );
     } finally {
       try { frame.remove(); } catch {}
+    }
+  }
+
+  async function runMeasurementAuthSelfTest(payload = {}, context = {}) {
+    if (measurementAuthSelfTestPromise) throw new Error('MADCAT self-test already running');
+    measurementAuthSelfTestPromise = runMeasurementAuthSelfTestInner(payload, context);
+    try {
+      return await measurementAuthSelfTestPromise;
+    } finally {
+      measurementAuthSelfTestPromise = null;
     }
   }
 
@@ -545,11 +629,18 @@ function gestureMeasurementIdentifier(target) {
     let closeTimer = 0;
     let keepaliveTimer = 0;
 
-    const saveToken = raw => {
+    const saveToken = (raw, source = 'unknown') => {
       const pack = normalizeMeasurementToken(raw);
       if (!pack) return false;
+      const capturedAt = Date.now();
       try {
-        GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt: Date.now() }));
+        GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt }));
+        GM_setValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY, JSON.stringify({
+          source:String(source || 'unknown').slice(0, 80),
+          capturedAt,
+          exp:Number(pack.exp) || 0,
+          issuedAt:Number(pack.issuedAt) || 0
+        }));
       } catch {
         return false;
       }
@@ -570,15 +661,21 @@ function gestureMeasurementIdentifier(target) {
       return true;
     };
 
-    const inspectText = value => {
-      const matches = String(value || '').match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g) || [];
-      return matches.some(saveToken);
+    const inspectText = (value, source = 'unknown') => {
+      const text = String(value || '');
+      const whole = normalizeMeasurementToken(text) ? 'exact' : 'embedded';
+      const matches = text.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g) || [];
+      return matches.some(token => saveToken(token, source + '-' + whole));
     };
 
     const inspectStores = () => {
-      for (const store of [pageWindow.localStorage, pageWindow.sessionStorage]) {
+      const stores = [
+        ['storage-local', pageWindow.localStorage],
+        ['storage-session', pageWindow.sessionStorage]
+      ];
+      for (const [name, store] of stores) {
         try {
-          for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)));
+          for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)), name);
         } catch {}
       }
     };
@@ -606,7 +703,7 @@ function gestureMeasurementIdentifier(target) {
         pageWindow.fetch = function(input, init) {
           try {
             const url = String(input?.url || input || '');
-            if (url.includes(MEASUREMENT_API_HOST)) saveToken(authFromHeaders(init?.headers) || authFromHeaders(input?.headers));
+            if (url.includes(MEASUREMENT_API_HOST)) saveToken(authFromHeaders(init?.headers) || authFromHeaders(input?.headers), 'fetch');
           } catch {}
           return originalFetch.apply(this, arguments);
         };
@@ -630,7 +727,7 @@ function gestureMeasurementIdentifier(target) {
         };
         XHR.prototype.send = function() {
           try {
-            if (this.__fcrMeasurementUrl?.includes(MEASUREMENT_API_HOST)) saveToken(this.__fcrMeasurementAuth);
+            if (this.__fcrMeasurementUrl?.includes(MEASUREMENT_API_HOST)) saveToken(this.__fcrMeasurementAuth, 'xhr');
           } catch {}
           return originalSend.apply(this, arguments);
         };
