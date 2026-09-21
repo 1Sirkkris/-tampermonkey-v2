@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.33
+// @version      0.3.34
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.33';
+  const VERSION = '0.3.34';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -5372,12 +5372,37 @@
       };
     }
     if (issSideWorkerMode === 'live') {
+      const currentMeta = live.current ? liveItemMeta(live.current) : null;
+      const failure = live.failureNotice ? {
+        title:clean(live.failureNotice.title || ''),
+        reason:clean(live.failureNotice.reason || ''),
+        scan:clean(live.failureNotice.scan || ''),
+        asin:clean(live.failureNotice.asin || ''),
+        fnsku:clean(live.failureNotice.fnsku || ''),
+        qty:Number(live.failureNotice.qty) || 1
+      } : null;
+      const issue = live.issue?.kind === 'destination' && live.current ? {
+        kind:'destination',
+        title:clean(live.issue.title || 'DESTINATION ACTION REQUIRED'),
+        reason:clean(live.issue.reason || ''),
+        scan:clean(currentMeta?.scan || live.current.code || ''),
+        asin:clean(currentMeta?.asin || ''),
+        fnsku:clean(currentMeta?.fnsku || ''),
+        qty:itemQty(live.current)
+      } : null;
+
       return {
-        mode: 'live',
-        running: !!live.running,
-        message: clean(live.error || live.note || 'Ready'),
-        moved: live.moved,
-        queued: live.queue.length + (live.current ? 1 : 0) + live.datePending.length
+        mode:'live',
+        running:!!live.running,
+        message:clean(live.error || live.note || 'Ready'),
+        attention:issue ? 'live-destination' : '',
+        moved:live.moved,
+        skipped:live.skipped,
+        queued:sumQty(live.queue) + (live.current ? itemQty(live.current) : 0) + sumQty(live.datePending),
+        expiryPending:sumQty(live.datePending),
+        delayEnabled:!!live.delayEnabled,
+        issue,
+        failure
       };
     }
     if (issSideWorkerMode === 'queue') {
@@ -5523,6 +5548,24 @@
     return { queued: code };
   }
 
+  function issSideLiveDestination(payload = {}) {
+    if (issSideWorkerMode !== 'live' || !live.sourceReady) throw new Error('Live source is not ready');
+    const dest = clean(payload.dest);
+    if (!dest) throw new Error('Destination required');
+
+    liveDest.disabled = false;
+    liveDest.value = dest;
+    acceptLiveDestination();
+
+    if (live.issue?.kind === 'destination') {
+      throw new Error(live.error || 'Destination change was not accepted');
+    }
+    if (!live.running) throw new Error(live.error || 'Live destination validation failed');
+
+    issSideEmitProgress();
+    return { ready:true, source:live.src, dest:live.dest };
+  }
+
   async function issSideQueueRun(payload = {}) {
     issSideSetMode('queue');
     qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
@@ -5582,7 +5625,7 @@
       const command = String(message.command || '');
       if (!id || !command) return;
 
-      if (issSideWorkerBusy && !['ping','stop','live.item','lazy.scan'].includes(command)) {
+      if (issSideWorkerBusy && !['ping','stop','live.item','live.destination','lazy.scan'].includes(command)) {
         issSideSend('ISS_CONSOLE_RPC_RESULT', { id, ok:false, error:'Sideline worker busy' });
         return;
       }
@@ -5614,6 +5657,8 @@
           data = await issSideLiveConfigure(message.payload || {});
         } else if (command === 'live.item') {
           data = issSideLiveItem(message.payload || {});
+        } else if (command === 'live.destination') {
+          data = issSideLiveDestination(message.payload || {});
         } else if (command === 'queue.run') {
           issSideWorkerBusy = true;
           data = await issSideQueueRun(message.payload || {});
