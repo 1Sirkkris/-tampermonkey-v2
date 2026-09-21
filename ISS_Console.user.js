@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.14
+// @version      0.1.15
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.14';
+  const VERSION = '0.1.15';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0114__) return;
-  window.__ISS_CONSOLE_V0114__ = true;
+  if (window.__ISS_CONSOLE_V0115__) return;
+  window.__ISS_CONSOLE_V0115__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -235,6 +235,73 @@
     return out;
   }
 
+  function collectLinesWithQuantity(text) {
+    const out = [];
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const value = clean(raw.split(/\s+/)[0]);
+      if (value) out.push(value);
+    }
+    return out;
+  }
+
+  function collectLazyLines(text, source = '', dest = '') {
+    const blocked = new Set(
+      [source, dest, SIDELINE_START_TRIGGER]
+        .map(value => upper(clean(value)))
+        .filter(Boolean)
+    );
+    return collectLinesWithQuantity(text).filter(value => !blocked.has(upper(value)));
+  }
+
+  function lazyMetricsFromLines(lines = []) {
+    const cleanLines = Array.isArray(lines) ? lines.filter(Boolean) : [];
+    return {
+      total: cleanLines.length,
+      unique: new Set(cleanLines.map(upper)).size,
+      moved: 0,
+      remaining: cleanLines.length
+    };
+  }
+
+  function lazyMetricsFromItems(items = []) {
+    const rows = Array.isArray(items) ? items : [];
+    let total = 0;
+    let moved = 0;
+    let remaining = 0;
+
+    for (const item of rows) {
+      const qty = Math.max(1, Number(item?.qty) || 1);
+      const status = upper(item?.status || '');
+      total += qty;
+      if (status === 'MOVED') moved += qty;
+      if (!['MOVED','FAILED','INVALID','SKIPPED'].includes(status)) remaining += qty;
+    }
+
+    return { total, unique: rows.length, moved, remaining };
+  }
+
+  function paintLazyMetrics(metrics = {}) {
+    const host = $('[data-side-lazy-metrics]');
+    if (!host) return;
+    const values = {
+      total: Number(metrics.total) || 0,
+      unique: Number(metrics.unique) || 0,
+      moved: Number(metrics.moved) || 0,
+      remaining: Number(metrics.remaining) || 0
+    };
+    for (const [key, value] of Object.entries(values)) {
+      const el = $('[data-side-metric="' + key + '"]');
+      if (el) el.textContent = String(value);
+    }
+  }
+
+  function paintLazyMetricsFromInput() {
+    const source = clean($('[data-side-source]')?.value);
+    const dest = clean($('[data-side-dest]')?.value);
+    const lines = collectLazyLines($('[data-side-items]')?.value, source, dest);
+    paintLazyMetrics(lazyMetricsFromLines(lines));
+  }
+
   function workerStateLine(worker) {
     const state = workers[worker];
     return state.ready ? ('v' + state.version) : 'connecting…';
@@ -335,6 +402,7 @@
 
       if (message.mode === 'lazy' && Array.isArray(message.items)) {
         renderSidelineItems(message.items, false);
+        paintLazyMetrics(lazyMetricsFromItems(message.items));
       }
 
       const meta = $('[data-progress="sideline"]');
@@ -536,6 +604,7 @@
       '        <label class="iss-field"><span>DESTINATION</span><input data-side-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
+      '        <div class="iss-side-metrics" data-side-lazy-metrics><div class="iss-side-metric"><span>TOTAL UNITS</span><b data-side-metric="total">0</b></div><div class="iss-side-metric"><span>UNIQUE ITEMS</span><b data-side-metric="unique">0</b></div><div class="iss-side-metric"><span>MOVED</span><b data-side-metric="moved">0</b></div><div class="iss-side-metric"><span>REMAINING</span><b data-side-metric="remaining">0</b></div></div>',
       '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
       '        <div class="iss-side-items" data-side-items-state></div>',
       '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden></div>',
@@ -574,7 +643,7 @@
       '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
       '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit,.iss-segment-move{grid-template-columns:repeat(2,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
-      '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}',
+      '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}.iss-side-items{display:none;max-height:190px;overflow:auto;border:1px solid #c7d0d8;border-radius:4px;background:#f8fafc;padding:5px;gap:5px}.iss-side-items[data-show="1"]{display:grid}.iss-side-item{padding:7px 8px;border:1px solid #cbd5e1;border-left:5px solid #64748b;border-radius:3px;background:#fff;color:#334155}.iss-side-item[data-state="READY"]{border-left-color:#146eb4;background:#eff6ff;color:#0f3d73}.iss-side-item[data-state="DATE"]{border-left-color:#f59e0b;background:#fff7ed;color:#7c2d12}.iss-side-item[data-state="MOVED"]{border-left-color:#146eb4;background:#f0f8ff;color:#0f3d73}.iss-side-item[data-state="FAILED"],.iss-side-item[data-state="INVALID"],.iss-side-item[data-state="SKIPPED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}.iss-side-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:1000}.iss-side-item-top code{font:900 12px Consolas,monospace}.iss-side-item-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;margin-top:5px;font-size:11px;line-height:1.25}.iss-side-item-meta b{font-weight:1000}.iss-side-item[data-state="FAILED"] .iss-side-item-meta b,.iss-side-item[data-state="INVALID"] .iss-side-item-meta b,.iss-side-item[data-state="SKIPPED"] .iss-side-item-meta b{color:#991b1b}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
       '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
@@ -729,6 +798,7 @@
     const itemsLabel = $('[data-side-items-label]');
     const run = $('[data-side-run]');
     const clearWrap = $('[data-clear-source-wrap]');
+    const lazyMetrics = $('[data-side-lazy-metrics]');
 
     if (source) source.disabled = sidelineMode === 'queue';
     if (dest) dest.disabled = sidelineMode === 'queue' || sidelineMode === 'scrubber';
@@ -737,6 +807,8 @@
     if (sourceLabel) sourceLabel.textContent = sidelineMode === 'scrubber' ? 'TOTE' : 'SOURCE';
     if (itemsLabel) itemsLabel.textContent = sidelineMode === 'queue' ? 'CONTAINERS' : 'ITEM BARCODES';
     if (clearWrap) clearWrap.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
+    if (lazyMetrics) lazyMetrics.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
+    if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
     paintClearSourceToggle();
 
     if (run) {
@@ -861,7 +933,10 @@
   async function runSideline() {
     const source = clean($('[data-side-source]')?.value);
     const dest = clean($('[data-side-dest]')?.value);
-    const items = collectLines($('[data-side-items]')?.value);
+    const itemText = $('[data-side-items]')?.value || '';
+    const items = sidelineMode === 'lazy'
+      ? collectLazyLines(itemText, source, dest)
+      : collectLines(itemText);
 
     setActivePanel('sideline');
 
@@ -894,6 +969,11 @@
 
       sidelineRunBusy = true;
       sidelineItemsSignature = '';
+      paintLazyMetrics(lazyMetricsFromLines(items));
+      observe('LAZY_INPUT_COUNTS', {
+        total:items.length,
+        unique:new Set(items.map(upper)).size
+      });
       renderSidelineItems([], false);
       setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       panelStatus('sideline', 'Starting Lazy…', 'working');
@@ -914,10 +994,12 @@
         resetSidelineLazyInputs();
         sidelineItemsSignature = '';
         if (failures.length) {
+          paintLazyMetrics(lazyMetricsFromItems(result.items || failures));
           renderSidelineItems(failures, true);
           panelStatus('sideline', 'DONE • ' + (result.failed || failures.length) + ' NOT MOVED — CHECK ITEMS BELOW', 'error');
         } else {
           renderSidelineItems([], true);
+          paintLazyMetrics({ total:0, unique:0, moved:0, remaining:0 });
           panelStatus('sideline', 'SUCCESS ✓ → ' + dest + (Number(result.moved) ? ' • ' + result.moved + ' moved' : ''), 'ok');
         }
       } catch (error) {
@@ -988,6 +1070,7 @@
     for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     sidelineItemsSignature = '';
     renderSidelineItems([], false);
+    paintLazyMetrics({ total:0, unique:0, moved:0, remaining:0 });
     panelStatus('sideline', 'Cleared', '');
     $('[data-side-source]')?.focus();
   }
@@ -1200,6 +1283,12 @@
       box.checked = !box.checked;
       box.dispatchEvent(new Event('change', { bubbles:true }));
     });
+
+    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) {
+      el.addEventListener('input', () => {
+        if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
+      });
+    }
 
     syncEditUi(false);
     paintMoveMode();
