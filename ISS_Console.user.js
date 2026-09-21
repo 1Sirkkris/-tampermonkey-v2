@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.16
+// @version      0.1.17
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.16';
+  const VERSION = '0.1.17';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0116__) return;
-  window.__ISS_CONSOLE_V0116__ = true;
+  if (window.__ISS_CONSOLE_V0117__) return;
+  window.__ISS_CONSOLE_V0117__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -366,7 +366,7 @@
   }
 
   function resetSidelineLazyInputs() {
-    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     $('[data-side-source]')?.focus();
   }
 
@@ -1163,7 +1163,7 @@
       $('[data-move-source]')?.focus();
       return;
     }
-    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     sidelineItemsSignature = '';
     renderSidelineItems([], false);
     paintLazyMetrics({ total:0, unique:0, moved:0, remaining:0 });
@@ -1384,7 +1384,7 @@
       box.dispatchEvent(new Event('change', { bubbles:true }));
     });
 
-    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) {
+    for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) {
       el.addEventListener('input', () => {
         if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
       });
