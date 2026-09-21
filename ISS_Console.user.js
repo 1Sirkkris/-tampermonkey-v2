@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.23
+// @version      0.1.24
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.23';
+  const VERSION = '0.1.24';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0123__) return;
-  window.__ISS_CONSOLE_V0123__ = true;
+  if (window.__ISS_CONSOLE_V0124__) return;
+  window.__ISS_CONSOLE_V0124__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -104,6 +104,7 @@
   let sidelineRunBusy = false;
   let sidelineAttention = '';
   let sidelineItemsSignature = '';
+  let sidelineCompletionStatus = '';
   let built = false;
 
   function nextRpcId(worker) {
@@ -496,7 +497,19 @@
 
     const attention = area === 'sideline' ? String(message.attention || '') : '';
     const needsUser = ['rescan-destination','live-destination'].includes(attention);
-    panelStatus(area, message.message || 'Working…', needsUser ? 'attention' : (message.error ? 'error' : 'working'));
+    const preserveLazyCompletion =
+      area === 'sideline' &&
+      sidelineMode === 'lazy' &&
+      !!sidelineCompletionStatus &&
+      message.mode === 'lazy' &&
+      !message.running &&
+      !attention;
+
+    if (preserveLazyCompletion) {
+      panelStatus('sideline', sidelineCompletionStatus, 'ok');
+    } else {
+      panelStatus(area, message.message || 'Working…', needsUser ? 'attention' : (message.error ? 'error' : 'working'));
+    }
 
     if (area === 'sideline') {
       const previousAttention = sidelineAttention;
@@ -621,11 +634,22 @@
     if (!pending) return;
     state.pending.delete(String(message.id || ''));
     clearTimeout(pending.timer);
+    const resultSummary = message.ok && message.data && typeof message.data === 'object'
+      ? {
+          done:Number.isFinite(Number(message.data.done)) ? Number(message.data.done) : undefined,
+          total:Number.isFinite(Number(message.data.total)) ? Number(message.data.total) : undefined,
+          moved:Number.isFinite(Number(message.data.moved)) ? Number(message.data.moved) : undefined,
+          failed:Number.isFinite(Number(message.data.failed)) ? Number(message.data.failed) : undefined,
+          flipped:Number.isFinite(Number(message.data.flipped)) ? Number(message.data.flipped) : undefined,
+          zero:Number.isFinite(Number(message.data.zero)) ? Number(message.data.zero) : undefined
+        }
+      : undefined;
     observe('RPC_RESULT', {
       worker,
       command:pending.command,
       ok:!!message.ok,
-      error:message.ok ? '' : clean(message.error || pending.command + ' failed').slice(0, 180)
+      error:message.ok ? '' : clean(message.error || pending.command + ' failed').slice(0, 180),
+      result:resultSummary
     });
     if (message.ok) {
       pending.resolve(message.data);
@@ -1012,6 +1036,7 @@
 
     const previous = sidelineMode;
     sidelineMode = mode;
+    sidelineCompletionStatus = '';
     syncSidelineModeUi();
     setActivePanel('sideline');
     setPanelLoading('sideline', true, 'Switching ' + mode.toUpperCase() + '…');
@@ -1210,6 +1235,7 @@
       if (!items.length) return panelStatus('sideline', 'Scan/paste at least one item', 'error');
 
       sidelineRunBusy = true;
+      sidelineCompletionStatus = '';
       sidelineItemsSignature = '';
       paintLazyMetrics(lazyMetricsFromLines(items));
       observe('LAZY_INPUT_COUNTS', {
@@ -1233,16 +1259,27 @@
               ? result.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(upper(item?.status || '')))
               : []);
 
-        resetSidelineLazyInputs();
+        const expectedUnits = items.length;
+        const movedUnits = Math.max(0, Number(result?.moved) || 0);
+        const fullyMoved = !failures.length && expectedUnits > 0 && movedUnits === expectedUnits;
+
         sidelineItemsSignature = '';
         if (failures.length) {
+          sidelineCompletionStatus = '';
           paintLazyMetrics(lazyMetricsFromItems(result.items || failures));
           renderSidelineItems(failures, true);
-          panelStatus('sideline', 'DONE • ' + (result.failed || failures.length) + ' NOT MOVED — CHECK ITEMS BELOW', 'error');
+          panelStatus('sideline', 'INCOMPLETE • ' + movedUnits + '/' + expectedUnits + ' moved • ' + (result.failed || failures.length) + ' NOT MOVED', 'error');
+        } else if (!fullyMoved) {
+          sidelineCompletionStatus = '';
+          paintLazyMetrics(lazyMetricsFromItems(result.items || []));
+          renderSidelineItems(result.items || [], true);
+          panelStatus('sideline', 'INCOMPLETE • ' + movedUnits + '/' + expectedUnits + ' moved — VERIFY BEFORE RETRY', 'error');
         } else {
+          sidelineCompletionStatus = source + ' > ' + dest + ' = COMPLETE';
+          resetSidelineLazyInputs();
           renderSidelineItems([], true);
           paintLazyMetrics({ total:0, unique:0, moved:0, remaining:0 });
-          panelStatus('sideline', 'SUCCESS ✓ → ' + dest + (Number(result.moved) ? ' • ' + result.moved + ' moved' : ''), 'ok');
+          panelStatus('sideline', sidelineCompletionStatus, 'ok');
         }
       } catch (error) {
         if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
@@ -1321,6 +1358,7 @@
     sidelineRunBusy = false;
     sidelineAttention = '';
     sidelineItemsSignature = '';
+    sidelineCompletionStatus = '';
     const panel = $('[data-panel="sideline"]');
     const alert = $('[data-side-alert]');
     if (panel) panel.dataset.sideAttention = '';
