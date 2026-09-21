@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.18
+// @version      0.1.19
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.18';
+  const VERSION = '0.1.19';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0118__) return;
-  window.__ISS_CONSOLE_V0118__ = true;
+  if (window.__ISS_CONSOLE_V0119__) return;
+  window.__ISS_CONSOLE_V0119__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -1065,7 +1065,7 @@
         const result = await rpc('sideline', 'queue.run', { items:itemText }, LONG_TIMEOUT);
         panelStatus('sideline', 'DONE ✓ ' + result.done + '/' + result.total + (result.failed?.length ? ' • ' + result.failed.length + ' failed' : ''), result.failed?.length ? 'error' : 'ok');
       } catch (error) {
-        panelStatus('sideline', error.message, 'error');
+        if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
       } finally {
         setPanelLoading('sideline', false);
       }
@@ -1114,7 +1114,7 @@
           panelStatus('sideline', 'SUCCESS ✓ → ' + dest + (Number(result.moved) ? ' • ' + result.moved + ' moved' : ''), 'ok');
         }
       } catch (error) {
-        panelStatus('sideline', error.message, 'error');
+        if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
       } finally {
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);
