@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.22
+// @version      0.1.23
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.22';
+  const VERSION = '0.1.23';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1223,7 +1223,6 @@
 
     if (
       previous?.event?.data &&
-      pageEvents.includes(previous.event) &&
       now - previous.lastTs <= UI_ENTER_BURST_GAP_MS
     ) {
       const gap = Math.max(0, now - previous.lastTs);
@@ -1480,6 +1479,11 @@
     clearTimeout(coreSuccessTimer);
     coreSuccessTimer = 0;
     coreSuccessStats = new Map();
+    workerProgressStates = new Map();
+    clearTimeout(fcliteUsageTimer);
+    fcliteUsageTimer = 0;
+    fcliteUsageStats = new Map();
+    uiEnterBatches = new Map();
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
@@ -1828,6 +1832,10 @@
 
     for (const name of ['hashchange', 'popstate', 'pagehide']) {
       window.addEventListener(name, () => {
+        if (name === 'pagehide') {
+          flushCoreSuccessSummary();
+          flushFcliteUsageSummary();
+        }
         const now = location.href;
         add(`page.${name}`, {
           from: sanitizeUrl(lastHref),
