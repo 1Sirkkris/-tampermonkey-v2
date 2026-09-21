@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.31
+// @version      0.3.32
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.31';
+  const VERSION = '0.3.32';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -80,6 +80,8 @@
   const SCRUB_VALIDATE_CONCURRENCY = 3;
   const LIVE_MOVE_DELAY_MIN_MS = 5000;
   const LIVE_MOVE_DELAY_MAX_MS = 11000;
+  const LAZY_PROCESS_DELAY_MIN_MS = 2000;
+  const LAZY_PROCESS_DELAY_MAX_MS = 8000;
   const PANEL_STATE_KEY = 'sidelineClean.panelStates.v1';
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
   const API_SCAN_SOURCE = '/api/scan-source-container';
@@ -2692,7 +2694,9 @@
     dateResolve:null,
     damagePaused:false,
     damagedDest:'',
-    inputCollapsed:false
+    inputCollapsed:false,
+    processDelayEnabled:false,
+    nextMoveAt:0
   };
 
 
@@ -3255,6 +3259,7 @@
     lazy.predicant = false;
     lazy.damagePaused = false;
     lazy.damagedDest = '';
+    lazy.nextMoveAt = 0;
     stopDamageAttention();
     if (lPause) lPause.textContent = 'Pause';
     lazy.predicantResolve?.();
@@ -3279,6 +3284,8 @@
     lazy.damagePaused = false;
     lazy.damagedDest = '';
     lazy.inputCollapsed = false;
+    lazy.processDelayEnabled = false;
+    lazy.nextMoveAt = 0;
     clearLazyCollapsedScanBuffer();
     stopDamageAttention();
     if (lPause) lPause.textContent = 'Pause';
@@ -3736,6 +3743,31 @@
     return postJson(path, body, lazy, run);
   }
 
+  function randomLazyProcessDelayMs() {
+    return LAZY_PROCESS_DELAY_MIN_MS +
+      Math.floor(Math.random() * (LAZY_PROCESS_DELAY_MAX_MS - LAZY_PROCESS_DELAY_MIN_MS + 1));
+  }
+
+  async function waitForLazyMovePace(item, run=lazy.activeRun) {
+    if (!currentLazyRun(run) || !lazy.running) return false;
+    if (!lazy.processDelayEnabled) return true;
+
+    let waitMs = Math.max(0, lazy.nextMoveAt - Date.now());
+    if (!waitMs) return true;
+
+    lazy.note = `delay ${(waitMs / 1000).toFixed(1)}s | ${item.code} ready`;
+    renderLazy();
+
+    while (lazy.processDelayEnabled) {
+      waitMs = Math.max(0, lazy.nextMoveAt - Date.now());
+      if (!waitMs) return currentLazyRun(run) && lazy.running;
+      await sleep(Math.min(waitMs, 200));
+      if (!currentLazyRun(run) || !lazy.running) return false;
+    }
+
+    return currentLazyRun(run) && lazy.running;
+  }
+
   function isOverageLabel(value) {
     return /\boverage(?:s)?\b|\bitem\s+not\s+in\s+(?:source\s+)?container\b|\bnot\s+in\s+source\s+container\b/i.test(clean(value));
   }
@@ -4068,8 +4100,10 @@
 
       try {
         response = await api(API_MOVE_ITEMS, payload, run);
+        lazy.nextMoveAt = lazy.processDelayEnabled ? Date.now() + randomLazyProcessDelayMs() : 0;
       } catch (error) {
         if (runWasCancelled(error, run)) return false;
+        lazy.nextMoveAt = lazy.processDelayEnabled ? Date.now() + randomLazyProcessDelayMs() : 0;
         if (isAllowedOverageResponse(error?.payload)) {
           response = error.payload;
         } else {
@@ -4829,6 +4863,7 @@
 
       if (result?.kind !== 'ready') continue;
 
+      if (!await waitForLazyMovePace(item, run)) break;
       await moveResolved(item, result.ctx, null, run);
     }
 
@@ -4847,6 +4882,7 @@
       const chosen = await showApiDatePicker(item);
       if (!chosen || !lazy.running || !currentLazyRun(run)) break;
 
+      if (!await waitForLazyMovePace(item, run)) break;
       await moveResolved(item, ctx, chosen.finalExpirationMs, run);
     }
 
@@ -5431,6 +5467,8 @@
       lClear.checked = payload.clearSource;
       lClear.dispatchEvent(new Event('change', { bubbles:true }));
     }
+    lazy.processDelayEnabled = payload.processDelay === true;
+    lazy.nextMoveAt = 0;
 
     issSideEmitProgress();
     await startLazy();
