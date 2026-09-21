@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.9
+// @version      0.1.10
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.9';
+  const VERSION = '0.1.10';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V019__) return;
-  window.__ISS_CONSOLE_V019__ = true;
+  if (window.__ISS_CONSOLE_V0110__) return;
+  window.__ISS_CONSOLE_V0110__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -894,7 +894,7 @@
           panelStatus('sideline', 'DONE • ' + (result.failed || failures.length) + ' NOT MOVED — CHECK ITEMS BELOW', 'error');
         } else {
           renderSidelineItems([], true);
-          panelStatus('sideline', result.message || ('DONE ✓ moved ' + result.moved), 'ok');
+          panelStatus('sideline', 'SUCCESS ✓ → ' + dest + (Number(result.moved) ? ' • ' + result.moved + ' moved' : ''), 'ok');
         }
       } catch (error) {
         panelStatus('sideline', error.message, 'error');
