@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.25
+// @version      0.2.26
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.25';
+  const VERSION = '0.2.26';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -50,6 +50,7 @@
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
+  const MEASUREMENT_AUTH_TEST_EVENT = 'fcr-madcat-auth:test';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
   const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
   const MEASUREMENT_KEEPALIVE_OWNER_KEY = 'fcr-data-core:measurement-keepalive-owner-v1';
@@ -327,6 +328,115 @@ function gestureMeasurementIdentifier(target) {
     const search = measurementIdentifierCandidate(new URLSearchParams(location.search).get('s') || '');
     if (search) return search;
     return readMeasurementIdentifier();
+  }
+
+  function emitMeasurementAuthTest(phase, data = {}) {
+    try {
+      window.dispatchEvent(new CustomEvent(MEASUREMENT_AUTH_TEST_EVENT, {
+        detail: JSON.stringify({
+          phase:clean(phase),
+          coreVersion:VERSION,
+          at:Date.now(),
+          ...data
+        })
+      }));
+    } catch {}
+  }
+
+  async function runMeasurementAuthSelfTest(payload = {}, context = {}) {
+    const identifier = measurementIdentifierCandidate(payload.identifier || readMeasurementIdentifier());
+    if (!identifier) throw new Error('MADCAT self-test needs a remembered ASIN/FNSKU');
+
+    const before = readMeasurementAuth();
+    if (!before) throw new Error('MADCAT self-test needs valid auth first');
+
+    let backup = '';
+    try { backup = String(GM_getValue(MEASUREMENT_AUTH_KEY, '') || ''); } catch {}
+    if (!backup) throw new Error('MADCAT self-test could not snapshot auth');
+
+    const startedAt = Date.now();
+    const beforeExpiresAt = Number(before.exp) || 0;
+    const beforeCapturedAt = Number(before.capturedAt) || 0;
+    const report = (phase, data = {}) => {
+      const payloadOut = { phase, ...data };
+      emitMeasurementAuthTest(phase, payloadOut);
+      try { context.progress?.(payloadOut); } catch {}
+    };
+
+    report('start', {
+      beforeExpiresAt,
+      beforeRemainingMs:Math.max(0, beforeExpiresAt - startedAt)
+    });
+
+    const frame = document.createElement('iframe');
+    frame.id = 'fcr-madcat-auth-selftest-frame';
+    frame.tabIndex = -1;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
+    const url = new URL(measurementKeepaliveUrl(identifier));
+    url.searchParams.set('fcrMadcatSelfTest', String(startedAt));
+    frame.src = url.href;
+
+    try {
+      clearMeasurementAuth();
+      report('token-cleared');
+
+      (document.body || document.documentElement).appendChild(frame);
+      report('silent-fetch-started');
+
+      const deadline = Date.now() + 20000;
+      let after = null;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        after = readMeasurementAuth();
+        if (after && Number(after.capturedAt) > beforeCapturedAt) break;
+      }
+
+      if (!after) throw new Error('Silent MADCAT auth fetch did not restore token within 20s');
+
+      const elapsedMs = Date.now() - startedAt;
+      const afterExpiresAt = Number(after.exp) || 0;
+      report('pass', {
+        elapsedMs,
+        beforeExpiresAt,
+        afterExpiresAt,
+        expiryDeltaMs:afterExpiresAt - beforeExpiresAt
+      });
+      recordUsage('madcat.auth.self-test.pass', elapsedMs);
+
+      ensureMeasurementKeepalive(identifier);
+      return {
+        ok:true,
+        elapsedMs,
+        beforeExpiresAt,
+        afterExpiresAt,
+        expiryDeltaMs:afterExpiresAt - beforeExpiresAt
+      };
+    } catch (error) {
+      let restored = false;
+      try {
+        const stored = JSON.parse(backup || '{}');
+        const pack = normalizeMeasurementToken(stored?.token || '');
+        if (pack) {
+          GM_setValue(MEASUREMENT_AUTH_KEY, backup);
+          restored = true;
+        }
+      } catch {}
+
+      const elapsedMs = Date.now() - startedAt;
+      report('fail', {
+        elapsedMs,
+        restored,
+        error:clean(error?.message || error || 'MADCAT self-test failed').slice(0, 180)
+      });
+      recordUsage('madcat.auth.self-test.fail', elapsedMs);
+      throw new Error(
+        clean(error?.message || error || 'MADCAT self-test failed') +
+        (restored ? ' • original token restored' : ' • original token could not be restored')
+      );
+    } finally {
+      try { frame.remove(); } catch {}
+    }
   }
 
   function measurementAuthStatus() {
@@ -1873,12 +1983,13 @@ function gestureMeasurementIdentifier(target) {
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'madcatAuthSelfTest', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
       else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);
       else if (type === 'madcatAuthStatus') data = measurementAuthStatus();
+      else if (type === 'madcatAuthSelfTest') data = await runMeasurementAuthSelfTest(payload, context);
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
@@ -1936,6 +2047,21 @@ function gestureMeasurementIdentifier(target) {
   });
   window.addEventListener('pagehide', flushUsage);
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushUsage(); });
+
+  installMeasurementAutoRenewal();
+
+  const bootstrapMeasurementKeepalive = () => {
+    const identifier = readMeasurementIdentifier();
+    if (!identifier) return false;
+    const started = ensureMeasurementKeepalive(identifier);
+    if (started) recordUsage('madcat.auth.keepalive-bootstrap');
+    return started;
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapMeasurementKeepalive, { once:true });
+  } else {
+    bootstrapMeasurementKeepalive();
+  }
 
   const markReady = () => {
     if (document.documentElement) document.documentElement.dataset.fcrDataCoreVersion = VERSION;
