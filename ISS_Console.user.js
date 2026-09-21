@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.13
+// @version      0.1.14
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.13';
+  const VERSION = '0.1.14';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0113__) return;
-  window.__ISS_CONSOLE_V0113__ = true;
+  if (window.__ISS_CONSOLE_V0114__) return;
+  window.__ISS_CONSOLE_V0114__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -323,11 +323,14 @@
 
       if (attention === 'rescan-destination') {
         const dest = clean($('[data-side-dest]')?.value);
+        setPanelLoading('sideline', false);
         if (alertText) alertText.textContent = 'SCAN ' + (dest || 'DESTINATION') + ' AGAIN IN ITEM BARCODES TO CONTINUE';
         if (previousAttention !== attention) {
           items?.focus();
           items?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
         }
+      } else if (previousAttention === 'rescan-destination' && sidelineRunBusy) {
+        setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       }
 
       if (message.mode === 'lazy' && Array.isArray(message.items)) {
