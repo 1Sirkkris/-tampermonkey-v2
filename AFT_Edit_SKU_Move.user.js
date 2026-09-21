@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.34
+// @version      0.9.35
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.34';
+  const VERSION = '0.9.35';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1677,7 +1677,18 @@
           failed.push({ sku, message: String(error?.message || error) });
           this.showSkuBatchFailures(failed);
           this.status(`${i + 1}/${items.length} FAILED • resetting`);
-          await this.restoreSkuBatchReady({ endCurrent: true, timeout: 30000 });
+          try {
+            await this.restoreSkuBatchReady({ endCurrent: true, timeout: 30000 });
+          } catch (recoveryError) {
+            recoveryError.aftPartial = {
+              kind:'edit-sku',
+              done:flipped + zero,
+              total:items.length,
+              failed:[...failed],
+              remaining:[sku, ...items.slice(i + 1)]
+            };
+            throw recoveryError;
+          }
         }
       }
 
@@ -2111,6 +2122,7 @@
         this.status(
           `DONE ✓ ${done}/${items.length} • avg ${(total / done / 1000).toFixed(2)}s`
         );
+        return { done, total:items.length };
       } catch (error) {
         const active = this.eachActiveObjectId || session.objectId;
 
@@ -2120,12 +2132,25 @@
           } catch {
             this.eachEndedObjectIds.add(active);
             this.eachActiveObjectId = null;
-            throw new Error(
+            const recoveryError = new Error(
               `${String(error?.message || error)} • Each recovery failed; refresh page before retry`
             );
+            recoveryError.aftPartial = {
+              kind:'edit-each',
+              done,
+              total:items.length,
+              remaining:items.slice(done).map(item => [item.location, item.asin, item.fnsku].filter(Boolean).join(' '))
+            };
+            throw recoveryError;
           }
         }
 
+        error.aftPartial = {
+          kind:'edit-each',
+          done,
+          total:items.length,
+          remaining:items.slice(done).map(item => [item.location, item.asin, item.fnsku].filter(Boolean).join(' '))
+        };
         throw error;
       } finally {
         this.eachActiveObjectId = null;
@@ -3848,19 +3873,19 @@
         if (items.length > 500) throw new Error('Edit queue too large');
 
         issWorkerProgress('edit', `EACH • starting ${items.length} row${items.length === 1 ? '' : 's'}`, {
-          current: 0,
-          total: items.length,
+          current:0,
+          total:items.length,
           mode
         });
 
-        await Edit.runEachQueue(items, { desiredState, desiredDamage });
-
-        issWorkerProgress('edit', `DONE ✓ ${items.length}/${items.length}`, {
-          done: items.length,
-          total: items.length,
+        const result = await Edit.runEachQueue(items, { desiredState, desiredDamage });
+        const done = Number(result?.done) || items.length;
+        issWorkerProgress('edit', `DONE ✓ ${done}/${items.length}`, {
+          done,
+          total:items.length,
           mode
         });
-        return { done: items.length, total: items.length, mode };
+        return { done, total:items.length, failed:[], mode };
       }
 
       const items = Edit.parseSkuBatchQueue(rawItems);
@@ -3872,47 +3897,36 @@
         throw new Error('Source and destination disposition cannot match');
       }
 
-      let done = 0;
-      const results = [];
-      for (let i = 0; i < items.length; i++) {
-        if (Edit.stopRequested) throw new Error('Stopped by user');
-        const sku = items[i];
-        issWorkerProgress('edit', `${i + 1}/${items.length} • ${sku}`, {
-          current: i + 1,
-          total: items.length,
-          mode
-        });
-        const result = await Edit.runSkuDirect({
-          sku,
-          currentState,
-          currentDamage: String(payload.sourceDamage || 'Defective'),
-          desiredState,
-          desiredDamage
-        }, {
-          maxRecoveries: 2,
-          allowReload: false
-        });
-        done++;
-        results.push({ sku, outcome: result?.outcome || 'done' });
-      }
-      issWorkerProgress('edit', `DONE ✓ ${done}/${items.length}`, { done, total: items.length, mode });
-      return { done, total: items.length, results, mode };
+      issWorkerProgress('edit', `SKU • starting ${items.length} item${items.length === 1 ? '' : 's'}`, {
+        current:0,
+        total:items.length,
+        mode
+      });
+
+      const result = await Edit.runSkuBatchQueue(items, {
+        currentState,
+        currentDamage:String(payload.sourceDamage || 'Defective'),
+        desiredState,
+        desiredDamage
+      });
+      const failed = Array.isArray(result?.failed) ? result.failed : [];
+      const flipped = Number(result?.flipped) || 0;
+      const zero = Number(result?.zero) || 0;
+      const done = flipped + zero;
+
+      issWorkerProgress(
+        'edit',
+        `DONE ✓ ${flipped} flipped • ${zero} zero • ${failed.length} failed`,
+        { done, total:items.length, failed:failed.length, mode }
+      );
+      return { done, total:items.length, flipped, zero, failed, mode };
     } finally {
       Edit.directBusy = false;
     }
   }
 
   async function issWorkerMoveQuantity(definition, objectId, label) {
-    const html = await ModeSwitch.routeHtml(definition, label);
-    const fetchedObjectId = objectIdFromHtmlForWorker(html);
-    assertObject(objectId, fetchedObjectId, label);
-    const direct = MoveItems.quantityInfoFromRaw(html);
-    if (direct.qty) return direct.qty;
-    if (direct.verify) throw new Error(`${label}: Verify Item screen detected`);
-    const info = MoveItems.quantityInfoFromHtml(html);
-    if (info.qty) return info.qty;
-    if (info.verify) throw new Error(`${label}: Verify Item screen detected`);
-    throw new Error(`${label}: quantity not found`);
+    return MoveItems.getNativeQuantity(objectId, label);
   }
 
   function objectIdFromHtmlForWorker(html) {
@@ -3985,8 +3999,16 @@
     } catch (error) {
       try { await MoveApi.end(objectId); } catch {}
       const message = String(error?.message || error);
+      error.aftPartial = {
+        kind:'move',
+        done,
+        total:items.length,
+        remaining:items.slice(done),
+        source,
+        dest
+      };
       if (done > 0) {
-        error.message = `${message} • ${done} already moved • do not blindly retry completed rows`;
+        error.message = `${message} • ${done} already moved • remaining queue kept`;
       }
       throw error;
     } finally {
@@ -4044,8 +4066,9 @@
         traceAft('ISS_WORKER_RPC_RESULT', { command, ok:false, error:workerError.slice(0, 180) });
         issWorkerSend('ISS_CONSOLE_RPC_RESULT', {
           id,
-          ok: false,
-          error: workerError
+          ok:false,
+          error:workerError,
+          data:error?.aftPartial || null
         });
       } finally {
         if (command !== 'ping' && command !== 'stop') issWorkerBusy = false;
