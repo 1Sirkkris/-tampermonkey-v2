@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.71
+// @version      0.1.72
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.71';
+  const VERSION = '0.1.72';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -712,28 +712,42 @@
     usage('madcat.auth.self-test.hotkey');
 
     try {
-      await coreRequest(
+      const result = await coreRequest(
         'madcatAuthSelfTest',
         { identifier },
-        30000,
+        80000,
         '',
         progress => {
           if (!button.isConnected) return;
           const phase = clean(progress?.phase);
           if (phase === 'token-cleared') button.textContent = 'KILLED';
           else if (phase === 'silent-fetch-started') button.textContent = 'AUTO…';
-          else if (phase === 'pass') button.textContent = 'PASS ✓';
+          else if (phase === 'same-token') button.textContent = 'SAME TOKEN';
+          else if (phase === 'expiry-probe-wait') button.textContent = 'WAIT EXPIRY…';
+          else if (phase === 'expiry-reload') button.textContent = 'EXPIRED → RETRY';
+          else if (phase === 'not-renewed') button.textContent = 'NOT RENEWED';
+          else if (phase === 'pass') button.textContent = 'RENEWED ✓';
         }
       );
 
       if (!row.isConnected) return;
-      button.textContent = 'PASS ✓';
-      button.title = 'Silent MADCAT auth recovery passed • verifying with a real MADCAT read…';
+      if (!result?.renewed) {
+        button.textContent = 'NOT RENEWED';
+        button.title = 'MADCAT token was recovered but not renewed' +
+          (result?.captureSource ? ' • source: ' + clean(result.captureSource) : '') +
+          (result?.method ? ' • method: ' + clean(result.method) : '');
+        return;
+      }
+
+      button.textContent = 'RENEWED ✓';
+      button.title = 'MADCAT token renewed silently • verifying with a real MADCAT read…';
       await checkMadcat(row, fnsku, asin, true, false);
     } catch (error) {
       if (!row.isConnected) return;
       const detail = clean(error?.message || 'MADCAT auth self-test failed');
       paintMadcat(row, 'error', 'AUTH SELF-TEST FAILED: ' + detail);
+    } finally {
+      if (button?.isConnected) delete button.dataset.authTestBusy;
     }
   }
 
@@ -3194,17 +3208,26 @@
         const result = await coreRequest(
           'madcatAuthSelfTest',
           {},
-          30000,
+          80000,
           '',
           progress => {
             const phase = clean(progress?.phase);
             if (phase === 'token-cleared') button.textContent = 'TOKEN KILLED';
             else if (phase === 'silent-fetch-started') button.textContent = 'AUTO FETCH…';
-            else if (phase === 'pass') button.textContent = 'AUTH PASS ✓';
+            else if (phase === 'same-token') button.textContent = 'SAME TOKEN';
+            else if (phase === 'expiry-probe-wait') button.textContent = 'WAIT EXPIRY…';
+            else if (phase === 'expiry-reload') button.textContent = 'EXPIRED → RETRY';
+            else if (phase === 'not-renewed') button.textContent = 'NOT RENEWED';
+            else if (phase === 'pass') button.textContent = 'RENEWED ✓';
           }
         );
-        button.textContent = 'AUTH PASS ✓';
-        button.title = `MADCAT auth self-test PASS • restored silently in ${Math.max(0, Number(result?.elapsedMs) || 0)} ms`;
+        if (result?.renewed) {
+          button.textContent = 'RENEWED ✓';
+          button.title = `MADCAT renewal PASS • ${Math.max(0, Number(result?.elapsedMs) || 0)} ms • ${clean(result?.method || '')}`;
+        } else {
+          button.textContent = 'NOT RENEWED';
+          button.title = `MADCAT recovered the same token • ${clean(result?.captureSource || 'unknown source')}`;
+        }
       } catch (error) {
         button.textContent = 'AUTH FAIL';
         button.title = clean(error?.message || 'MADCAT auth self-test failed');
