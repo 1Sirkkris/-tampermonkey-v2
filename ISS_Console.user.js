@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.21
+// @version      0.1.22
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.21';
+  const VERSION = '0.1.22';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0121__) return;
-  window.__ISS_CONSOLE_V0121__ = true;
+  if (window.__ISS_CONSOLE_V0122__) return;
+  window.__ISS_CONSOLE_V0122__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -28,6 +28,9 @@
   const STORE_PREFIX = 'issConsole.v1.';
   const DEFAULT_TIMEOUT = 20000;
   const LONG_TIMEOUT = 12 * 60 * 1000;
+  const WORKER_HEALTH_TIMEOUT = 4000;
+  const WORKER_READY_TIMEOUT = 15000;
+  const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
 
   try { window.stop(); } catch {}
@@ -74,7 +77,11 @@
       frame: null,
       ready: false,
       version: '',
-      pending: new Map()
+      pending: new Map(),
+      lastSeenAt: 0,
+      lastHealthyAt: 0,
+      healthPromise: null,
+      restartPromise: null
     },
     sideline: {
       origin: location.origin,
@@ -122,7 +129,7 @@
     } catch {}
   }
 
-  function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
+  function rpcRaw(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
     const state = workers[worker];
     if (!state) return Promise.reject(new Error('Unknown worker'));
     if (!state.ready || !workerFrame(worker)) {
@@ -150,10 +157,121 @@
     });
   }
 
+  function waitForWorkerReady(worker, timeout = WORKER_READY_TIMEOUT) {
+    const state = workers[worker];
+    if (!state) return Promise.reject(new Error('Unknown worker'));
+
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeout;
+      const check = () => {
+        if (state.ready && workerFrame(worker)) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          reject(new Error(worker + ' worker did not reconnect'));
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
+  async function restartWorker(worker, reason = 'health-check') {
+    const state = workers[worker];
+    if (!state || state.local) throw new Error(worker + ' worker cannot be restarted');
+    if (state.restartPromise) return state.restartPromise;
+
+    const active = [...state.pending.values()].filter(item => item?.command !== 'ping');
+    if (active.length) throw new Error(worker + ' worker has an active command');
+
+    state.restartPromise = (async () => {
+      observe('WORKER_RESTART', { worker, reason });
+      markWorker(worker, false);
+
+      const oldFrame = state.frame;
+      state.frame = null;
+      try { oldFrame?.remove(); } catch {}
+
+      spawnWorker(worker);
+      await waitForWorkerReady(worker);
+
+      const result = await rpcRaw(worker, 'ping', {}, WORKER_HEALTH_TIMEOUT);
+      state.lastHealthyAt = Date.now();
+      observe('WORKER_HEALTH', { worker, ok:true, repaired:true, reason });
+      return result;
+    })().finally(() => {
+      state.restartPromise = null;
+    });
+
+    return state.restartPromise;
+  }
+
+  async function ensureWorkerHealthy(worker) {
+    const state = workers[worker];
+    if (!state) throw new Error('Unknown worker');
+    if (state.local) return true;
+    if (state.healthPromise) return state.healthPromise;
+
+    state.healthPromise = (async () => {
+      if (!state.ready || !workerFrame(worker)) {
+        return restartWorker(worker, 'not-ready');
+      }
+
+      try {
+        const result = await rpcRaw(worker, 'ping', {}, WORKER_HEALTH_TIMEOUT);
+        state.lastHealthyAt = Date.now();
+        observe('WORKER_HEALTH', { worker, ok:true, repaired:false });
+        return result;
+      } catch (error) {
+        observe('WORKER_HEALTH', {
+          worker,
+          ok:false,
+          error:clean(error?.message || error).slice(0, 180)
+        });
+        return restartWorker(worker, 'ping-failed');
+      }
+    })().finally(() => {
+      state.healthPromise = null;
+    });
+
+    return state.healthPromise;
+  }
+
+  async function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
+    if (worker === 'aft' && !['ping','stop'].includes(command)) {
+      await ensureWorkerHealthy(worker);
+    }
+    return rpcRaw(worker, command, payload, timeout);
+  }
+
+  function startWorkerWatchdog() {
+    setInterval(() => {
+      const state = workers.aft;
+      if (!state || state.restartPromise || state.healthPromise || state.pending.size) return;
+      const age = Date.now() - Number(state.lastHealthyAt || state.lastSeenAt || 0);
+      if (age < WORKER_HEARTBEAT_MS) return;
+
+      ensureWorkerHealthy('aft').catch(error => {
+        markWorker('aft', false);
+        observe('WORKER_HEALTH', {
+          worker:'aft',
+          ok:false,
+          watchdog:true,
+          error:clean(error?.message || error).slice(0, 180)
+        });
+      });
+    }, WORKER_HEARTBEAT_MS);
+  }
+
   function markWorker(worker, ready, version = '') {
     const state = workers[worker];
     if (!state) return;
+    const previousReady = !!state.ready;
+    const previousVersion = state.version || '';
     state.ready = !!ready;
+    if (ready) state.lastSeenAt = Date.now();
     if (version) state.version = version;
 
     const dot = $('[data-worker-dot="' + worker + '"]');
@@ -177,7 +295,9 @@
       }
     }
 
-    observe('WORKER_STATE', { worker, ready:!!ready, version:version || state.version || '' });
+    if (previousReady !== state.ready || previousVersion !== state.version) {
+      observe('WORKER_STATE', { worker, ready:!!ready, version:version || state.version || '' });
+    }
   }
 
   function panelStatus(area, message, kind = '') {
@@ -461,9 +581,11 @@
     const originOk = state.local ? event.origin === location.origin : event.origin === state.origin;
     const sourceOk = state.local ? true : event.source === workerFrame(worker);
     if (!originOk || !sourceOk) return;
+    state.lastSeenAt = Date.now();
 
     if (message.type === 'ISS_CONSOLE_WORKER_READY') {
       observe('WORKER_READY_MESSAGE', { worker, version:message.version || '' });
+      state.lastHealthyAt = Date.now();
       markWorker(worker, true, message.version || '');
       if (worker === 'sideline') {
         rpc('sideline', 'mode', { mode: sidelineMode }, 15000)
@@ -541,18 +663,20 @@
     frame.tabIndex = -1;
     frame.src = state.url;
     frame.addEventListener('load', () => {
+      if (state.frame !== frame) return;
+      markWorker(worker, false);
       setTimeout(() => {
-        if (!state.ready) {
-          try {
-            frame.contentWindow.postMessage({
-              type: 'ISS_CONSOLE_RPC',
-              worker,
-              id: nextRpcId(worker),
-              command: 'ping',
-              payload: {}
-            }, state.origin);
-          } catch {}
-        }
+        if (state.frame !== frame || state.ready) return;
+        try {
+          frame.contentWindow.postMessage({
+            type: 'ISS_CONSOLE_RPC',
+            worker,
+            id: nextRpcId(worker),
+            command: 'ping',
+            payload: {}
+          }, state.origin);
+          observe('WORKER_PING', { worker, reason:'iframe-load' });
+        } catch {}
       }, 1000);
     });
     state.frame = frame;
@@ -1469,6 +1593,7 @@
     hydrate();
     spawnWorker('aft');
     spawnWorker('sideline');
+    startWorkerWatchdog();
 
     panelStatus('edit', 'Waiting for AFT worker…', '');
     panelStatus('move', 'Waiting for AFT worker…', '');
