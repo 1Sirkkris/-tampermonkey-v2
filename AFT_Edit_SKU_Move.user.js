@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.35
+// @version      0.9.36
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__AFT_MASTER_V098__ = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.35';
+  const VERSION = '0.9.36';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -3926,7 +3926,21 @@
   }
 
   async function issWorkerMoveQuantity(definition, objectId, label) {
-    return MoveItems.getNativeQuantity(objectId, label);
+    // Worker iframe stays on EditItems. Read the MoveItems route explicitly so
+    // quantity parsing uses the same native response shape without changing iframe route.
+    const html = await ModeSwitch.routeHtml(definition, label);
+    const fetchedObjectId = objectIdFromHtmlForWorker(html);
+    assertObject(objectId, fetchedObjectId, label);
+
+    const direct = MoveItems.quantityInfoFromRaw(html);
+    if (direct.qty) return direct.qty;
+    if (direct.verify) throw new Error(`${label}: Verify Item screen detected`);
+
+    const info = MoveItems.quantityInfoFromHtml(html);
+    if (info.qty) return info.qty;
+    if (info.verify) throw new Error(`${label}: Verify Item screen detected`);
+
+    throw new Error(`${label}: quantity not found`);
   }
 
   function objectIdFromHtmlForWorker(html) {
