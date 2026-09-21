@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.8
+// @version      0.1.9
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V018__) return;
-  window.__ISS_CONSOLE_V018__ = true;
+  if (window.__ISS_CONSOLE_V019__) return;
+  window.__ISS_CONSOLE_V019__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -96,6 +96,7 @@
     : 'lazy';
   let sidelineRunBusy = false;
   let sidelineAttention = '';
+  let sidelineItemsSignature = '';
   let built = false;
 
   function nextRpcId(worker) {
@@ -239,6 +240,69 @@
     return state.ready ? ('v' + state.version) : 'connecting…';
   }
 
+  function sidelineItemStateLabel(item) {
+    const status = upper(item?.status || '');
+    if (status === 'READY') return '✓ READY';
+    if (status === 'DATE') return '⚠ ' + (upper(item?.dateType || '') === 'PRODUCTION_DATE' ? 'PRODUCTION DATE' : 'EXPIRATION DATE') + ' REQUIRED';
+    if (status === 'RESOLVING') return '… CHECKING';
+    if (status === 'MOVING') return '→ MOVING';
+    if (status === 'MOVED') return '✓ MOVED';
+    if (status === 'INVALID' || status === 'FAILED' || status === 'SKIPPED') return '✕ NOT MOVED';
+    if (status === 'DEST_RETRY') return '⚠ WAITING TO RETRY';
+    return status || '• QUEUED';
+  }
+
+  function renderSidelineItems(items = [], finalOnly = false) {
+    const host = $('[data-side-items-state]');
+    if (!host) return;
+
+    let rows = Array.isArray(items) ? items : [];
+    if (finalOnly) rows = rows.filter(item => ['FAILED','INVALID','SKIPPED'].includes(upper(item?.status || '')));
+
+    const signature = (finalOnly ? 'final|' : 'live|') + rows.map(item => [
+      item?.code || '',
+      item?.qty || 0,
+      item?.status || '',
+      item?.asin || '',
+      item?.fnsku || '',
+      item?.issue || '',
+      item?.dateType || ''
+    ].join('\u0000')).join('\u0001');
+
+    if (signature === sidelineItemsSignature) return;
+    sidelineItemsSignature = signature;
+
+    if (!rows.length) {
+      host.innerHTML = '';
+      host.dataset.show = '0';
+      return;
+    }
+
+    host.innerHTML = rows.map(item => {
+      const status = upper(item?.status || '');
+      const scan = clean(item?.code || '—');
+      const asin = clean(item?.asin || '—');
+      const fnsku = clean(item?.fnsku || '—');
+      const issue = clean(item?.issue || '');
+      const qty = Number(item?.qty) || 1;
+      const issueRow = issue ? '<b>Issue:</b><span>' + esc(issue) + '</span>' : '';
+      return '<div class="iss-side-item" data-state="' + esc(status) + '">' +
+        '<div class="iss-side-item-top"><strong>' + esc(sidelineItemStateLabel(item)) + '</strong><code>' + esc(scan) + ' ×' + qty + '</code></div>' +
+        '<div class="iss-side-item-meta">' +
+          '<b>ASIN:</b><span>' + esc(asin) + '</span>' +
+          '<b>FNSKU:</b><span>' + esc(fnsku) + '</span>' +
+          issueRow +
+        '</div>' +
+      '</div>';
+    }).join('');
+    host.dataset.show = '1';
+  }
+
+  function resetSidelineLazyInputs() {
+    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    $('[data-side-source]')?.focus();
+  }
+
   function handleProgress(message) {
     const area = message.area;
     if (!['edit','move','sideline'].includes(area)) return;
@@ -264,6 +328,10 @@
           items?.focus();
           items?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
         }
+      }
+
+      if (message.mode === 'lazy' && Array.isArray(message.items)) {
+        renderSidelineItems(message.items, false);
       }
 
       const meta = $('[data-progress="sideline"]');
@@ -466,6 +534,7 @@
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
       '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
+      '        <div class="iss-side-items" data-side-items-state></div>',
       '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><input type="checkbox" data-clear-source hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
@@ -504,7 +573,7 @@
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:block}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
-      '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
+      '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}.iss-side-items{display:none;max-height:190px;overflow:auto;border:1px solid #c7d0d8;border-radius:4px;background:#f8fafc;padding:5px;gap:5px}.iss-side-items[data-show="1"]{display:grid}.iss-side-item{padding:7px 8px;border:1px solid #cbd5e1;border-left:5px solid #64748b;border-radius:3px;background:#fff;color:#334155}.iss-side-item[data-state="READY"]{border-left-color:#146eb4;background:#eff6ff;color:#0f3d73}.iss-side-item[data-state="DATE"]{border-left-color:#f59e0b;background:#fff7ed;color:#7c2d12}.iss-side-item[data-state="MOVED"]{border-left-color:#146eb4;background:#f0f8ff;color:#0f3d73}.iss-side-item[data-state="FAILED"],.iss-side-item[data-state="INVALID"],.iss-side-item[data-state="SKIPPED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}.iss-side-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:1000}.iss-side-item-top code{font:900 12px Consolas,monospace}.iss-side-item-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;margin-top:5px;font-size:11px;line-height:1.25}.iss-side-item-meta b{font-weight:1000}.iss-side-item[data-state="FAILED"] .iss-side-item-meta b,.iss-side-item[data-state="INVALID"] .iss-side-item-meta b,.iss-side-item[data-state="SKIPPED"] .iss-side-item-meta b{color:#991b1b}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
       '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
       '.iss-footer{height:32px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #c8d0d8;background:#f7f8f9;color:#687683;font-size:10px;font-weight:800}',
       '.iss-worker-frame{position:fixed!important;width:2px!important;height:2px!important;left:-10000px!important;top:-10000px!important;opacity:0!important;pointer-events:none!important;border:0!important}',
@@ -801,6 +870,8 @@
       if (!items.length) return panelStatus('sideline', 'Scan/paste at least one item', 'error');
 
       sidelineRunBusy = true;
+      sidelineItemsSignature = '';
+      renderSidelineItems([], false);
       setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       panelStatus('sideline', 'Starting Lazy…', 'working');
       try {
@@ -810,7 +881,21 @@
           items,
           clearSource: !!$('[data-clear-source]')?.checked
         }, LONG_TIMEOUT);
-        panelStatus('sideline', result.message || ('DONE ✓ moved ' + result.moved), result.failed ? 'error' : 'ok');
+        const failures = Array.isArray(result.failures)
+          ? result.failures
+          : (Array.isArray(result.items)
+              ? result.items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(upper(item?.status || '')))
+              : []);
+
+        resetSidelineLazyInputs();
+        sidelineItemsSignature = '';
+        if (failures.length) {
+          renderSidelineItems(failures, true);
+          panelStatus('sideline', 'DONE • ' + (result.failed || failures.length) + ' NOT MOVED — CHECK ITEMS BELOW', 'error');
+        } else {
+          renderSidelineItems([], true);
+          panelStatus('sideline', result.message || ('DONE ✓ moved ' + result.moved), 'ok');
+        }
       } catch (error) {
         panelStatus('sideline', error.message, 'error');
       } finally {
@@ -876,7 +961,9 @@
       $('[data-move-source]')?.focus();
       return;
     }
-    for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    for (const el of $('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
+    sidelineItemsSignature = '';
+    renderSidelineItems([], false);
     panelStatus('sideline', 'Cleared', '');
     $('[data-side-source]')?.focus();
   }
