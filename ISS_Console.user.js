@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.7
+// @version      0.1.8
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V017__) return;
-  window.__ISS_CONSOLE_V017__ = true;
+  if (window.__ISS_CONSOLE_V018__) return;
+  window.__ISS_CONSOLE_V018__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -95,6 +95,7 @@
     ? storeGet('sidelineMode', 'lazy')
     : 'lazy';
   let sidelineRunBusy = false;
+  let sidelineAttention = '';
   let built = false;
 
   function nextRpcId(worker) {
@@ -241,9 +242,30 @@
   function handleProgress(message) {
     const area = message.area;
     if (!['edit','move','sideline'].includes(area)) return;
-    panelStatus(area, message.message || 'Working…', message.error ? 'error' : 'working');
+
+    const attention = area === 'sideline' ? String(message.attention || '') : '';
+    panelStatus(area, message.message || 'Working…', attention ? 'attention' : (message.error ? 'error' : 'working'));
 
     if (area === 'sideline') {
+      const previousAttention = sidelineAttention;
+      sidelineAttention = attention;
+
+      const panel = $('[data-panel="sideline"]');
+      const alert = $('[data-side-alert]');
+      const alertText = $('[data-side-alert-text]');
+      const items = $('[data-side-items]');
+      if (panel) panel.dataset.sideAttention = attention;
+      if (alert) alert.dataset.show = attention === 'rescan-destination' ? '1' : '0';
+
+      if (attention === 'rescan-destination') {
+        const dest = clean($('[data-side-dest]')?.value);
+        if (alertText) alertText.textContent = 'SCAN ' + (dest || 'DESTINATION') + ' AGAIN IN ITEM BARCODES TO CONTINUE';
+        if (previousAttention !== attention) {
+          items?.focus();
+          items?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
+        }
+      }
+
       const meta = $('[data-progress="sideline"]');
       if (meta) {
         const bits = [];
@@ -443,6 +465,7 @@
       '        <label class="iss-field"><span>DESTINATION</span><input data-side-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
+      '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
       '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><input type="checkbox" data-clear-source hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
@@ -481,7 +504,7 @@
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:block}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
-      '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}',
+      '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
       '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
       '.iss-footer{height:32px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #c8d0d8;background:#f7f8f9;color:#687683;font-size:10px;font-weight:800}',
       '.iss-worker-frame{position:fixed!important;width:2px!important;height:2px!important;left:-10000px!important;top:-10000px!important;opacity:0!important;pointer-events:none!important;border:0!important}',
