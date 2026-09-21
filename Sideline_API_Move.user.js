@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.36
+// @version      0.3.37
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.36';
+  const VERSION = '0.3.37';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -4040,6 +4040,7 @@
       lazy.error = '';
       lazy.note = message;
       renderLazy();
+      if (ISS_CONSOLE_LOCAL) issSideEmitProgress();
     };
 
     try {
@@ -4054,6 +4055,7 @@
       lazy.note = `Destination emptied — retrying ${item.code} ×${item.qty}`;
       shared.owner = 'lazy';
       renderLazy();
+      if (ISS_CONSOLE_LOCAL) issSideEmitProgress();
       return true;
     } catch (error) {
       if (error?.outcomeUnknown) {
@@ -5362,13 +5364,14 @@
   function issSideSnapshot() {
     if (issSideWorkerMode === 'lazy') {
       const items = issSideLazyItems();
+      const predicantRecovery = !!(lazy.predicant && shared.owner === 'lazy-recovery');
       return {
-        mode: 'lazy',
-        running: !!lazy.running,
-        message: clean(lazy.error || lazy.note || 'Ready'),
-        attention: lazy.predicant ? 'rescan-destination' : '',
-        current: Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
-        total: lazy.items.length,
+        mode:'lazy',
+        running:!!lazy.running,
+        message:clean(lazy.error || lazy.note || 'Ready'),
+        attention:predicantRecovery ? 'predicant-recovery' : (lazy.predicant ? 'rescan-destination' : ''),
+        current:Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
+        total:lazy.items.length,
         items
       };
     }
@@ -5526,10 +5529,26 @@
   function issSideLazyScan(payload = {}) {
     const code = clean(payload.code || payload.item || '');
     if (!code) throw new Error('Scan required');
+
+    const confirmingPredicant = !!(
+      lazy.predicant &&
+      lazy.predicantResolve &&
+      norm(code) === norm(lazy.dest)
+    );
+
     const accepted = acceptCollapsedLazyScan(code);
     if (!accepted) throw new Error('Lazy scan not accepted in current state');
+
+    if (confirmingPredicant) {
+      lazy.predicant = true;
+      lazy.paused = true;
+      lazy.error = '';
+      lazy.note = `destination confirmed — emptying ${lazy.dest}`;
+      shared.owner = 'lazy-recovery';
+    }
+
     issSideEmitProgress();
-    return { accepted:true, code };
+    return { accepted:true, code, recovery:confirmingPredicant };
   }
 
   async function issSideLiveConfigure(payload = {}) {
