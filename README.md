@@ -12,7 +12,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Sideline API Move | 0.3.37 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
 | AFT Edit/SKU/Move | 0.9.33 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
 | ISS Console | 0.1.25 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js) |
-| FCR Data Core | 0.2.27 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
+| FCR Data Core | 0.2.28 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
 | FCResearch Master | 0.1.58 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
 | FC-Lite | 0.1.72 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
 | Stow Andons Helper | 5.5.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
