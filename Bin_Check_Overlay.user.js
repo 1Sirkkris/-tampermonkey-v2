@@ -2,7 +2,7 @@
 // @name         TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @name:en      TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.4
+// @version      7.4.5
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,10 +15,10 @@
 (() => {
   'use strict';
 
-  if (window.__binOverlay_v743test || location.hash.startsWith('#fcr-tote-checker')) return;
-  window.__binOverlay_v743test = true;
+  if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker')) return;
+  window.__bwu2BinCheckOverlay = true;
 
-  const VERSION = '7.4.4';
+  const VERSION = '7.4.5';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -883,10 +883,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('p-level-overlay-style-v743')) return;
+    if (document.getElementById('p-level-overlay-style')) return;
 
     const style = document.createElement('style');
-    style.id = 'p-level-overlay-style-v743';
+    style.id = 'p-level-overlay-style';
     style.textContent = `
       #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
       #pLevelOverlay[hidden]{display:none}

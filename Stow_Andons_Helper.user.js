@@ -8,7 +8,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.6
+// @version      5.5.7
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -17,10 +17,10 @@
 
 (() => {
   'use strict';
-  if (window.__stowAndonsCore548test) return;
-  window.__stowAndonsCore548test = true;
+  if (window.__bwu2StowAndonsHelper) return;
+  window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.5.6';
+  const VERSION = '5.5.7';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;

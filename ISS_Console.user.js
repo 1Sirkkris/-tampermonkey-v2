@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.26
+// @version      0.1.27
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.26';
+  const VERSION = '0.1.27';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0126__) return;
-  window.__ISS_CONSOLE_V0126__ = true;
+  if (window.__bwu2IssConsole) return;
+  window.__bwu2IssConsole = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -437,11 +437,6 @@
     const dest = clean($('[data-side-dest]')?.value);
     const lines = collectLazyLines($('[data-side-items]')?.value, source, dest);
     paintLazyMetrics(lazyMetricsFromLines(lines));
-  }
-
-  function workerStateLine(worker) {
-    const state = workers[worker];
-    return state.ready ? ('v' + state.version) : 'connecting…';
   }
 
   function sidelineItemStateLabel(item) {

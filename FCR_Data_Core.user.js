@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.28
+// @version      0.2.29
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.28';
+  const VERSION = '0.2.29';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -62,8 +62,8 @@
     return;
   }
 
-  if (window.__fcrDataCore_v0210test) return;
-  window.__fcrDataCore_v0210test = true;
+  if (window.__bwu2FcrDataCore) return;
+  window.__bwu2FcrDataCore = true;
   registerRuntimeVersion('FCR CORE', VERSION);
 
   const REQUEST_EVENT = 'fcr-data-core:request';
@@ -1211,10 +1211,6 @@ function gestureMeasurementIdentifier(target) {
       if (row.asin || row.fnsku || row.fcsku) rows.push(row);
     }
     return rows;
-  }
-
-  function parseInventoryHtml(html) {
-    return parseInventoryDocument(parseHtml(html));
   }
 
   function inventoryPreviewFromDocument(doc, startedAt, networkMs) {

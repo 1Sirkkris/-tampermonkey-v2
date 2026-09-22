@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.59
+// @version      0.1.60
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -20,10 +20,10 @@
 (() => {
   'use strict';
 
-  if (window.__fcrMasterCore_v018test || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
-  window.__fcrMasterCore_v018test = true;
+  if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
+  window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.59';
+  const VERSION = '0.1.60';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -55,8 +55,6 @@
   const BIN_REQUEST_TIMEOUT_MS = 15000;
   const BIN_MAX_CONTAINER_ATTEMPTS = 3;
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com';
-  const SECTION_LOAD_PREFS_KEY = 'fcrm_native_section_load_v1';
-  const SECTION_LOAD_PREF_KEY_PREFIX = 'fcrm_native_section_load_v2.';
   const SECTION_LOAD_RECORD_KEY_PREFIX = 'fcrm_native_section_load_v4.';
   const SECTION_LOAD_STYLE_ID = 'fcrm-section-load-visibility';
   const SECTION_AUTO_DEFAULTS = new Set(['product', 'inventory']);

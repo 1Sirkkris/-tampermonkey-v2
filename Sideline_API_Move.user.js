@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.37
+// @version      0.3.38
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -22,14 +22,14 @@
   const ISS_CONSOLE_LOCAL = IS_FCR && location.hash.startsWith('#iss-console');
   if (!IS_POIROT && !ISS_CONSOLE_LOCAL) return;
 
-  if (window.__sidelineApiMoveTest_v0201) return;
-  window.__sidelineApiMoveTest_v0201 = true;
+  if (window.__bwu2SidelineApiMove) return;
+  window.__bwu2SidelineApiMove = true;
 
   const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.37';
+  const VERSION = '0.3.38';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -455,22 +455,6 @@
       await sleep(gap);
     }
     return null;
-  }
-
-  async function fillAndConfirm(value, expected='', active=()=>true) {
-    const input = await waitFor(() => active() && (!expected || screen() === expected) && scanInput(), 12000, 60);
-    if (!input || !active()) return false;
-    input.focus();
-    input.select?.();
-    setValue(input, '');
-    await sleep(10);
-    if (!active()) return false;
-    setValue(input, value);
-    await sleep(25);
-    if (!active()) return false;
-    const button = confirmButton();
-    enabled(button) ? click(button) : enter(input);
-    return active();
   }
 
   async function closeOpenContainer(choice='yes', active=()=>true) {

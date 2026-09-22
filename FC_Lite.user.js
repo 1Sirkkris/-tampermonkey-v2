@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.72
+// @version      0.1.73
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -16,8 +16,8 @@
 (() => {
   'use strict';
 
-  if (window.__fcrLite_v0151test || location.hash.startsWith('#iss-console')) return;
-  window.__fcrLite_v0151test = true;
+  if (window.__bwu2FcLite || location.hash.startsWith('#iss-console')) return;
+  window.__bwu2FcLite = true;
 
   const TOTE_HASH = '#fcr-tote-checker';
   const SECTIONS_HASH = '#fcr-lite';
@@ -38,7 +38,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.72';
+  const VERSION = '0.1.73';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;

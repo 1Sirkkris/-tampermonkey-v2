@@ -2,7 +2,7 @@
 // @name         MAIN Screenshot Mode
 // @name:en      MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.1.2
+// @version      0.1.3
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
 // @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -47,7 +47,7 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const MODE_ATTR = 'data-bwu2-screenshot-mode';
   const LEGACY_ATTR = 'data-bwu2-screenshot-owned';
   const STYLE_ID = 'bwu2-screenshot-mode-style';
@@ -172,7 +172,7 @@
     'fcrm-section-load-visibility',
     'vm-safe-trim-css',
     'fcratc-style',
-    'p-level-overlay-style-v743',
+    'p-level-overlay-style',
     'sim-md-style',
     'aftm-style',
     'bwu2-observability-style',

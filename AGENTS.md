@@ -86,6 +86,19 @@ For targeted work:
 
 Broader replacement is appropriate only when explicitly requested and after the functional baseline is established.
 
+## Repository hygiene and retirement
+
+Git history is the archive. `main` should represent current reality, not accumulate old revisions.
+
+- Keep one canonical active source per deployed script. Do not retain versioned full-script snapshots, duplicate source copies, superseded implementations or completed probes merely as backups.
+- Temporary diagnostics, compatibility shims and migrations must have a reason and a retirement condition. Remove them after the relevant evidence is captured or compatibility need has ended.
+- Prefer version-neutral runtime guard/UI identifiers. Do not embed a release number in a new guard, DOM id or style id unless that number is an intentional data/protocol schema version.
+- Do not rename immutable deployed Tampermonkey identity fields merely for cleanliness. Existing `@name + @namespace`, stable filename and canonical update/download paths remain protected.
+- Before retiring compatibility logic or duplicate source, verify the canonical replacement, relevant history and recent runtime/observability evidence where available.
+- Cleanup work must preserve current behaviour unless a separately justified change is safer, more correct, more reliable or materially better.
+- During broad cleanup audits, check: duplicate blobs/files, dead functions/constants, stale README/version references, expired diagnostics, revision-specific guards/DOM ids, obsolete compatibility selectors and unused storage migrations.
+- Do not churn persistent storage keys or schema-versioned feature guards just to make names prettier; migrate only when there is a concrete benefit and a safe compatibility path.
+
 ## Direct path before DOM automation
 
 For workflows that read site data or perform site actions, do not default to DOM scraping, simulated clicks, polling or fixed delays.

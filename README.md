@@ -9,25 +9,25 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Carton PrEditor | 7.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Carton_PrEditor.user.js) |
 | SIM Markdown Toolbar | 5.1.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/SIM_Markdown_Toolbar.user.js) |
 | FNSKU Mapping Lookup | 1.4.1-test | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FNSKU_Mapping_Lookup.user.js) |
-| Sideline API Move | 0.3.37 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
-| AFT Edit/SKU/Move | 0.9.33 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
-| ISS Console | 0.1.26 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js) |
-| FCR Data Core | 0.2.28 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
-| FCResearch Master | 0.1.59 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
-| FC-Lite | 0.1.72 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
-| Stow Andons Helper | 5.5.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
-| Bin Check Overlay | 7.4.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
+| Sideline API Move | 0.3.38 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_API_Move.user.js) |
+| AFT Edit/SKU/Move | 0.9.37 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/AFT_Edit_SKU_Move.user.js) |
+| ISS Console | 0.1.27 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js) |
+| FCR Data Core | 0.2.29 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCR_Data_Core.user.js) |
+| FCResearch Master | 0.1.60 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js) |
+| FC-Lite | 0.1.73 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js) |
+| Stow Andons Helper | 5.5.7 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js) |
+| Bin Check Overlay | 7.4.5 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
 | Dropzone Selector Queue | 0.2.19 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
 | BWU2 Observability Core | 0.1.25 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
 | Calm Code | 1.3.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
 | Unbind Hierarchy Queue | 1.0.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |
-| Screenshot Mode | 0.1.2 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Screenshot_Mode.user.js) |
+| Screenshot Mode | 0.1.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Screenshot_Mode.user.js) |
 
 Tampermonkey manager titles are intentionally version-free via `@name:en`; legacy base `@name` values stay frozen as update identity. Every active fleet script renders a shared low-profile runtime version stamp at the bottom of the page, so the actually running version is visible immediately after reload.
 
-Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Versioned `.txt` files remain as historical/diagnostic artifacts.
+Each stable `.user.js` file owns its permanent `@updateURL` and `@downloadURL`. Git history is the archive; `main` keeps one canonical active source per deployed script plus diagnostics that are still actively useful.
 
-Rule: when duplicate uploads exist, prefer the stable `.user.js` file unless explicitly told otherwise. Diagnostic/usage-probe variants are kept separate from production/current scripts.
+Do not keep versioned full-script snapshots, duplicate source copies, completed probes or superseded implementations on `main`. Temporary diagnostics stay separate from the active fleet and should be removed after their question is answered unless they remain intentionally useful.
 
 ## Temporary diagnostics
 
