@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.27
+// @version      0.2.28
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.27';
+  const VERSION = '0.2.28';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -154,6 +154,57 @@
   let measurementKeepaliveHeartbeat = 0;
   let measurementKeepaliveLastRefreshAt = 0;
   let measurementAuthSelfTestPromise = null;
+  let measurementFocusInteractionSeq = 0;
+
+  const noteMeasurementUserInteraction = event => {
+    if (event?.isTrusted) measurementFocusInteractionSeq++;
+  };
+  for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) {
+    document.addEventListener(eventName, noteMeasurementUserInteraction, true);
+  }
+
+  function isNativeFcrSurface() {
+    const host = String(location.hostname || '').toLowerCase();
+    const hash = String(location.hash || '').toLowerCase();
+    const fcrHost = host.includes('fcresearch') || host === 'qifcr.fe.aftx.amazonoperations.app';
+    return fcrHost &&
+      !hash.startsWith('#fcr-lite') &&
+      !hash.startsWith('#fcr-tote-checker') &&
+      !hash.startsWith('#iss-console');
+  }
+
+  function nativeFcrSearchInput() {
+    if (!isNativeFcrSurface()) return null;
+    const inputs = [...document.querySelectorAll('input[type="search"],input[type="text"],input:not([type])')];
+    return inputs.find(input => {
+      if (input.disabled || input.readOnly || input.closest?.('[data-fcr-tool-ui],#bwu2-runtime-version-stamp')) return false;
+      const rect = input.getBoundingClientRect();
+      return rect.width >= 250 && rect.height > 0 && rect.top >= 0 && rect.top < 150;
+    }) || null;
+  }
+
+  function guardMeasurementFrameFocus(frame, reason = 'keepalive') {
+    if (!frame || !isNativeFcrSurface()) return;
+    const interactionSeq = measurementFocusInteractionSeq;
+    const restore = delay => {
+      setTimeout(() => {
+        if (measurementFocusInteractionSeq !== interactionSeq) return;
+        const input = nativeFcrSearchInput();
+        if (!input || document.activeElement === input) return;
+        try {
+          input.focus({ preventScroll:true });
+          recordUsage('madcat.auth.keepalive-focus-restored');
+        } catch {}
+      }, delay);
+    };
+    frame.addEventListener('load', () => {
+      // The hidden Measurement app can autofocus inside its iframe during/just after load.
+      // Restore native FCResearch search only when the user has not interacted meanwhile.
+      restore(0);
+      restore(250);
+      restore(1000);
+    }, { once:true });
+  }
 
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
@@ -237,6 +288,7 @@ function refreshMeasurementKeepaliveFrame(frame, identifier, reason = 'watchdog'
   const url = new URL(measurementKeepaliveUrl(wanted));
   url.searchParams.set('fcrMadcatRefresh', String(now));
   measurementKeepaliveLastRefreshAt = now;
+  guardMeasurementFrameFocus(frame, reason);
   frame.src = url.href;
   recordUsage('madcat.auth.keepalive-refresh');
 
@@ -283,7 +335,10 @@ function ensureMeasurementKeepalive(identifier) {
     frame.src = measurementKeepaliveUrl(wanted);
     frame.tabIndex = -1;
     frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('inert', '');
+    try { frame.inert = true; } catch {}
     frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
+    guardMeasurementFrameFocus(frame, 'initial');
     root.appendChild(frame);
     recordUsage('madcat.auth.keepalive-start');
 
@@ -382,6 +437,8 @@ function gestureMeasurementIdentifier(target) {
     frame.id = 'fcr-madcat-auth-selftest-frame';
     frame.tabIndex = -1;
     frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('inert', '');
+    try { frame.inert = true; } catch {}
     frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
     const url = new URL(measurementKeepaliveUrl(identifier));
     url.searchParams.set('fcrMadcatSelfTest', String(startedAt));
