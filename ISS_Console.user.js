@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.24
+// @version      0.1.25
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.24';
+  const VERSION = '0.1.25';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0124__) return;
-  window.__ISS_CONSOLE_V0124__ = true;
+  if (window.__ISS_CONSOLE_V0125__) return;
+  window.__ISS_CONSOLE_V0125__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -48,6 +48,22 @@
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
   const validContainer = value => /^(?:ts|cs)x[0-9a-z_-]+$/i.test(clean(value));
+
+  function requireContainerField(area, input, label) {
+    const value = clean(input?.value);
+    if (validContainer(value)) return value;
+
+    panelStatus(area, label + ' must start with tsX or csX', 'error');
+    observe('CONTAINER_INPUT_BLOCKED', {
+      area,
+      field:String(label || '').toLowerCase(),
+      length:value.length
+    });
+    input?.focus();
+    input?.select?.();
+    return '';
+  }
+
   const esc = value => String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1519,12 +1535,14 @@
     $('[data-move-source]')?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
+      if (!requireContainerField('move', event.currentTarget, 'SOURCE')) return;
       $('[data-move-dest]')?.focus();
       $('[data-move-dest]')?.select();
     });
     $('[data-move-dest]')?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
+      if (!requireContainerField('move', event.currentTarget, 'DESTINATION')) return;
       $('[data-move-items]')?.focus();
       panelStatus('move', 'Scan item(s) • rescan destination to start', 'ok');
     });
@@ -1537,7 +1555,8 @@
     $('[data-side-source]')?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      const source = clean(event.currentTarget.value);
+      const source = requireContainerField('sideline', event.currentTarget, 'SOURCE');
+      if (!source) return;
       if (sidelineMode === 'scrubber') {
         scrubScan(source);
         return;
@@ -1548,6 +1567,7 @@
     $('[data-side-dest]')?.addEventListener('keydown', async event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
+      if (!requireContainerField('sideline', event.currentTarget, 'DESTINATION')) return;
       if (sidelineMode === 'live') {
         try {
           if (sidelineAttention === 'live-destination') await recoverLiveDestinationFromField();
