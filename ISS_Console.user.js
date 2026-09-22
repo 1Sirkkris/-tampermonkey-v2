@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.25
+// @version      0.1.26
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,11 +15,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.25';
+  const VERSION = '0.1.26';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
-  if (window.__ISS_CONSOLE_V0125__) return;
-  window.__ISS_CONSOLE_V0125__ = true;
+  if (window.__ISS_CONSOLE_V0126__) return;
+  window.__ISS_CONSOLE_V0126__ = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -113,7 +113,7 @@
   let rpcSeq = 0;
   let activePanel = storeGet('activePanel', 'edit');
   let editMode = ['each','sku'].includes(storeGet('editMode', 'sku')) ? storeGet('editMode', 'sku') : 'sku';
-  let moveMode = ['all','qty'].includes(storeGet('moveMode', 'all')) ? storeGet('moveMode', 'all') : 'all';
+  let moveMode = ['all','each','qty'].includes(storeGet('moveMode', 'all')) ? storeGet('moveMode', 'all') : 'all';
   let sidelineMode = ['scrubber','queue','lazy','live'].includes(storeGet('sidelineMode', 'lazy'))
     ? storeGet('sidelineMode', 'lazy')
     : 'lazy';
@@ -791,13 +791,13 @@
       '    <section class="iss-panel" data-panel="move" data-active="' + (activePanel === 'move' ? '1' : '0') + '">',
       '      <div class="iss-panel-head"><div><strong class="iss-panel-title">MOVE</strong><span class="iss-panel-subtitle">Move Items • Container move</span></div><span class="iss-engine" data-move-engine>' + esc(moveMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
-      '        <div class="iss-segment iss-segment-move" data-move-modes><button type="button" data-move-mode="all">ALL</button><button type="button" data-move-mode="qty">QTY</button></div>',
+      '        <div class="iss-segment iss-segment-move" data-move-modes><button type="button" data-move-mode="all">ALL</button><button type="button" data-move-mode="each">EACH</button><button type="button" data-move-mode="qty">QTY</button></div>',
+      '        <label class="iss-inline-field" data-move-qty-wrap><span>QTY</span><input type="number" min="1" max="999999" data-move-qty></label>',
       '        <label class="iss-field"><span>SOURCE</span><input data-move-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field"><span>DESTINATION</span><input data-move-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span>ITEM BARCODES</span><textarea data-move-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
-      '        <label class="iss-inline-field" data-move-qty-wrap><span>QTY</span><input type="number" min="1" max="999999" data-move-qty></label>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-move-run>RUN MOVE</button><button type="button" data-stop="move">STOP</button><button type="button" data-clear="move">CLEAR</button></div>',
       '        <div class="iss-status" data-status="move" data-kind="">Ready</div>',
       '      </div>',
@@ -849,7 +849,7 @@
       '.iss-field input:disabled,.iss-field textarea:disabled{background:#eceff1;color:#8a949e;border-color:#c8ced4}.iss-grow{flex:1}.iss-flow-arrow{text-align:center;height:12px;color:#7b8793;font-weight:900;line-height:12px}',
       '.iss-damage{display:none}.iss-damage[data-show="1"]{display:grid}.iss-auto-source{display:grid;gap:5px}.iss-auto-source[hidden]{display:none!important}.iss-auto-source strong{height:36px;display:flex;align-items:center;padding:0 9px;border:1px solid #c4cbd1;border-radius:3px;background:#eef1f3;color:#65717c;font-size:11px;letter-spacing:.2px}',
       '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
-      '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit,.iss-segment-move{grid-template-columns:repeat(2,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
+      '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit{grid-template-columns:repeat(2,1fr)}.iss-segment-move{grid-template-columns:repeat(3,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
@@ -972,11 +972,12 @@
   }
 
   async function switchMoveMode(mode) {
-    if (!['all','qty'].includes(mode)) return;
+    if (!['all','each','qty'].includes(mode)) return;
     moveMode = mode;
     paintMoveMode();
     setActivePanel('move');
-    panelStatus('move', mode === 'qty' ? 'QTY mode selected' : 'ALL quantity selected', 'ok');
+    const label = mode === 'qty' ? 'QTY mode selected' : mode === 'each' ? 'EACH selected • 1 unit per item' : 'ALL quantity selected';
+    panelStatus('move', label, 'ok');
   }
 
   function paintClearSourceToggle() {
@@ -1138,7 +1139,9 @@
     setPanelLoading('move', true, 'Running MoveItems…');
     panelStatus('move', 'Starting MoveItems…', 'working');
     try {
-      const result = await rpc('aft', 'move.run', { source, dest, items, mode: moveMode, qty }, LONG_TIMEOUT);
+      const workerMode = moveMode === 'each' ? 'qty' : moveMode;
+      const workerQty = moveMode === 'each' ? 1 : qty;
+      const result = await rpc('aft', 'move.run', { source, dest, items, mode: workerMode, qty: workerQty }, LONG_TIMEOUT);
       const moveSource = $('[data-move-source]');
       const moveDest = $('[data-move-dest]');
       const moveItems = $('[data-move-items]');
@@ -1148,7 +1151,7 @@
       if (moveItems) moveItems.value = '';
       if (moveQty) moveQty.value = '';
       panelStatus('move', 'SUCCESS ✓ → ' + dest + ' • ' + result.done + '/' + result.total + ' moved', 'ok');
-      moveSource?.focus();
+      (moveMode === 'qty' ? moveQty : moveSource)?.focus();
     } catch (error) {
       const moveItems = $('[data-move-items]');
       const partial = error?.data?.kind === 'move' ? error.data : null;
@@ -1359,7 +1362,7 @@
     if (area === 'move') {
       for (const el of document.querySelectorAll('[data-move-source],[data-move-dest],[data-move-items],[data-move-qty]')) el.value = '';
       panelStatus('move', 'Cleared', '');
-      $('[data-move-source]')?.focus();
+      (moveMode === 'qty' ? $('[data-move-qty]') : $('[data-move-source]'))?.focus();
       return;
     }
 
@@ -1532,6 +1535,19 @@
     for (const button of $$('[data-move-mode]')) {
       button.addEventListener('click', () => switchMoveMode(button.dataset.moveMode));
     }
+    $('[data-move-qty]')?.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || moveMode !== 'qty') return;
+      event.preventDefault();
+      const qty = Number(event.currentTarget.value);
+      if (!Number.isSafeInteger(qty) || qty < 1) {
+        panelStatus('move', 'Enter QTY', 'error');
+        event.currentTarget.focus();
+        event.currentTarget.select();
+        return;
+      }
+      $('[data-move-source]')?.focus();
+      $('[data-move-source]')?.select();
+    });
     $('[data-move-source]')?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
