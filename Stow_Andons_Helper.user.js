@@ -8,7 +8,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.5
+// @version      5.5.6
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -20,7 +20,7 @@
   if (window.__stowAndonsCore548test) return;
   window.__stowAndonsCore548test = true;
 
-  const VERSION = '5.5.5';
+  const VERSION = '5.5.6';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -128,6 +128,16 @@
     window.dispatchEvent(new CustomEvent('fcr-usage:event', {
       detail: JSON.stringify({ key: 'stow.' + key, ms, count })
     }));
+  }
+
+  function observe(type, data = {}) {
+    try {
+      window.postMessage({
+        __BWU2_TRACE__: true,
+        type,
+        data: { script:'STOW', version:VERSION, ...data }
+      }, '*');
+    } catch {}
   }
 
 
@@ -462,9 +472,36 @@
     return entered;
   }
 
-  function unbindPostJson(url, body, timeout, phase) {
+  function inlineUnbindResponseShape(phase, data, container) {
+    const kind = data === null ? 'null' : (Array.isArray(data) ? 'array' : typeof data);
+    if (phase === 'validate') {
+      const scannableId = clean(data?.scannableId || '');
+      return {
+        responseKind:kind,
+        scannablePresent:!!scannableId,
+        scannableMatches:!!scannableId && scannableId.toLowerCase() === clean(container).toLowerCase()
+      };
+    }
+    if (phase === 'summary') {
+      return {
+        responseKind:kind,
+        summaryList:Array.isArray(data?.transferBindingSummaryList),
+        summaryCount:Array.isArray(data?.transferBindingSummaryList) ? data.transferBindingSummaryList.length : -1
+      };
+    }
+    if (phase === 'unbind') {
+      return {
+        responseKind:kind,
+        hostNamePresent:typeof data?.hostName === 'string' && !!clean(data.hostName)
+      };
+    }
+    return { responseKind:kind };
+  }
+
+  function unbindPostJson(url, body, timeout, phase, container = '') {
     return new Promise((resolve, reject) => {
       const started = performance.now();
+      observe('STOW_UNBIND_API_REQUEST', { phase, timeoutMs:timeout, container });
       GM_xmlhttpRequest({
         method: 'POST',
         url,
@@ -476,10 +513,19 @@
         },
         data: JSON.stringify(body),
         onload: response => {
+          const ms = Math.round(performance.now() - started);
           let data = response.responseText;
           try { data = response.responseText ? JSON.parse(response.responseText) : null; } catch {}
+          observe('STOW_UNBIND_API_RESPONSE', {
+            phase,
+            status:Number(response.status) || 0,
+            ok:response.status >= 200 && response.status < 300,
+            ms,
+            container,
+            ...inlineUnbindResponseShape(phase, data, container)
+          });
           if (response.status >= 200 && response.status < 300) {
-            resolve({ data, status: response.status, ms: Math.round(performance.now() - started) });
+            resolve({ data, status: response.status, ms });
             return;
           }
           const error = new Error(`${phase}: HTTP ${response.status}`);
@@ -488,12 +534,32 @@
           reject(error);
         },
         onerror: () => {
+          const ms = Math.round(performance.now() - started);
+          observe('STOW_UNBIND_API_RESPONSE', {
+            phase,
+            status:0,
+            ok:false,
+            ms,
+            container,
+            networkError:true,
+            ambiguous:phase === 'unbind'
+          });
           const error = new Error(`${phase}: network error`);
           error.phase = phase;
           error.ambiguous = phase === 'unbind';
           reject(error);
         },
         ontimeout: () => {
+          const ms = Math.round(performance.now() - started);
+          observe('STOW_UNBIND_API_RESPONSE', {
+            phase,
+            status:0,
+            ok:false,
+            ms,
+            container,
+            timedOut:true,
+            ambiguous:phase === 'unbind'
+          });
           const error = new Error(`${phase}: timeout`);
           error.phase = phase;
           error.ambiguous = phase === 'unbind';
@@ -534,6 +600,9 @@
 
     usage('unbind');
     unbindBusy = true;
+    const runStarted = performance.now();
+    let currentPhase = 'validate';
+    observe('STOW_UNBIND_START', { container, loginReady:true });
     const original = button?.textContent || 'Unbind';
     if (button) {
       button.disabled = true;
@@ -547,32 +616,70 @@
         UNBIND_VALIDATE_URL,
         { warehouseId: 'BWU2', scannableId: container },
         12000,
-        'validate'
+        'validate',
+        container
       );
       assertInlineUnbindValidate(validated.data, container);
+      observe('STOW_UNBIND_PHASE_OK', {
+        phase:'validate',
+        status:validated.status,
+        ms:validated.ms,
+        container,
+        ...inlineUnbindResponseShape('validate', validated.data, container)
+      });
 
+      currentPhase = 'summary';
       if (button) button.textContent = 'Checking…';
       const summary = await unbindPostJson(
         UNBIND_SUMMARY_URL,
         { warehouseId: 'BWU2', scannableId: container },
         12000,
-        'summary'
+        'summary',
+        container
       );
       assertInlineUnbindSummary(summary.data);
+      observe('STOW_UNBIND_PHASE_OK', {
+        phase:'summary',
+        status:summary.status,
+        ms:summary.ms,
+        container,
+        ...inlineUnbindResponseShape('summary', summary.data, container)
+      });
 
+      currentPhase = 'unbind';
       if (button) button.textContent = 'Unbinding…';
       const unbound = await unbindPostJson(
         UNBIND_URL,
         { sourceWarehouseId: 'BWU2', scannableId: container, employeeLogin: login },
         20000,
-        'unbind'
+        'unbind',
+        container
       );
       assertInlineUnbindResult(unbound.data);
+      observe('STOW_UNBIND_PHASE_OK', {
+        phase:'unbind',
+        status:unbound.status,
+        ms:unbound.ms,
+        container,
+        ...inlineUnbindResponseShape('unbind', unbound.data, container)
+      });
 
       finalText = 'Unbound ✓';
+      observe('STOW_UNBIND_SUCCESS', {
+        container,
+        totalMs:Math.round(performance.now() - runStarted)
+      });
       toast(`Unbound ${container}`);
     } catch (error) {
       console.error('[Stow Unbind]', error);
+      observe('STOW_UNBIND_FAILURE', {
+        container,
+        phase:clean(error?.phase || currentPhase),
+        status:Number(error?.status) || 0,
+        ambiguous:!!error?.ambiguous,
+        totalMs:Math.round(performance.now() - runStarted),
+        error:clean(error?.message || error || 'Unbind failed').slice(0, 180)
+      });
       if (error?.ambiguous) {
         finalText = 'Check result';
         resetDelay = 2600;
