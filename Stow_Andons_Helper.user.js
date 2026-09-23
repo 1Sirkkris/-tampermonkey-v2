@@ -8,7 +8,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.7
+// @version      5.5.8
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -20,7 +20,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.5.7';
+  const VERSION = '5.5.8';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -132,11 +132,12 @@
 
   function observe(type, data = {}) {
     try {
-      window.postMessage({
-        __BWU2_TRACE__: true,
-        type,
-        data: { script:'STOW', version:VERSION, ...data }
-      }, '*');
+      window.dispatchEvent(new CustomEvent('bwu2-observability:event', {
+        detail: JSON.stringify({
+          type,
+          data: { script:'STOW', version:VERSION, ...data }
+        })
+      }));
     } catch {}
   }
 
