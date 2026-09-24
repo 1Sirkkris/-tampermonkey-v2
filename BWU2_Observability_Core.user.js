@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.25
+// @version      0.1.26
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -27,23 +27,19 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.25';
+  const VERSION = '0.1.26';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
-      const root = document.body || document.documentElement;
-      if (!root) return;
+      const root = document.body || document.documentElement; if (!root) return;
       let host = document.getElementById('bwu2-runtime-version-stamp');
       if (!host) {
-        host = document.createElement('div');
-        host.id = 'bwu2-runtime-version-stamp';
-        host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)';
-        root.appendChild(host);
+        host = document.createElement('div'); host.id = 'bwu2-runtime-version-stamp'; host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)'; root.appendChild(host);
       }
-      let item = Array.from(host.children).find(node => node.dataset?.bwu2RuntimeKey === label);
+      let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
       if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
       item.textContent = `${label} · v${version}`;
-      Array.from(host.children).sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
+      [...host.children].sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
     };
     mount();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
@@ -59,9 +55,6 @@
   const WARN_AT = Math.floor(MAX_EVENTS * 0.80);
   const FLUSH_MS = 300;
   const MAX_BODY_CHARS = 5000;
-  const MUTATION_REPORT_MS = 10000;
-  const EVENT_LOOP_WARN_MS = 500;
-  const EVENT_LOOP_MIN_GAP_MS = 10000;
   const FCR_NETWORK_QUIET_MS = 1200;
   const FCR_CORE_QUIET_MS = 10000;
   const WORKER_PROGRESS_HEARTBEAT_MS = 60000;
@@ -106,23 +99,18 @@
   let lastHref = location.href;
   let lastGlobalCount = 0;
   let full = false;
-  let mutationObserver = null;
-  let mutationStats = emptyMutationStats();
-  let mutationTimer = 0;
   let uiObserver = null;
   let uiRoot = null;
   let uiCount = null;
   let uiClear = null;
   let countSyncTimer = 0;
   let countListenerId = null;
-  let lastEventLoopLogAt = 0;
   let visibilityTimer = 0;
   let visibilityReportTimer = 0;
   let visibilityStats = emptyVisibilityStats();
   let viewportTimer = 0;
   let lastViewport = '';
   let performanceObserver = null;
-  let eventLoopTimer = 0;
   let fcrNetworkTimer = 0;
   let fcrNetworkStats = new Map();
   let pollNetworkTimer = 0;
@@ -216,7 +204,6 @@
     pageCountKey = countKey(activeSessionId);
     lastGlobalCount = 0;
     full = false;
-    mutationStats = emptyMutationStats();
     fcrNetworkStats = new Map();
     clearTimeout(fcrNetworkTimer);
     fcrNetworkTimer = 0;
@@ -1459,7 +1446,6 @@
     gmSet(pageCountKey, 0);
     lastGlobalCount = 0;
     full = false;
-    mutationStats = emptyMutationStats();
     fcrNetworkStats = new Map();
     clearTimeout(fcrNetworkTimer);
     fcrNetworkTimer = 0;
@@ -1913,93 +1899,6 @@
     }, true);
   }
 
-  function emptyMutationStats() {
-    return {
-      batches: 0, records: 0, added: 0, removed: 0, attributes: 0, text: 0, maxBatch: 0,
-      attributeNames: Object.create(null), targets: Object.create(null)
-    };
-  }
-
-  function bumpCount(bucket, key) {
-    const name = scrubText(String(key || 'unknown').slice(0, 100));
-    bucket[name] = (Number(bucket[name]) || 0) + 1;
-  }
-
-  function mutationTargetKey(target) {
-    const element = target instanceof Element ? target : target?.parentElement;
-    if (!element) return 'unknown';
-    if (element.closest?.('#fcratc-root')) return '#fcratc-root';
-    if (element.closest?.('[data-fcr-tool-ui="1"]')) return '[data-fcr-tool-ui]';
-    const table = element.closest?.('table[id]');
-    if (table?.id) return `table#${table.id}`;
-    const identified = element.closest?.('[id]');
-    if (identified?.id) return `${identified.tagName?.toLowerCase() || 'element'}#${identified.id}`;
-    return element.tagName?.toLowerCase() || 'unknown';
-  }
-
-  function topCounts(bucket, limit = 6) {
-    return Object.entries(bucket || {}).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, count]) => ({ name, count }));
-  }
-
-  function installMutationHealth() {
-    if (!isFCResearch()) return;
-    const start = () => {
-      if (!document.documentElement || mutationObserver) return;
-
-      mutationObserver = new MutationObserver(records => {
-        if (document.visibilityState !== 'visible') return;
-
-        const filtered = records.filter(record => !uiRoot?.contains(record.target));
-        if (!filtered.length) return;
-
-        mutationStats.batches++;
-        mutationStats.records += filtered.length;
-        mutationStats.maxBatch = Math.max(mutationStats.maxBatch, filtered.length);
-
-        for (const record of filtered) {
-          mutationStats.added += record.addedNodes?.length || 0;
-          mutationStats.removed += record.removedNodes?.length || 0;
-          bumpCount(mutationStats.targets, mutationTargetKey(record.target));
-          if (record.type === 'attributes') {
-            mutationStats.attributes++;
-            bumpCount(mutationStats.attributeNames, record.attributeName || 'unknown');
-          }
-          if (record.type === 'characterData') mutationStats.text++;
-        }
-      });
-
-      mutationObserver.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true
-      });
-
-      mutationTimer = setInterval(() => {
-        const snapshot = mutationStats;
-        mutationStats = emptyMutationStats();
-
-        if (document.visibilityState !== 'visible') return;
-
-        if (
-          snapshot.records >= 500 ||
-          snapshot.maxBatch >= 150 ||
-          snapshot.added + snapshot.removed >= 300
-        ) {
-          const { attributeNames, targets, ...totals } = snapshot;
-          add('health.mutations', {
-            ...totals,
-            topAttributes: topCounts(attributeNames),
-            topTargets: topCounts(targets)
-          });
-        }
-      }, MUTATION_REPORT_MS);
-    };
-
-    if (document.documentElement) start();
-    else document.addEventListener('DOMContentLoaded', start, { once: true });
-  }
-
   function installPerformanceHealth() {
     try {
       if (typeof PerformanceObserver !== 'undefined') {
@@ -2020,22 +1919,6 @@
       }
     } catch {}
 
-    let expected = performance.now() + 1000;
-
-    eventLoopTimer = setInterval(() => {
-      const now = performance.now();
-      const lag = now - expected;
-      expected = now + 1000;
-
-      if (document.visibilityState !== 'visible') return;
-      if (lag < EVENT_LOOP_WARN_MS) return;
-
-      const wallNow = Date.now();
-      if (wallNow - lastEventLoopLogAt < EVENT_LOOP_MIN_GAP_MS) return;
-
-      lastEventLoopLogAt = wallNow;
-      add('health.eventloop', { lagMs: Math.round(lag) });
-    }, 1000);
   }
 
   function trackedCoreType(type) {
@@ -2514,7 +2397,6 @@
   installErrorTrace();
   installActionTrace();
   installViewportTrace();
-  installMutationHealth();
   installPerformanceHealth();
   bootAftEditPageStateProbe();
   bootResearchProbe();
@@ -2535,12 +2417,9 @@
     flushBlockedSectionsSummary();
     flushCoreSuccessSummary();
     flushPage();
-    if (mutationObserver) mutationObserver.disconnect();
     if (uiObserver) uiObserver.disconnect();
     if (runtimeVersionObserver) runtimeVersionObserver.disconnect();
     if (performanceObserver) performanceObserver.disconnect();
-    if (mutationTimer) clearInterval(mutationTimer);
-    if (eventLoopTimer) clearInterval(eventLoopTimer);
     clearTimeout(countSyncTimer);
     clearTimeout(runtimeVersionTimer);
     gmUnlisten(countListenerId);

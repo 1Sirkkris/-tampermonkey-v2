@@ -2,7 +2,7 @@
 // @name         MAIN v0.3.16 Sideline API Move TEST
 // @name:en      MAIN Sideline API Move TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.38
+// @version      0.3.39
 // @description  Sideline helper: Tote, Scrub, QTY, Lazy and Live workflows.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -29,7 +29,7 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
-  const VERSION = '0.3.38';
+  const VERSION = '0.3.39';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 
   function startRuntime() {
@@ -53,20 +53,16 @@
   });
   function registerRuntimeVersion(label, version) {
     const mount = () => {
-      const root = document.body || document.documentElement;
-      if (!root) return;
+      const root = document.body || document.documentElement; if (!root) return;
       let host = document.getElementById('bwu2-runtime-version-stamp');
       if (!host) {
-        host = document.createElement('div');
-        host.id = 'bwu2-runtime-version-stamp';
-        host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)';
-        root.appendChild(host);
+        host = document.createElement('div'); host.id = 'bwu2-runtime-version-stamp'; host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)'; root.appendChild(host);
       }
-      let item = Array.from(host.children).find(node => node.dataset?.bwu2RuntimeKey === label);
+      let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
       if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
       item.textContent = `${label} · v${version}`;
-      Array.from(host.children).sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
+      [...host.children].sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
     };
     mount();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
@@ -5317,7 +5313,11 @@
   let issSideWorkerBusy = false;
   let issSideWorkerMode = '';
   let issSideProgressTimer = 0;
+  let issSideProgressSignature = '';
+  let issSideLastProgressAt = 0;
   let issSideControlSeq = 0;
+  const ISS_SIDE_PROGRESS_CHECK_MS = 1500;
+  const ISS_SIDE_PROGRESS_HEARTBEAT_MS = 30000;
 
   function issSideSend(type, detail = {}) {
     if (!ISS_CONSOLE_WORKER) return;
@@ -5414,19 +5414,24 @@
     return { mode: issSideWorkerMode || '', running: false, message: 'Ready' };
   }
 
-  function issSideEmitProgress() {
+  function issSideEmitProgress(force = false) {
     const snapshot = issSideSnapshot();
-    issSideSend('ISS_CONSOLE_PROGRESS', {
-      area: 'sideline',
-      message: snapshot.message,
-      ...snapshot
-    });
+    const payload = { area:'sideline', message:snapshot.message, ...snapshot };
+    const signature = JSON.stringify(payload);
+    const now = Date.now();
+    if (!force && signature === issSideProgressSignature && now - issSideLastProgressAt < ISS_SIDE_PROGRESS_HEARTBEAT_MS) return false;
+    issSideProgressSignature = signature;
+    issSideLastProgressAt = now;
+    issSideSend('ISS_CONSOLE_PROGRESS', payload);
+    return true;
   }
 
   function issSideStartProgress() {
     clearInterval(issSideProgressTimer);
-    issSideProgressTimer = setInterval(issSideEmitProgress, 450);
-    issSideEmitProgress();
+    issSideProgressSignature = '';
+    issSideLastProgressAt = 0;
+    issSideProgressTimer = setInterval(issSideEmitProgress, ISS_SIDE_PROGRESS_CHECK_MS);
+    issSideEmitProgress(true);
   }
 
   function issSideStopQueue(note = 'stopped') {
