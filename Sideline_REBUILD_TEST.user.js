@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.4
+// @name         Sideline REBUILD TEST v0.0.5
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.4
+// @version      0.0.5
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -16,10 +16,10 @@
 
 (() => {
   'use strict';
-  if (window.__sidelineRebuildTest_v004) return;
-  window.__sidelineRebuildTest_v004 = true;
+  if (window.__sidelineRebuildTest_v005) return;
+  window.__sidelineRebuildTest_v005 = true;
 
-  const VERSION = '0.0.4-REBUILD';
+  const VERSION = '0.0.5-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -551,6 +551,33 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 #sh-qty .sh-qty-grid{gap:5px}
 #sh-qty .sh-qty-grid button{min-height:38px;font-size:14px}
 #sh-queue .sh-area{height:66px}
+
+/* v0.0.5 — wider concise layout + super preflight */
+#sh-dock{width:510px}
+.sh-panel{width:510px}
+#sh-lazy .sh-return-source{width:100%;box-sizing:border-box;margin:0 0 8px;padding:7px 10px!important}
+.sh-field-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sh-field-grid .sh-field-label{margin-top:0}
+#sh-lazy .sh-area{height:96px}
+#sh-lazy .sh-metrics{grid-template-columns:repeat(2,1fr)}
+#sh-lazy .sh-metric{padding:7px 4px}
+#sh-lazy .sh-metric b{font-size:20px}
+.sh-preflight{
+  margin:7px 0;padding:8px 9px;border:2px solid #94a3b8;border-left-width:7px;
+  border-radius:3px;background:#f8fafc;display:grid;grid-template-columns:1fr auto;
+  gap:8px;align-items:center
+}
+.sh-preflight-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.sh-preflight-main strong{font-size:12px;font-weight:1000;letter-spacing:.25px}
+.sh-preflight-main span{font:800 11px/1.25 Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sh-preflight-counts{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.sh-preflight-counts b{padding:4px 6px;border:1px solid #b8c4cf;border-radius:3px;background:#fff;font-size:9px}
+.sh-preflight-green{border-color:#18794e;border-left-color:#18794e;background:#ecfdf5;color:#14532d}
+.sh-preflight-yellow{border-color:#b7791f;border-left-color:#b7791f;background:#fffbeb;color:#78350f}
+.sh-preflight-red{border-color:#b42318;border-left-color:#b42318;background:#fff1f2;color:#7f1d1d}
+.sh-preflight-checking{border-color:#315f7f;border-left-color:#315f7f;background:#eef6fb;color:#173c5d}
+.sh-preflight-idle{color:#475569}
+@media(max-width:560px){#sh-dock,.sh-panel{width:calc(100vw - 28px)}.sh-field-grid{grid-template-columns:1fr}.sh-preflight{grid-template-columns:1fr}}
 `;
   document.documentElement.appendChild(style);
 
@@ -990,6 +1017,15 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
     const code = validContainer(source) ? clean(source) : '';
     lazyPreResolve.sourceKey = code ? norm(code) : '';
+
+    superPreflight.results.clear();
+    superPreflight.redCodes.clear();
+    superPreflight.dateCache.clear();
+    superPreflight.dateQueued.clear();
+    superPreflight.dateQueue.length = 0;
+    superPreflight.stats = { green:0, yellow:0, red:0 };
+    superPreflight.last = { kind:'idle', code:'', reason:'Scan an item' };
+    renderSuperPreflight();
   }
 
   function syncLazyPreResolveSource() {
@@ -1039,6 +1075,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
           entry.state = 'done';
           entry.response = payload;
           finishLazyPreResolveEntry(entry, payload);
+          applyPreflightResult(entry.code, payload);
           return;
         }
 
@@ -1100,14 +1137,16 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
   const lazyPanel = panel('sh-lazy', `Lazy Sideline v${VERSION}`, 'lazy');
   lazyPanel.insertAdjacentHTML('beforeend',
-    '<label class="sh-field-label">SOURCE</label>' +
-    '<input class="sh-input" data-f="src" placeholder="tsX / csX">' +
-    '<div class="sh-flow-arrow">↓</div>' +
-    '<label class="sh-field-label">DESTINATION</label>' +
-    '<input class="sh-input" data-f="dest" placeholder="tsX / csX">' +
-    '<div class="sh-flow-arrow">↓</div>' +
+    '<div class="sh-field-grid">' +
+      '<div><label class="sh-field-label">SOURCE</label><input class="sh-input" data-f="src" placeholder="tsX / csX"></div>' +
+      '<div><label class="sh-field-label">DESTINATION</label><input class="sh-input" data-f="dest" placeholder="tsX / csX"></div>' +
+    '</div>' +
     '<label class="sh-field-label">ITEM BARCODES</label>' +
     '<textarea class="sh-input sh-area" data-f="items" placeholder="Scan or paste one per line"></textarea>' +
+    '<div class="sh-preflight sh-preflight-idle">' +
+      '<div class="sh-preflight-main"><strong>PREFLIGHT READY</strong><span>Scan an item</span></div>' +
+      '<div class="sh-preflight-counts"><b data-pf="green">0 GOOD</b><b data-pf="yellow">0 EXPIRY</b><b data-pf="red">0 ASIDE</b></div>' +
+    '</div>' +
     '<div class="sh-lazy-input-summary"><span data-lazy-input-summary>0 unique / 0 units</span><button type="button" data-a="toggle-items">Expand</button></div>' +
     '<div id="sh-lazy-settings">' +
       '<button class="sh-btn sh-on" data-a="clear-source">CLEAR SOURCE: ON</button>' +
@@ -1154,6 +1193,11 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
   const mMoved = $('[data-m="moved"]', lazyPanel);
   const mFailed = $('[data-m="failed"]', lazyPanel);
   const mRemaining = $('[data-m="remaining"]', lazyPanel);
+  const lPreflight = $('.sh-preflight', lazyPanel);
+  const lPreflightMain = $('.sh-preflight-main', lazyPanel);
+  const pfGreen = $('[data-pf="green"]', lazyPanel);
+  const pfYellow = $('[data-pf="yellow"]', lazyPanel);
+  const pfRed = $('[data-pf="red"]', lazyPanel);
 
   lClear.checked = localStorage.getItem(CLEAR_SOURCE_KEY) === '1';
   lClear.addEventListener('change', () => localStorage.setItem(CLEAR_SOURCE_KEY, lClear.checked ? '1' : '0'));
@@ -1164,6 +1208,174 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
   function partialContainer(v) {
     return /^(?:|c|t|cs|ts|csx|tsx|csx[0-9a-z_-]*|tsx[0-9a-z_-]*)$/i.test(clean(v));
+  }
+
+  const superPreflight = {
+    results:new Map(),
+    redCodes:new Set(),
+    dateCache:new Map(),
+    dateQueued:new Set(),
+    dateQueue:[],
+    dateBusy:false,
+    stats:{ green:0, yellow:0, red:0 },
+    last:{ kind:'idle', code:'', reason:'Scan an item' }
+  };
+
+  function preflightKey(code) {
+    return clean(code).toUpperCase();
+  }
+
+  function renderSuperPreflight() {
+    if (!lPreflight) return;
+    const { kind, code, reason } = superPreflight.last;
+    lPreflight.className = `sh-preflight sh-preflight-${kind || 'idle'}`;
+    const title = kind === 'green' ? '✓ GOOD — KEEP'
+      : kind === 'yellow' ? '⚠ EXPIRY — DATE SAVED / REQUIRED'
+      : kind === 'red' ? '✕ PUT ASIDE'
+      : kind === 'checking' ? '… CHECKING'
+      : 'PREFLIGHT READY';
+    lPreflightMain.innerHTML = `<strong>${esc(title)}</strong><span>${esc(code ? `${code} — ${reason || ''}` : (reason || 'Scan an item'))}</span>`;
+    setTextIfChanged(pfGreen, `${superPreflight.stats.green} GOOD`);
+    setTextIfChanged(pfYellow, `${superPreflight.stats.yellow} EXPIRY`);
+    setTextIfChanged(pfRed, `${superPreflight.stats.red} ASIDE`);
+  }
+
+  function preflightResponseText(response) {
+    return [
+      response?.['@type'],
+      response?.message,
+      response?.description,
+      response?.errorMessage,
+      response?.errorCode,
+      response?.filterResult?.filterType,
+      response?.filterResult?.reason?.type,
+      response?.filterResult?.reason?.description,
+      response?.filterResult?.reason?.message,
+      ...responseProblemLabels(response)
+    ].map(clean).filter(Boolean).join(' ');
+  }
+
+  function classifyPreflight(response, code) {
+    const ctx = resolveItem(response, code);
+    const text = preflightResponseText(response);
+
+    if (/damaged/i.test(text)) return { kind:'red', reason:'DAMAGED / INCOMPATIBLE', ctx };
+    if (isHazmatRejectionResponse(response)) return { kind:'red', reason:'HAZMAT / DANGEROUS GOODS', ctx };
+
+    if (!ctx.ok) {
+      const type = clean(ctx.type);
+      const reason = ctx.invalid ? 'INVALID BARCODE'
+        : type === 'RequestMultipleBarcodesResponse' ? 'MULTIPLE BARCODE MATCHES'
+        : (type && type !== 'Unknown' ? type : 'NO ITEM DETAILS');
+      return { kind:'red', reason, ctx };
+    }
+
+    if (ctx.notInSource) return { kind:'red', reason:'NOT IN SOURCE CONTAINER', ctx };
+
+    const issue = scanStageIssue(ctx);
+    if (issue) return { kind:'red', reason:issue.reason, ctx };
+
+    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
+      return { kind:'yellow', reason:ctx.dateType === 'PRODUCTION_DATE' ? 'PRODUCTION DATE' : 'EXPIRY DATE', ctx };
+    }
+
+    return { kind:'green', reason:'GOOD TO GO', ctx };
+  }
+
+  function queuePreflightDate(code, ctx) {
+    const key = preflightKey(code);
+    if (superPreflight.dateCache.has(key) || superPreflight.dateQueued.has(key)) return;
+    superPreflight.dateQueued.add(key);
+    superPreflight.dateQueue.push({ code, ctx });
+    pumpPreflightDates();
+  }
+
+  async function pumpPreflightDates() {
+    if (superPreflight.dateBusy || !superPreflight.dateQueue.length || lazy.running) return;
+    superPreflight.dateBusy = true;
+
+    try {
+      while (superPreflight.dateQueue.length && !lazy.running) {
+        const next = superPreflight.dateQueue.shift();
+        const key = preflightKey(next.code);
+        if (superPreflight.dateCache.has(key)) {
+          superPreflight.dateQueued.delete(key);
+          continue;
+        }
+
+        const item = { code:next.code, qty:1, ctx:next.ctx, status:'DATE' };
+        const chosen = await showApiDatePicker(item);
+        superPreflight.dateQueued.delete(key);
+
+        if (chosen) {
+          superPreflight.dateCache.set(key, chosen);
+          superPreflight.last = { kind:'yellow', code:next.code, reason:`${next.ctx.dateType === 'PRODUCTION_DATE' ? 'PRODUCTION' : 'EXPIRY'} DATE SAVED — ${dateLabel(chosen.enteredMs)}` };
+          renderSuperPreflight();
+        }
+        setMoveCorner('lazy','idle');
+        if (!lazy.running) lItems.focus();
+      }
+    } finally {
+      superPreflight.dateBusy = false;
+    }
+  }
+
+  function applyPreflightResult(code, response) {
+    const key = preflightKey(code);
+    if (superPreflight.results.has(key)) return superPreflight.results.get(key);
+
+    const result = classifyPreflight(response, code);
+    superPreflight.results.set(key, result);
+    superPreflight.stats[result.kind] = (superPreflight.stats[result.kind] || 0) + 1;
+
+    if (result.kind === 'red') superPreflight.redCodes.add(key);
+    if (result.kind === 'yellow') queuePreflightDate(code, result.ctx);
+
+    superPreflight.last = { kind:result.kind, code, reason:result.reason };
+    renderSuperPreflight();
+    return result;
+  }
+
+  function purgeKnownRedTextareaLines() {
+    if (!superPreflight.redCodes.size) return 0;
+    const lines = String(lItems.value).split(/\r?\n/);
+    const kept = [];
+    let removed = 0;
+
+    for (const line of lines) {
+      const value = clean(line);
+      if (value && superPreflight.redCodes.has(preflightKey(value))) {
+        removed++;
+        continue;
+      }
+      kept.push(line);
+    }
+
+    if (removed) {
+      lItems.value = kept.join('\n').replace(/^\n+|\n+$/g,'');
+      const end = lItems.value.length;
+      lItems.setSelectionRange?.(end,end);
+      refreshItems();
+    }
+    return removed;
+  }
+
+  async function settleSuperPreflightForCurrentInput() {
+    const items = parseItems(lItems.value);
+    queueLazyPreResolve(items);
+    const source = syncLazyPreResolveSource();
+    if (!source) return;
+
+    const waits = items.map(async item => {
+      const response = await getLazyPreResolvedResponse(source, item.code);
+      if (response != null) applyPreflightResult(item.code, response);
+    });
+    await Promise.allSettled(waits);
+
+    while (superPreflight.dateBusy || superPreflight.dateQueue.length) {
+      pumpPreflightDates();
+      await sleep(50);
+    }
   }
 
   function parseItems(text) {
@@ -1802,7 +2014,19 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
   lItems.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
 
-    const line = currentTextareaLine();
+    let line = currentTextareaLine();
+    const specialLine =
+      (line.code && norm(line.code) === norm(lSrc.value)) ||
+      (line.code && norm(line.code) === norm(lDest.value)) ||
+      (line.code && norm(line.code) === norm(START_TRIGGER));
+
+    if (!specialLine) {
+      const removed = purgeKnownRedTextareaLines();
+      if (removed) {
+        lazy.note = `${removed} rejected barcode${removed===1?'':'s'} removed from queue`;
+        line = currentTextareaLine();
+      }
+    }
     const sameSrc = line.code && norm(line.code) === norm(lSrc.value);
     const sameDest = line.code && norm(line.code) === norm(lDest.value);
     const startTrigger = line.code && norm(line.code) === norm(START_TRIGGER);
@@ -2490,6 +2714,12 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     item.ctx = ctx;
 
     if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
+      const cachedDate = superPreflight.dateCache.get(preflightKey(item.code));
+      if (cachedDate) {
+        item.status = 'READY';
+        renderLazy();
+        return { kind:'ready-date', ctx, chosen:cachedDate };
+      }
       item.status = 'DATE';
       renderLazy();
       return { kind:'date', ctx };
@@ -3035,6 +3265,25 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
       return;
     }
 
+    lazy.note = 'finishing preflight';
+    renderLazy();
+    await settleSuperPreflightForCurrentInput();
+    const removedRed = purgeKnownRedTextareaLines();
+    lazy.items = parseItems(lItems.value);
+    lazy.index = 0;
+
+    if (!lazy.items.length) {
+      lazy.error = removedRed ? 'All scanned items were rejected by preflight.' : 'No item barcodes.';
+      lazy.note = removedRed ? `${removedRed} rejected barcode${removedRed===1?'':'s'} removed` : '';
+      renderLazy();
+      return;
+    }
+
+    if (removedRed) {
+      lazy.note = `${removedRed} rejected barcode${removedRed===1?'':'s'} removed before Start`;
+      renderLazy();
+    }
+
     // Ensure every current item is queued for scan-item pre-resolve before the run begins.
     // This still performs no movement; move-items remains gated below by explicit Start.
     queueLazyPreResolve(lazy.items);
@@ -3115,6 +3364,11 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
       if (result?.kind === 'date') {
         parkDeferredDate(item, result.ctx);
+        continue;
+      }
+
+      if (result?.kind === 'ready-date') {
+        await moveResolved(item, result.ctx, result.chosen?.finalExpirationMs ?? null, run);
         continue;
       }
 
