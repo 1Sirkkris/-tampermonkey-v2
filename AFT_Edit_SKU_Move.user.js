@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.38
+// @version      0.9.40
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.39';
+  const VERSION = '0.9.40';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -1655,7 +1655,7 @@
       for (let i = 0; i < items.length; i++) {
         if (this.stopRequested) throw new Error('Stopped by user');
         const sku = items[i];
-        this.workerProgress = { current:i + 1, total:items.length, mode:'sku' };
+        this.workerProgress = { current:i + 1, total:items.length, mode:'sku', inventoryQty:null };
         this.status(`${i + 1}/${items.length} • ${sku}`);
         this.setSkuBatchProgressState(i, 'active', '▶ RUNNING');
 
@@ -1809,6 +1809,17 @@
 
           const inventory = this.readEditInventory(sourcePage.doc);
           this.setStartQty(inventory);
+          if (ISS_CONSOLE_WORKER && this.workerProgress) {
+            this.workerProgress = {
+              ...this.workerProgress,
+              inventoryQty:{
+                sellable:Number.isInteger(inventory.sellable?.qty) ? inventory.sellable.qty : null,
+                pending:Number.isInteger(inventory['pending research']?.qty) ? inventory['pending research'].qty : null,
+                unsellable:Number.isInteger(inventory.unsellable?.qty) ? inventory.unsellable.qty : null
+              }
+            };
+            issWorkerProgress('edit', `Attempt ${attempt} • Qty`, { ...this.workerProgress });
+          }
           const qty = this.readEditQty(sourcePage, currentLabel);
           if (qty != null && initialQty == null) initialQty = qty;
           traceAft('AFT_SKU_QTY', {
