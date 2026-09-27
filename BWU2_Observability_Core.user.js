@@ -2,8 +2,8 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.28
-// @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
+// @version      0.1.29
+// @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
@@ -28,7 +28,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.28';
+  const VERSION = '0.1.29';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -60,12 +60,8 @@
   const FCR_CORE_QUIET_MS = 10000;
   const WORKER_PROGRESS_HEARTBEAT_MS = 60000;
   const FCLITE_USAGE_SUMMARY_MS = 30000;
-  const UI_ENTER_BURST_GAP_MS = 5000;
   const SLOW_NETWORK_MS = 1500;
-  const VISIBILITY_DEBOUNCE_MS = 750;
-  const VIEWPORT_DEBOUNCE_MS = 500;
   const ROUTINE_NETWORK_REPORT_MS = 60000;
-  const VISIBILITY_REPORT_MS = 60000;
   const BLOCKED_SECTIONS_QUIET_MS = 1200;
   const RESEARCH_ACTION_WINDOW_MS = 2000;
   const RESEARCH_CHAIN_MAX = 120;
@@ -100,7 +96,6 @@
   let pageCountKey = countKey(activeSessionId);
   let flushTimer = 0;
   let eventSeq = 0;
-  let lastHref = location.href;
   let lastGlobalCount = 0;
   let full = false;
   let uiObserver = null;
@@ -109,11 +104,6 @@
   let uiClear = null;
   let countSyncTimer = 0;
   let countListenerId = null;
-  let visibilityTimer = 0;
-  let visibilityReportTimer = 0;
-  let visibilityStats = emptyVisibilityStats();
-  let viewportTimer = 0;
-  let lastViewport = '';
   let performanceObserver = null;
   let fcrNetworkTimer = 0;
   let fcrNetworkStats = new Map();
@@ -129,7 +119,6 @@
   let workerProgressStates = new Map();
   let fcliteUsageTimer = 0;
   let fcliteUsageStats = new Map();
-  let uiEnterBatches = new Map();
   let aftMoveProbeAction = 0;
   let aftMoveProbeStatus = '';
   let aftMoveProbeCount = 0;
@@ -162,10 +151,6 @@
     } catch {
       return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 9)}`;
     }
-  }
-
-  function emptyVisibilityStats() {
-    return { transitions: 0, hidden: 0, visible: 0, firstAt: '', lastAt: '', last: '' };
   }
 
   function defaultMeta() {
@@ -217,9 +202,6 @@
     routineNetworkStats = new Map();
     clearTimeout(routineNetworkTimer);
     routineNetworkTimer = 0;
-    clearTimeout(visibilityReportTimer);
-    visibilityReportTimer = 0;
-    visibilityStats = emptyVisibilityStats();
     clearTimeout(blockedSectionsTimer);
     blockedSectionsTimer = 0;
     blockedSections = new Set();
@@ -231,7 +213,6 @@
     clearTimeout(fcliteUsageTimer);
     fcliteUsageTimer = 0;
     fcliteUsageStats = new Map();
-    uiEnterBatches = new Map();
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
@@ -398,87 +379,6 @@
     });
   }
 
-  function researchRuntimeSnapshot(reason = 'settled') {
-    const nameRx = /(?:api|client|service|workflow|state|store|model|controller|action|inventory|move|edit|unbind|sideline|dropzone|mapping|fcr|river|stow|bin|container)/i;
-    const globals = [];
-
-    try {
-      for (const name of Object.getOwnPropertyNames(W)) {
-        if (!nameRx.test(name) || SENSITIVE_KEY.test(name)) continue;
-        const descriptor = Object.getOwnPropertyDescriptor(W, name);
-        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
-        const value = descriptor.value;
-        const item = { name: scrubText(name), type: Array.isArray(value) ? 'array' : typeof value };
-
-        if (typeof value === 'function') {
-          item.arity = Math.max(0, Number(value.length) || 0);
-        } else if (value && typeof value === 'object') {
-          try {
-            item.ctor = scrubText(value.constructor?.name || '');
-            item.keys = Object.keys(value).filter(key => !SENSITIVE_KEY.test(key)).slice(0, 40).map(key => scrubText(key));
-          } catch {}
-        }
-
-        globals.push(item);
-        if (globals.length >= 60) break;
-      }
-    } catch {}
-
-    const stateScripts = [];
-    try {
-      for (const script of [...document.querySelectorAll('script[type="a-state"],script[type="application/json"],script[id*="state" i],script[id*="data" i]')].slice(0, 30)) {
-        const raw = String(script.textContent || '').trim();
-        if (!raw) continue;
-        const item = {
-          type: scrubText(script.type || ''),
-          id: scrubText(script.id || ''),
-          chars: raw.length
-        };
-        try {
-          const parsed = JSON.parse(raw);
-          item.kind = Array.isArray(parsed) ? 'array' : typeof parsed;
-          if (parsed && typeof parsed === 'object') {
-            item.keys = Object.keys(parsed).filter(key => !SENSITIVE_KEY.test(key)).slice(0, 50).map(key => scrubText(key));
-          }
-        } catch {
-          item.kind = 'text';
-        }
-        stateScripts.push(item);
-      }
-    } catch {}
-
-    const framework = { reactFiber: 0, reactProps: 0, vue: 0, angular: 0, scanned: 0 };
-    try {
-      for (const el of [...document.querySelectorAll('*')].slice(0, 250)) {
-        framework.scanned++;
-        const keys = Object.getOwnPropertyNames(el);
-        if (keys.some(key => key.startsWith('__reactFiber$'))) framework.reactFiber++;
-        if (keys.some(key => key.startsWith('__reactProps$'))) framework.reactProps++;
-        if (keys.some(key => key === '__vue__' || key.startsWith('__vue'))) framework.vue++;
-        if (keys.some(key => key === '__ngContext__')) framework.angular++;
-      }
-    } catch {}
-
-    add('research.runtime-surface', {
-      reason,
-      globals,
-      stateScripts,
-      framework,
-      runtimeScripts: collectRuntimeVersions(),
-      forms: document.forms?.length || 0,
-      scripts: document.scripts?.length || 0
-    });
-  }
-
-  function bootResearchProbe() {
-    const capture = () => {
-      queueMicrotask(() => researchRuntimeSnapshot('dom-ready'));
-      setTimeout(() => researchRuntimeSnapshot('settled-1000ms'), 1000);
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once: true });
-    else capture();
-  }
-
   function parsedUrl(rawUrl) {
     try { return new URL(String(rawUrl || ''), location.href); }
     catch { return null; }
@@ -603,56 +503,6 @@
       request: poPortalRequestSummary(body),
       response: poPortalResponseSummary(responseText, contentType)
     });
-  }
-
-  function poPortalPageStateSnapshot(reason = 'page-ready') {
-    if (!isPoPortalPage()) return;
-
-    const controls = [...document.querySelectorAll('input,select,textarea')].slice(0, 80).map(control => {
-      const type = String(control.getAttribute('type') || control.tagName || '').toLowerCase();
-      const entry = {
-        tag: String(control.tagName || '').toLowerCase(),
-        type,
-        id: scrubText(control.id || ''),
-        name: scrubText(control.getAttribute('name') || ''),
-        label: aftControlLabel(control),
-        disabled: !!control.disabled
-      };
-
-      if (control.tagName === 'SELECT') {
-        entry.multiple = !!control.multiple;
-        entry.options = [...control.options].slice(0, 30).map(option => ({
-          text: scrubText(cleanText(option.textContent || '')).slice(0, 120),
-          value: scrubText(String(option.value || '')).slice(0, 120),
-          selected: !!option.selected
-        }));
-      } else if (['checkbox', 'radio'].includes(type)) {
-        entry.checked = !!control.checked;
-        entry.value = scrubText(String(control.value || '')).slice(0, 120);
-      } else {
-        const raw = String(control.value || '').trim();
-        entry.value = /asin|fnsku/i.test(entry.name + ' ' + entry.id + ' ' + entry.label)
-          ? fingerprint(raw, 'po-search')
-          : scrubText(raw).slice(0, 160);
-      }
-      return entry;
-    });
-
-    add('poportal.page-state', {
-      reason,
-      query: poPortalQuerySummary(location.href),
-      controls
-    });
-  }
-
-  function bootPoPortalPageStateProbe() {
-    if (!isPoPortalPage()) return;
-    const capture = () => {
-      queueMicrotask(() => poPortalPageStateSnapshot('dom-ready'));
-      setTimeout(() => poPortalPageStateSnapshot('settled-1000ms'), 1000);
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once:true });
-    else capture();
   }
 
   function isAftMoveProbe(rawUrl) {
@@ -943,158 +793,6 @@
     });
   }
 
-  function aftSafeControlValue(element) {
-    let raw = '';
-    try { raw = String(element?.value ?? '').trim(); } catch {}
-    if (!raw) return { kind: 'empty', length: 0 };
-    if (/^\d{1,7}$/.test(raw)) return { kind: 'numeric', length: raw.length, number: Number(raw) };
-    if (/^(?:INVENTORY|SELLABLE|PENDING_RESEARCH|UNSELLABLE|PENDING_REPAIR|PENDING_WORKORDER|IN_QUARANTINE|Confirm|Done|Continue|Start over)$/i.test(raw)) {
-      return { kind: 'enum', length: raw.length, value: scrubText(raw) };
-    }
-    return {
-      kind: classifySearchValue(raw),
-      length: raw.length,
-      fingerprint: fingerprint(raw, 'aft-control')
-    };
-  }
-
-  function aftControlLabel(element) {
-    const parts = [];
-    try {
-      for (const label of element?.labels || []) parts.push(label.textContent || '');
-    } catch {}
-    if (!parts.length) {
-      try { parts.push(element?.closest?.('label')?.textContent || element?.parentElement?.textContent || ''); } catch {}
-    }
-    return scrubText(cleanText(parts.join(' ')).slice(0, 220));
-  }
-
-  function aftInterestingStateScripts() {
-    const out = [];
-    const scripts = [...document.querySelectorAll('script[type="a-state"], script[type="application/json"]')].slice(0, 40);
-    for (const script of scripts) {
-      const raw = String(script.textContent || '').trim();
-      if (!raw || !/(?:quantity|qty|inventory|pending|unsellable|objectId|instruction|workflow|state|option|disposition|owner)/i.test(raw)) continue;
-
-      const item = {
-        type: scrubText(script.getAttribute('type') || ''),
-        id: scrubText(script.id || ''),
-        dataState: scrubText(script.getAttribute('data-a-state') || ''),
-        chars: raw.length
-      };
-      try {
-        item.value = boundedRiverValue(JSON.parse(raw));
-      } catch {
-        item.tokens = [...new Set(
-          (raw.match(/\b(?:quantity|qty|inventory|pending_research|unsellable|objectId|instructionId|workflow|state|option|disposition|owner)\b/gi) || [])
-            .map(value => value.toLowerCase())
-        )].slice(0, 30);
-      }
-      out.push(item);
-      if (out.length >= 16) break;
-    }
-    return out;
-  }
-
-  function aftPageStateSnapshot(reason = 'page-ready') {
-    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/edititems\/?$/i.test(location.pathname)) return;
-
-    const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
-      .map(node => scrubText(cleanText(node.textContent || '').slice(0, 180)))
-      .filter(Boolean)
-      .slice(0, 16);
-
-    const radios = [...document.querySelectorAll('input[type="radio"]')].slice(0, 30).map(radio => ({
-      name: scrubText(radio.name || ''),
-      checked: !!radio.checked,
-      disabled: !!radio.disabled,
-      label: aftControlLabel(radio),
-      value: aftSafeControlValue(radio)
-    }));
-
-    const forms = [...document.forms].slice(0, 12).map(form => ({
-      method: scrubText(form.method || ''),
-      action: form.action ? sanitizeUrl(form.action) : '',
-      controls: [...form.elements].slice(0, 40).map(control => ({
-        tag: String(control.tagName || '').toLowerCase(),
-        type: scrubText(control.getAttribute?.('type') || ''),
-        name: scrubText(control.getAttribute?.('name') || ''),
-        id: scrubText(control.id || ''),
-        checked: 'checked' in control ? !!control.checked : undefined,
-        disabled: !!control.disabled,
-        label: aftControlLabel(control),
-        value: aftSafeControlValue(control)
-      }))
-    }));
-
-    const quantityLabels = [...new Set(
-      [...document.querySelectorAll('label,li,tr,div')]
-        .map(node => cleanText(node.textContent || ''))
-        .filter(text => /\bQuantity\s*:\s*\d{1,7}\b/i.test(text))
-        .map(text => scrubText(text.slice(0, 240)))
-    )].slice(0, 20);
-
-    const globals = [];
-    try {
-      for (const name of Object.getOwnPropertyNames(window)) {
-        if (!/(?:initial.*state|bootstrap.*data|workflow|instruction|inventory|edititems|quantity|(?:^|[_$])aft(?:[_$]|$))/i.test(name)) continue;
-        const descriptor = Object.getOwnPropertyDescriptor(window, name);
-        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
-        const value = descriptor.value;
-        if (typeof value === 'function') continue;
-        const entry = { name: scrubText(name), type: Array.isArray(value) ? 'array' : typeof value };
-        if (value && typeof value === 'object') {
-          const proto = Object.getPrototypeOf(value);
-          if (Array.isArray(value) || proto === Object.prototype || proto === null) {
-            entry.value = boundedRiverValue(value);
-          } else {
-            entry.keys = Object.keys(value).slice(0, 40).map(key => scrubText(key));
-          }
-        } else if (['string','number','boolean'].includes(typeof value)) {
-          entry.value = boundedRiverValue(value, name);
-        }
-        globals.push(entry);
-        if (globals.length >= 20) break;
-      }
-    } catch {}
-
-    let navigation = null;
-    try {
-      const nav = performance.getEntriesByType?.('navigation')?.[0];
-      if (nav) {
-        navigation = {
-          transferSize: Number(nav.transferSize) || 0,
-          encodedBodySize: Number(nav.encodedBodySize) || 0,
-          decodedBodySize: Number(nav.decodedBodySize) || 0,
-          durationMs: Math.round(Number(nav.duration) || 0)
-        };
-      }
-    } catch {}
-
-    add('aft.edit.page-state', {
-      reason,
-      readyState: document.readyState,
-      title: sanitizeTitle(document.title || ''),
-      headings,
-      quantityLabels,
-      radios,
-      forms,
-      stateScripts: aftInterestingStateScripts(),
-      globals,
-      navigation
-    });
-  }
-
-  function bootAftEditPageStateProbe() {
-    if (!AFT_QT_HOST.test(location.hostname) || !/^\/app\/edititems\/?$/i.test(location.pathname)) return;
-    const capture = () => {
-      queueMicrotask(() => aftPageStateSnapshot('dom-ready'));
-      setTimeout(() => aftPageStateSnapshot('settled-250ms'), 250);
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once: true });
-    else capture();
-  }
-
   function summarizeFcrResponse(text, contentType = '') {
     const raw = String(text ?? '');
     const base = { chars: raw.length };
@@ -1340,44 +1038,6 @@
     return add('script.ISS_CONSOLE_WORKER_PROGRESS', payload);
   }
 
-  function recordUiEnter(data = {}) {
-    const safe = sanitize(data);
-    if (!['item','container'].includes(String(safe?.inputKind || ''))) return add('ui.enter', safe);
-
-    const key = JSON.stringify([
-      safe?.tag || '',
-      safe?.id || '',
-      safe?.name || '',
-      safe?.label || '',
-      safe?.inputKind || ''
-    ]);
-    const now = Date.now();
-    const previous = uiEnterBatches.get(key);
-
-    if (
-      previous?.event?.data &&
-      now - previous.lastTs <= UI_ENTER_BURST_GAP_MS
-    ) {
-      const gap = Math.max(0, now - previous.lastTs);
-      previous.lastTs = now;
-      previous.event.data.count = (Number(previous.event.data.count) || 1) + 1;
-      previous.event.data.lastAt = new Date(now).toISOString();
-      previous.event.data.spanMs = Math.max(0, now - previous.firstTs);
-      previous.event.data.minGapMs = previous.event.data.minGapMs == null
-        ? gap
-        : Math.min(Number(previous.event.data.minGapMs) || gap, gap);
-      previous.event.data.maxGapMs = Math.max(Number(previous.event.data.maxGapMs) || 0, gap);
-      scheduleFlush();
-      return true;
-    }
-
-    if (!add('ui.enter', { ...safe, count:1, spanMs:0 })) return false;
-    const event = pageEvents[pageEvents.length - 1];
-    if (event?.data) event.data.lastAt = event.at;
-    uiEnterBatches.set(key, { event, firstTs:now, lastTs:now });
-    return true;
-  }
-
   function recordFcrUsage(detail = {}) {
     const key = String(detail?.key || '');
     if (!/^fclite\.item\.(?:scan|in|out)$/i.test(key)) return add('fcr.usage', detail);
@@ -1601,9 +1261,6 @@
     routineNetworkStats = new Map();
     clearTimeout(routineNetworkTimer);
     routineNetworkTimer = 0;
-    clearTimeout(visibilityReportTimer);
-    visibilityReportTimer = 0;
-    visibilityStats = emptyVisibilityStats();
     clearTimeout(blockedSectionsTimer);
     blockedSectionsTimer = 0;
     blockedSections = new Set();
@@ -1615,7 +1272,6 @@
     clearTimeout(fcliteUsageTimer);
     fcliteUsageTimer = 0;
     fcliteUsageStats = new Map();
-    uiEnterBatches = new Map();
     aftMoveProbeAction = 0;
     aftMoveProbeStatus = '';
     aftMoveProbeCount = 0;
@@ -1869,171 +1525,31 @@
     return element.closest('button, a[href], [role="button"], [role="menuitem"], [role="tab"], [role="radio"], [role="option"], input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"]');
   }
 
-  function shouldLogChange(target) {
-    const element = target instanceof Element ? target : target?.parentElement;
-    if (!element) return false;
-    const tag = element.tagName?.toLowerCase() || '';
-    const type = String(element.getAttribute?.('type') || '').toLowerCase();
-    if (RIVER_HOST.test(location.hostname)) {
-      return tag === 'select' || tag === 'textarea' || (tag === 'input' && !['password', 'file', 'hidden'].includes(type));
-    }
-    return tag === 'select' || (tag === 'input' && ['checkbox', 'radio'].includes(type));
-  }
-
-  function installActionTrace() {
+  function installActionContext() {
     document.addEventListener('click', event => {
-      const river = RIVER_HOST.test(location.hostname);
-      if (!event.isTrusted && !river) return;
+      if (!event.isTrusted) return;
       const action = clickTarget(event.target);
-      if (!action) return;
-      const info = targetInfo(action, true);
-      if (info) {
-        add('ui.click', { ...info, trusted: !!event.isTrusted });
-        if (event.isTrusted) rememberResearchAction('click', info);
-      }
+      const info = action ? targetInfo(action, true) : null;
+      if (info) rememberResearchAction('click', info);
     }, true);
 
     document.addEventListener('submit', event => {
-      const river = RIVER_HOST.test(location.hostname);
-      if (!event.isTrusted && !river) return;
+      if (!event.isTrusted) return;
       const info = targetInfo(event.target);
-      if (!info) return;
-      const form = event.target instanceof HTMLFormElement ? event.target : null;
-      add('ui.submit', {
-        ...info,
-        trusted: !!event.isTrusted,
-        method: scrubText(form?.method || ''),
-        action: form?.action ? sanitizeUrl(form.action) : '',
-        controls: form?.elements?.length || 0
-      });
-      if (event.isTrusted) rememberResearchAction('submit', info);
+      if (info) rememberResearchAction('submit', info);
     }, true);
 
     document.addEventListener('change', event => {
-      const river = RIVER_HOST.test(location.hostname);
-      if ((!event.isTrusted && !river) || !shouldLogChange(event.target)) return;
+      if (!event.isTrusted) return;
       const info = targetInfo(event.target);
-      if (!info) return;
-
-      if (!river) {
-        add('ui.change', info);
-        if (event.isTrusted) rememberResearchAction('change', info);
-        return;
-      }
-
-      const element = event.target instanceof Element ? event.target : null;
-      let value = '';
-      try {
-        value = element?.tagName === 'SELECT'
-          ? element.options?.[element.selectedIndex]?.text || element.value || ''
-          : element?.value || '';
-      } catch {}
-
-      const detail = {
-        ...info,
-        trusted: !!event.isTrusted,
-        inputKind: classifySearchValue(value),
-        inputLength: String(value || '').length
-      };
-      if (element?.tagName === 'SELECT') {
-        detail.selected = scrubText(value);
-        detail.selectedValue = boundedRiverValue(element.value || '', element.name || element.id || 'option');
-      }
-      if (element && 'checked' in element && ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase())) detail.checked = !!element.checked;
-      add('ui.change', detail);
-      if (event.isTrusted) rememberResearchAction('change', info);
+      if (info) rememberResearchAction('change', info);
     }, true);
 
     document.addEventListener('keydown', event => {
       if (!event.isTrusted || event.key !== 'Enter') return;
       const info = targetInfo(event.target);
-      if (!info) return;
-
-      let value = '';
-      try { value = event.target?.value || ''; } catch {}
-
-      recordUiEnter({ ...info, inputKind: classifySearchValue(value), inputLength: String(value || '').length });
-      rememberResearchAction('enter', info);
+      if (info) rememberResearchAction('enter', info);
     }, true);
-  }
-
-  function installRouteTrace() {
-    const wrap = name => {
-      try {
-        const original = W.history?.[name];
-        if (typeof original !== 'function') return;
-
-        W.history[name] = function() {
-          const before = location.href;
-          const result = original.apply(this, arguments);
-          const after = location.href;
-
-          if (after !== before) add(`route.${name}`, {
-            from: sanitizeUrl(before),
-            to: sanitizeUrl(after)
-          });
-
-          lastHref = after;
-          return result;
-        };
-      } catch {}
-    };
-
-    wrap('pushState');
-    wrap('replaceState');
-
-    for (const name of ['hashchange', 'popstate', 'pagehide']) {
-      window.addEventListener(name, () => {
-        if (name === 'pagehide') {
-          flushCoreSuccessSummary();
-          flushFcliteUsageSummary();
-        }
-        const now = location.href;
-        add(`page.${name}`, {
-          from: sanitizeUrl(lastHref),
-          to: sanitizeUrl(now),
-          visibility: document.visibilityState
-        });
-        lastHref = now;
-      }, true);
-    }
-
-    window.addEventListener('pageshow', event => {
-      if (!event.persisted) return;
-      const now = location.href;
-      add('page.pageshow', {
-        from: sanitizeUrl(lastHref),
-        to: sanitizeUrl(now),
-        visibility: document.visibilityState,
-        persisted: true
-      });
-      lastHref = now;
-    }, true);
-
-    document.addEventListener('visibilitychange', () => {
-      clearTimeout(visibilityTimer);
-      const visibility = document.visibilityState;
-      visibilityTimer = setTimeout(() => {
-        visibilityTimer = 0;
-        if (document.visibilityState !== visibility) return;
-        const now = new Date().toISOString();
-        visibilityStats.transitions++;
-        visibilityStats[visibility] = (Number(visibilityStats[visibility]) || 0) + 1;
-        visibilityStats.firstAt ||= now;
-        visibilityStats.lastAt = now;
-        visibilityStats.last = visibility;
-        if (!visibilityReportTimer) visibilityReportTimer = setTimeout(flushVisibilitySummary, VISIBILITY_REPORT_MS);
-      }, VISIBILITY_DEBOUNCE_MS);
-    }, true);
-  }
-
-  function flushVisibilitySummary() {
-    clearTimeout(visibilityReportTimer);
-    visibilityReportTimer = 0;
-    if (!visibilityStats.transitions) return;
-    const summary = visibilityStats;
-    visibilityStats = emptyVisibilityStats();
-    add('page.visibility.summary', summary);
   }
 
   function recordRejection(reason) {
@@ -2413,21 +1929,6 @@
     };
   }
 
-  function installViewportTrace() {
-    lastViewport = JSON.stringify(viewportSnapshot());
-    window.addEventListener('resize', () => {
-      clearTimeout(viewportTimer);
-      viewportTimer = setTimeout(() => {
-        viewportTimer = 0;
-        const snapshot = viewportSnapshot();
-        const key = JSON.stringify(snapshot);
-        if (key === lastViewport) return;
-        lastViewport = key;
-        add('page.viewport', snapshot);
-      }, VIEWPORT_DEBOUNCE_MS);
-    }, true);
-  }
-
   function isFCResearch() {
     return FCR_HOST.test(location.hostname);
   }
@@ -2559,28 +2060,19 @@
   installScriptBus();
   bootRuntimeVersionTrace();
   installFcrDataCoreTrace();
-  installRouteTrace();
   installErrorTrace();
-  installActionTrace();
-  installViewportTrace();
+  installActionContext();
   installPerformanceHealth();
-  bootAftEditPageStateProbe();
-  bootPoPortalPageStateProbe();
-  bootResearchProbe();
   bootUi();
 
   window.addEventListener('pagehide', () => {
-    clearTimeout(visibilityTimer);
-    clearTimeout(viewportTimer);
     clearTimeout(fcrNetworkTimer);
     clearTimeout(pollNetworkTimer);
     clearTimeout(routineNetworkTimer);
-    clearTimeout(visibilityReportTimer);
     clearTimeout(blockedSectionsTimer);
     flushFcrNetworkSummary();
     flushPollNetworkSummary();
     flushRoutineNetworkSummary();
-    flushVisibilitySummary();
     flushBlockedSectionsSummary();
     flushCoreSuccessSummary();
     flushPage();
