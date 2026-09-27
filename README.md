@@ -19,7 +19,7 @@ Canonical source and Tampermonkey update host. The older `tampermonkey-scripts` 
 | Bin Check Overlay | 7.4.6 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Bin_Check_Overlay.user.js) |
 | Dropzone Selector Queue | 0.2.20 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js) |
 | BWU2 Observability Core | 0.1.26 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Observability_Core.user.js) |
-| PO Portal Lite | 0.1.0 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/PO_Portal_Lite.user.js) |
+| PO Portal Lite | 0.1.1 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/PO_Portal_Lite.user.js) |
 | Calm Code | 1.3.3 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Calm_Code.user.js) |
 | Unbind Hierarchy Queue | 1.0.7 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js) |
 | Screenshot Mode | 0.1.4 | [Open](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Screenshot_Mode.user.js) |
