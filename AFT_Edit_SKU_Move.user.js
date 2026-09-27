@@ -22,7 +22,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.38';
+  const VERSION = '0.9.39';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -506,6 +506,9 @@
     status(text) {
       if (this.statusEl) this.statusEl.textContent = text;
       if (this.busyStatusEl) this.busyStatusEl.textContent = text || 'Working…';
+      if (ISS_CONSOLE_WORKER && this.workerProgress) {
+        issWorkerProgress('edit', text, { ...this.workerProgress });
+      }
     },
 
     detect() {
@@ -1652,6 +1655,7 @@
       for (let i = 0; i < items.length; i++) {
         if (this.stopRequested) throw new Error('Stopped by user');
         const sku = items[i];
+        this.workerProgress = { current:i + 1, total:items.length, mode:'sku' };
         this.status(`${i + 1}/${items.length} • ${sku}`);
         this.setSkuBatchProgressState(i, 'active', '▶ RUNNING');
 
@@ -1791,6 +1795,7 @@
           );
 
           this.tracker?.active('Qty');
+          this.status(`Attempt ${attempt} • Qty`);
           const sourcePage = await this.snapshot(objectId, `Source inventory ${attempt}`);
 
           if (sourcePage.state === 'retryError') {
@@ -2019,6 +2024,7 @@
       }
 
       await this.tracked('Lookup', `${index}/${total} Item`, () => EditApi.input(objectId, item.fnsku, 'Item'));
+      this.status(`${index}/${total} Source`);
       let snap = await this.snapshot(objectId, 'After item');
       this.tracker?.active('Source');
       if (snap.state !== 'newState') {
@@ -2057,6 +2063,7 @@
           if (this.stopRequested) throw new Error('Stopped by user');
 
           const item = items[i];
+          this.workerProgress = { current:i + 1, total:items.length, mode:'each' };
           let startState = 'location';
 
           if (session.open && low(session.location) === low(item.location)) {
@@ -3861,6 +3868,7 @@
     await issWorkerEnsureMode(`edit:${mode}`);
     Edit.stopRequested = false;
     Edit.directBusy = true;
+    Edit.workerProgress = null;
 
     try {
       if (mode === 'each') {
@@ -3868,6 +3876,7 @@
         if (!items.length) throw new Error('EACH needs: TOTE ASIN [FNSKU] — one row per item');
         if (items.length > 500) throw new Error('Edit queue too large');
 
+        Edit.workerProgress = { current:0, total:items.length, mode };
         issWorkerProgress('edit', `EACH • starting ${items.length} row${items.length === 1 ? '' : 's'}`, {
           current:0,
           total:items.length,
@@ -3893,6 +3902,7 @@
         throw new Error('Source and destination disposition cannot match');
       }
 
+      Edit.workerProgress = { current:0, total:items.length, mode };
       issWorkerProgress('edit', `SKU • starting ${items.length} item${items.length === 1 ? '' : 's'}`, {
         current:0,
         total:items.length,
@@ -3917,6 +3927,7 @@
       );
       return { done, total:items.length, flipped, zero, failed, mode };
     } finally {
+      Edit.workerProgress = null;
       Edit.directBusy = false;
     }
   }
