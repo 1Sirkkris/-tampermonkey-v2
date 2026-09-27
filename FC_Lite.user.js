@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.75
+// @version      0.1.76
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -34,7 +34,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.75';
+  const VERSION = '0.1.76';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -666,12 +666,6 @@
         paintMadcat(row, 'error', 'Measurement login popup blocked');
         return;
       }
-    } else {
-      try {
-        const auth = await coreRequest('madcatAuthStatus', {}, 1200);
-        if (!row.isConnected || row._fcratcMadcatCheckSerial !== checkSerial) return;
-        if (!auth?.available && auth?.bridgeRecent) paintMadcat(row, 'auth');
-      } catch {}
     }
 
     try {
