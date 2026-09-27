@@ -951,10 +951,9 @@
   };
 
 
-  // Lazy pre-resolve: scan-item only. This cache never calls move-items or close-container.
-  // It uses otherwise-idle time while the operator is scanning barcodes, then Start reuses
-  // completed/in-flight scan-item responses. Movement still begins only inside startLazy().
-  const lazyPreResolve = {
+  // Super Preflight is the ONLY scan-item lookup engine.
+  // Up to 5 harmless lookups run in parallel while scanning. No move/close calls happen here.
+  const preflight = {
     sourceKey:'',
     generation:0,
     queue:[],
@@ -963,65 +962,57 @@
     active:0
   };
 
-  function lazyPreResolveKey(source, barcode) {
+  function preflightKey(source, barcode) {
     return `${norm(source)}\u0000${clean(barcode).toUpperCase()}`;
   }
 
-  function resetLazyPreResolve(source='') {
-    lazyPreResolve.generation++;
-    for (const controller of lazyPreResolve.controllers) {
+  function resetPreflightLookups(source='') {
+    preflight.generation++;
+    for (const controller of preflight.controllers) {
       try { controller.abort(); } catch {}
     }
-    lazyPreResolve.controllers.clear();
-    lazyPreResolve.queue.length = 0;
-    for (const entry of lazyPreResolve.entries.values()) {
+    preflight.controllers.clear();
+    preflight.queue.length = 0;
+    for (const entry of preflight.entries.values()) {
       if (!entry.settled) {
         entry.settled = true;
         entry.resolve(null);
       }
     }
-    lazyPreResolve.entries.clear();
+    preflight.entries.clear();
 
     const code = validContainer(source) ? clean(source) : '';
-    lazyPreResolve.sourceKey = code ? norm(code) : '';
-
-    superPreflight.results.clear();
-    superPreflight.redCodes.clear();
-    superPreflight.dateCache.clear();
-    superPreflight.dateQueued.clear();
-    superPreflight.dateQueue.length = 0;
-    superPreflight.stats = { green:0, yellow:0, red:0 };
-    superPreflight.last = { kind:'idle', code:'', reason:'Scan an item' };
+    preflight.sourceKey = code ? norm(code) : '';
+    resetPreflightWorkflowState();
     renderSuperPreflight();
   }
 
-  function syncLazyPreResolveSource() {
+  function syncPreflightSource() {
     const source = validContainer(lSrc.value) ? clean(lSrc.value) : '';
     const key = source ? norm(source) : '';
-
-    if (key !== lazyPreResolve.sourceKey) resetLazyPreResolve(source);
+    if (key !== preflight.sourceKey) resetPreflightLookups(source);
     return source;
   }
 
-  function finishLazyPreResolveEntry(entry, value) {
+  function finishPreflightEntry(entry, value) {
     if (entry.settled) return;
     entry.settled = true;
     entry.resolve(value);
   }
 
-  function pumpLazyPreResolve() {
-    while (lazyPreResolve.active < LOOKUP_CONCURRENCY && lazyPreResolve.queue.length) {
-      const entry = lazyPreResolve.queue.shift();
-      if (!entry || entry.generation !== lazyPreResolve.generation || lazyPreResolve.entries.get(entry.key) !== entry) {
-        finishLazyPreResolveEntry(entry, null);
+  function pumpPreflight() {
+    while (preflight.active < LOOKUP_CONCURRENCY && preflight.queue.length) {
+      const entry = preflight.queue.shift();
+      if (!entry || entry.generation !== preflight.generation || preflight.entries.get(entry.key) !== entry) {
+        finishPreflightEntry(entry, null);
         continue;
       }
 
-      lazyPreResolve.active++;
+      preflight.active++;
       entry.state = 'pending';
       const controller = new AbortController();
       entry.controller = controller;
-      lazyPreResolve.controllers.add(controller);
+      preflight.controllers.add(controller);
 
       fetch(API_SCAN_ITEM, {
         method:'POST',
@@ -1036,70 +1027,63 @@
 
         if (
           response.ok &&
-          entry.generation === lazyPreResolve.generation &&
-          lazyPreResolve.entries.get(entry.key) === entry
+          entry.generation === preflight.generation &&
+          preflight.entries.get(entry.key) === entry
         ) {
-          entry.state = 'done';
           entry.response = payload;
-          finishLazyPreResolveEntry(entry, payload);
-          applyPreflightResult(entry.code, payload);
+          entry.result = classifyPreflight(payload, entry.code);
+          entry.state = 'done';
+          finishPreflightEntry(entry, entry.result);
+          onPreflightResolved(entry.code, entry.result);
           return;
         }
 
-        finishLazyPreResolveEntry(entry, null);
+        finishPreflightEntry(entry, null);
       }).catch(() => {
-        finishLazyPreResolveEntry(entry, null);
+        finishPreflightEntry(entry, null);
       }).finally(() => {
-        lazyPreResolve.controllers.delete(controller);
-        lazyPreResolve.active = Math.max(0, lazyPreResolve.active - 1);
-
-        if (entry.state !== 'done' && lazyPreResolve.entries.get(entry.key) === entry) {
-          lazyPreResolve.entries.delete(entry.key);
+        preflight.controllers.delete(controller);
+        preflight.active = Math.max(0, preflight.active - 1);
+        if (entry.state !== 'done' && preflight.entries.get(entry.key) === entry) {
+          preflight.entries.delete(entry.key);
         }
-
-        pumpLazyPreResolve();
+        pumpPreflight();
       });
     }
   }
 
-  function queueLazyPreResolve(items=parseItems(lItems.value)) {
+  function queuePreflight(items=parseItems(lItems.value)) {
     if (lazy.running) return;
-    const source = syncLazyPreResolveSource();
+    const source = syncPreflightSource();
     if (!source) return;
 
-    const generation = lazyPreResolve.generation;
+    const generation = preflight.generation;
     for (const item of items) {
-      const key = lazyPreResolveKey(source, item.code);
-      if (lazyPreResolve.entries.has(key)) continue;
+      const key = preflightKey(source, item.code);
+      if (preflight.entries.has(key)) continue;
 
-      let resolve;      const promise = new Promise(r => { resolve = r; });
+      let resolve;
+      const promise = new Promise(r => { resolve = r; });
       const entry = {
-        key,
-        source,
-        code:item.code,
-        generation,
-        state:'queued',
-        response:null,
-        promise,
-        resolve,
-        settled:false,
-        controller:null
+        key, source, code:item.code, generation,
+        state:'queued', response:null, result:null,
+        promise, resolve, settled:false, controller:null
       };
-
-      lazyPreResolve.entries.set(key, entry);
-      lazyPreResolve.queue.push(entry);
+      preflight.entries.set(key, entry);
+      preflight.queue.push(entry);
     }
-
-    pumpLazyPreResolve();
+    pumpPreflight();
   }
 
-  async function getLazyPreResolvedResponse(source, barcode) {
-    const key = lazyPreResolveKey(source, barcode);
-    const entry = lazyPreResolve.entries.get(key);
-    if (!entry || entry.generation !== lazyPreResolve.generation) return null;
-
-    const response = entry.state === 'done' ? entry.response : await entry.promise;
-    return response == null ? null : response;
+  async function getPreflightResult(source, barcode) {
+    const key = preflightKey(source, barcode);
+    let entry = preflight.entries.get(key);
+    if (!entry || entry.generation !== preflight.generation) {
+      queuePreflight([{code:barcode,qty:1}]);
+      entry = preflight.entries.get(key);
+    }
+    if (!entry) return null;
+    return entry.state === 'done' ? entry.result : await entry.promise;
   }
 
   const lazyPanel = panel('sh-lazy', `Lazy Sideline v${VERSION}`, 'lazy');
