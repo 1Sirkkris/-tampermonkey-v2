@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.7
+// @name         Sideline REBUILD TEST v0.0.8
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.7
+// @version      0.0.8
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -12,10 +12,10 @@
 
 (() => {
   'use strict';
-  if (window.__sidelineRebuildTest_v007) return;
-  window.__sidelineRebuildTest_v007 = true;
+  if (window.__sidelineRebuildTest_v008) return;
+  window.__sidelineRebuildTest_v008 = true;
 
-  const VERSION = '0.0.7-REBUILD';
+  const VERSION = '0.0.8-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2186,6 +2186,64 @@
   function requestId() {
     const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return `amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.${id}`;
+  }
+
+  function scanSourcePayload(container) {
+    return { containerScannableId:container, requestId:requestId(), tool:TOOL };
+  }
+
+  function scanItemPayload(source, barcode) {
+    return {
+      containerScannableId:source,
+      itemBarcode:barcode,
+      isMasterpack:null,
+      itemAndonContext:null,
+      requestId:requestId(),
+      tool:TOOL
+    };
+  }
+
+  function buildMovePayload(source, destination, sourceMeta, ctx, qty=1, expirationMs=null) {
+    const item = ctx.item;
+    const sku = ctx.sku;
+    const records = ctx.records?.length ? ctx.records : [item];
+
+    return {
+      itemExternalId:null,
+      sourceContainerScannableId:source,
+      destinationContainerScannableId:destination,
+      scannableId:clean(item.scannableId || ctx.barcode),
+      quantity:String(Math.max(1, Number(qty) || 1)),
+      itemDetails:records.map(record => {
+        const recordSku = record.skuDetail || sku;
+        return {
+          fcsku:clean(recordSku.fcSku),
+          quantity:Number.isFinite(Number(record.quantity)) ? Number(record.quantity) : 0,
+          consumerType:record.consumer ?? null,
+          disposition:record.disposition ?? null,
+          referenceId:record.referenceId ?? null,
+          fnsku:clean(recordSku.fnSku)
+        };
+      }),
+      foundProblems:[null,null,null],
+      scannedSourceContainerAsDestination:false,
+      datelotDetail:sku.datelotDetail || null,
+      userEnteredExpirationDate:expirationMs,
+      mlcCaptureDetail:{
+        mlcClass:sku.mlcDetail?.mlcClass ?? 'UNKNOWN',
+        userEnteredLotCode:null,
+        mlcMissing:sku.mlcDetail?.mlcMissing ?? false,
+        mlcNotEnteredReason:null,
+        mlcCaptureMethod:null
+      },
+      itemMovedToISS:false,
+      candidatePurchaseOrders:[],
+      packHierarchyDetail:null,
+      itemAndonContext:null,
+      processPath:sourceMeta?.processPath ?? 'UNDETERMINED',
+      requestId:requestId(),
+      tool:TOOL
+    };
   }
 
   function payloadHasCustomerBound(value, seen=new Set()) {
