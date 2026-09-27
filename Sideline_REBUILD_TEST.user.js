@@ -1,13 +1,9 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.5
+// @name         Sideline REBUILD TEST v0.0.6
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.5
+// @version      0.0.6
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
-// @match        https://fcresearch-fe.aka.amazon.com/*
-// @match        https://qi-fcresearch-fe.corp.amazon.com/*
-// @match        https://qi-fcresearch-jp.corp.amazon.com/*
-// @match        https://qifcr.fe.aftx.amazonoperations.app/*
 // @run-at       document-end
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
@@ -16,10 +12,10 @@
 
 (() => {
   'use strict';
-  if (window.__sidelineRebuildTest_v005) return;
-  window.__sidelineRebuildTest_v005 = true;
+  if (window.__sidelineRebuildTest_v006) return;
+  window.__sidelineRebuildTest_v006 = true;
 
-  const VERSION = '0.0.5-REBUILD';
+  const VERSION = '0.0.6-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -42,19 +38,6 @@
   }
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
-  const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
-  const IS_SIDELINE_HOST = location.origin === SIDELINE_ORIGIN;
-  const IS_WORKER_FRAME = IS_SIDELINE_HOST && location.hash.includes('sideline-rebuild-worker');
-
-  if (!IS_SIDELINE_HOST) {
-    bootConsoleBridge();
-    return;
-  }
-
-  if (IS_WORKER_FRAME) {
-    document.documentElement.dataset.sidelineRebuildWorker = '1';
-  }
-
   const TOOL = 'V3';
   const START_TRIGGER = '123START';
   const LOOKUP_CONCURRENCY = 5;
@@ -63,6 +46,7 @@
   const LAZY_DELAY_MIN_MS = 2000;
   const LAZY_DELAY_MAX_MS = 8000;
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
+  const EXPIRY_HISTORY_KEY = 'sidelineRebuild.expiryHistory.v1';
   const API_SCAN_SOURCE = '/api/scan-source-container';
   const API_CLOSE_CONTAINER = '/api/close-container';
   const API_SCAN_ITEM = '/api/scanitem';
@@ -372,22 +356,6 @@
     return null;
   }
 
-  async function fillAndConfirm(value, expected='', active=()=>true) {
-    const input = await waitFor(() => active() && (!expected || screen() === expected) && scanInput(), 12000, 60);
-    if (!input || !active()) return false;
-    input.focus();
-    input.select?.();
-    setValue(input, '');
-    await sleep(10);
-    if (!active()) return false;
-    setValue(input, value);
-    await sleep(25);
-    if (!active()) return false;
-    const button = confirmButton();
-    enabled(button) ? click(button) : enter(input);
-    return active();
-  }
-
   async function closeOpenContainer(choice='yes', active=()=>true) {
     const change = await waitFor(() => active() && changeButton(), 12000, 35);
     if (!change || !active()) return 'cancelled';
@@ -441,7 +409,6 @@
   // UI
   const style = document.createElement('style');
   style.textContent = `
-html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worker="1"] .sh-panel,html[data-sideline-rebuild-worker="1"] #sh-move-corner,html[data-sideline-rebuild-worker="1"] #sh-lazy-running-indicator{display:none!important}
 #sh-dock{position:fixed;right:14px;bottom:12px;z-index:2147483647;display:grid;grid-template-columns:repeat(3,1fr);gap:5px;width:278px;padding:5px;background:#fff;border:1px solid #c7d0dd;border-radius:5px;box-shadow:0 2px 8px #0003;font:12px Arial,sans-serif}
 #sh-dock button,.sh-btn{border:1px solid #aeb8c5;border-radius:4px;padding:7px 6px;font-weight:800;cursor:pointer;background:#f5f7fa;color:#1f2937}.sh-on{background:#146eb4!important;color:#fff!important;border-color:#0f5c99!important}
 .sh-panel{position:fixed;right:14px;bottom:56px;z-index:2147483646;width:430px;max-width:calc(100vw - 28px);box-sizing:border-box;padding:8px;background:#fff;border:1px solid #c7d0dd;border-radius:5px;box-shadow:0 2px 8px #0003;font:12px Arial,sans-serif;color:#111827}.sh-title{font-weight:900;margin:-8px -8px 7px;padding:7px 9px;background:#f3f5f8;border-bottom:1px solid #d5dbe3;border-radius:5px 5px 0 0}
@@ -1733,31 +1700,6 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
     setLazyRunningIndicator(false);
     startDamageAttention(lazy.dest);
-    renderLazy();
-  }
-
-  function stopLazyForModeSwitch(note='mode switched') {
-    const hadLazyWork = !!(lazy.running || lazy.activeRun || lazy.predicant || lazy.damagePaused || lazy.dateResolve);
-    resetLazyPreResolve();
-    if (!hadLazyWork) return;
-
-    cancelLazyRun();
-    clearMoveCorner('lazy');
-    lazy.running = false;
-    lazy.paused = false;
-    lazy.predicant = false;
-    lazy.damagePaused = false;
-    lazy.damagedDest = '';
-    stopDamageAttention();
-    if (lPause) lPause.textContent = 'Pause';
-    lazy.predicantResolve?.();
-    lazy.predicantResolve = null;
-    lazy.dateResolve?.(null);
-    lazy.dateResolve = null;
-    $('#sh-og-expiry')?.remove();
-    setLazyRunningIndicator(false);
-    if (shared.owner === 'lazy') shared.owner = '';
-    lazy.note = note;
     renderLazy();
   }
 
@@ -3767,249 +3709,6 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     universalReturnToSource(returnModeFromButton(button));
   }
 
-  function rpcPayload(data) {
-    const payload = data?.payload ?? data?.args ?? data?.data ?? {};
-    return payload && typeof payload === 'object' ? payload : {};
-  }
-
-  function pick(obj, keys, fallback='') {
-    for (const key of keys) {
-      const value = obj?.[key];
-      if (value !== undefined && value !== null && value !== '') return value;
-    }
-    return fallback;
-  }
-
-  function normalizeRpcItems(payload) {
-    const raw = pick(payload, ['items','barcodes','itemBarcodes','codes','scans'], []);
-    if (Array.isArray(raw)) return raw.map(value => typeof value === 'object' ? pick(value,['code','barcode','value'],'') : value).filter(Boolean);
-    return String(raw || '').split(/[\r\n,\t ]+/).map(clean).filter(Boolean);
-  }
-
-  function setLazyFromRpc(payload) {
-    const src = clean(pick(payload, ['source','src','sourceContainer','sourceContainerScannableId'], lSrc.value));
-    const dest = clean(pick(payload, ['destination','dest','destinationContainer','destinationContainerScannableId'], lDest.value));
-    const items = normalizeRpcItems(payload);
-    const clearSource = pick(payload, ['clearSource','clearSourceWhenDone','emptySource'], undefined);
-    const delay = pick(payload, ['delayEnabled','artificialDelay','useDelay','delay'], undefined);
-
-    if (src) lSrc.value = src;
-    if (dest) lDest.value = dest;
-    if (items.length) lItems.value = items.join('\n');
-    if (clearSource !== undefined) {
-      lClear.checked = !!clearSource;
-      localStorage.setItem(CLEAR_SOURCE_KEY, lClear.checked ? '1' : '0');
-    }
-    if (typeof delay === 'boolean') {
-      lazy.delayEnabled = delay;
-      if (!delay) lazy.nextMoveAt = 0;
-      localStorage.setItem(LAZY_DELAY_KEY, delay ? '1' : '0');
-    }
-    refreshItems();
-  }
-
-  function lazyResult() {
-    let moved = 0, failed = 0;
-    for (const item of lazy.items) {
-      const qty = itemQty(item);
-      if (item.status === 'MOVED') moved += qty;
-      else if (['FAILED','INVALID'].includes(item.status)) failed += qty;
-    }
-    return { moved, failed };
-  }
-
-  function queueResult() {
-    return { processed:Math.min(q.index,q.list.length), total:q.list.length, failed:q.failed.length, errors:[...q.failed] };
-  }
-
-  async function waitForIdle(kind, timeout=20*60*1000) {
-    const end = Date.now() + timeout;
-    while (Date.now() < end) {
-      if (kind === 'lazy' && !lazy.running && !lazy.activeRun && !lazy.predicant && !lazy.dateResolve && !lazy.damagePaused) return;
-      if (kind === 'queue' && !q.running && !shared.queueBusy) return;
-      await sleep(100);
-    }
-    throw new Error(`${kind} timed out`);
-  }
-
-  async function handleWorkerCommand(command, payload={}) {
-    const cmd = String(command || '').toLowerCase();
-
-    if (cmd === 'ping') return { version:VERSION };
-    if (cmd === 'mode') return { mode:'lazy', delayEnabled:lazy.delayEnabled, queueRunning:q.running, lazyRunning:lazy.running };
-
-    if (['reset','lazy.reset'].includes(cmd)) {
-      q.runSeq++;
-      q.running = false;
-      q.paused = false;
-      resetLazy('console reset');
-      return {};
-    }
-
-    if (['lazy.delay','delay','settings.delay'].includes(cmd)) {
-      const next = pick(payload, ['enabled','delayEnabled','artificialDelay','value'], !lazy.delayEnabled);
-      lazy.delayEnabled = !!next;
-      if (!lazy.delayEnabled) lazy.nextMoveAt = 0;
-      localStorage.setItem(LAZY_DELAY_KEY, lazy.delayEnabled ? '1' : '0');
-      renderLazy();
-      return { delayEnabled:lazy.delayEnabled };
-    }
-
-    if (cmd === 'lazy.scan') {
-      setLazyFromRpc(payload);
-      const barcode = clean(pick(payload, ['barcode','item','code','scan'], ''));
-      if (barcode) {
-        const existing = lItems.value.trim();
-        lItems.value = existing ? `${existing}\n${barcode}` : barcode;
-        refreshItems();
-      }
-      queueLazyPreResolve(parseItems(lItems.value));
-      return {};
-    }
-
-    if (cmd === 'lazy.run') {
-      if (lazy.running) throw new Error('Lazy already running');
-      setLazyFromRpc(payload);
-      const before = lazy.runSeq;
-      await startLazy();
-      if (lazy.runSeq === before && !lazy.running) {
-        if (lazy.error) throw new Error(lazy.error);
-      }
-      await waitForIdle('lazy');
-      if (lazy.error && !lazyResult().moved) throw new Error(lazy.error);
-      return lazyResult();
-    }
-
-    if (['queue.run','tote.run','totequeue.run'].includes(cmd)) {
-      const raw = pick(payload, ['containers','totes','items','codes','value','text'], '');
-      const list = Array.isArray(raw) ? raw : parseContainers(String(raw));
-      q.runSeq++;
-      q.list = Array.isArray(list) ? list.map(clean).filter(validContainer) : [];
-      qText.value = q.list.join('\n');
-      q.index = 0;
-      q.failed = [];
-      q.running = !!q.list.length;
-      q.paused = false;
-      renderQueue(q.running ? 'console start' : 'no containers');
-      if (q.running) queuePump(q.runSeq);
-      await waitForIdle('queue');
-      return queueResult();
-    }
-
-    if (['queue.pause','tote.pause','totequeue.pause'].includes(cmd)) {
-      q.paused = true;
-      renderQueue('paused by console');
-      return queueResult();
-    }
-    if (['queue.resume','tote.resume','totequeue.resume'].includes(cmd)) {
-      q.paused = false;
-      renderQueue('resumed by console');
-      if (q.running) queuePump(q.runSeq);
-      return queueResult();
-    }
-    if (['queue.stop','tote.stop','totequeue.stop'].includes(cmd)) {
-      q.runSeq++;
-      q.running = false;
-      q.paused = false;
-      if (shared.owner === 'queue') shared.owner = '';
-      renderQueue('stopped by console');
-      return queueResult();
-    }
-
-    throw new Error(`Unsupported Sideline command: ${command}`);
-  }
-
-  function postWorkerProgress(force=false) {
-    if (!IS_WORKER_FRAME || window.parent === window) return;
-    const total = lazy.items.reduce((sum,item)=>sum+itemQty(item),0);
-    const done = lazy.items.reduce((sum,item)=>sum+(['MOVED','FAILED','INVALID','SKIPPED'].includes(item.status)?itemQty(item):0),0);
-    const payload = {
-      __sidelineRebuild:true,
-      kind:'progress',
-      data:{worker:'sideline',area:'sideline',loading:false,mode:lazy.running?'lazy':(q.running?'queue':'lazy'),current:Math.min(done,total),total}
-    };
-    const sig = JSON.stringify(payload.data);
-    if (!force && postWorkerProgress.last === sig) return;
-    postWorkerProgress.last = sig;
-    window.parent.postMessage(payload, '*');
-  }
-
-  function bootWorkerFrame() {
-    // UI nodes exist because the same engine is used, but are hidden in worker mode.
-    refreshItems();
-    window.addEventListener('message', async event => {
-      const data = event.data;
-      if (!data || data.__sidelineRebuild !== true || data.kind !== 'rpc') return;
-      const id = data.id;
-      try {
-        const result = await handleWorkerCommand(data.command, data.payload || {});
-        window.parent.postMessage({__sidelineRebuild:true,kind:'result',id,command:data.command,ok:true,result,error:'',version:VERSION}, '*');
-      } catch (error) {
-        window.parent.postMessage({__sidelineRebuild:true,kind:'result',id,command:data.command,ok:false,result:{},error:error?.message||String(error),version:VERSION}, '*');
-      } finally {
-        postWorkerProgress(true);
-      }
-    });
-    setInterval(()=>postWorkerProgress(false), 250);
-    window.parent.postMessage({__sidelineRebuild:true,kind:'ready',version:VERSION}, '*');
-  }
-
-  function bootConsoleBridge() {
-    if (!location.hash.includes('iss-console')) return;
-    const frame = document.createElement('iframe');
-    frame.id = 'sideline-rebuild-worker-frame';
-    frame.src = `${SIDELINE_ORIGIN}/#sideline-rebuild-worker`;
-    frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10000px;top:-10000px;border:0;opacity:0;pointer-events:none';
-    document.documentElement.appendChild(frame);
-
-    let seq = 0;
-    const pending = new Map();
-    const emit = message => window.postMessage(message, '*');
-    const ready = () => emit({messageType:'ISS_CONSOLE_WORKER_READY',type:'ISS_CONSOLE_WORKER_READY',worker:'sideline',version:VERSION});
-
-    function requestShape(data) {
-      if (!data || typeof data !== 'object') return null;
-      const worker = data.worker || data.targetWorker || data.data?.worker;
-      if (worker !== 'sideline') return null;
-      const command = data.command || data.data?.command;
-      if (!command) return null;
-      const type = String(data.messageType || data.type || '').toUpperCase();
-      if (type.includes('RESULT') || type.includes('PROGRESS') || type.includes('READY')) return null;
-      if (!(type.includes('RPC') || type.includes('COMMAND') || type.includes('REQUEST'))) return null;
-      return { command, payload:rpcPayload(data), requestId:data.requestId ?? data.rpcId ?? data.id ?? data.data?.requestId ?? null };
-    }
-
-    window.addEventListener('message', event => {
-      const data = event.data;
-      if (event.source === frame.contentWindow && data?.__sidelineRebuild) {
-        if (data.kind === 'ready') { ready(); return; }
-        if (data.kind === 'progress') {
-          emit({messageType:'ISS_CONSOLE_WORKER_PROGRESS',type:'ISS_CONSOLE_WORKER_PROGRESS',...data.data,version:VERSION});
-          return;
-        }
-        if (data.kind === 'result') {
-          const meta = pending.get(data.id) || {};
-          pending.delete(data.id);
-          emit({
-            messageType:'ISS_CONSOLE_RPC_RESULT', type:'ISS_CONSOLE_RPC_RESULT', worker:'sideline', version:VERSION,
-            requestId:meta.requestId, rpcId:meta.requestId, id:meta.requestId,
-            command:data.command, ok:!!data.ok, result:data.result || {}, error:data.error || ''
-          });
-          return;
-        }
-      }
-
-      if (event.source !== window) return;
-      const req = requestShape(data);
-      if (!req) return;
-      const id = ++seq;
-      pending.set(id, req);
-      frame.contentWindow?.postMessage({__sidelineRebuild:true,kind:'rpc',id,command:req.command,payload:req.payload}, SIDELINE_ORIGIN);
-    });
-
-    frame.addEventListener('load', () => setTimeout(ready, 200));
-  }
-
   // Boot
   function boot() {
     document.addEventListener('click', handleUniversalReturnClick, true);
@@ -4087,7 +3786,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     armRecoveryWatchdog(15000);
   }
 
-  const launch = () => IS_WORKER_FRAME ? bootWorkerFrame() : boot();
+  const launch = boot;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',launch,{once:true});
   else launch();
 })();
