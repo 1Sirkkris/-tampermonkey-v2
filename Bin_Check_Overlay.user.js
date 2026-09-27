@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker')) return;
+  if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2BinCheckOverlay = true;
 
   const VERSION = '7.4.6';
