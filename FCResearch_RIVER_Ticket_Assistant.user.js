@@ -18,6 +18,7 @@
 (() => {
   'use strict';
 
+  if (location.hash.startsWith('#iss-console')) return;
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
