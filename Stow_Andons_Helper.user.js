@@ -17,6 +17,7 @@
 
 (() => {
   'use strict';
+  if (location.hash.startsWith('#iss-console')) return;
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
