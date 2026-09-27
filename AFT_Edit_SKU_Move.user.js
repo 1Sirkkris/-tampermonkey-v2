@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.41
+// @version      0.9.42
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.41';
+  const VERSION = '0.9.42';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -1662,7 +1662,7 @@
         try {
           const result = await this.runSkuDirect(
             { ...baseMeta, sku },
-            { maxRecoveries: 2, allowReload: false }
+            { maxRecoveries: 6, allowReload: false }
           );
           if (result?.outcome === 'zero') {
             zero++;
@@ -1766,12 +1766,17 @@
 
       const recover = async (objectId, reason, endCurrent = true) => {
         recoveries++;
-        if (recoveries >= maxRecoveries) {
-          throw new Error(`${reason} • failed twice`);
+        const recoveryLimit = Number.isFinite(maxRecoveries) ? Math.max(0, maxRecoveries - 1) : Infinity;
+        if (Number.isFinite(recoveryLimit) && recoveries > recoveryLimit) {
+          throw new Error(`${reason} • failed after ${recoveryLimit} recoveries`);
         }
+        const recoveryText = Number.isFinite(recoveryLimit)
+          ? `recovery ${recoveries}/${recoveryLimit}`
+          : `recovery ${recoveries}`;
+        this.status(`${reason} → ${recoveryText}`);
         return this.resetSkuWorkflow(
           objectId,
-          `${reason} • retry ${recoveries}/1`,
+          `${reason} • ${recoveryText}`,
           endCurrent,
           options.allowReload !== false
         );
