@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.3
+// @name         Sideline REBUILD TEST v0.0.4
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.2
+// @version      0.0.4
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -10,14 +10,16 @@
 // @match        https://qifcr.fe.aftx.amazonoperations.app/*
 // @run-at       document-end
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
-  if (window.__sidelineRebuildTest_v002) return;
-  window.__sidelineRebuildTest_v002 = true;
+  if (window.__sidelineRebuildTest_v004) return;
+  window.__sidelineRebuildTest_v004 = true;
 
-  const VERSION = '0.0.3-REBUILD';
+  const VERSION = '0.0.4-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -483,6 +485,72 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 #sh-og-expiry .og-grid{display:grid;gap:5px}.og-month{grid-template-columns:repeat(4,minmax(0,1fr))}.og-day{grid-template-columns:repeat(7,minmax(0,1fr))}.og-year{grid-template-columns:repeat(4,minmax(0,1fr))}
 #sh-og-expiry button{min-width:0;height:35px;border:1px solid #c7d2fe;border-radius:7px;background:#f5f7ff;color:#1e3a8a;font-size:13px;font-weight:850;cursor:pointer}#sh-og-expiry button:hover:not(:disabled){background:#e0e7ff}#sh-og-expiry button.selected{background:#2563eb;color:#fff;border-color:#1d4ed8}#sh-og-expiry button:disabled{opacity:.35;cursor:not-allowed}
 #sh-og-expiry .og-footer{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.og-footer.og-footer-single{grid-template-columns:1fr}.og-footer button{width:100%;height:48px!important;background:#7c3aed!important;color:#fff!important;border-color:#6d28d9!important;font-size:15px!important}.og-footer .production-confirm{background:#146eb4!important;border-color:#0f5c99!important}.og-footer .og-return-source{background:#eff6ff!important;color:#0f3d73!important;border:2px solid #146eb4!important}
+
+/* v0.0.4 — ISS Console visual alignment; UI only */
+#sh-dock{
+  width:430px;box-sizing:border-box;padding:6px;
+  background:#f2f4f6;border-color:#aab7c6;border-top:0;
+  border-radius:0 0 4px 4px;box-shadow:0 3px 9px #0002;
+  font:700 11px Arial,sans-serif
+}
+#sh-dock button,.sh-btn{
+  border-color:#9faec0;border-radius:3px;
+  font-weight:800;color:#122b49
+}
+#sh-dock button.sh-on,.sh-on{
+  background:#315f7f!important;color:#fff!important;border-color:#315f7f!important
+}
+.sh-panel{
+  width:430px;padding:12px;border-color:#aab7c6;
+  border-radius:4px 4px 0 0;box-shadow:0 3px 9px #0002;
+  font:11px Arial,sans-serif;color:#122b49
+}
+.sh-title{
+  margin:-12px -12px 11px;padding:9px 11px;
+  background:#f1f3f5;border-left:3px solid #7894ad;
+  border-bottom:1px solid #c4ced8;border-radius:0;
+  color:#0f2d4c
+}
+.sh-title-brand{display:flex;align-items:center;justify-content:space-between;padding:10px 11px}
+.sh-title-brand div{display:flex;flex-direction:column;gap:1px}
+.sh-title-brand strong{font-size:22px;line-height:1;color:#0b2c4b;letter-spacing:.5px}
+.sh-title-brand span{font-size:10px;font-weight:700;color:#60758c}
+.sh-title-brand b{
+  padding:5px 10px;border:1px solid #9fb0c0;border-radius:3px;
+  background:#fff;color:#173c5d;font-size:10px;letter-spacing:.4px
+}
+.sh-return-source{
+  margin:-2px 0 8px auto;padding:5px 8px!important;
+  border:1px solid #315f7f!important;background:#fff!important;
+  color:#17466b!important;font-size:10px!important
+}
+.sh-field-label{
+  display:block;margin:7px 0 4px;font-size:10px;font-weight:900;
+  color:#385674;letter-spacing:.45px
+}
+.sh-flow-arrow{text-align:center;color:#7894ad;font-size:18px;line-height:14px;margin:4px 0}
+.sh-input{
+  border-color:#aab7c6;border-radius:3px;padding:9px;
+  background:#fff;color:#1b2e43
+}
+.sh-input:focus{outline:2px solid rgba(49,95,127,.16);border-color:#315f7f}
+#sh-lazy .sh-area{height:106px}
+#sh-lazy-settings{margin:9px 0 7px}
+#sh-lazy-settings .sh-btn{min-height:34px}
+.sh-grid4{grid-template-columns:1.45fr .9fr .9fr .9fr}
+.sh-metric{
+  border-color:#b8c5d2;background:#f5f7f9;
+  color:#28445f
+}
+.sh-metric b{color:#0e2f4f}
+#sh-lazy>.sh-status{
+  margin-top:7px;padding:7px 9px;border:1px solid #9eb8cd;
+  background:#eef8ff;color:#153d5f
+}
+#sh-qty{width:300px}
+#sh-qty .sh-qty-grid{gap:5px}
+#sh-qty .sh-qty-grid button{min-height:38px;font-size:14px}
+#sh-queue .sh-area{height:66px}
 `;
   document.documentElement.appendChild(style);
 
@@ -573,7 +641,10 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     const returnSource = key === 'lazy'
       ? '<button type="button" class="sh-btn sh-return-source" data-return-source>↩ Return to Source</button>'
       : '';
-    root.innerHTML = `<div class="sh-title">${title}</div>${returnSource}`;
+    const header = key === 'lazy'
+      ? '<div class="sh-title sh-title-brand"><div><strong>SIDELINE</strong><span>Container workflow</span></div><b>LAZY</b></div>'
+      : `<div class="sh-title">${title}</div>`;
+    root.innerHTML = header + returnSource;
     root.style.display = 'none';
     document.body.appendChild(root);
     panels[key] = root;
@@ -596,7 +667,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     restorePanelStates();
     const dock = document.createElement('div');
     dock.id = 'sh-dock';
-    for (const [key,label] of [['queue','Tote'],['lazy','Lazy'],['qty','QTY']]) {
+    for (const [key,label] of [['queue','QUEUE'],['lazy','LAZY'],['qty','QTY']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.key = key;
@@ -1029,11 +1100,14 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
   const lazyPanel = panel('sh-lazy', `Lazy Sideline v${VERSION}`, 'lazy');
   lazyPanel.insertAdjacentHTML('beforeend',
-    '<div class="sh-row">' +
-      '<input class="sh-input" data-f="src" placeholder="Source container (csX / tsX)">' +
-      '<input class="sh-input" data-f="dest" placeholder="Destination container (csX / tsX)">' +
-    '</div>' +
-    '<textarea class="sh-input sh-area" data-f="items" placeholder="Scan item barcodes — one per line"></textarea>' +
+    '<label class="sh-field-label">SOURCE</label>' +
+    '<input class="sh-input" data-f="src" placeholder="tsX / csX">' +
+    '<div class="sh-flow-arrow">↓</div>' +
+    '<label class="sh-field-label">DESTINATION</label>' +
+    '<input class="sh-input" data-f="dest" placeholder="tsX / csX">' +
+    '<div class="sh-flow-arrow">↓</div>' +
+    '<label class="sh-field-label">ITEM BARCODES</label>' +
+    '<textarea class="sh-input sh-area" data-f="items" placeholder="Scan or paste one per line"></textarea>' +
     '<div class="sh-lazy-input-summary"><span data-lazy-input-summary>0 unique / 0 units</span><button type="button" data-a="toggle-items">Expand</button></div>' +
     '<div id="sh-lazy-settings">' +
       '<button class="sh-btn sh-on" data-a="clear-source">CLEAR SOURCE: ON</button>' +
