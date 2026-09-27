@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.31
+// @version      0.1.32
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.31';
+  const VERSION = '0.1.32';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -282,6 +282,14 @@
     }, WORKER_HEARTBEAT_MS);
   }
 
+  function paintRuntimeVersions() {
+    const el = $('[data-runtime-versions]');
+    if (!el) return;
+    const aftVersion = clean(workers.aft?.version) || '…';
+    const sidelineVersion = clean(workers.sideline?.version) || '…';
+    el.textContent = `ISS · v${VERSION} | AFT · v${aftVersion} | SIDELINE · v${sidelineVersion}`;
+  }
+
   function markWorker(worker, ready, version = '') {
     const state = workers[worker];
     if (!state) return;
@@ -290,6 +298,7 @@
     state.ready = !!ready;
     if (ready) state.lastSeenAt = Date.now();
     if (version) state.version = version;
+    paintRuntimeVersions();
 
     const dot = $('[data-worker-dot="' + worker + '"]');
     const label = $('[data-worker-label="' + worker + '"]');
@@ -833,7 +842,7 @@
       '      <div class="iss-loading"><span class="iss-spinner"></span><b data-loading-label>Switching mode…</b></div>',
       '    </section>',
       '  </main>',
-      '  <footer class="iss-footer"><span>ISS Console v' + VERSION + '</span><span>Source → Destination → Items</span></footer>',
+      '  <footer class="iss-footer"><span class="iss-footer-spacer"></span><span class="iss-runtime-versions" data-runtime-versions>ISS · v' + VERSION + ' | AFT · … | SIDELINE · …</span><span class="iss-footer-flow">Source → Destination → Items</span></footer>',
       '</div>'
     ].join('');
   }
@@ -867,7 +876,7 @@
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-alert-action{justify-self:center;height:32px;padding:0 14px;border:2px solid #b91c1c;border-radius:4px;background:#fff;color:#991b1b;font-size:11px;font-weight:1000;cursor:pointer}.iss-panel[data-side-attention="rescan-destination"],.iss-panel[data-side-attention="live-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items],.iss-panel[data-side-attention="live-destination"] [data-side-dest]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}.iss-side-items{display:none;max-height:190px;overflow:auto;border:1px solid #c7d0d8;border-radius:4px;background:#f8fafc;padding:5px;gap:5px}.iss-side-items[data-show="1"]{display:grid}.iss-side-item{padding:7px 8px;border:1px solid #cbd5e1;border-left:5px solid #64748b;border-radius:3px;background:#fff;color:#334155}.iss-side-item[data-state="READY"]{border-left-color:#146eb4;background:#eff6ff;color:#0f3d73}.iss-side-item[data-state="DATE"]{border-left-color:#f59e0b;background:#fff7ed;color:#7c2d12}.iss-side-item[data-state="MOVED"]{border-left-color:#146eb4;background:#f0f8ff;color:#0f3d73}.iss-side-item[data-state="FAILED"],.iss-side-item[data-state="INVALID"],.iss-side-item[data-state="SKIPPED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}.iss-side-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:1000}.iss-side-item-top code{font:900 12px Consolas,monospace}.iss-side-item-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;margin-top:5px;font-size:11px;line-height:1.25}.iss-side-item-meta b{font-weight:1000}.iss-side-item[data-state="FAILED"] .iss-side-item-meta b,.iss-side-item[data-state="INVALID"] .iss-side-item-meta b,.iss-side-item[data-state="SKIPPED"] .iss-side-item-meta b{color:#991b1b}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
       '.iss-loading{position:absolute;inset:68px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);backdrop-filter:grayscale(.45) saturate(.70) brightness(.93);opacity:0;pointer-events:none;transition:opacity .12s ease}.iss-panel[data-loading="1"] .iss-loading{opacity:1}.iss-loading b{padding:5px 9px;border:1px solid rgba(81,100,116,.30);border-radius:3px;background:rgba(255,255,255,.92);font-size:10px;color:#334a5e}.iss-spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.90);border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%;box-shadow:0 2px 11px rgba(0,0,0,.22);animation:issSpin .72s linear infinite}@keyframes issSpin{to{transform:rotate(360deg)}}',
-      '.iss-footer{height:32px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #c8d0d8;background:#f7f8f9;color:#687683;font-size:10px;font-weight:800}',
+      '.iss-footer{height:32px;padding:0 20px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-top:1px solid #c8d0d8;background:#f7f8f9;color:#687683;font-size:10px;font-weight:800}.iss-runtime-versions{justify-self:center;white-space:nowrap;font-weight:900;letter-spacing:.2px;color:#536171}.iss-footer-flow{justify-self:end;white-space:nowrap}.iss-footer-spacer{justify-self:start}',
       '.iss-worker-frame{position:fixed!important;width:2px!important;height:2px!important;left:-10000px!important;top:-10000px!important;opacity:0!important;pointer-events:none!important;border:0!important}',
       '@media(max-width:1380px){body{min-width:980px}#iss-grid{gap:9px;padding-left:10px;padding-right:10px}#iss-grid[data-active="edit"]{grid-template-columns:1.6fr 1fr 1fr}#iss-grid[data-active="move"]{grid-template-columns:1fr 1.6fr 1fr}#iss-grid[data-active="sideline"]{grid-template-columns:1fr 1fr 1.6fr}.iss-panel-body{padding:9px}.iss-topbar{padding:0 14px}}'
     ].join('\n');
