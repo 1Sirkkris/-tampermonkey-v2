@@ -2,7 +2,7 @@
 // @name         PO Portal Lite
 // @name:en      PO Portal Lite
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.0
+// @version      0.1.1
 // @description  Lightweight PO Portal controls and results view for AU ISS workflow.
 // @include      /^https?:\/\/console\.harmony\.a2z\.com\/poportal(?:[/?#]|$)/
 // @run-at       document-start
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const GUARD = 'data-bwu2-po-portal-lite';
   const ALL_CONDITIONS = [
     'Complete',
@@ -158,6 +158,60 @@
         background:#7f1d1d;
         color:#fff;
       }
+      #bwu2-po-lite-calendar {
+        position: fixed;
+        z-index: 2147483646;
+        width: 286px;
+        padding: 10px;
+        border: 1px solid #64748b;
+        border-radius: 8px;
+        background: #fff;
+        color: #0f172a;
+        box-shadow: 0 10px 28px rgba(0,0,0,.35);
+        font: 700 13px/1.2 Arial,sans-serif;
+      }
+      #bwu2-po-lite-calendar[hidden] { display:none !important; }
+      #bwu2-po-lite-calendar .cal-head {
+        display:grid;
+        grid-template-columns:32px 1fr 88px 32px;
+        gap:6px;
+        align-items:center;
+        margin-bottom:8px;
+      }
+      #bwu2-po-lite-calendar .cal-head button,
+      #bwu2-po-lite-calendar .cal-head select {
+        height:30px;
+        border:1px solid #cbd5e1;
+        border-radius:5px;
+        background:#f8fafc;
+        color:#0f172a;
+        font:800 12px Arial,sans-serif;
+      }
+      #bwu2-po-lite-calendar .cal-week,
+      #bwu2-po-lite-calendar .cal-grid {
+        display:grid;
+        grid-template-columns:repeat(7,1fr);
+        gap:4px;
+      }
+      #bwu2-po-lite-calendar .cal-week span {
+        text-align:center;
+        color:#64748b;
+        font-size:11px;
+      }
+      #bwu2-po-lite-calendar .cal-grid button {
+        height:30px;
+        border:0;
+        border-radius:5px;
+        background:#f1f5f9;
+        color:#0f172a;
+        font:800 12px Arial,sans-serif;
+        cursor:pointer;
+      }
+      #bwu2-po-lite-calendar .cal-grid button:hover { background:#bae6fd; }
+      #bwu2-po-lite-calendar .cal-grid button.blank { visibility:hidden; }
+      #bwu2-po-lite-calendar .cal-grid button.selected { background:#0ea5e9; color:#fff; }
+      #bwu2-po-lite-calendar .cal-grid button.today { box-shadow: inset 0 0 0 2px #f59e0b; }
+      .bwu2-po-lite-date { cursor:pointer; }
       .bwu2-po-lite-stock-search-hidden { display:none !important; }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -173,6 +227,134 @@
     };
   }
 
+  function ensureCalendar() {
+    let cal = document.getElementById('bwu2-po-lite-calendar');
+    if (cal) return cal;
+
+    cal = document.createElement('div');
+    cal.id = 'bwu2-po-lite-calendar';
+    cal.hidden = true;
+    cal.innerHTML = `
+      <div class="cal-head">
+        <button type="button" data-step="-1">‹</button>
+        <select class="cal-month" aria-label="Month"></select>
+        <select class="cal-year" aria-label="Year"></select>
+        <button type="button" data-step="1">›</button>
+      </div>
+      <div class="cal-week">
+        <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+      </div>
+      <div class="cal-grid"></div>
+    `;
+    document.body.appendChild(cal);
+
+    const month = cal.querySelector('.cal-month');
+    const year = cal.querySelector('.cal-year');
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    month.innerHTML = monthNames.map((name, i) => `<option value="${i}">${name}</option>`).join('');
+
+    const now = new Date();
+    year.innerHTML = Array.from({ length: 16 }, (_, i) => {
+      const y = now.getFullYear() - 10 + i;
+      return `<option value="${y}">${y}</option>`;
+    }).join('');
+
+    cal.querySelectorAll('[data-step]').forEach(button => {
+      button.addEventListener('click', () => {
+        let y = Number(year.value);
+        let m = Number(month.value) + Number(button.dataset.step);
+        if (m < 0) { m = 11; y -= 1; }
+        if (m > 11) { m = 0; y += 1; }
+        if (![...year.options].some(o => Number(o.value) === y)) {
+          const opt = document.createElement('option');
+          opt.value = String(y);
+          opt.textContent = String(y);
+          year.appendChild(opt);
+        }
+        year.value = String(y);
+        month.value = String(m);
+        renderCalendar();
+      });
+    });
+
+    month.addEventListener('change', renderCalendar);
+    year.addEventListener('change', renderCalendar);
+
+    document.addEventListener('mousedown', event => {
+      if (cal.hidden) return;
+      if (cal.contains(event.target)) return;
+      if (event.target?.classList?.contains('bwu2-po-lite-date')) return;
+      cal.hidden = true;
+    });
+
+    return cal;
+  }
+
+  function renderCalendar() {
+    const cal = ensureCalendar();
+    const inputId = cal.dataset.target;
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    const month = Number(cal.querySelector('.cal-month').value);
+    const year = Number(cal.querySelector('.cal-year').value);
+    const firstDay = new Date(year, month, 1).getDay();
+    const days = new Date(year, month + 1, 0).getDate();
+    const selected = validDateText(input.value) ? input.value : '';
+    const today = formatDate(new Date());
+    const grid = cal.querySelector('.cal-grid');
+    grid.innerHTML = '';
+
+    for (let i = 0; i < firstDay; i += 1) {
+      const blank = document.createElement('button');
+      blank.type = 'button';
+      blank.className = 'blank';
+      blank.tabIndex = -1;
+      grid.appendChild(blank);
+    }
+
+    for (let day = 1; day <= days; day += 1) {
+      const value = `${year}-${pad(month + 1)}-${pad(day)}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = String(day);
+      if (value === selected) button.classList.add('selected');
+      if (value === today) button.classList.add('today');
+      button.addEventListener('click', () => {
+        input.value = value;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        cal.hidden = true;
+      });
+      grid.appendChild(button);
+    }
+  }
+
+  function openCalendar(input) {
+    const cal = ensureCalendar();
+    const base = validDateText(input.value) ? new Date(input.value + 'T00:00:00') : new Date();
+    const month = cal.querySelector('.cal-month');
+    const year = cal.querySelector('.cal-year');
+
+    if (![...year.options].some(o => Number(o.value) === base.getFullYear())) {
+      const opt = document.createElement('option');
+      opt.value = String(base.getFullYear());
+      opt.textContent = String(base.getFullYear());
+      year.appendChild(opt);
+    }
+
+    cal.dataset.target = input.id;
+    month.value = String(base.getMonth());
+    year.value = String(base.getFullYear());
+    renderCalendar();
+
+    cal.hidden = false;
+    const rect = input.getBoundingClientRect();
+    const left = Math.min(rect.left, window.innerWidth - 296);
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 330);
+    cal.style.left = `${Math.max(8, left)}px`;
+    cal.style.top = `${Math.max(8, top)}px`;
+  }
+
   function buildPanel() {
     if (document.getElementById('bwu2-po-lite-panel')) return;
 
@@ -184,10 +366,10 @@
         <input id="bwu2-po-lite-asin" type="text" autocomplete="off" spellcheck="false">
       </label>
       <label>From
-        <input id="bwu2-po-lite-start" type="text" inputmode="numeric" placeholder="YYYY-MM-DD">
+        <input id="bwu2-po-lite-start" class="bwu2-po-lite-date" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" readonly>
       </label>
       <label>To
-        <input id="bwu2-po-lite-end" type="text" inputmode="numeric" placeholder="YYYY-MM-DD">
+        <input id="bwu2-po-lite-end" class="bwu2-po-lite-date" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" readonly>
       </label>
       <button type="button" data-range="6">6M</button>
       <button type="button" data-range="12">12M</button>
@@ -207,6 +389,11 @@
     asin.value = d.asin;
     start.value = d.start;
     end.value = d.end;
+
+    start.addEventListener('click', () => openCalendar(start));
+    end.addEventListener('click', () => openCalendar(end));
+    start.addEventListener('focus', () => openCalendar(start));
+    end.addEventListener('focus', () => openCalendar(end));
 
     const setRange = months => {
       const endDate = validDateText(end.value) ? new Date(end.value + 'T00:00:00') : new Date();
