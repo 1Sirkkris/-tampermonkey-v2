@@ -1162,33 +1162,144 @@
   }
 
   const superPreflight = {
-    results:new Map(),
-    redCodes:new Set(),
+    hardRed:new Set(),
+    expiryRejectCounts:new Map(),
+    scanOccurrences:new Map(),
+    expiryScheduled:new Map(),
     dateCache:new Map(),
-    dateQueued:new Set(),
     dateQueue:[],
     dateBusy:false,
-    stats:{ green:0, yellow:0, red:0 },
+    workflowKey:'',
+    workflowExpirationMs:null,
+    workflowEnteredMs:null,
     last:{ kind:'idle', code:'', reason:'Scan an item' }
   };
 
-  function preflightKey(code) {
+  function itemKey(code) {
     return clean(code).toUpperCase();
+  }
+
+  function expiryHistoryLoad() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(EXPIRY_HISTORY_KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function expiryHistorySave(history) {
+    try {
+      const entries = Object.entries(history)
+        .sort((a,b) => Number(b[1]?.updatedAt||0) - Number(a[1]?.updatedAt||0))
+        .slice(0,500);
+      localStorage.setItem(EXPIRY_HISTORY_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch {}
+  }
+
+  function expiryHistoryKeys(code, ctx) {
+    const keys = [];
+    const asin = clean(ctx?.asin).toUpperCase();
+    const barcode = itemKey(code);
+    if (asin) keys.push('asin:' + asin);
+    if (barcode) keys.push('barcode:' + barcode);
+    return keys;
+  }
+
+  function getRememberedExpiry(code, ctx) {
+    const history = expiryHistoryLoad();
+    for (const key of expiryHistoryKeys(code, ctx)) {
+      const value = history[key];
+      if (value?.finalExpirationMs) return value;
+    }
+    return null;
+  }
+
+  function rememberExpiry(code, ctx, chosen) {
+    if (!chosen?.finalExpirationMs) return;
+    const history = expiryHistoryLoad();
+    const record = {
+      enteredMs:Number(chosen.enteredMs || chosen.finalExpirationMs),
+      finalExpirationMs:Number(chosen.finalExpirationMs),
+      dateType:clean(ctx?.dateType),
+      asin:clean(ctx?.asin).toUpperCase(),
+      barcode:itemKey(code),
+      updatedAt:Date.now()
+    };
+    for (const key of expiryHistoryKeys(code, ctx)) history[key] = record;
+    expiryHistorySave(history);
+  }
+
+  function resetPreflightWorkflowState() {
+    superPreflight.hardRed.clear();
+    superPreflight.expiryRejectCounts.clear();
+    superPreflight.scanOccurrences.clear();
+    superPreflight.expiryScheduled.clear();
+    superPreflight.dateCache.clear();
+    superPreflight.dateQueue.length = 0;
+    superPreflight.dateBusy = false;
+    superPreflight.workflowKey = '';
+    superPreflight.workflowExpirationMs = null;
+    superPreflight.workflowEnteredMs = null;
+    superPreflight.last = { kind:'idle', code:'', reason:'Scan an item' };
+  }
+
+  function syncPreflightWorkflow() {
+    const key = validContainer(lSrc.value) && validContainer(lDest.value)
+      ? norm(lSrc.value) + '|' + norm(lDest.value)
+      : '';
+    if (key === superPreflight.workflowKey) return;
+
+    superPreflight.expiryRejectCounts.clear();
+    superPreflight.scanOccurrences.clear();
+    superPreflight.expiryScheduled.clear();
+    superPreflight.dateCache.clear();
+    superPreflight.dateQueue.length = 0;
+    superPreflight.workflowExpirationMs = null;
+    superPreflight.workflowEnteredMs = null;
+    superPreflight.workflowKey = key;
+  }
+
+  function cachedPreflight(code) {
+    const source = syncPreflightSource();
+    if (!source) return null;
+    return preflight.entries.get(preflightKey(source, code))?.result || null;
   }
 
   function renderSuperPreflight() {
     if (!lPreflight) return;
-    const { kind, code, reason } = superPreflight.last;
-    lPreflight.className = `sh-preflight sh-preflight-${kind || 'idle'}`;
-    const title = kind === 'green' ? '✓ GOOD — KEEP'
-      : kind === 'yellow' ? '⚠ EXPIRY — DATE SAVED / REQUIRED'
-      : kind === 'red' ? '✕ PUT ASIDE'
-      : kind === 'checking' ? '… CHECKING'
+    const state = superPreflight.last;
+    lPreflight.className = 'sh-preflight sh-preflight-' + (state.kind || 'idle');
+
+    const title = state.kind === 'green' ? '✓ GOOD — KEEP'
+      : state.kind === 'yellow' ? '⚠ EXPIRY — KEEP'
+      : state.kind === 'red' ? '✕ PUT ASIDE'
+      : state.kind === 'checking' ? '… CHECKING'
       : 'PREFLIGHT READY';
-    lPreflightMain.innerHTML = `<strong>${esc(title)}</strong><span>${esc(code ? `${code} — ${reason || ''}` : (reason || 'Scan an item'))}</span>`;
-    setTextIfChanged(pfGreen, `${superPreflight.stats.green} GOOD`);
-    setTextIfChanged(pfYellow, `${superPreflight.stats.yellow} EXPIRY`);
-    setTextIfChanged(pfRed, `${superPreflight.stats.red} ASIDE`);
+
+    const detail = state.code
+      ? state.code + ' — ' + (state.reason || '')
+      : (state.reason || 'Scan an item');
+
+    lPreflightMain.innerHTML = '<strong>' + esc(title) + '</strong><span>' + esc(detail) + '</span>';
+
+    let green=0, yellow=0, red=0;
+    for (const item of parseItems(lItems.value)) {
+      const result = cachedPreflight(item.code);
+      if (!result) continue;
+      const qty = itemQty(item);
+
+      if (result.kind === 'red') red += qty;
+      else if (result.kind === 'yellow') {
+        const rejected = Math.min(qty, Number(superPreflight.expiryRejectCounts.get(itemKey(item.code)) || 0));
+        yellow += Math.max(0, qty - rejected);
+        red += rejected;
+      } else if (result.kind === 'green') green += qty;
+    }
+
+    setTextIfChanged(pfGreen, green + ' GOOD');
+    setTextIfChanged(pfYellow, yellow + ' EXPIRY');
+    setTextIfChanged(pfRed, red + ' ASIDE');
   }
 
   function preflightResponseText(response) {
@@ -1215,10 +1326,13 @@
 
     if (!ctx.ok) {
       const type = clean(ctx.type);
-      const reason = ctx.invalid ? 'INVALID BARCODE'
-        : type === 'RequestMultipleBarcodesResponse' ? 'MULTIPLE BARCODE MATCHES'
-        : (type && type !== 'Unknown' ? type : 'NO ITEM DETAILS');
-      return { kind:'red', reason, ctx };
+      return {
+        kind:'red',
+        reason:ctx.invalid ? 'INVALID BARCODE'
+          : type === 'RequestMultipleBarcodesResponse' ? 'MULTIPLE BARCODE MATCHES'
+          : (type && type !== 'Unknown' ? type : 'NO ITEM DETAILS'),
+        ctx
+      };
     }
 
     if (ctx.notInSource) return { kind:'red', reason:'NOT IN SOURCE CONTAINER', ctx };
@@ -1233,12 +1347,129 @@
     return { kind:'green', reason:'GOOD TO GO', ctx };
   }
 
-  function queuePreflightDate(code, ctx) {
-    const key = preflightKey(code);
-    if (superPreflight.dateCache.has(key) || superPreflight.dateQueued.has(key)) return;
-    superPreflight.dateQueued.add(key);
-    superPreflight.dateQueue.push({ code, ctx });
+  function noteScannedOccurrence(code) {
+    const key = itemKey(code);
+    if (!key || key === itemKey(lSrc.value) || key === itemKey(lDest.value) || norm(code) === norm(START_TRIGGER)) return;
+
+    syncPreflightWorkflow();
+    superPreflight.scanOccurrences.set(key, Number(superPreflight.scanOccurrences.get(key) || 0) + 1);
+
+    const result = cachedPreflight(code);
+    if (result?.kind === 'yellow') scheduleExpiryPrompts(code, result.ctx);
+    if (result?.kind === 'red') {
+      superPreflight.last = { kind:'red', code, reason:result.reason };
+      renderSuperPreflight();
+    }
+  }
+
+  function ensureOccurrenceCounts(items=parseItems(lItems.value)) {
+    for (const item of items) {
+      const key = itemKey(item.code);
+      const have = Number(superPreflight.scanOccurrences.get(key) || 0);
+      if (itemQty(item) > have) superPreflight.scanOccurrences.set(key, itemQty(item));
+
+      const result = cachedPreflight(item.code);
+      if (result?.kind === 'yellow') scheduleExpiryPrompts(item.code, result.ctx);
+    }
+  }
+
+  function scheduleExpiryPrompts(code, ctx) {
+    const key = itemKey(code);
+    const seen = Number(superPreflight.scanOccurrences.get(key) || 0);
+    let scheduled = Number(superPreflight.expiryScheduled.get(key) || 0);
+
+    while (scheduled < seen) {
+      scheduled++;
+      superPreflight.dateQueue.push({ code, ctx, occurrence:scheduled });
+    }
+
+    superPreflight.expiryScheduled.set(key, scheduled);
     pumpPreflightDates();
+  }
+
+  async function showRememberedExpiryPrompt(item, remembered) {
+    return new Promise(resolve => {
+      const root = document.createElement('div');
+      root.id = 'sh-og-expiry';
+      root.dataset.owner = 'preflight-confirm';
+
+      const label = dateLabel(remembered.enteredMs || remembered.finalExpirationMs);
+      root.innerHTML =
+        '<div class="og-wrap sh-expiry-memory">' +
+          '<div class="og-id"><div>' + esc(item.ctx?.asin || item.code) + '</div><div>SAME DATE AS LAST TIME?</div></div>' +
+          '<div class="sh-expiry-memory-date">' + esc(label) + '</div>' +
+          '<div class="sh-expiry-memory-actions">' +
+            '<button data-choice="yes">YES — SAME DATE</button>' +
+            '<button data-choice="no">NO — ENTER NEW DATE</button>' +
+          '</div>' +
+        '</div>';
+
+      document.body.appendChild(root);
+      root.addEventListener('click', event => {
+        const button = event.target.closest('button[data-choice]');
+        if (!button) return;
+        const yes = button.dataset.choice === 'yes';
+        root.remove();
+        resolve(yes);
+      });
+    });
+  }
+
+  async function chooseExpiryForOccurrence(code, ctx) {
+    const remembered = getRememberedExpiry(code, ctx);
+
+    if (remembered) {
+      const same = await showRememberedExpiryPrompt({code,ctx}, remembered);
+      if (same) {
+        return {
+          enteredMs:Number(remembered.enteredMs || remembered.finalExpirationMs),
+          finalExpirationMs:Number(remembered.finalExpirationMs),
+          remembered:true
+        };
+      }
+    }
+
+    const chosen = await showApiDatePicker({ code, qty:1, ctx, status:'DATE' });
+    if (chosen) rememberExpiry(code, ctx, chosen);
+    return chosen;
+  }
+
+  function acceptWorkflowExpiry(code, ctx, chosen) {
+    if (!chosen?.finalExpirationMs) return;
+
+    const key = itemKey(code);
+    const finalMs = Number(chosen.finalExpirationMs);
+
+    if (superPreflight.workflowExpirationMs == null) {
+      superPreflight.workflowExpirationMs = finalMs;
+      superPreflight.workflowEnteredMs = Number(chosen.enteredMs || finalMs);
+      superPreflight.dateCache.set(key, chosen);
+      superPreflight.last = {
+        kind:'yellow',
+        code,
+        reason:'WORKFLOW DATE ' + dateLabel(chosen.enteredMs || finalMs) + ' — KEEP'
+      };
+      return;
+    }
+
+    if (finalMs === superPreflight.workflowExpirationMs) {
+      superPreflight.dateCache.set(key, chosen);
+      superPreflight.last = {
+        kind:'yellow',
+        code,
+        reason:'MATCHES ' + dateLabel(chosen.enteredMs || finalMs) + ' — KEEP'
+      };
+      return;
+    }
+
+    superPreflight.expiryRejectCounts.set(key, Number(superPreflight.expiryRejectCounts.get(key) || 0) + 1);
+    superPreflight.last = {
+      kind:'red',
+      code,
+      reason:'DATE ' + dateLabel(chosen.enteredMs || finalMs) +
+        ' ≠ WORKFLOW ' + dateLabel(superPreflight.workflowEnteredMs || superPreflight.workflowExpirationMs) +
+        ' — NEXT WORKFLOW'
+    };
   }
 
   async function pumpPreflightDates() {
@@ -1248,22 +1479,11 @@
     try {
       while (superPreflight.dateQueue.length && !lazy.running) {
         const next = superPreflight.dateQueue.shift();
-        const key = preflightKey(next.code);
-        if (superPreflight.dateCache.has(key)) {
-          superPreflight.dateQueued.delete(key);
-          continue;
-        }
+        const chosen = await chooseExpiryForOccurrence(next.code, next.ctx);
+        if (chosen) acceptWorkflowExpiry(next.code, next.ctx, chosen);
 
-        const item = { code:next.code, qty:1, ctx:next.ctx, status:'DATE' };
-        const chosen = await showApiDatePicker(item);
-        superPreflight.dateQueued.delete(key);
-
-        if (chosen) {
-          superPreflight.dateCache.set(key, chosen);
-          superPreflight.last = { kind:'yellow', code:next.code, reason:`${next.ctx.dateType === 'PRODUCTION_DATE' ? 'PRODUCTION' : 'EXPIRY'} DATE SAVED — ${dateLabel(chosen.enteredMs)}` };
-          renderSuperPreflight();
-        }
         setMoveCorner('lazy','idle');
+        renderSuperPreflight();
         if (!lazy.running) lItems.focus();
       }
     } finally {
@@ -1271,34 +1491,50 @@
     }
   }
 
-  function applyPreflightResult(code, response) {
-    const key = preflightKey(code);
-    if (superPreflight.results.has(key)) return superPreflight.results.get(key);
+  function onPreflightResolved(code, result) {
+    if (!result) return;
 
-    const result = classifyPreflight(response, code);
-    superPreflight.results.set(key, result);
-    superPreflight.stats[result.kind] = (superPreflight.stats[result.kind] || 0) + 1;
+    if (result.kind === 'red') {
+      superPreflight.hardRed.add(itemKey(code));
+      superPreflight.last = { kind:'red', code, reason:result.reason };
+    } else {
+      superPreflight.last = { kind:result.kind, code, reason:result.reason };
+      if (result.kind === 'yellow') {
+        ensureOccurrenceCounts();
+        scheduleExpiryPrompts(code, result.ctx);
+      }
+    }
 
-    if (result.kind === 'red') superPreflight.redCodes.add(key);
-    if (result.kind === 'yellow') queuePreflightDate(code, result.ctx);
-
-    superPreflight.last = { kind:result.kind, code, reason:result.reason };
     renderSuperPreflight();
-    return result;
   }
 
   function purgeKnownRedTextareaLines() {
-    if (!superPreflight.redCodes.size) return 0;
-    const lines = String(lItems.value).split(/\r?\n/);
+    if (!superPreflight.hardRed.size && !superPreflight.expiryRejectCounts.size) return 0;
+
+    const remainingExpiryRejects = new Map(superPreflight.expiryRejectCounts);
     const kept = [];
     let removed = 0;
 
-    for (const line of lines) {
+    for (const line of String(lItems.value).split(/\r?\n/)) {
       const value = clean(line);
-      if (value && superPreflight.redCodes.has(preflightKey(value))) {
+      const key = itemKey(value);
+      if (!value) {
+        kept.push(line);
+        continue;
+      }
+
+      if (superPreflight.hardRed.has(key)) {
         removed++;
         continue;
       }
+
+      const expiryRejects = Number(remainingExpiryRejects.get(key) || 0);
+      if (expiryRejects > 0) {
+        remainingExpiryRejects.set(key, expiryRejects - 1);
+        removed++;
+        continue;
+      }
+
       kept.push(line);
     }
 
@@ -1306,22 +1542,25 @@
       lItems.value = kept.join('\n').replace(/^\n+|\n+$/g,'');
       const end = lItems.value.length;
       lItems.setSelectionRange?.(end,end);
+      superPreflight.expiryRejectCounts.clear();
       refreshItems();
     }
+
     return removed;
   }
 
   async function settleSuperPreflightForCurrentInput() {
+    syncPreflightWorkflow();
+
     const items = parseItems(lItems.value);
-    queueLazyPreResolve(items);
-    const source = syncLazyPreResolveSource();
+    ensureOccurrenceCounts(items);
+    queuePreflight(items);
+
+    const source = syncPreflightSource();
     if (!source) return;
 
-    const waits = items.map(async item => {
-      const response = await getLazyPreResolvedResponse(source, item.code);
-      if (response != null) applyPreflightResult(item.code, response);
-    });
-    await Promise.allSettled(waits);
+    await Promise.allSettled(items.map(item => getPreflightResult(source, item.code)));
+    ensureOccurrenceCounts(items);
 
     while (superPreflight.dateBusy || superPreflight.dateQueue.length) {
       pumpPreflightDates();
