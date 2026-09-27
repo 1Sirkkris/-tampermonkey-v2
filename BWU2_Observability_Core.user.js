@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.26
+// @version      0.1.27
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -12,6 +12,7 @@
 // @include      /^https?:\/\/aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com\//
 // @include      /^https?:\/\/river\.amazon\.com\//
+// @include      /^https?:\/\/console\.harmony\.a2z\.com\/poportal\/fe(?:[/?#]|$)/
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_getValue
@@ -27,7 +28,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.26';
+  const VERSION = '0.1.27';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -87,6 +88,7 @@
   const SIM_HOST = /^t\.corp\.amazon\.com$/i;
   const CARTON_HOST = /^aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com$/i;
   const RIVER_HOST = /^river\.amazon\.com$/i;
+  const PO_PORTAL_HOST = /^console\.harmony\.a2z\.com$/i;
 
   const pageId = randomId('p_');
   let meta = loadMeta();
@@ -507,6 +509,145 @@
     if (CARTON_HOST.test(location.hostname) && url?.origin === location.origin && !isStatic) return true;
     if (url) return DETAILED_PATH.test(url.pathname);
     return DETAILED_PATH.test(String(rawUrl || ''));
+  }
+
+  function isPoPortalPage() {
+    return PO_PORTAL_HOST.test(location.hostname) && /^\/poportal\/fe\/?$/i.test(location.pathname);
+  }
+
+  function isPoPortalNetwork(rawUrl) {
+    if (!isPoPortalPage()) return false;
+    const url = parsedUrl(rawUrl);
+    if (!url || url.origin !== location.origin) return false;
+    return !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname);
+  }
+
+  function poPortalQuerySummary(rawUrl) {
+    const url = parsedUrl(rawUrl);
+    if (!url) return {};
+    const out = {};
+    for (const key of ['asin', 'startDate', 'endDate', 'countries', 'distributorChecks', 'removeZeroFilter']) {
+      if (!url.searchParams.has(key)) continue;
+      const value = url.searchParams.get(key) || '';
+      out[key] = key === 'asin' ? fingerprint(value, 'asin') : scrubText(value).slice(0, 500);
+    }
+    return out;
+  }
+
+  function poPortalRequestSummary(body) {
+    const out = summarizeRequestShape(body);
+    let value = body;
+    try {
+      if (typeof body === 'string') {
+        try { value = JSON.parse(body); }
+        catch { value = Object.fromEntries(new URLSearchParams(body).entries()); }
+      } else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        value = Object.fromEntries(body.entries());
+      } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        value = Object.fromEntries(body.entries());
+      }
+    } catch {}
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+    const filters = {};
+    for (const [key, raw] of Object.entries(value)) {
+      if (!/^(?:asin|fnsku|startDate|endDate|countries|country|distributorChecks|removeZeroFilter|vendorIds?|iogs?)$/i.test(key)) continue;
+      const text = Array.isArray(raw) ? raw.join(',') : String(raw ?? '');
+      filters[key] = /^(?:asin|fnsku)$/i.test(key) ? fingerprint(text, key.toLowerCase()) : scrubText(text).slice(0, 500);
+    }
+    if (Object.keys(filters).length) out.filters = filters;
+    return out;
+  }
+
+  function poPortalJsonShape(value, depth = 0) {
+    if (value == null) return { kind: value === null ? 'null' : typeof value };
+    if (Array.isArray(value)) {
+      return {
+        kind: 'array',
+        length: value.length,
+        ...(value.length && depth < 2 ? { item: poPortalJsonShape(value[0], depth + 1) } : {})
+      };
+    }
+    if (typeof value !== 'object') return { kind: typeof value };
+    const keys = Object.keys(value).slice(0, 60);
+    const children = {};
+    if (depth < 2) {
+      for (const key of keys.slice(0, 20)) {
+        const child = value[key];
+        if (child && typeof child === 'object') children[key] = poPortalJsonShape(child, depth + 1);
+      }
+    }
+    return { kind: 'object', keys, ...(Object.keys(children).length ? { children } : {}) };
+  }
+
+  function poPortalResponseSummary(text, contentType = '') {
+    const raw = String(text ?? '');
+    const base = { chars: raw.length };
+    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
+      try { return { ...base, ...poPortalJsonShape(JSON.parse(raw)) }; } catch {}
+    }
+    return summarizeFcrResponse(raw, contentType);
+  }
+
+  function recordPoPortalNetwork(base, rawUrl, body, responseText = '', contentType = '') {
+    const url = parsedUrl(rawUrl);
+    add('poportal.network', {
+      ...base,
+      path: sanitizePath(url?.pathname || ''),
+      query: poPortalQuerySummary(rawUrl),
+      request: poPortalRequestSummary(body),
+      response: poPortalResponseSummary(responseText, contentType)
+    });
+  }
+
+  function poPortalPageStateSnapshot(reason = 'page-ready') {
+    if (!isPoPortalPage()) return;
+
+    const controls = [...document.querySelectorAll('input,select,textarea')].slice(0, 80).map(control => {
+      const type = String(control.getAttribute('type') || control.tagName || '').toLowerCase();
+      const entry = {
+        tag: String(control.tagName || '').toLowerCase(),
+        type,
+        id: scrubText(control.id || ''),
+        name: scrubText(control.getAttribute('name') || ''),
+        label: aftControlLabel(control),
+        disabled: !!control.disabled
+      };
+
+      if (control.tagName === 'SELECT') {
+        entry.multiple = !!control.multiple;
+        entry.options = [...control.options].slice(0, 30).map(option => ({
+          text: scrubText(cleanText(option.textContent || '')).slice(0, 120),
+          value: scrubText(String(option.value || '')).slice(0, 120),
+          selected: !!option.selected
+        }));
+      } else if (['checkbox', 'radio'].includes(type)) {
+        entry.checked = !!control.checked;
+        entry.value = scrubText(String(control.value || '')).slice(0, 120);
+      } else {
+        const raw = String(control.value || '').trim();
+        entry.value = /asin|fnsku/i.test(entry.name + ' ' + entry.id + ' ' + entry.label)
+          ? fingerprint(raw, 'po-search')
+          : scrubText(raw).slice(0, 160);
+      }
+      return entry;
+    });
+
+    add('poportal.page-state', {
+      reason,
+      query: poPortalQuerySummary(location.href),
+      controls
+    });
+  }
+
+  function bootPoPortalPageStateProbe() {
+    if (!isPoPortalPage()) return;
+    const capture = () => {
+      queueMicrotask(() => poPortalPageStateSnapshot('dom-ready'));
+      setTimeout(() => poPortalPageStateSnapshot('settled-1000ms'), 1000);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', capture, { once:true });
+    else capture();
   }
 
   function isAftMoveProbe(rawUrl) {
@@ -1489,8 +1630,9 @@
         const method = String(init?.method || input?.method || 'GET').toUpperCase();
         const noise = isNoise(rawUrl);
         const fcr = !noise && isFcrNetwork(rawUrl);
-        const aftMoveProbe = !noise && !fcr && isAftMoveProbe(rawUrl);
-        const detailed = !noise && !fcr && !aftMoveProbe && isDetailedApi(rawUrl);
+        const poPortal = !noise && !fcr && isPoPortalNetwork(rawUrl);
+        const aftMoveProbe = !noise && !fcr && !poPortal && isAftMoveProbe(rawUrl);
+        const detailed = !noise && !fcr && !poPortal && !aftMoveProbe && isDetailedApi(rawUrl);
         const researchCause = recentResearchAction();
         const started = performance.now();
 
@@ -1514,6 +1656,16 @@
             void response.clone().text()
               .then(text => recordFcrNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
               .catch(() => recordFcrNetwork(base, rawUrl, init?.body));
+          } else if (poPortal) {
+            void response.clone().text()
+              .then(text => recordPoPortalNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
+              .catch(error => add('poportal.network', {
+                ...base,
+                path: parsedUrl(rawUrl)?.pathname || '',
+                query: poPortalQuerySummary(rawUrl),
+                request: poPortalRequestSummary(init?.body),
+                responseReadError: scrubText(error?.message || error)
+              }));
           } else if (aftMoveProbe) {
             void response.clone().text()
               .then(text => recordAftMoveProbe(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
@@ -1596,8 +1748,9 @@
         if (noise) return originalSend.apply(this, arguments);
 
         const fcr = isFcrNetwork(info.url);
-        const aftMoveProbe = !fcr && isAftMoveProbe(info.url);
-        const detailed = !fcr && !aftMoveProbe && isDetailedApi(info.url);
+        const poPortal = !fcr && isPoPortalNetwork(info.url);
+        const aftMoveProbe = !fcr && !poPortal && isAftMoveProbe(info.url);
+        const detailed = !fcr && !poPortal && !aftMoveProbe && isDetailedApi(info.url);
         const researchCause = recentResearchAction();
         const started = performance.now();
 
@@ -1622,6 +1775,14 @@
               contentType = this.getResponseHeader('content-type') || '';
             } catch {}
             recordFcrNetwork(base, info.url, body, text, contentType);
+          } else if (poPortal) {
+            let text = '';
+            let contentType = '';
+            try {
+              if (!this.responseType || this.responseType === 'text') text = this.responseText || '';
+              contentType = this.getResponseHeader('content-type') || '';
+            } catch {}
+            recordPoPortalNetwork(base, info.url, body, text, contentType);
           } else if (cancelled) {
             add('network.cancelled', { ...base, reason: 'status-0' });
           } else if (aftMoveProbe) {
@@ -2399,6 +2560,7 @@
   installViewportTrace();
   installPerformanceHealth();
   bootAftEditPageStateProbe();
+  bootPoPortalPageStateProbe();
   bootResearchProbe();
   bootUi();
 
