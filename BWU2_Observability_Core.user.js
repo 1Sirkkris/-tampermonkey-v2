@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.29
+// @version      0.1.30
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -28,7 +28,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.29';
+  const VERSION = '0.1.30';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -1698,72 +1698,7 @@
     });
   }
 
-  function recordMadcatAuthDiagnostic(message) {
-    const data = message?.data;
-    if (!data || typeof data !== 'object') return;
-
-    const available = !!data.available;
-    const issuedAt = Math.max(0, Number(data.issuedAt) || 0);
-    const expiresAt = Math.max(0, Number(data.expiresAt) || 0);
-    const capturedAt = Math.max(0, Number(data.capturedAt) || 0);
-    const lifetimeMs = Math.max(0, Number(data.lifetimeMs) || (issuedAt && expiresAt ? expiresAt - issuedAt : 0));
-    const remainingMs = Math.max(0, Number(data.expiresInMs) || 0);
-    const captureAgeMs = Math.max(0, Number(data.captureAgeMs) || (capturedAt ? Date.now() - capturedAt : 0));
-    const signature = JSON.stringify([available, issuedAt, expiresAt, !!data.renewSoon, !!data.bridgeRecent]);
-    const stateKey = `${SAMPLE_PREFIX}${activeSessionId}:madcat-auth-state`;
-    if (gmGet(stateKey, '') === signature) return;
-    gmSet(stateKey, signature);
-
-    add('fcr.madcat.auth-status', {
-      available,
-      issuedAt,
-      expiresAt,
-      capturedAt,
-      lifetimeMs,
-      remainingMs,
-      captureAgeMs,
-      renewSoon: !!data.renewSoon,
-      bridgeRecent: !!data.bridgeRecent,
-      coreVersion: scrubText(message.version || '')
-    });
-  }
-
-  function recordMadcatAuthTestEvent(detail) {
-    if (!detail || typeof detail !== 'object') return;
-    const phase = scrubText(detail.phase || '').slice(0, 60);
-    if (!phase) return;
-
-    const data = {
-      phase,
-      coreVersion:scrubText(detail.coreVersion || ''),
-      at:Math.max(0, Number(detail.at) || 0)
-    };
-
-    for (const key of [
-      'elapsedMs',
-      'remainingMs',
-      'beforeRemainingMs',
-      'beforeExpiresAt',
-      'afterExpiresAt',
-      'expiryDeltaMs'
-    ]) {
-      if (Number.isFinite(Number(detail[key]))) data[key] = Number(detail[key]);
-    }
-    for (const key of ['renewed','recovered','sameToken','restored']) {
-      if (typeof detail[key] === 'boolean') data[key] = detail[key];
-    }
-    if (detail.method) data.method = scrubText(detail.method).slice(0, 80);
-    if (detail.captureSource) data.captureSource = scrubText(detail.captureSource).slice(0, 80);
-    if (detail.error) data.error = scrubText(detail.error).slice(0, 180);
-
-    add('fcr.madcat.auth-test', data);
-  }
-
   function installFcrDataCoreTrace() {
-    window.addEventListener('fcr-madcat-auth:test', event => {
-      recordMadcatAuthTestEvent(parseEventDetail(event.detail));
-    }, true);
-
     window.addEventListener('fcr-data-core:request', event => {
       const message = parseEventDetail(event.detail);
       if (!message?.id || !trackedCoreType(message.type)) return;
@@ -1794,26 +1729,6 @@
         ...coreResponseSummary(message.data)
       };
 
-      if (pending.type === 'madcatAuthStatus' && message.ok) recordMadcatAuthDiagnostic(message);
-
-      if (pending.type === 'madcatAuthSelfTest') {
-        const result = message.data && typeof message.data === 'object' ? message.data : {};
-        add('fcr.madcat.auth-test-result', {
-          ok:!!message.ok,
-          renewed:typeof result.renewed === 'boolean' ? result.renewed : undefined,
-          recovered:typeof result.recovered === 'boolean' ? result.recovered : undefined,
-          sameToken:typeof result.sameToken === 'boolean' ? result.sameToken : undefined,
-          method:scrubText(result.method || ''),
-          captureSource:scrubText(result.captureSource || ''),
-          elapsedMs:Number.isFinite(Number(result.elapsedMs)) ? Number(result.elapsedMs) : elapsedMs,
-          beforeExpiresAt:Number.isFinite(Number(result.beforeExpiresAt)) ? Number(result.beforeExpiresAt) : 0,
-          afterExpiresAt:Number.isFinite(Number(result.afterExpiresAt)) ? Number(result.afterExpiresAt) : 0,
-          expiryDeltaMs:Number.isFinite(Number(result.expiryDeltaMs)) ? Number(result.expiryDeltaMs) : 0,
-          coreVersion:scrubText(message.version || ''),
-          error
-        });
-        return;
-      }
 
       if (error === 'fcr-data-core:cancelled') {
         add('fcr.core.cancelled', response);
