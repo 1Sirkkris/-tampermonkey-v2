@@ -2,7 +2,7 @@
 // @name         TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @name:en      TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.6
+// @version      7.4.7
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -18,7 +18,7 @@
   if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2BinCheckOverlay = true;
 
-  const VERSION = '7.4.6';
+  const VERSION = '7.4.7';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
