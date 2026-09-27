@@ -2,8 +2,8 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.30
-// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with silent measurement-auth keepalive and on-demand fallback.
+// @version      0.2.31
+// @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.30';
+  const VERSION = '0.2.31';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -47,10 +47,8 @@
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
   const MEASUREMENT_AUTH_CAPTURE_DIAG_KEY = 'fcr-data-core:measurement-auth-capture-diag-v1';
-  const MEASUREMENT_AUTH_TEST_EVENT = 'fcr-madcat-auth:test';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
   const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
-  const MEASUREMENT_KEEPALIVE_OWNER_KEY = 'fcr-data-core:measurement-keepalive-owner-v1';
 
   if (location.hostname === MEASUREMENT_SITE_HOST) {
     registerRuntimeVersion('FCR CORE', VERSION);
@@ -81,11 +79,6 @@
   const MEASUREMENT_RENEW_BEFORE_MS = 15 * 1000;
   const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
-  const MEASUREMENT_KEEPALIVE_TTL_MS = 5 * 60 * 1000;
-  const MEASUREMENT_KEEPALIVE_HEARTBEAT_MS = 60 * 1000;
-  const MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS = 10 * 60 * 1000;
-  const MEASUREMENT_KEEPALIVE_REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
-  const MEASUREMENT_KEEPALIVE_VERIFY_MS = 15 * 1000;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
   const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
@@ -146,64 +139,7 @@
     dedupeHits: 0
   };
 
-  const measurementKeepaliveOwner = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  let measurementKeepaliveHeartbeat = 0;
-  let measurementKeepaliveLastRefreshAt = 0;
-  let measurementAuthSelfTestPromise = null;
-  let measurementFocusInteractionSeq = 0;
-
-  const noteMeasurementUserInteraction = event => {
-    if (event?.isTrusted) measurementFocusInteractionSeq++;
-  };
-  for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) {
-    document.addEventListener(eventName, noteMeasurementUserInteraction, true);
-  }
-
-  function isNativeFcrSurface() {
-    const host = String(location.hostname || '').toLowerCase();
-    const hash = String(location.hash || '').toLowerCase();
-    const fcrHost = host.includes('fcresearch') || host === 'qifcr.fe.aftx.amazonoperations.app';
-    return fcrHost &&
-      !hash.startsWith('#fcr-lite') &&
-      !hash.startsWith('#fcr-tote-checker') &&
-      !hash.startsWith('#iss-console');
-  }
-
-  function nativeFcrSearchInput() {
-    if (!isNativeFcrSurface()) return null;
-    const inputs = [...document.querySelectorAll('input[type="search"],input[type="text"],input:not([type])')];
-    return inputs.find(input => {
-      if (input.disabled || input.readOnly || input.closest?.('[data-fcr-tool-ui],#bwu2-runtime-version-stamp')) return false;
-      const rect = input.getBoundingClientRect();
-      return rect.width >= 250 && rect.height > 0 && rect.top >= 0 && rect.top < 150;
-    }) || null;
-  }
-
-  function guardMeasurementFrameFocus(frame, reason = 'keepalive') {
-    if (!frame || !isNativeFcrSurface()) return;
-    const interactionSeq = measurementFocusInteractionSeq;
-    const restore = delay => {
-      setTimeout(() => {
-        if (measurementFocusInteractionSeq !== interactionSeq) return;
-        const input = nativeFcrSearchInput();
-        if (!input || document.activeElement === input) return;
-        try {
-          input.focus({ preventScroll:true });
-          recordUsage('madcat.auth.keepalive-focus-restored');
-        } catch {}
-      }, delay);
-    };
-    frame.addEventListener('load', () => {
-      // The hidden Measurement app can autofocus inside its iframe during/just after load.
-      // Restore native FCResearch search only when the user has not interacted meanwhile.
-      restore(0);
-      restore(250);
-      restore(1000);
-    }, { once:true });
-  }
-
-  const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  const upper = value => clean(value).toUpperCase();
+  let measurementAuthAcquirePromise = null;
 
   function measurementIdentifierCandidate(value) {
     const candidate = upper(value);
@@ -238,342 +174,71 @@
     return url.href;
   }
 
-  function measurementKeepaliveUrl(identifier) {
-  const url = new URL(measurementBridgeUrl(identifier));
-  url.searchParams.set('fcrMadcatKeepalive', '1');
-  return url.href;
-}
+  async function acquireMeasurementAuth(identifier, options = {}) {
+    if (measurementAuthAcquirePromise) return measurementAuthAcquirePromise;
 
-function readMeasurementKeepaliveOwner() {
-  try {
-    const raw = GM_getValue(MEASUREMENT_KEEPALIVE_OWNER_KEY, '');
-    const value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
-    return {
-      owner: String(value?.owner || ''),
-      at: Number(value?.at) || 0
-    };
-  } catch {
-    return { owner: '', at: 0 };
-  }
-}
+    const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
+    if (!wanted) return null;
+    rememberMeasurementIdentifier(wanted);
 
-function writeMeasurementKeepaliveOwner() {
-  const record = { owner: measurementKeepaliveOwner, at: Date.now() };
-  try { GM_setValue(MEASUREMENT_KEEPALIVE_OWNER_KEY, JSON.stringify(record)); } catch { return false; }
-  return readMeasurementKeepaliveOwner().owner === measurementKeepaliveOwner;
-}
+    const current = readMeasurementAuth();
+    const previousExp = Math.max(0, Number(options.previousExp) || 0);
+    if (current && (!previousExp || Number(current.exp) > previousExp)) return current;
 
-function releaseMeasurementKeepaliveOwner() {
-  const current = readMeasurementKeepaliveOwner();
-  if (current.owner !== measurementKeepaliveOwner) return;
-  try { GM_deleteValue(MEASUREMENT_KEEPALIVE_OWNER_KEY); } catch {}
-}
+    measurementAuthAcquirePromise = (async () => {
+      const started = Date.now();
+      const frame = document.createElement('iframe');
+      frame.id = 'fcr-madcat-auth-transient-frame';
+      frame.tabIndex = -1;
+      frame.setAttribute('aria-hidden', 'true');
+      frame.setAttribute('inert', '');
+      try { frame.inert = true; } catch {}
+      frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
 
-function refreshMeasurementKeepaliveFrame(frame, identifier, reason = 'watchdog') {
-  if (!frame?.isConnected) return false;
-  const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
-  if (!wanted) return false;
+      const url = new URL(measurementBridgeUrl(wanted));
+      url.searchParams.set('fcrMadcatTransient', '1');
+      url.searchParams.set('fcrMadcatRefresh', String(started));
+      frame.src = url.href;
 
-  const now = Date.now();
-  if (measurementKeepaliveLastRefreshAt && now - measurementKeepaliveLastRefreshAt < MEASUREMENT_KEEPALIVE_REFRESH_COOLDOWN_MS) return false;
-
-  const before = readMeasurementAuth();
-  const beforeCapturedAt = Number(before?.capturedAt) || 0;
-  const beforeExpiresAt = Number(before?.exp) || 0;
-
-  const url = new URL(measurementKeepaliveUrl(wanted));
-  url.searchParams.set('fcrMadcatRefresh', String(now));
-  measurementKeepaliveLastRefreshAt = now;
-  guardMeasurementFrameFocus(frame, reason);
-  frame.src = url.href;
-  recordUsage('madcat.auth.keepalive-refresh');
-
-  setTimeout(() => {
-    const after = readMeasurementAuth();
-    const refreshed =
-      Number(after?.capturedAt) > beforeCapturedAt &&
-      Number(after?.exp) > Math.max(beforeExpiresAt, Date.now() + MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS);
-
-    recordUsage(refreshed
-      ? 'madcat.auth.keepalive-renewed'
-      : 'madcat.auth.keepalive-refresh-miss');
-  }, MEASUREMENT_KEEPALIVE_VERIFY_MS);
-
-  return true;
-}
-
-function ensureMeasurementKeepalive(identifier) {
-  const wanted = measurementIdentifierCandidate(identifier || readMeasurementIdentifier());
-  if (!wanted) return false;
-
-  const existing = document.getElementById('fcr-madcat-keepalive-frame');
-  if (existing?.isConnected) {
-    writeMeasurementKeepaliveOwner();
-    return true;
-  }
-
-  const current = readMeasurementKeepaliveOwner();
-  if (current.owner && current.owner !== measurementKeepaliveOwner && Date.now() - current.at < MEASUREMENT_KEEPALIVE_TTL_MS) return false;
-  if (!writeMeasurementKeepaliveOwner()) return false;
-
-  const mount = () => {
-    const root = document.body || document.documentElement;
-    if (!root) return false;
-    const already = document.getElementById('fcr-madcat-keepalive-frame');
-    if (already?.isConnected) return true;
-
-    const owner = readMeasurementKeepaliveOwner();
-    if (owner.owner && owner.owner !== measurementKeepaliveOwner && Date.now() - owner.at < MEASUREMENT_KEEPALIVE_TTL_MS) return false;
-    if (!writeMeasurementKeepaliveOwner()) return false;
-
-    const frame = document.createElement('iframe');
-    frame.id = 'fcr-madcat-keepalive-frame';
-    frame.src = measurementKeepaliveUrl(wanted);
-    frame.tabIndex = -1;
-    frame.setAttribute('aria-hidden', 'true');
-    frame.setAttribute('inert', '');
-    try { frame.inert = true; } catch {}
-    frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
-    guardMeasurementFrameFocus(frame, 'initial');
-    root.appendChild(frame);
-    recordUsage('madcat.auth.keepalive-start');
-
-    if (!measurementKeepaliveHeartbeat) {
-      measurementKeepaliveHeartbeat = setInterval(() => {
-        const node = document.getElementById('fcr-madcat-keepalive-frame');
-        if (!node?.isConnected) return;
-        const active = readMeasurementKeepaliveOwner();
-        if (active.owner && active.owner !== measurementKeepaliveOwner && Date.now() - active.at < MEASUREMENT_KEEPALIVE_TTL_MS) {
-          node.remove();
-          clearInterval(measurementKeepaliveHeartbeat);
-          measurementKeepaliveHeartbeat = 0;
-          return;
-        }
-        writeMeasurementKeepaliveOwner();
-
-        const auth = readMeasurementAuth();
-        const expiresIn = Number(auth?.exp) - Date.now();
-        if (!auth || expiresIn <= MEASUREMENT_KEEPALIVE_RENEW_BEFORE_MS) {
-          refreshMeasurementKeepaliveFrame(node, wanted, auth ? 'renew-soon' : 'missing-auth');
-        }
-      }, MEASUREMENT_KEEPALIVE_HEARTBEAT_MS);
-    }
-
-    if (!window.__fcrMeasurementKeepaliveCleanup_v1) {
-      window.__fcrMeasurementKeepaliveCleanup_v1 = true;
-      window.addEventListener('pagehide', () => {
-        if (measurementKeepaliveHeartbeat) clearInterval(measurementKeepaliveHeartbeat);
-        measurementKeepaliveHeartbeat = 0;
-        releaseMeasurementKeepaliveOwner();
-      }, { once: true });
-    }
-    return true;
-  };
-
-  if (mount()) return true;
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
-  return false;
-}
-
-function gestureMeasurementIdentifier(target) {
-    const direct = measurementIdentifierCandidate(target?.value || target?.getAttribute?.('value') || '');
-    if (direct) return direct;
-    const search = measurementIdentifierCandidate(new URLSearchParams(location.search).get('s') || '');
-    if (search) return search;
-    return readMeasurementIdentifier();
-  }
-
-  function emitMeasurementAuthTest(phase, data = {}) {
-    try {
-      window.dispatchEvent(new CustomEvent(MEASUREMENT_AUTH_TEST_EVENT, {
-        detail: JSON.stringify({
-          phase:clean(phase),
-          coreVersion:VERSION,
-          at:Date.now(),
-          ...data
-        })
-      }));
-    } catch {}
-  }
-
-  function readMeasurementCaptureDiag() {
-    try {
-      const raw = GM_getValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY, '');
-      const value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
-      return value && typeof value === 'object' ? value : {};
-    } catch {
-      return {};
-    }
-  }
-
-  async function runMeasurementAuthSelfTestInner(payload = {}, context = {}) {
-    const identifier = measurementIdentifierCandidate(payload.identifier || readMeasurementIdentifier());
-    if (!identifier) throw new Error('MADCAT self-test needs a remembered ASIN/FNSKU');
-
-    const before = readMeasurementAuth();
-    if (!before) throw new Error('MADCAT self-test needs valid auth first');
-
-    let backup = '';
-    try { backup = String(GM_getValue(MEASUREMENT_AUTH_KEY, '') || ''); } catch {}
-    if (!backup) throw new Error('MADCAT self-test could not snapshot auth');
-
-    const startedAt = Date.now();
-    const beforeExpiresAt = Number(before.exp) || 0;
-    const beforeCapturedAt = Number(before.capturedAt) || 0;
-    const beforeRemainingMs = Math.max(0, beforeExpiresAt - startedAt);
-    const report = (phase, data = {}) => {
-      const payloadOut = { phase, ...data };
-      emitMeasurementAuthTest(phase, payloadOut);
-      try { context.progress?.(payloadOut); } catch {}
-    };
-
-    report('start', { beforeExpiresAt, beforeRemainingMs });
-
-    const frame = document.createElement('iframe');
-    frame.id = 'fcr-madcat-auth-selftest-frame';
-    frame.tabIndex = -1;
-    frame.setAttribute('aria-hidden', 'true');
-    frame.setAttribute('inert', '');
-    try { frame.inert = true; } catch {}
-    frame.style.cssText = 'position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;border:0!important;';
-    const url = new URL(measurementKeepaliveUrl(identifier));
-    url.searchParams.set('fcrMadcatSelfTest', String(startedAt));
-    frame.src = url.href;
-
-    try {
-      try { GM_deleteValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY); } catch {}
-      clearMeasurementAuth();
-      report('token-cleared');
-
-      (document.body || document.documentElement).appendChild(frame);
-      report('silent-fetch-started');
-
-      const firstDeadline = Date.now() + 20000;
-      let after = null;
-      while (Date.now() < firstDeadline) {
-        await new Promise(resolve => setTimeout(resolve, 250));
-        after = readMeasurementAuth();
-        if (after && Number(after.capturedAt) > beforeCapturedAt) break;
-      }
-
-      if (!after) throw new Error('Silent MADCAT auth fetch did not restore token within 20s');
-
-      // Give the Measurement app a brief chance to replace an immediately re-read
-      // storage token with a token produced by its network/auth flow.
-      if (after.token === before.token || Number(after.exp) <= beforeExpiresAt) {
-        const settleDeadline = Date.now() + 2500;
-        while (Date.now() < settleDeadline) {
-          await new Promise(resolve => setTimeout(resolve, 250));
-          const candidate = readMeasurementAuth();
-          if (candidate) after = candidate;
-          if (candidate && candidate.token !== before.token && Number(candidate.exp) > beforeExpiresAt) break;
-        }
-      }
-
-      let capture = readMeasurementCaptureDiag();
-      let sameToken = after.token === before.token;
-      let afterExpiresAt = Number(after.exp) || 0;
-      let renewed = !sameToken && afterExpiresAt > beforeExpiresAt;
-      let method = renewed ? 'silent-refresh' : 'same-token-recovery';
-
-      if (!renewed) {
-        report('same-token', {
-          elapsedMs:Date.now() - startedAt,
-          beforeExpiresAt,
-          afterExpiresAt,
-          expiryDeltaMs:afterExpiresAt - beforeExpiresAt,
-          sameToken,
-          captureSource:clean(capture.source || 'unknown')
-        });
-
-        // If expiry is close, cheaply prove the user's "one token until expiry" theory:
-        // wait for the old token to expire, reload the hidden Measurement page once,
-        // and see whether the site itself issues a later token.
-        const untilOldExpiry = beforeExpiresAt - Date.now();
-        if (untilOldExpiry >= 0 && untilOldExpiry <= 60_000) {
-          report('expiry-probe-wait', {
-            remainingMs:untilOldExpiry,
-            beforeExpiresAt,
-            captureSource:clean(capture.source || 'unknown')
-          });
-          if (untilOldExpiry > 0) await new Promise(resolve => setTimeout(resolve, untilOldExpiry + 750));
-
-          const probeUrl = new URL(url.href);
-          probeUrl.searchParams.set('fcrMadcatExpiryProbe', String(Date.now()));
-          frame.src = probeUrl.href;
-          report('expiry-reload', { beforeExpiresAt });
-
-          const probeDeadline = Date.now() + 15000;
-          while (Date.now() < probeDeadline) {
-            await new Promise(resolve => setTimeout(resolve, 250));
-            const candidate = readMeasurementAuth();
-            if (!candidate) continue;
-            after = candidate;
-            if (candidate.token !== before.token && Number(candidate.exp) > beforeExpiresAt) break;
-          }
-
-          capture = readMeasurementCaptureDiag();
-          sameToken = !!after && after.token === before.token;
-          afterExpiresAt = Number(after?.exp) || 0;
-          renewed = !!after && !sameToken && afterExpiresAt > beforeExpiresAt;
-          if (renewed) method = 'post-expiry-reload';
-        }
-      }
-
-      const elapsedMs = Date.now() - startedAt;
-      const result = {
-        ok:true,
-        renewed,
-        recovered:!!after,
-        sameToken,
-        method,
-        captureSource:clean(capture.source || 'unknown'),
-        elapsedMs,
-        beforeExpiresAt,
-        afterExpiresAt,
-        expiryDeltaMs:afterExpiresAt - beforeExpiresAt
-      };
-
-      report(renewed ? 'pass' : 'not-renewed', result);
-      recordUsage(renewed ? 'madcat.auth.self-test.pass' : 'madcat.auth.self-test.not-renewed', elapsedMs);
-
-      ensureMeasurementKeepalive(identifier);
-      return result;
-    } catch (error) {
-      let restored = false;
       try {
-        const stored = JSON.parse(backup || '{}');
-        const pack = normalizeMeasurementToken(stored?.token || '');
-        if (pack) {
-          GM_setValue(MEASUREMENT_AUTH_KEY, backup);
-          restored = true;
-        }
-      } catch {}
+        (document.body || document.documentElement).appendChild(frame);
+        recordUsage('madcat.auth.transient-start');
 
-      const elapsedMs = Date.now() - startedAt;
-      report('fail', {
-        elapsedMs,
-        restored,
-        error:clean(error?.message || error || 'MADCAT self-test failed').slice(0, 180)
-      });
-      recordUsage('madcat.auth.self-test.fail', elapsedMs);
-      throw new Error(
-        clean(error?.message || error || 'MADCAT self-test failed') +
-        (restored ? ' • original token restored' : ' • original token could not be restored')
-      );
+        const timeoutMs = Math.max(3000, Number(options.timeoutMs) || MEASUREMENT_TIMEOUT_MS);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          const auth = readMeasurementAuth();
+          if (!auth) continue;
+          if (previousExp && Number(auth.exp) <= previousExp) continue;
+          recordUsage('madcat.auth.transient-success', Date.now() - started);
+          return auth;
+        }
+
+        recordUsage('madcat.auth.transient-miss', Date.now() - started);
+        return null;
+      } finally {
+        try { frame.remove(); } catch {}
+      }
+    })();
+
+    try {
+      return await measurementAuthAcquirePromise;
     } finally {
-      try { frame.remove(); } catch {}
+      measurementAuthAcquirePromise = null;
     }
   }
 
-  async function runMeasurementAuthSelfTest(payload = {}, context = {}) {
-    if (measurementAuthSelfTestPromise) throw new Error('MADCAT self-test already running');
-    measurementAuthSelfTestPromise = runMeasurementAuthSelfTestInner(payload, context);
-    try {
-      return await measurementAuthSelfTestPromise;
-    } finally {
-      measurementAuthSelfTestPromise = null;
+  async function waitForMeasurementAuth(timeoutMs = MEASUREMENT_BRIDGE_WAIT_MS) {
+    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+    let auth = readMeasurementAuth();
+    if (auth) return auth;
+    stats.madcatAuthWaits++;
+    while (!auth && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      auth = readMeasurementAuth();
     }
+    return auth;
   }
 
   function measurementAuthStatus() {
@@ -595,57 +260,6 @@ function gestureMeasurementIdentifier(target) {
       bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
     };
   }
-
-  function installMeasurementAutoRenewal() {
-    if (window.__fcrMeasurementAutoRenewal_v1) return;
-    window.__fcrMeasurementAutoRenewal_v1 = true;
-
-    const maybeOpen = event => {
-      if (!event?.isTrusted) return;
-      if (event.type === 'keydown' && event.key !== 'Enter') return;
-      if (event.type === 'click' && event.target?.closest?.('.fc-madcat-badge,.madcat-pill')) return;
-
-      const auth = readMeasurementAuth();
-      if (auth && auth.exp - Date.now() > MEASUREMENT_RENEW_BEFORE_MS) return;
-
-      const lastAttempt = readMeasurementBridgeAttemptAt();
-      if (lastAttempt && Date.now() - lastAttempt < MEASUREMENT_BRIDGE_COOLDOWN_MS) return;
-
-      const identifier = gestureMeasurementIdentifier(event.target);
-      if (!identifier) return;
-      rememberMeasurementIdentifier(identifier);
-      markMeasurementBridgeAttempt();
-
-      let bridge = null;
-      try {
-        bridge = window.open(measurementBridgeUrl(identifier), 'fcrMadcatBridge', 'popup,width=560,height=680');
-      } catch {}
-      if (bridge) {
-        stats.madcatAutoBridge++;
-        recordUsage('madcat.auth.auto-bridge');
-      } else {
-        stats.madcatAutoBridgeBlocked++;
-        recordUsage('madcat.auth.auto-bridge-blocked');
-      }
-    };
-
-    document.addEventListener('keydown', maybeOpen, true);
-    document.addEventListener('click', maybeOpen, true);
-  }
-
-  async function waitForMeasurementAuth(timeoutMs = MEASUREMENT_BRIDGE_WAIT_MS) {
-    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
-    let auth = readMeasurementAuth();
-    if (auth) return auth;
-    stats.madcatAuthWaits++;
-    while (!auth && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 250));
-      auth = readMeasurementAuth();
-    }
-    return auth;
-  }
-
-  // Silent keepalive is primary. A visible bridge is only a user-gesture fallback if silent renewal misses.
 
   function decodeJwtPayload(token) {
     try {
@@ -678,9 +292,8 @@ function gestureMeasurementIdentifier(target) {
     const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
     const params = new URLSearchParams(location.search);
     const bridgeLaunch = params.get('fcrMadcatBridge') === '1';
-    const keepaliveLaunch = params.get('fcrMadcatKeepalive') === '1';
+    const transientLaunch = params.get('fcrMadcatTransient') === '1';
     let closeTimer = 0;
-    let keepaliveTimer = 0;
 
     const saveToken = (raw, source = 'unknown') => {
       const pack = normalizeMeasurementToken(raw);
@@ -697,15 +310,7 @@ function gestureMeasurementIdentifier(target) {
       } catch {
         return false;
       }
-      if (keepaliveLaunch) {
-        clearTimeout(keepaliveTimer);
-        const untilExpiry = Math.max(0, pack.exp - Date.now());
-        const refreshIn = Math.max(5 * 60 * 1000, Math.min(45 * 60 * 1000, untilExpiry - 10 * 60 * 1000));
-        keepaliveTimer = setTimeout(() => {
-          try { location.reload(); } catch {}
-        }, refreshIn);
-      }
-      if (bridgeLaunch && !keepaliveLaunch && !closeTimer) {
+      if (bridgeLaunch && !transientLaunch && !closeTimer) {
         closeTimer = setTimeout(() => {
           try { pageWindow.opener?.focus?.(); } catch {}
           try { pageWindow.close(); } catch {}
@@ -713,27 +318,6 @@ function gestureMeasurementIdentifier(target) {
       }
       return true;
     };
-
-    const inspectText = (value, source = 'unknown') => {
-      const text = String(value || '');
-      const whole = normalizeMeasurementToken(text) ? 'exact' : 'embedded';
-      const matches = text.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g) || [];
-      return matches.some(token => saveToken(token, source + '-' + whole));
-    };
-
-    const inspectStores = () => {
-      const stores = [
-        ['storage-local', pageWindow.localStorage],
-        ['storage-session', pageWindow.sessionStorage]
-      ];
-      for (const [name, store] of stores) {
-        try {
-          for (let index = 0; index < store.length; index++) inspectText(store.getItem(store.key(index)), name);
-        } catch {}
-      }
-    };
-    inspectStores();
-    if (keepaliveLaunch) setInterval(inspectStores, 5000);
 
     const authFromHeaders = headers => {
       if (!headers) return '';
@@ -1854,7 +1438,6 @@ function gestureMeasurementIdentifier(target) {
     const identifierType = fnsku ? 'FNSKU' : 'ASIN';
     if (!identifier) throw new Error('Measurement item unavailable');
     rememberMeasurementIdentifier(identifier);
-    if (readMeasurementAuth()) ensureMeasurementKeepalive(identifier);
 
     if (!force) {
       const cached = readMadcatCache(identifierType, identifier);
@@ -1867,18 +1450,14 @@ function gestureMeasurementIdentifier(target) {
 
     let auth = readMeasurementAuth();
     if (!auth) {
-      const lastAttempt = readMeasurementBridgeAttemptAt();
-      const recentAttempt = lastAttempt && Date.now() - lastAttempt <= MEASUREMENT_BRIDGE_WAIT_MS + 1500;
       const requestedWait = Math.max(0, Number(input?.waitForAuthMs) || 0);
-      if (recentAttempt || requestedWait) {
-        auth = await waitForMeasurementAuth(requestedWait || MEASUREMENT_BRIDGE_WAIT_MS);
-      }
+      if (requestedWait) auth = await waitForMeasurementAuth(requestedWait);
+      if (!auth) auth = await acquireMeasurementAuth(identifier, { timeoutMs: MEASUREMENT_TIMEOUT_MS });
     }
     if (!auth) {
       stats.madcatAuthRequired++;
       return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-login-required');
     }
-    ensureMeasurementKeepalive(identifier);
 
     const key = `madcat30:${identifierType}:${identifier}:${force ? 'force' : 'normal'}`;
     if (inFlight.has(key)) {
@@ -1912,7 +1491,19 @@ function gestureMeasurementIdentifier(target) {
         if (nextToken) url.searchParams.set('nextToken', nextToken);
         else url.searchParams.delete('nextToken');
 
-        const response = await requestMeasurementPage(url.href, auth.token);
+        let response;
+        try {
+          response = await requestMeasurementPage(url.href, auth.token);
+        } catch (error) {
+          if (!/measurement login required/i.test(clean(error?.message || error || ''))) throw error;
+          const refreshed = await acquireMeasurementAuth(identifier, {
+            previousExp: Number(auth?.exp) || 0,
+            timeoutMs: MEASUREMENT_TIMEOUT_MS
+          });
+          if (!refreshed) throw error;
+          auth = refreshed;
+          response = await requestMeasurementPage(url.href, auth.token);
+        }
         let payload;
         try {
           payload = JSON.parse(response.responseText || '{}');
@@ -2129,13 +1720,12 @@ function gestureMeasurementIdentifier(target) {
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'madcatAuthSelfTest', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
       else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);
       else if (type === 'madcatAuthStatus') data = measurementAuthStatus();
-      else if (type === 'madcatAuthSelfTest') data = await runMeasurementAuthSelfTest(payload, context);
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
@@ -2193,21 +1783,6 @@ function gestureMeasurementIdentifier(target) {
   });
   window.addEventListener('pagehide', flushUsage);
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushUsage(); });
-
-  installMeasurementAutoRenewal();
-
-  const bootstrapMeasurementKeepalive = () => {
-    const identifier = readMeasurementIdentifier();
-    if (!identifier) return false;
-    const started = ensureMeasurementKeepalive(identifier);
-    if (started) recordUsage('madcat.auth.keepalive-bootstrap');
-    return started;
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapMeasurementKeepalive, { once:true });
-  } else {
-    bootstrapMeasurementKeepalive();
-  }
 
   const markReady = () => {
     if (document.documentElement) document.documentElement.dataset.fcrDataCoreVersion = VERSION;
