@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.27
+// @version      0.1.28
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -520,6 +520,17 @@
       panelStatus('sideline', sidelineCompletionStatus, 'ok');
     } else {
       panelStatus(area, message.message || 'Working…', needsUser ? 'attention' : (message.error ? 'error' : 'working'));
+    }
+
+    // Keep the visible grey loading overlay useful while AFT work is running.
+    // The worker already knows the real Edit/Move step; mirror that text here
+    // without changing locks, workflow order, requests, or recovery behaviour.
+    const progressMessage = clean(message.message || '');
+    if (progressMessage && area !== 'sideline') {
+      const panel = $('[data-panel="' + area + '"]');
+      if (panel?.dataset.loading === '1') {
+        setPanelLoading(area, true, progressMessage, { lock:false });
+      }
     }
 
     if (area === 'sideline') {
