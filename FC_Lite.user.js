@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.76
+// @version      0.1.77
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -34,7 +34,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.76';
+  const VERSION = '0.1.77';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -95,6 +95,27 @@
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
   const isContainer = value => /^(?:TSX|CSX)[A-Z0-9]+$/i.test(clean(value));
+
+  function toteAuditUrl(containerValue = new URLSearchParams(location.search).get('s')) {
+    const url = new URL(location.href);
+    url.search = '';
+    const wanted = clean(containerValue);
+    if (wanted) url.searchParams.set('s', wanted);
+    url.hash = TOTE_HASH;
+    return url.href;
+  }
+
+  function installDimensionsLauncher() {
+    document.addEventListener('click', event => {
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const cell = event.target.closest('th,td');
+      if (!cell || clean(cell.textContent).toLowerCase() !== 'dimensions') return;
+      if (!cell.closest('[data-section-type="product"]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      location.href = toteAuditUrl();
+    }, true);
+  }
 
   function fullFCResearchUrl(containerValue = container || new URLSearchParams(location.search).get('s')) {
     const fc = warehouseId();
@@ -1890,7 +1911,11 @@
 
   }
 
-  if (!RESULTS_PAGE || !STANDALONE) return;
+  if (!RESULTS_PAGE) return;
+  if (!STANDALONE) {
+    installDimensionsLauncher();
+    return;
+  }
   ensureStandaloneDocument();
   buildToteUi();
 })();
