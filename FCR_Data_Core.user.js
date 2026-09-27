@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.32
+// @version      0.2.33
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.32';
+  const VERSION = '0.2.33';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -74,7 +74,6 @@
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
   const MEASUREMENT_TIMEOUT_MS = 10000;
-  const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
@@ -260,7 +259,7 @@
     const transientLaunch = params.get('fcrMadcatTransient') === '1';
     let closeTimer = 0;
 
-    const saveToken = (raw, source = 'unknown') => {
+    const saveToken = raw => {
       const pack = normalizeMeasurementToken(raw);
       if (!pack) return false;
       const capturedAt = Date.now();
@@ -299,7 +298,7 @@
         pageWindow.fetch = function(input, init) {
           try {
             const url = String(input?.url || input || '');
-            if (url.includes(MEASUREMENT_API_HOST)) saveToken(authFromHeaders(init?.headers) || authFromHeaders(input?.headers), 'fetch');
+            if (url.includes(MEASUREMENT_API_HOST)) saveToken(authFromHeaders(init?.headers) || authFromHeaders(input?.headers));
           } catch {}
           return originalFetch.apply(this, arguments);
         };
@@ -323,7 +322,7 @@
         };
         XHR.prototype.send = function() {
           try {
-            if (this.__fcrMeasurementUrl?.includes(MEASUREMENT_API_HOST)) saveToken(this.__fcrMeasurementAuth, 'xhr');
+            if (this.__fcrMeasurementUrl?.includes(MEASUREMENT_API_HOST)) saveToken(this.__fcrMeasurementAuth);
           } catch {}
           return originalSend.apply(this, arguments);
         };
