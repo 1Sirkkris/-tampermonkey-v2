@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.31
+// @version      0.2.32
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.31';
+  const VERSION = '0.2.32';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -46,9 +46,7 @@
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
-  const MEASUREMENT_AUTH_CAPTURE_DIAG_KEY = 'fcr-data-core:measurement-auth-capture-diag-v1';
   const MEASUREMENT_LAST_IDENTIFIER_KEY = 'fcr-data-core:measurement-last-identifier-v1';
-  const MEASUREMENT_BRIDGE_ATTEMPT_KEY = 'fcr-data-core:measurement-bridge-at-v1';
 
   if (location.hostname === MEASUREMENT_SITE_HOST) {
     registerRuntimeVersion('FCR CORE', VERSION);
@@ -76,7 +74,6 @@
   const HAZ_FAILURE_TTL = 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
   const MEASUREMENT_TIMEOUT_MS = 10000;
-  const MEASUREMENT_RENEW_BEFORE_MS = 15 * 1000;
   const MEASUREMENT_BRIDGE_COOLDOWN_MS = 20 * 1000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -129,8 +126,6 @@
     madcatAuthRequired: 0,
     madcatHistoryFallback: 0,
     madcatAuthWaits: 0,
-    madcatAutoBridge: 0,
-    madcatAutoBridgeBlocked: 0,
     hazNetwork: 0,
     hazCacheHits: 0,
     binNetwork: 0,
@@ -155,16 +150,6 @@
 
   function readMeasurementIdentifier() {
     try { return measurementIdentifierCandidate(GM_getValue(MEASUREMENT_LAST_IDENTIFIER_KEY, '')); } catch { return ''; }
-  }
-
-  function readMeasurementBridgeAttemptAt() {
-    try { return Number(GM_getValue(MEASUREMENT_BRIDGE_ATTEMPT_KEY, 0)) || 0; } catch { return 0; }
-  }
-
-  function markMeasurementBridgeAttempt() {
-    const at = Date.now();
-    try { GM_setValue(MEASUREMENT_BRIDGE_ATTEMPT_KEY, at); } catch {}
-    return at;
   }
 
   function measurementBridgeUrl(identifier) {
@@ -241,26 +226,6 @@
     return auth;
   }
 
-  function measurementAuthStatus() {
-    const auth = readMeasurementAuth();
-    const lastAttempt = readMeasurementBridgeAttemptAt();
-    const age = lastAttempt ? Date.now() - lastAttempt : Infinity;
-    const issuedAt = Number(auth?.issuedAt) || 0;
-    const expiresAt = Number(auth?.exp) || 0;
-    const capturedAt = Number(auth?.capturedAt) || 0;
-    return {
-      available: !!auth,
-      issuedAt,
-      expiresAt,
-      capturedAt,
-      lifetimeMs: issuedAt && expiresAt ? Math.max(0, expiresAt - issuedAt) : 0,
-      expiresInMs: expiresAt ? Math.max(0, expiresAt - Date.now()) : 0,
-      captureAgeMs: capturedAt ? Math.max(0, Date.now() - capturedAt) : 0,
-      renewSoon: !auth || expiresAt - Date.now() <= MEASUREMENT_RENEW_BEFORE_MS,
-      bridgeRecent: age >= 0 && age <= MEASUREMENT_BRIDGE_WAIT_MS + 1500
-    };
-  }
-
   function decodeJwtPayload(token) {
     try {
       const part = String(token || '').split('.')[1];
@@ -301,12 +266,6 @@
       const capturedAt = Date.now();
       try {
         GM_setValue(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...pack, capturedAt }));
-        GM_setValue(MEASUREMENT_AUTH_CAPTURE_DIAG_KEY, JSON.stringify({
-          source:String(source || 'unknown').slice(0, 80),
-          capturedAt,
-          exp:Number(pack.exp) || 0,
-          issuedAt:Number(pack.issuedAt) || 0
-        }));
       } catch {
         return false;
       }
@@ -1720,12 +1679,11 @@
     }
     try {
       let data;
-      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'madcatAuthStatus', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
+      if (type === 'ping') data = { version: VERSION, modules: ['product', 'inventory', 'inventoryPreview', 'history', 'madcatRecent', 'hazmat', 'binSize', 'section'], stats: { ...stats } };
       else if (type === 'inventory') data = await fetchInventory(payload.container || payload.code, context);
       else if (type === 'inventoryPreview') data = await fetchInventoryPreview(payload.container || payload.code || payload.search, context);
       else if (type === 'history') data = await fetchHistory(payload.code, payload.force === true);
       else if (type === 'madcatRecent') data = await fetchRecentMadcat(payload, payload.force === true);
-      else if (type === 'madcatAuthStatus') data = measurementAuthStatus();
       else if (type === 'hazmat') data = await fetchHazmat(payload.asin, payload.force === true);
       else if (type === 'product') data = await fetchProduct(payload.code, Array.isArray(payload.require) ? payload.require : [], context);
       else if (type === 'section') data = await fetchSection(payload.endpoint, payload.code || payload.search, payload, context);
