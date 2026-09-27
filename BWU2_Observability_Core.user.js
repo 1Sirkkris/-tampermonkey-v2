@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.27
+// @version      0.1.28
 // @description  Signal-focused cross-tool observability with deduped worker state, compact scan/usage summaries, and bounded diagnostics.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -28,7 +28,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.27';
+  const VERSION = '0.1.28';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -89,6 +89,8 @@
   const CARTON_HOST = /^aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com$/i;
   const RIVER_HOST = /^river\.amazon\.com$/i;
   const PO_PORTAL_HOST = /^console\.harmony\.a2z\.com$/i;
+  const PO_PORTAL_API_HOST = /(?:^|\.)execute-api\.(?:us-east-1|us-west-2)\.amazonaws\.com$/i;
+  const PO_PORTAL_API_PATH = /^\/beta\/(?:getPoHeaders|getEmidFromPolReadService|getInboundRecordsForShipmentByFnsku|getShipmentItems)\/?$/i;
 
   const pageId = randomId('p_');
   let meta = loadMeta();
@@ -518,8 +520,11 @@
   function isPoPortalNetwork(rawUrl) {
     if (!isPoPortalPage()) return false;
     const url = parsedUrl(rawUrl);
-    if (!url || url.origin !== location.origin) return false;
-    return !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname);
+    if (!url) return false;
+    if (url.origin === location.origin) {
+      return !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname);
+    }
+    return PO_PORTAL_API_HOST.test(url.hostname) && PO_PORTAL_API_PATH.test(url.pathname);
   }
 
   function poPortalQuerySummary(rawUrl) {
