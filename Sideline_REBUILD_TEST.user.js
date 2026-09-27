@@ -1177,7 +1177,6 @@
   }
 
   const preflightState = {
-    results:new Map(),
     pendingOccurrences:new Map(),
     trackedCounts:new Map(),
     redPendingCounts:new Map(),
@@ -1196,7 +1195,6 @@
 
   function resetPreflightWorkflowState() {
     if (typeof preflightState === 'undefined') return;
-    preflightState.results.clear();
     preflightState.pendingOccurrences.clear();
     preflightState.trackedCounts.clear();
     preflightState.redPendingCounts.clear();
@@ -1309,6 +1307,12 @@
     preflightState.redPendingCounts.set(key,(preflightState.redPendingCounts.get(key)||0)+count);
   }
 
+  function cachedPreflightResult(code) {
+    const source = syncPreflightSource();
+    if (!source) return null;
+    return preflightLookup.entries.get(preflightLookupKey(source,code))?.result || null;
+  }
+
   function handlePreflightOccurrence(code,result) {
     if (!result) return;
     if (result.kind === 'red') {
@@ -1330,7 +1334,6 @@
 
   function onPreflightResolved(code,result) {
     const key = itemKey(code);
-    preflightState.results.set(key,result);
     const count = preflightState.pendingOccurrences.get(key)||0;
     if (!count) return;
     preflightState.pendingOccurrences.delete(key);
@@ -1340,7 +1343,7 @@
   function registerPreflightOccurrence(code) {
     const key = itemKey(code);
     if (!key) return;
-    const existing = preflightState.results.get(key);
+    const existing = cachedPreflightResult(code);
     if (existing) {
       handlePreflightOccurrence(code,existing);
       return;
@@ -2744,7 +2747,7 @@
       return {kind:'skipped'};
     }
 
-    let result = preflightState.results.get(itemKey(item.code));
+    let result = cachedPreflightResult(item.code);
 
     // Single safety fallback only; this is not another worker pool.
     if (!result) {
@@ -2757,7 +2760,6 @@
         renderLazy();
         return {kind:'failed'};
       }
-      preflightState.results.set(itemKey(item.code),result);
     }
 
     if (!currentLazyRun(run)) return {kind:'aborted'};
@@ -3335,8 +3337,7 @@
       renderLazy();
     }
 
-    // Ensure every current item is queued for scan-item pre-resolve before the run begins.
-    // This still performs no movement; move-items remains gated below by explicit Start.
+    // Ensure every current item is in the single Super Preflight lookup queue before movement.
     queuePreflightLookups(lazy.items);
 
     const run = beginLazyRun();
