@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.8
+// @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.8
+// @version      0.0.9
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -12,10 +12,10 @@
 
 (() => {
   'use strict';
-  if (window.__sidelineRebuildTest_v008) return;
-  window.__sidelineRebuildTest_v008 = true;
+  if (window.__sidelineRebuildTest_v009) return;
+  window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.8-REBUILD';
+  const VERSION = '0.0.9-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -540,7 +540,39 @@
 .sh-preflight-counts b{padding:4px 6px;border:1px solid #b8c4cf;border-radius:3px;background:#fff;font-size:9px}
 .sh-preflight-green{border-color:#18794e;border-left-color:#18794e;background:#ecfdf5;color:#14532d}
 .sh-preflight-yellow{border-color:#b7791f;border-left-color:#b7791f;background:#fffbeb;color:#78350f}
-.sh-preflight-red{border-color:#b42318;border-left-color:#b42318;background:#fff1f2;color:#7f1d1d}
+.sh-preflight-red{
+  border:4px solid #7a0000!important;
+  border-left:12px solid #7a0000!important;
+  background:#b00020!important;
+  color:#fff!important;
+  box-shadow:0 0 0 3px #fff,0 0 0 6px #b00020,0 6px 18px rgba(0,0,0,.28)!important;
+  min-height:76px;
+  padding:12px 14px!important
+}
+.sh-preflight-red .sh-preflight-main{gap:7px}
+.sh-preflight-red .sh-preflight-main strong{
+  color:#fff!important;
+  font-size:20px!important;
+  line-height:1.05!important;
+  letter-spacing:.5px!important;
+  text-transform:uppercase
+}
+.sh-preflight-red .sh-preflight-main span{
+  color:#fff!important;
+  font-size:14px!important;
+  line-height:1.35!important;
+  font-weight:1000!important;
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important
+}
+.sh-preflight-red .sh-preflight-counts b{
+  border:2px solid #fff!important;
+  background:#fff!important;
+  color:#7a0000!important;
+  font-size:11px!important;
+  padding:6px 8px!important
+}
 .sh-preflight-checking{border-color:#315f7f;border-left-color:#315f7f;background:#eef6fb;color:#173c5d}
 .sh-preflight-idle{color:#475569}
 @media(max-width:560px){#sh-dock,.sh-panel{width:calc(100vw - 28px)}.sh-field-grid{grid-template-columns:1fr}.sh-preflight{grid-template-columns:1fr}}
@@ -1254,7 +1286,7 @@
     lPreflight.className = `sh-preflight sh-preflight-${kind || 'idle'}`;
     const title = kind === 'green' ? '✓ GOOD — KEEP'
       : kind === 'yellow' ? '⚠ EXPIRY — KEEP'
-      : kind === 'red' ? '✕ PUT ASIDE'
+      : kind === 'red' ? '✕ PUT ASIDE — DO NOT PROCESS'
       : kind === 'checking' ? '… CHECKING'
       : 'PREFLIGHT READY';
     lPreflightMain.innerHTML = `<strong>${esc(title)}</strong><span>${esc(code ? `${code} — ${reason || ''}` : (reason || 'Scan an item'))}</span>`;
