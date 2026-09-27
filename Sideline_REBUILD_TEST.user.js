@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.2
+// @name         Sideline REBUILD TEST v0.0.3
 // @namespace    https://github.com/1Sirkkris
 // @version      0.0.2
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
@@ -17,7 +17,7 @@
   if (window.__sidelineRebuildTest_v002) return;
   window.__sidelineRebuildTest_v002 = true;
 
-  const VERSION = '0.0.2-REBUILD';
+  const VERSION = '0.0.3-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -444,10 +444,10 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 #sh-dock button,.sh-btn{border:1px solid #aeb8c5;border-radius:4px;padding:7px 6px;font-weight:800;cursor:pointer;background:#f5f7fa;color:#1f2937}.sh-on{background:#146eb4!important;color:#fff!important;border-color:#0f5c99!important}
 .sh-panel{position:fixed;right:14px;bottom:56px;z-index:2147483646;width:430px;max-width:calc(100vw - 28px);box-sizing:border-box;padding:8px;background:#fff;border:1px solid #c7d0dd;border-radius:5px;box-shadow:0 2px 8px #0003;font:12px Arial,sans-serif;color:#111827}.sh-title{font-weight:900;margin:-8px -8px 7px;padding:7px 9px;background:#f3f5f8;border-bottom:1px solid #d5dbe3;border-radius:5px 5px 0 0}
 .sh-return-source{width:auto;display:block;margin:0 0 6px auto;padding:5px 9px!important;border:1px solid #146eb4!important;background:#eff6ff!important;color:#0f3d73!important;font-weight:900!important;font-size:11px}.sh-return-source:hover{background:#dbeafe!important}.sh-return-source-inline{margin-top:8px;width:100%;border:2px solid #146eb4!important;background:#eff6ff!important;color:#0f3d73!important;font-weight:1000!important}
-.sh-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.sh-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.sh-input{width:100%;box-sizing:border-box;border:1px solid #b8c2cf;border-radius:4px;padding:7px;font:12px Arial,sans-serif}.sh-input.good{border-color:#16a34a}.sh-input.bad{border-color:#dc2626}.sh-area{height:76px;resize:vertical}.sh-status{margin-top:5px;font-weight:700;line-height:1.3}.sh-error{margin-top:3px;color:#b91c1c;font-weight:700}.sh-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}#sh-lazy .sh-row:has(.sh-lazy-delay){grid-template-columns:120px 1fr;align-items:center;margin-top:5px;margin-bottom:5px}#sh-lazy [data-delay-note]{margin:0;color:#475569;font-size:11px;font-weight:700}
+.sh-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.sh-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.sh-input{width:100%;box-sizing:border-box;border:1px solid #b8c2cf;border-radius:4px;padding:7px;font:12px Arial,sans-serif}.sh-input.good{border-color:#16a34a}.sh-input.bad{border-color:#dc2626}.sh-area{height:76px;resize:vertical}.sh-status{margin-top:5px;font-weight:700;line-height:1.3}.sh-error{margin-top:3px;color:#b91c1c;font-weight:700}.sh-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}#sh-lazy-settings{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}#sh-lazy-settings .sh-btn{min-height:34px;font-size:11px;font-weight:900;letter-spacing:.1px}#sh-lazy-settings .sh-setting-off{background:#f5f7fa!important;color:#475569!important;border-color:#b8c2cf!important}
 #sh-qty{left:14px;right:auto;width:306px}.sh-qty-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.sh-qty-grid button{min-height:42px;font-size:16px}.sh-clear-tote{width:100%;margin-top:8px;background:#fff1f2!important;color:#991b1b!important;border-color:#fecaca!important}.sh-stop{background:#fff7ed!important;color:#9a3412!important;border-color:#fed7aa!important}
 .sh-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:6px 0 3px}.sh-metric{border:1px solid #c7d0dd;background:#f8fafc;padding:6px 3px;text-align:center;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.15px}.sh-metric b{display:block;font-size:19px;line-height:1.05;margin-top:2px}.sh-notmoved-line{display:none;font-size:11px;color:#475569;text-align:right;margin:2px 1px 7px}.sh-notmoved-line.show{display:block}.sh-notmoved-line b{font-size:13px;color:#991b1b}.sh-lazy-input-summary{display:none;align-items:center;justify-content:space-between;gap:8px;margin:6px 0;padding:8px 10px;border:1px solid #cbd5e1;border-left:5px solid #146eb4;background:#f8fafc;border-radius:4px;font-weight:850;color:#334155}.sh-lazy-input-summary.show{display:flex}.sh-lazy-input-summary.auto{border-left-color:#16a34a;background:#f0fdf4;box-shadow:0 0 0 2px rgba(22,163,74,.10)}.sh-lazy-input-summary button{padding:5px 9px;border:1px solid #94a3b8;border-radius:4px;background:#fff;font-weight:800;cursor:pointer}.sh-lazy-collapsed{display:none!important}.sh-result-summary{display:none;margin:7px 0;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;overflow:hidden}.sh-result-summary.show{display:block}.sh-result-ok{padding:8px 9px;background:#eff6ff;color:#0f3d73;font-weight:900}.sh-result-bad{padding:8px 9px;background:#fff7f7;color:#991b1b;font-weight:900;font-size:13px;line-height:1.35;border-top:1px solid #fecaca;border-left:6px solid #dc2626}.sh-result-bad-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.sh-result-bad-title{font-size:13px;font-weight:1000}.sh-result-bad code{font:900 13px Consolas,monospace;color:#7f1d1d}.sh-failed-actions{display:flex;gap:6px}.sh-failed-actions button{padding:6px 9px;border:1px solid #ef4444;background:#fff;color:#991b1b;border-radius:3px;font-weight:900;cursor:pointer}.sh-failed-list{margin-top:8px;border-top:1px solid #fecaca;padding-top:8px;display:grid;gap:8px}.sh-failed-card{padding:7px 8px;background:#fff;border:1px solid #fecaca;border-left:4px solid #ef4444;border-radius:4px}.sh-failed-top{font:1000 13px/1.2 Consolas,monospace;color:#7f1d1d;margin-bottom:5px}.sh-failed-grid{display:grid;grid-template-columns:auto 1fr;column-gap:7px;row-gap:3px;font-size:12px;line-height:1.25}.sh-failed-grid b{color:#7f1d1d}.sh-predicant-card{display:none;margin:8px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:6px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:shPredicantPulse .85s ease-in-out infinite alternate}.sh-predicant-card.show{display:block}.sh-predicant-title{font-size:17px;font-weight:1000;line-height:1.15}.sh-predicant-dest{margin:6px 0 4px;padding:7px 8px;background:#fff;border:2px solid #dc2626;border-radius:4px;font:1000 18px Consolas,monospace;color:#7f1d1d;letter-spacing:.4px}.sh-predicant-help{font-size:12px;font-weight:900;line-height:1.35}.sh-predicant-help strong{font-size:13px}.sh-predicant-scan{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important}@keyframes shPredicantPulse{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}.sh-failure-pill{display:none;margin:6px 0 2px;padding:7px 9px;border:1px solid #ef4444;border-left:5px solid #dc2626;border-radius:4px;background:#fff1f2;color:#991b1b;font-weight:900;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sh-failure-pill.show{display:block}.sh-failure-pill:hover{background:#ffe4e6}.sh-progress{max-height:210px;overflow:auto;border-top:1px solid #d5dbe3;margin-top:8px;padding-top:6px;font-family:Consolas,monospace}.sh-item{padding:6px 7px;border-radius:3px;margin-bottom:3px;border:1px solid transparent}.sh-item.current{background:#fff3bf;border-color:#f59e0b;font-weight:900}.sh-item.moved{background:#eff6ff;color:#0f3d73;border-color:#bfdbfe;font-weight:800}.sh-item.failed{background:#fff1f2;color:#991b1b;border:2px solid #ef4444;border-left-width:6px;font-weight:900}.sh-item.parked{background:#fff7ed;color:#9a3412;border-color:#fed7aa;font-weight:800}.sh-item.retry{background:#fff7ed;color:#9a3412;border:2px solid #f59e0b;border-left-width:6px;font-weight:900}
-#sh-lazy-footer{display:flex;justify-content:flex-end;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid #d5dbe3}#sh-lazy-footer label{display:flex;align-items:center;gap:5px;padding:5px 7px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;border-radius:4px;font-weight:800;font-size:11px}
+#sh-lazy-footer{display:none}
 #sh-invalid-toast{position:fixed;left:50%;top:88px;transform:translateX(-50%);z-index:2147483647;min-width:280px;max-width:min(520px,calc(100vw - 32px));padding:12px 48px 12px 14px;border:2px solid #ef4444;border-radius:5px;background:#fef2f2;color:#7f1d1d;box-shadow:0 4px 16px #0004;font:13px Arial,sans-serif}#sh-invalid-toast .title{font-weight:900;font-size:15px;margin-bottom:6px}#sh-invalid-toast .close{position:absolute;right:7px;top:7px;width:32px;height:32px;border:1px solid #ef4444;border-radius:4px;background:#fff;color:#991b1b;font-size:22px;font-weight:900;line-height:28px;cursor:pointer}
 #sh-damage-alert{position:fixed;inset:0;z-index:2147483647;pointer-events:none;border:10px solid #dc2626;box-sizing:border-box;background:rgba(220,38,38,.08);animation:shDamageFlash .42s steps(2,end) 10}
 #sh-damage-alert .sh-damage-box{position:absolute;left:50%;top:72px;transform:translateX(-50%);min-width:520px;max-width:calc(100vw - 40px);padding:16px 22px;text-align:center;background:#7f1d1d;color:#fff;border:5px solid #facc15;border-radius:8px;box-shadow:0 8px 28px #0008;font:900 22px/1.25 Arial,sans-serif;letter-spacing:.3px}
@@ -1035,13 +1035,17 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     '</div>' +
     '<textarea class="sh-input sh-area" data-f="items" placeholder="Scan item barcodes — one per line"></textarea>' +
     '<div class="sh-lazy-input-summary"><span data-lazy-input-summary>0 unique / 0 units</span><button type="button" data-a="toggle-items">Expand</button></div>' +
+    '<div id="sh-lazy-settings">' +
+      '<button class="sh-btn sh-on" data-a="clear-source">CLEAR SOURCE: ON</button>' +
+      '<button class="sh-btn sh-on" data-a="delay">DELAY 2–8s: ON</button>' +
+      '<input type="checkbox" data-f="clear" hidden>' +
+    '</div>' +
     '<div class="sh-grid4">' +
-      '<button class="sh-btn sh-on" data-a="start">Start</button>' +
+      '<button class="sh-btn sh-on" data-a="start">RUN LAZY</button>' +
       '<button class="sh-btn" data-a="pause">Pause</button>' +
       '<button class="sh-btn sh-stop" data-a="stop">Stop</button>' +
       '<button class="sh-btn" data-a="reset">Reset</button>' +
     '</div>' +
-    '<div class="sh-row"><button class="sh-btn sh-lazy-delay" data-a="delay">Delay: ON</button><span class="sh-status" data-delay-note>2–8s pacing between moves</span></div>' +
     '<div class="sh-metrics">' +
       '<div class="sh-metric">Total units<b data-m="total">0</b></div>' +
       '<div class="sh-metric">Unique items<b data-m="unique">0</b></div>' +
@@ -1051,8 +1055,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     '<div class="sh-notmoved-line">Errors: <b data-m="failed">0</b></div>' +
     '<div class="sh-predicant-card"></div>' +
     '<div class="sh-failure-pill" data-a="copy-failed" title="Current run only — clears on Start, Reset, or page reload"></div>' +
-    '<div class="sh-status"></div><div class="sh-error"></div><div class="sh-result-summary"></div><div class="sh-progress"></div>' +
-    '<div id="sh-lazy-footer"><label><input type="checkbox" data-f="clear"> Clear source when done</label></div>'
+    '<div class="sh-status"></div><div class="sh-error"></div><div class="sh-result-summary"></div><div class="sh-progress"></div>'
   );
 
   const lSrc = $('[data-f="src"]', lazyPanel);
@@ -1067,7 +1070,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
   const lProgress = $('.sh-progress', lazyPanel);
   const lPause = $('[data-a="pause"]', lazyPanel);
   const lDelay = $('[data-a="delay"]', lazyPanel);
-  const lDelayNote = $('[data-delay-note]', lazyPanel);
+  const lClearToggle = $('[data-a="clear-source"]', lazyPanel);
   const lInputSummary = $('.sh-lazy-input-summary', lazyPanel);
   const lInputSummaryText = $('[data-lazy-input-summary]', lazyPanel);
   const lInputToggle = $('[data-a="toggle-items"]', lazyPanel);
@@ -1353,11 +1356,17 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
     );
     setMoveCorner('lazy', lazyWaiting ? 'waiting' : lazy.running ? 'active' : 'idle');
     if (lDelay) {
-      lDelay.textContent = `Delay: ${lazy.delayEnabled ? 'ON' : 'OFF'}`;
+      lDelay.textContent = `DELAY 2–8s: ${lazy.delayEnabled ? 'ON' : 'OFF'}`;
       lDelay.classList.toggle('sh-on', lazy.delayEnabled);
+      lDelay.classList.toggle('sh-setting-off', !lazy.delayEnabled);
       lDelay.title = lazy.delayEnabled ? 'Artificial Lazy move pacing is ON (2–8 seconds between confirmed moves).' : 'Artificial Lazy move pacing is OFF.';
     }
-    if (lDelayNote) lDelayNote.textContent = lazy.delayEnabled ? '2–8s pacing between moves' : 'No artificial pacing';
+    if (lClearToggle) {
+      lClearToggle.textContent = `CLEAR SOURCE: ${lClear.checked ? 'ON' : 'OFF'}`;
+      lClearToggle.classList.toggle('sh-on', lClear.checked);
+      lClearToggle.classList.toggle('sh-setting-off', !lClear.checked);
+      lClearToggle.title = lClear.checked ? 'Clear source container when Lazy finishes.' : 'Leave source container open when Lazy finishes.';
+    }
     requestPanelLayout();
   }
 
@@ -1987,8 +1996,7 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
       ...problems
     ].map(clean).filter(Boolean);
 
-    const explicitOverage = isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);
-    if (!explicitOverage) return false;
+    const explicitOverage = isOverageLabel(type) || diagnosticLabels.some(isOverageLabel);    if (!explicitOverage) return false;
 
     // Overage is the ONLY exception. A response that also carries another
     // substantive problem stays fail-closed even if the word Overage appears.
@@ -1996,7 +2004,8 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
     const fatalText = [type, ...diagnosticLabels].join(' ');
     if (/hazmat|dangerous.?goods|invalid\s+barcode|incompatib|damaged|predicant|customer\s*bound/i.test(fatalText)) {
-      return false;    }
+      return false;
+    }
 
     return true;
   }
@@ -2986,7 +2995,6 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
       renderLazy();
       return;
     }
-
     const slots = lazy.items.map(() => {
       let resolve;
       const promise = new Promise(r => { resolve = r; });
@@ -2995,7 +3003,8 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
 
     let nextLookupIndex = 0;
 
-    const lookupWorker = async () => {      while (currentLazyRun(run) && lazy.running) {
+    const lookupWorker = async () => {
+      while (currentLazyRun(run) && lazy.running) {
         while (
           currentLazyRun(run) &&
           lazy.running &&
@@ -3243,6 +3252,14 @@ html[data-sideline-rebuild-worker="1"] #sh-dock,html[data-sideline-rebuild-worke
       shared.owner = '';
       lazy.note = 'stopped';
       renderLazy();
+    }
+
+    if (a === 'clear-source') {
+      lClear.checked = !lClear.checked;
+      localStorage.setItem(CLEAR_SOURCE_KEY, lClear.checked ? '1' : '0');
+      lazy.note = lClear.checked ? 'clear source ON' : 'clear source OFF';
+      renderLazy();
+      return;
     }
 
     if (a === 'delay') {
