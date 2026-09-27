@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.30
+// @version      0.1.31
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.30';
+  const VERSION = '0.1.31';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -533,8 +533,8 @@
       }
     }
 
-    if (area === 'edit' && Object.prototype.hasOwnProperty.call(message, 'inventoryQty')) {
-      paintEditInventoryQty(message.inventoryQty);
+    if (area === 'edit' && clean(message.sku)) {
+      paintEditInventoryQty(message.sku, message.inventoryQty || null);
     }
 
     if (area === 'sideline') {
@@ -781,7 +781,7 @@
       '      <div class="iss-panel-head"><div><strong class="iss-panel-title">EDIT</strong><span class="iss-panel-subtitle">Edit Items • Disposition</span></div><span class="iss-engine" data-edit-engine>' + esc(editMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
       '        <div class="iss-segment iss-segment-edit" data-edit-modes><button type="button" data-edit-mode="each">EACH</button><button type="button" data-edit-mode="sku">SKU</button></div>',
-      '        <div class="iss-edit-qty" data-edit-qty hidden aria-live="polite"><div class="iss-edit-qty-label">INVENTORY QTY</div><div class="iss-edit-qty-grid"><div class="iss-edit-qty-card" data-tone="s"><span>SELLABLE</span><b data-edit-qty-s>—</b></div><div class="iss-edit-qty-card" data-tone="p"><span>PENDING</span><b data-edit-qty-p>—</b></div><div class="iss-edit-qty-card" data-tone="u"><span>UNSELL</span><b data-edit-qty-u>—</b></div></div></div>',
+      '        <div class="iss-edit-qty" data-edit-qty hidden aria-live="polite"><div class="iss-edit-qty-label">INVENTORY QTY</div><div class="iss-edit-qty-head"><span>ITEM</span><span>SELLABLE</span><span>PENDING</span><span>UNSELL</span></div><div class="iss-edit-qty-list" data-edit-qty-list></div></div>',
       '        <input type="hidden" data-edit-source value="Sellable">',
       '        <input type="hidden" data-edit-source-damage value="Defective">',
       '        <input type="hidden" data-edit-dest value="Pending Research">',
@@ -861,7 +861,7 @@
       '.iss-damage{display:none}.iss-damage[data-show="1"]{display:grid}.iss-auto-source{display:grid;gap:5px}.iss-auto-source[hidden]{display:none!important}.iss-auto-source strong{height:36px;display:flex;align-items:center;padding:0 9px;border:1px solid #c4cbd1;border-radius:3px;background:#eef1f3;color:#65717c;font-size:11px;letter-spacing:.2px}',
       '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
       '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit{grid-template-columns:repeat(2,1fr)}.iss-segment-move{grid-template-columns:repeat(3,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
-      '.iss-edit-qty{position:relative;display:grid;gap:5px;padding:7px;border:1px solid #c3d3d9;border-radius:4px;background:#f9fcfd}.iss-panel[data-loading="1"] .iss-edit-qty{z-index:21;box-shadow:0 0 0 2px rgba(255,255,255,.92),0 2px 8px rgba(0,0,0,.10)}.iss-edit-qty[hidden]{display:none!important}.iss-edit-qty-label{font-size:9px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-edit-qty-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.iss-edit-qty-card{padding:6px 5px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:4px;background:#fff;text-align:center}.iss-edit-qty-card[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}.iss-edit-qty-card[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}.iss-edit-qty-card[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}.iss-edit-qty-card span{display:block;font-size:9px;font-weight:900;color:#53666e}.iss-edit-qty-card b{display:block;margin-top:2px;font:900 19px/1 Consolas,monospace;color:#17262d}',
+      '.iss-edit-qty{position:relative;display:grid;gap:5px;padding:7px;border:1px solid #c3d3d9;border-radius:4px;background:#f9fcfd}.iss-panel[data-loading="1"] .iss-edit-qty{z-index:21;box-shadow:0 0 0 2px rgba(255,255,255,.92),0 2px 8px rgba(0,0,0,.10)}.iss-edit-qty[hidden]{display:none!important}.iss-edit-qty-label{font-size:9px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-edit-qty-head,.iss-edit-qty-row{display:grid;grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(72px,1fr));gap:5px;align-items:center}.iss-edit-qty-head{padding:0 4px;font-size:8px;font-weight:900;letter-spacing:.25px;color:#667583;text-align:center}.iss-edit-qty-head span:first-child{text-align:left}.iss-edit-qty-list{display:grid;gap:5px;max-height:91px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px}.iss-edit-qty-row{min-height:43px;padding:4px;border:1px solid #c5cfd6;border-radius:4px;background:#fff}.iss-edit-qty-row[data-active="1"]{border-color:#146eb4;box-shadow:inset 4px 0 #146eb4}.iss-edit-qty-sku{min-width:0;padding:0 5px;font:900 11px/1.2 Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#243746}.iss-edit-qty-value{display:grid;place-items:center;min-height:33px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:4px;background:#fff;font:900 18px/1 Consolas,monospace;color:#17262d}.iss-edit-qty-value[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}.iss-edit-qty-value[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}.iss-edit-qty-value[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
@@ -903,17 +903,55 @@
     for (const button of $$('[data-edit-mode]')) button.dataset.active = button.dataset.editMode === editMode ? '1' : '0';
   }
 
-  function paintEditInventoryQty(value) {
-    const qty = key => Number.isInteger(value?.[key]) ? value[key] : '—';
-    const values = {
-      '[data-edit-qty-s]': value ? qty('sellable') : '—',
-      '[data-edit-qty-p]': value ? qty('pending') : '—',
-      '[data-edit-qty-u]': value ? qty('unsellable') : '—'
-    };
-    for (const [selector, amount] of Object.entries(values)) {
-      const el = $(selector);
-      if (el) el.textContent = String(amount);
+  function initEditInventoryQty(items = []) {
+    const list = $('[data-edit-qty-list]');
+    if (!list) return;
+    const unique = [];
+    const seen = new Set();
+    for (const raw of items) {
+      const sku = clean(raw);
+      const key = upper(sku);
+      if (!sku || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(sku);
     }
+    list.innerHTML = unique.map(sku =>
+      '<div class="iss-edit-qty-row" data-edit-qty-row="' + esc(upper(sku)) + '">' +
+        '<code class="iss-edit-qty-sku" title="' + esc(sku) + '">' + esc(sku) + '</code>' +
+        '<b class="iss-edit-qty-value" data-tone="s" data-q="sellable">—</b>' +
+        '<b class="iss-edit-qty-value" data-tone="p" data-q="pending">—</b>' +
+        '<b class="iss-edit-qty-value" data-tone="u" data-q="unsellable">—</b>' +
+      '</div>'
+    ).join('');
+    list.scrollTop = 0;
+  }
+
+  function paintEditInventoryQty(sku, value) {
+    const key = upper(clean(sku));
+    if (!key) return;
+    const list = $('[data-edit-qty-list]');
+    if (!list) return;
+    let row = [...list.querySelectorAll('[data-edit-qty-row]')].find(el => el.dataset.editQtyRow === key);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'iss-edit-qty-row';
+      row.dataset.editQtyRow = key;
+      row.innerHTML =
+        '<code class="iss-edit-qty-sku" title="' + esc(sku) + '">' + esc(sku) + '</code>' +
+        '<b class="iss-edit-qty-value" data-tone="s" data-q="sellable">—</b>' +
+        '<b class="iss-edit-qty-value" data-tone="p" data-q="pending">—</b>' +
+        '<b class="iss-edit-qty-value" data-tone="u" data-q="unsellable">—</b>';
+      list.appendChild(row);
+    }
+    for (const el of list.querySelectorAll('[data-edit-qty-row]')) el.dataset.active = el === row ? '1' : '0';
+    if (value) {
+      const qty = name => Number.isInteger(value?.[name]) ? value[name] : '—';
+      for (const name of ['sellable','pending','unsellable']) {
+        const el = row.querySelector('[data-q="' + name + '"]');
+        if (el) el.textContent = String(qty(name));
+      }
+    }
+    row.scrollIntoView?.({ block:'nearest', inline:'nearest' });
   }
 
   function syncEditUi(save = true) {
@@ -1106,7 +1144,7 @@
     if (!clean(itemText)) return panelStatus('edit', 'Scan/paste at least one item', 'error');
 
     setActivePanel('edit');
-    if (editMode === 'sku') paintEditInventoryQty(null);
+    if (editMode === 'sku') initEditInventoryQty(collectLines(itemText));
     setPanelLoading('edit', true, 'Running EditItems…');
     panelStatus('edit', 'Starting EditItems…', 'working');
     try {
