@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.17
+// @version      0.0.18
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.17-REBUILD';
+  const VERSION = '0.0.18-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -686,6 +686,50 @@
 .sh-preflight-idle{color:#475569}
 @media(max-width:560px){#sh-dock,.sh-panel{width:calc(100vw - 28px)}.sh-field-grid{grid-template-columns:1fr}.sh-preflight{grid-template-columns:1fr}}
 
+/* v0.0.18 — permanent wide + low profile so native Item Issue controls stay exposed */
+#sh-dock{width:720px;max-width:calc(100vw - 28px)}
+#sh-lazy,#sh-queue{width:720px;max-width:calc(100vw - 28px)}
+#sh-lazy{padding:8px 10px}
+#sh-lazy .sh-title{margin:-8px -10px 6px;padding:6px 9px}
+#sh-lazy .sh-title-brand{padding:6px 9px}
+#sh-lazy .sh-title-brand strong{font-size:18px}
+#sh-lazy .sh-title-brand span{font-size:9px}
+#sh-lazy .sh-title-brand b{padding:3px 8px}
+#sh-lazy .sh-return-source{margin:0 0 5px;padding:4px 8px!important;min-height:25px}
+#sh-lazy .sh-field-grid{gap:6px}
+#sh-lazy .sh-field-label{margin:3px 0 2px;font-size:9px}
+#sh-lazy .sh-input{padding:6px 7px}
+#sh-lazy .sh-area{height:54px;min-height:54px}
+#sh-lazy .sh-preflight{margin:5px 0;padding:5px 7px;min-height:0}
+#sh-lazy .sh-preflight-main{gap:1px}
+#sh-lazy .sh-preflight-main strong{font-size:11px}
+#sh-lazy .sh-preflight-main span{font-size:10px}
+#sh-lazy .sh-preflight-counts b{padding:3px 5px;font-size:8px}
+#sh-lazy-settings{margin:5px 0;gap:5px}
+#sh-lazy-settings .sh-btn{min-height:27px;padding:4px 6px;font-size:10px}
+#sh-lazy .sh-grid4{gap:5px}
+#sh-lazy .sh-grid4 .sh-btn{min-height:29px;padding:5px 6px}
+#sh-lazy .sh-metrics{grid-template-columns:repeat(4,1fr);gap:4px;margin:5px 0 2px}
+#sh-lazy .sh-metric{padding:4px 3px;font-size:8px}
+#sh-lazy .sh-metric b{font-size:16px;margin-top:1px}
+#sh-lazy>.sh-status{margin-top:4px;padding:4px 7px;min-height:24px}
+#sh-lazy .sh-error{margin-top:2px}
+#sh-lazy .sh-progress{max-height:72px;margin-top:4px;padding-top:4px}
+#sh-lazy .sh-item{padding:3px 5px;margin-bottom:2px}
+#sh-lazy .sh-result-summary{margin:4px 0}
+#sh-lazy .sh-result-ok,#sh-lazy .sh-result-bad{padding:5px 7px}
+#sh-lazy .sh-failure-pill{margin:4px 0 2px;padding:5px 7px}
+#sh-lazy .sh-predicant-card{margin:5px 0;padding:7px 9px}
+#sh-lazy .sh-notmoved-line{margin:1px 1px 3px}
+#sh-lazy .sh-preflight-red{min-height:58px;padding:8px 10px!important}
+#sh-lazy .sh-preflight-red .sh-preflight-main{gap:4px}
+#sh-lazy .sh-preflight-red .sh-preflight-main strong{font-size:16px!important}
+#sh-lazy .sh-preflight-red .sh-preflight-main span{font-size:12px!important}
+#sh-lazy .sh-preflight-red .sh-preflight-counts b{font-size:9px!important;padding:4px 6px!important}
+@media(max-width:760px){
+  #sh-dock,#sh-lazy,#sh-queue{width:calc(100vw - 28px)}
+}
+
 `;
   document.documentElement.appendChild(style);
 
@@ -817,50 +861,22 @@
     document.body.appendChild(dock);
   }
 
-  function nativeRightControlsBottom() {
-    const label = /^(?:change container|back to source container|damaged|no match|item dimension problem|record prep)\b/i;
-    let bottom = 0;
-
-    for (const el of appElements('button,[role="button"]')) {
-      if (!visible(el)) continue;
-      const text = clean(el.innerText || el.textContent);
-      if (!label.test(text)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.left < innerWidth * 0.55) continue;
-      bottom = Math.max(bottom, rect.bottom);
-    }
-    return bottom;
-  }
-
   function applyPanels() {
     for (const b of dockButtons) b.classList.toggle('sh-on', feature[b.dataset.key]);
     for (const [key,p] of Object.entries(panels)) {
       const display = feature[key] ? 'block' : 'none';
       if (p.style.display !== display) p.style.display = display;
     }
-
-    const nativeBottom = nativeRightControlsBottom();
-    let stackTop = nativeBottom ? Math.ceil(nativeBottom + 10) : 0;
     let bottom = 58;
-
     for (const key of ['lazy','queue']) {
       const p = panels[key];
       if (!p || !feature[key]) continue;
-
-      if (stackTop) {
-        const available = Math.max(180, innerHeight - stackTop - 68);
-        p.style.top = `${stackTop}px`;
-        p.style.bottom = 'auto';
-        p.style.maxHeight = `${available}px`;
-        p.style.overflowY = 'auto';
-        stackTop += Math.min(p.scrollHeight, available) + 10;
-      } else {
-        p.style.top = 'auto';
-        p.style.bottom = `${bottom}px`;
-        p.style.maxHeight = '';
-        p.style.overflowY = '';
-        bottom += Math.max(80, p.offsetHeight) + 10;
-      }
+      p.style.top = 'auto';
+      p.style.maxHeight = '';
+      p.style.overflowY = '';
+      const position = `${bottom}px`;
+      if (p.style.bottom !== position) p.style.bottom = position;
+      bottom += Math.max(80, p.offsetHeight) + 10;
     }
   }
 
@@ -4311,7 +4327,6 @@
         }
         screenDirty = true;
         scheduleNativeExpiry();
-        requestPanelLayout();
         break;
       }
     });
@@ -4332,11 +4347,7 @@
     for (const type of ['keydown', 'input', 'change', 'click']) {
       document.addEventListener(type, recoverAfterInteraction, true);
     }
-    window.addEventListener('pageshow', () => {
-      armRecoveryWatchdog(15000);
-      requestPanelLayout();
-    });
-    window.addEventListener('resize', requestPanelLayout);
+    window.addEventListener('pageshow', () => armRecoveryWatchdog(15000));
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) armRecoveryWatchdog(8000);
     });
