@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.19
+// @version      0.0.20
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.19-REBUILD';
+  const VERSION = '0.0.20-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1406,8 +1406,7 @@
   const preflightState = {
     pendingOccurrences:new Map(),
     trackedCounts:new Map(),
-    redPendingCounts:new Map(),
-    asideEntries:new Map(),
+    redEntries:new Map(),
     dateCache:new Map(),
     dateQueue:[],
     dateBusy:false,
@@ -1420,13 +1419,13 @@
   }
 
   function clearAsidePanel() {
-    preflightState.asideEntries.clear();
+    preflightState.redEntries.clear();
     renderAsidePanel();
   }
 
   function renderAsidePanel() {
     if (!asidePanel) return;
-    const entries = [...preflightState.asideEntries.values()]
+    const entries = [...preflightState.redEntries.values()]
       .filter(entry => entry.qty > 0)
       .sort((a,b) => a.code.localeCompare(b.code));
     const total = entries.reduce((sum,entry) => sum + entry.qty,0);
@@ -1448,14 +1447,16 @@
     ).join('');
   }
 
-  function addAsideEntry(code, reason, count=1) {
+  function addRedEntry(code, reason, count=1) {
     const key = itemKey(code);
     if (!key) return;
-    const existing = preflightState.asideEntries.get(key) || {code:clean(code),reason:'',qty:0};
+    const amount = Math.max(1,Number(count)||1);
+    const existing = preflightState.redEntries.get(key) || {code:clean(code),reason:'',qty:0,pendingQty:0};
     existing.code = clean(code) || existing.code;
     existing.reason = clean(reason) || existing.reason || 'NOT PROCESSING';
-    existing.qty += Math.max(1,Number(count)||1);
-    preflightState.asideEntries.set(key,existing);
+    existing.qty += amount;
+    existing.pendingQty += amount;
+    preflightState.redEntries.set(key,existing);
     renderAsidePanel();
   }
 
@@ -1463,7 +1464,6 @@
     if (typeof preflightState === 'undefined') return;
     preflightState.pendingOccurrences.clear();
     preflightState.trackedCounts.clear();
-    preflightState.redPendingCounts.clear();
     preflightState.dateCache.clear();
     preflightState.dateQueue.length = 0;
     preflightState.dateBusy = false;
@@ -1495,7 +1495,8 @@
     lPreflightMain.innerHTML = `<strong>${esc(title)}</strong><span>${esc(code ? `${code} — ${reason || ''}` : (reason || 'Scan an item'))}</span>`;
     setTextIfChanged(pfGreen,`${preflightState.stats.green} GOOD`);
     setTextIfChanged(pfYellow,`${preflightState.stats.yellow} EXPIRY`);
-    setTextIfChanged(pfRed,`${preflightState.stats.red} ASIDE`);
+    const redTotal = [...preflightState.redEntries.values()].reduce((sum,entry) => sum + Math.max(0,Number(entry.qty)||0),0);
+    setTextIfChanged(pfRed,`${redTotal} ASIDE`);
   }
 
   function preflightResponseText(response) {
@@ -1567,11 +1568,6 @@
     }
   }
 
-  function addRedPending(code,count=1) {
-    const key = itemKey(code);
-    preflightState.redPendingCounts.set(key,(preflightState.redPendingCounts.get(key)||0)+count);
-  }
-
   function cachedPreflightResult(code) {
     const source = syncPreflightSource();
     if (!source) return null;
@@ -1581,9 +1577,7 @@
   function handlePreflightOccurrence(code,result) {
     if (!result) return;
     if (result.kind === 'red') {
-      preflightState.stats.red++;
-      addRedPending(code);
-      addAsideEntry(code,result.reason);
+      addRedEntry(code,result.reason);
       preflightState.last = {kind:'red',code,reason:result.reason};
       renderPreflight();
       return;
@@ -1662,19 +1656,22 @@
   }
 
   function purgeKnownRedTextareaLines() {
-    if (!preflightState.redPendingCounts.size) return 0;
+    const pending = [...preflightState.redEntries.entries()]
+      .filter(([,entry]) => Math.max(0,Number(entry?.pendingQty)||0) > 0);
+    if (!pending.length) return 0;
+
     const lines = String(lItems.value).split(/\r?\n/);
     let removed = 0;
 
-    for (const [key,wanted] of [...preflightState.redPendingCounts]) {
-      let left = wanted;
+    for (const [key,entry] of pending) {
+      let left = Math.max(0,Number(entry.pendingQty)||0);
       for (let i=lines.length-1;i>=0 && left>0;i--) {
         if (itemKey(lines[i]) !== key) continue;
         lines.splice(i,1);
         left--;
         removed++;
       }
-      preflightState.redPendingCounts.delete(key);
+      entry.pendingQty = 0;
     }
 
     if (removed) {
@@ -2155,7 +2152,6 @@
         if (ok) lazy.error = '';
       }
       refreshItems();
-    installIssConsoleSidelineWorkerBridge();
       if (revealItems) scheduleLazySourceReveal();
     });
 
@@ -4088,6 +4084,25 @@
     }));
   }
 
+  function issSideLazyMetrics(items = lazy.items) {
+    const rows = Array.isArray(items) ? items : [];
+    return {
+      total:sumQty(rows),
+      unique:rows.length,
+      moved:sumQty(rows.filter(item => item.status === 'MOVED')),
+      remaining:sumQty(rows.filter(item => !['MOVED','FAILED','INVALID','SKIPPED'].includes(item.status))),
+      failed:sumQty(rows.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status)))
+    };
+  }
+
+  function issSideAsideEntries() {
+    return [...preflightState.redEntries.values()].map(entry => ({
+      code:clean(entry.code),
+      reason:clean(entry.reason),
+      qty:Math.max(0,Number(entry.qty)||0)
+    })).filter(entry => entry.qty > 0);
+  }
+
   function issSideSnapshot() {
     if (issSideWorkerMode === 'queue') {
       return {
@@ -4108,6 +4123,8 @@
       attention:predicantRecovery ? 'predicant-recovery' : (lazy.predicant ? 'rescan-destination' : ''),
       current:Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
       total:lazy.items.length,
+      metrics:issSideLazyMetrics(lazy.items),
+      aside:issSideAsideEntries(),
       items
     };
   }
@@ -4174,7 +4191,7 @@
     feature.lazy = wanted === 'lazy';
     feature.qty = false;
     issSideWorkerMode = wanted;
-    applyPanels();
+    if (!ISS_CONSOLE_WORKER) applyPanels();
     issSideEmitProgress(true);
     return wanted;
   }
@@ -4222,6 +4239,8 @@
       moved,
       failed,
       message:clean(lazy.note || 'complete'),
+      metrics:issSideLazyMetrics(lazy.items),
+      aside:issSideAsideEntries(),
       items,
       failures:items.filter(item => ['FAILED','INVALID','SKIPPED'].includes(item.status))
     };
@@ -4298,8 +4317,10 @@
     return {reset:true,mode};
   }
 
+  let issSideBridgeInstalled = false;
   function installIssConsoleSidelineWorkerBridge() {
-    if (!ISS_CONSOLE_WORKER) return;
+    if (!ISS_CONSOLE_WORKER || issSideBridgeInstalled) return;
+    issSideBridgeInstalled = true;
 
     window.addEventListener('message', async event => {
       const message = event.data;
@@ -4363,10 +4384,16 @@
 
   // Boot
   function boot() {
+    refreshItems();
+
+    if (ISS_CONSOLE_WORKER) {
+      installIssConsoleSidelineWorkerBridge();
+      return;
+    }
+
     document.addEventListener('click', handleUniversalReturnClick, true);
     mountDock();
     applyPanels();
-    refreshItems();
 
     const isHelperMutationTarget = node => {
       const el = node?.nodeType === 1 ? node : node?.parentElement;
@@ -4381,6 +4408,8 @@
       expiryRaf = requestAnimationFrame(() => {
         expiryRaf = 0;
         nativeExpiryTick();
+        const state = screen();
+        if (state !== 'ITEM' && state !== 'UNKNOWN') armRecoveryWatchdog(8000);
       });
     };
 
@@ -4417,17 +4446,9 @@
       attributeFilter:['hidden','aria-hidden']
     });
 
-    const recoverAfterInteraction = event => {
-      const target = event.target;
-      if (target instanceof Element && target.closest(helperSelector)) return;
-      armRecoveryWatchdog();
-    };
-    for (const type of ['keydown', 'input', 'change', 'click']) {
-      document.addEventListener(type, recoverAfterInteraction, true);
-    }
-    window.addEventListener('pageshow', () => armRecoveryWatchdog(15000));
+    window.addEventListener('pageshow', scheduleNativeExpiry);
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) armRecoveryWatchdog(8000);
+      if (!document.hidden) scheduleNativeExpiry();
     });
     window.addEventListener('pagehide', () => {
       observer.disconnect();
@@ -4435,7 +4456,7 @@
       clearTimeout(recoveryTimer);
     }, { once:true });
 
-    armRecoveryWatchdog(15000);
+    scheduleNativeExpiry();
   }
 
   const launch = boot;
