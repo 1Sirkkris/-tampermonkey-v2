@@ -102,18 +102,55 @@
     }));
   }
 
+
+  function usage(prefix, key, ms = 0, count = 1) {
+    window.dispatchEvent(new CustomEvent('fcr-usage:event', {
+      detail: JSON.stringify({ key: `${clean(prefix)}.${clean(key)}`, ms, count })
+    }));
+  }
+
+  function trace(type, data = {}) {
+    try {
+      if (typeof window.BWU2Trace === 'function') window.BWU2Trace(type, data);
+      else window.postMessage({ __BWU2_TRACE__: true, type, data }, '*');
+    } catch {}
+  }
+
+  function normalizeContainer(value, pattern) {
+    const id = clean(value);
+    return pattern instanceof RegExp && pattern.test(id) ? id : '';
+  }
+
+  function nextQueued(items) {
+    return Array.isArray(items) ? items.find(item => item?.status === 'queued') || null : null;
+  }
+
+  function queueCounts(items) {
+    const list = Array.isArray(items) ? items : [];
+    const result = { total: list.length, queued: 0, active: 0, done: 0, attention: 0 };
+    for (const item of list) {
+      if (Object.prototype.hasOwnProperty.call(result, item?.status)) result[item.status]++;
+    }
+    return result;
+  }
+
   function markUi(node, value = '1') {
     if (node?.setAttribute) node.setAttribute('data-bwu2-ui', value);
     return node;
   }
 
   ROOT.BWU2Fleet = Object.freeze({
-    version: '0.1.0',
+    version: '0.1.1',
     clean,
     upper,
     registerRuntimeVersion,
     createCoreClient,
     runWithConcurrency,
+    usage,
+    trace,
+    normalizeContainer,
+    nextQueued,
+    queueCounts,
     markUi
   });
 })();
