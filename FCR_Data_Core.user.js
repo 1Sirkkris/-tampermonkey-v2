@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.35
+// @version      0.2.36
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.35';
+  const VERSION = '0.2.36';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -74,6 +74,11 @@
   const HAZ_FAILURE_TTL = 60 * 1000;
   const HAZMAT_RETRY_DELAYS_MS = [500, 1500];
   const REQUEST_TIMEOUT_MS = 15000;
+  const NATIVE_INVENTORY_PREVIEW_TTL_MS = 30 * 1000;
+  const NATIVE_INVENTORY_WAIT_MS = 3000;
+  const NATIVE_INVENTORY_XHR = new WeakMap();
+  const nativeInventoryPreviewCache = new Map();
+  const nativeInventoryPending = new Map();
   const MEASUREMENT_TIMEOUT_MS = 10000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -780,6 +785,128 @@
     };
   }
 
+  function nativeInventoryEndpoint(rawUrl) {
+    let url;
+    try { url = new URL(String(rawUrl || ''), location.href); } catch { return false; }
+    const host = url.hostname.toLowerCase();
+    if (!host.includes('fcresearch') && host !== 'qifcr.fe.aftx.amazonoperations.app') return false;
+    return /\/results\/inventory\/?$/i.test(url.pathname);
+  }
+
+  function nativeInventorySearch(body) {
+    let search = '';
+    try {
+      if (body instanceof URLSearchParams) search = body.get('s') || '';
+      else if (typeof body === 'string') search = new URLSearchParams(body).get('s') || '';
+    } catch {}
+    if (!search) {
+      try { search = new URLSearchParams(location.search).get('s') || ''; } catch {}
+    }
+    return clean(search);
+  }
+
+  function cachedNativeInventoryPreview(searchValue) {
+    const key = upper(searchValue);
+    if (!key) return null;
+    const entry = nativeInventoryPreviewCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - Number(entry.ts || 0) > NATIVE_INVENTORY_PREVIEW_TTL_MS) {
+      nativeInventoryPreviewCache.delete(key);
+      return null;
+    }
+    return entry.value || null;
+  }
+
+  function installNativeInventoryTap() {
+    const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+    const XHR = pageWindow.XMLHttpRequest;
+    if (!XHR?.prototype || XHR.prototype.__fcrDataCoreNativeInventoryTapV1) return;
+
+    const originalOpen = XHR.prototype.open;
+    const originalSend = XHR.prototype.send;
+
+    XHR.prototype.open = function(method, url) {
+      NATIVE_INVENTORY_XHR.set(this, {
+        inventory: nativeInventoryEndpoint(url),
+        method: String(method || 'GET').toUpperCase()
+      });
+      return originalOpen.apply(this, arguments);
+    };
+
+    XHR.prototype.send = function(body) {
+      const info = NATIVE_INVENTORY_XHR.get(this);
+      if (!info?.inventory || info.method !== 'POST') return originalSend.apply(this, arguments);
+
+      const search = nativeInventorySearch(body);
+      const key = upper(search);
+      if (!key) return originalSend.apply(this, arguments);
+
+      let resolvePending;
+      const pending = {
+        startedAt: performance.now(),
+        promise: new Promise(resolve => { resolvePending = resolve; }),
+        resolve: value => resolvePending?.(value)
+      };
+      nativeInventoryPending.set(key, pending);
+
+      this.addEventListener('loadend', () => {
+        let preview = null;
+        if (this.status >= 200 && this.status < 300) {
+          try {
+            const doc = parseHtml(this.responseText || '');
+            preview = {
+              ...inventoryPreviewFromDocument(
+                doc,
+                pending.startedAt,
+                Math.round(performance.now() - pending.startedAt)
+              ),
+              source: 'native-xhr'
+            };
+            nativeInventoryPreviewCache.set(key, { ts: Date.now(), value: preview });
+            recordUsage('inventory.preview.native-captured');
+          } catch {
+            recordUsage('inventory.preview.native-parse-failed');
+          }
+        }
+        pending.resolve(preview);
+        if (nativeInventoryPending.get(key) === pending) nativeInventoryPending.delete(key);
+      }, { once:true });
+
+      return originalSend.apply(this, arguments);
+    };
+
+    Object.defineProperty(XHR.prototype, '__fcrDataCoreNativeInventoryTapV1', {
+      value: true,
+      configurable: true
+    });
+  }
+
+  async function reuseNativeInventoryPreview(searchValue) {
+    const search = clean(searchValue);
+    const key = upper(search);
+    if (!key) return null;
+
+    const cached = cachedNativeInventoryPreview(search);
+    if (cached) {
+      recordUsage('inventory.preview.native-cache-hit');
+      return cached;
+    }
+
+    const pending = nativeInventoryPending.get(key);
+    if (!pending) return null;
+
+    const timeout = new Promise(resolve => setTimeout(() => resolve(null), NATIVE_INVENTORY_WAIT_MS));
+    const preview = await Promise.race([pending.promise, timeout]);
+    if (preview) {
+      recordUsage('inventory.preview.native-wait-hit');
+      return preview;
+    }
+
+    recordUsage('inventory.preview.native-wait-miss');
+    if (nativeInventoryPending.get(key) === pending) nativeInventoryPending.delete(key);
+    return cachedNativeInventoryPreview(search);
+  }
+
   function paginationToken(doc) {
     const raw = clean(doc?.querySelector('.pagination-token')?.textContent || '');
     if (!raw || /^(?:true|false|null|done)$/i.test(raw)) return '';
@@ -958,6 +1085,11 @@
   async function fetchInventoryPreview(searchValue, context = {}) {
     const search = clean(searchValue);
     if (!search) throw new Error('Inventory search value required');
+
+    const reused = await reuseNativeInventoryPreview(search);
+    if (reused) return reused;
+
+    recordUsage('inventory.preview.network-fallback');
     const started = performance.now();
     const first = await fcrPost('inventory', search, context);
     const doc = parseHtml(first.text);
@@ -1733,6 +1865,8 @@
       respond(id, false, null, clean(error?.message || error || 'request failed'));
     }
   }
+
+  installNativeInventoryTap();
 
   window.addEventListener(REQUEST_EVENT, event => {
     try {
