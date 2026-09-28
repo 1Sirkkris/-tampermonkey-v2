@@ -9,11 +9,12 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.6.0
+// @version      5.6.1
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Fleet_Core.lib.js
 // ==/UserScript==
 
 (() => {
@@ -22,25 +23,10 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.0';
+  const VERSION = '5.6.1';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
-  function registerRuntimeVersion(label, version) {
-    const mount = () => {
-      const root = document.body || document.documentElement; if (!root) return;
-      let host = document.getElementById('bwu2-runtime-version-stamp');
-      if (!host) {
-        host = document.createElement('div'); host.id = 'bwu2-runtime-version-stamp'; host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)'; root.appendChild(host);
-      }
-      let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
-      if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
-      item.textContent = `${label} · v${version}`;
-      [...host.children].sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
-    };
-    mount();
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
-  }
+  const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('STOW', VERSION);
 
 
@@ -94,34 +80,9 @@
   }
 
 
-  const CORE_REQUEST_EVENT = 'fcr-data-core:request';
-  const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
-  const CORE_TIMEOUT_MS = 17000;
-  const corePending = new Map();
-
-  window.addEventListener(CORE_RESPONSE_EVENT, event => {
-    let message;
-    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
-    const pending = corePending.get(message?.id);
-    if (!pending) return;
-    corePending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.ok) pending.resolve(message.data);
-    else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
-  });
-
-  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS) {
-    const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        corePending.delete(id);
-        reject(new Error('FCR Data Core missing / timed out'));
-      }, timeout);
-      corePending.set(id, { resolve, reject, timer });
-      window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, { detail: JSON.stringify({ id, type, payload, client: 'stow' }) }));
-    });
-  }
-
+  const coreClient = globalThis.BWU2Fleet.createCoreClient({ client: 'stow', defaultTimeout: 17000 });
+  const coreRequest = (type, payload = {}, timeout = 17000) =>
+    coreClient.request(type, payload, { timeout });
 
   function usage(key, ms = 0, count = 1) {
     window.dispatchEvent(new CustomEvent('fcr-usage:event', {
