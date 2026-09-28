@@ -2,7 +2,7 @@
 // @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @name:en      TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.14
+// @version      0.3.15
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -12,6 +12,7 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_RIVER_Ticket_Assistant.user.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Fleet_Core.lib.js
 // ==/UserScript==
 
 // Keep @name unchanged: Tampermonkey identifies updates by @name + @namespace.
@@ -22,29 +23,11 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.14';
-  function registerRuntimeVersion(label, version) {
-    const mount = () => {
-      const root = document.body || document.documentElement; if (!root) return;
-      let host = document.getElementById('bwu2-runtime-version-stamp');
-      if (!host) {
-        host = document.createElement('div'); host.id = 'bwu2-runtime-version-stamp'; host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)'; root.appendChild(host);
-      }
-      let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
-      if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
-      item.textContent = `${label} · v${version}`;
-      [...host.children].sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
-    };
-    mount();
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
-  }
+  const VERSION = '0.3.15';
+  const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
   const KEY = 'bwu2_ticket_assistant_payload_v3';
-  const CORE_REQUEST_EVENT = 'fcr-data-core:request';
-  const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
-  const CORE_CANCEL_EVENT = 'fcr-data-core:cancel';
   const CAPTURE_FIELDS = ['asin', 'fnsku', 'title', 'purchaseOrder', 'quantity', 'inventoryCost', 'vendorCode'];
   const DOM_GRACE_MS = 6000;
   const CORE_TIMEOUT_MS = 12000;
@@ -283,47 +266,27 @@
     };
   }
 
-  const corePending = new Map();
-  window.addEventListener(CORE_RESPONSE_EVENT, event => {
-    let message;
-    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
-    const pending = corePending.get(message?.id);
-    if (!pending) return;
-    corePending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.ok) pending.resolve(message.data);
-    else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
-  }, true);
+  const coreClient = globalThis.BWU2Fleet.createCoreClient({
+    client: 'river-assistant',
+    defaultTimeout: CORE_TIMEOUT_MS,
+    responseCapture: true,
+    timeoutError: type => `${type} timed out`
+  });
 
-  function coreRequest(type, payload = {}) {
-    const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    return new Promise((resolve, reject) => {
-      const started = performance.now();
-      const timer = setTimeout(() => {
-        corePending.delete(id);
-        reject(new Error(`${type} timed out`));
-      }, CORE_TIMEOUT_MS);
-      corePending.set(id, {
-        timer,
-        resolve: data => {
-          emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: true });
-          resolve(data);
-        },
-        reject: error => {
-          emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: false });
-          reject(error);
-        }
-      });
-      window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
-        detail: JSON.stringify({ id, type, payload, client: 'river-assistant', group: 'river-capture' })
-      }));
-    });
+  async function coreRequest(type, payload = {}) {
+    const started = performance.now();
+    try {
+      const data = await coreClient.request(type, payload, { timeout: CORE_TIMEOUT_MS, group: 'river-capture' });
+      emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: true });
+      return data;
+    } catch (error) {
+      emit('capture.fallback.response', { endpoint: clean(payload.endpoint || type), ms: Math.round(performance.now() - started), ok: false });
+      throw error;
+    }
   }
 
   function cancelCoreCapture() {
-    try {
-      window.dispatchEvent(new CustomEvent(CORE_CANCEL_EVENT, { detail: JSON.stringify({ client: 'river-assistant', group: 'river-capture' }) }));
-    } catch {}
+    coreClient.cancel('river-capture');
   }
 
   function newCaptureState() {
