@@ -2,10 +2,11 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.0.8
+// @version      1.1.0
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
@@ -20,7 +21,8 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.8';
+  const VERSION = '1.1.0';
+  const ACTIONS = globalThis.BWU2Actions;
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -48,7 +50,6 @@
   const TIMEOUT_UNBIND_MS = 20000;
   const NEXT_GAP_MS = 180;
   const STATE_KEY = 'bwu2.unbindQueue.state.v1';
-  const LOGIN_KEY = 'bwu2.unbindQueue.employeeLogin.v1';
   const DRAFT_KEY = 'bwu2.unbindQueue.draft.v1';
   const LOCK_KEY = 'bwu2.unbindQueue.lock.v1';
   const MINIMIZED_KEY = 'bwu2.unbindQueue.minimized.v1';
@@ -56,7 +57,6 @@
   const SESSION_RECOVERY_MAX_AGE_MS = 60 * 1000;
   const SESSION_RECOVERY_MAX_ATTEMPTS = 2;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const LOGIN_PATTERN = /^[a-z][a-z0-9-]{2,31}$/i;
   const CONTAINER_PATTERN = /^tsX[A-Za-z0-9]+$/i;
 
   let processing = false;
@@ -74,11 +74,6 @@
   function normalizeContainer(value) {
     const id = clean(value);
     return CONTAINER_PATTERN.test(id) ? id : '';
-  }
-
-  function normalizeLogin(value) {
-    const login = clean(value).toLowerCase();
-    return LOGIN_PATTERN.test(login) ? login : '';
   }
 
   function defaultState() {
@@ -164,13 +159,6 @@
     try { localStorage.removeItem(SESSION_RECOVERY_KEY); } catch (_) {}
   }
 
-  function persistLogin(value) {
-    const login = normalizeLogin(value);
-    if (!login) return '';
-    try { localStorage.setItem(LOGIN_KEY, login); } catch (_) {}
-    return login;
-  }
-
   function trace(event, data = {}) {
     try {
       if (typeof window.BWU2Trace === 'function') window.BWU2Trace(event, data);
@@ -246,99 +234,8 @@
     }
   }
 
-  function findLoginInObject(value, depth = 0) {
-    if (!value || typeof value !== 'object' || depth > 3) return '';
-    const preferred = ['employeeLogin', 'userLogin', 'username', 'login', 'alias'];
-    for (const key of preferred) {
-      const found = normalizeLogin(value[key]);
-      if (found) return found;
-    }
-    for (const [key, child] of Object.entries(value).slice(0, 40)) {
-      if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-      const found = findLoginInObject(child, depth + 1);
-      if (found) return found;
-    }
-    return '';
-  }
-
-  function cookieLogin() {
-    try {
-      for (const part of document.cookie.split(';')) {
-        const index = part.indexOf('=');
-        if (index < 1) continue;
-        const key = clean(part.slice(0, index)).toLowerCase();
-        if (!/^(?:employeelogin|userlogin|username|login|alias|autoid)$/.test(key)) continue;
-        let value = clean(part.slice(index + 1));
-        try { value = decodeURIComponent(value); } catch (_) {}
-        const found = normalizeLogin(value);
-        if (found) return found;
-      }
-    } catch (_) {}
-    return '';
-  }
-
-  function discoverLiveLogin() {
-    const globals = [
-      window.employeeLogin,
-      window.userLogin,
-      window.autoId,
-      window.autoID,
-      window.currentUser,
-      window.user,
-      window.employee,
-      window.bootstrapData,
-      window.__INITIAL_STATE__
-    ];
-    for (const value of globals) {
-      const found = typeof value === 'string' ? normalizeLogin(value) : findLoginInObject(value);
-      if (found) return found;
-    }
-
-    const selectors = [
-      '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
-      'input[name="employeeLogin"]', 'input[name="userLogin"]', 'input[name="autoid"]',
-      'meta[name="employeeLogin"]', 'meta[name="username"]', 'meta[name="autoid"]'
-    ];
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (!element) continue;
-      const found = normalizeLogin(
-        element.dataset?.employeeLogin ||
-        element.dataset?.userLogin ||
-        element.dataset?.username ||
-        element.dataset?.autoid ||
-        element.value ||
-        element.content
-      );
-      if (found) return found;
-    }
-
-    const fromCookie = cookieLogin();
-    if (fromCookie) return fromCookie;
-
-    for (const storage of [localStorage, sessionStorage]) {
-      try {
-        for (let index = 0; index < storage.length; index++) {
-          const key = storage.key(index) || '';
-          if (key === LOGIN_KEY) continue;
-          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
-          if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-          const raw = storage.getItem(key);
-          let found = normalizeLogin(raw);
-          if (!found) {
-            try { found = findLoginInObject(JSON.parse(raw)); } catch (_) {}
-          }
-          if (found) return found;
-        }
-      } catch (_) {}
-    }
-
-    return '';
-  }
-
   function currentLogin() {
-    const live = discoverLiveLogin();
-    return live ? persistLogin(live) : '';
+    return ACTIONS.resolveEmployeeLogin({ document, pageWindow: window }).login;
   }
 
   function refreshDetectedLogin() {
@@ -469,30 +366,6 @@
     }
   }
 
-  function assertValidate(data, id) {
-    if (!data || typeof data !== 'object') {
-      throw new RequestError('Unexpected validation response', { phase: 'validate' });
-    }
-    if (data.scannableId && clean(data.scannableId).toLowerCase() !== id.toLowerCase()) {
-      throw new RequestError('Validation returned a different container', { phase: 'validate' });
-    }
-  }
-
-  function assertSummary(data) {
-    if (!data || !Array.isArray(data.transferBindingSummaryList)) {
-      throw new RequestError('Unexpected binding-summary response', { phase: 'summary' });
-    }
-  }
-
-  function assertUnbind(data) {
-    if (!data || typeof data.hostName !== 'string' || !clean(data.hostName)) {
-      throw new RequestError('Unexpected unbind response — verify container', {
-        phase: 'unbind',
-        ambiguous: true
-      });
-    }
-  }
-
   function activateNext() {
     const item = nextQueued();
     if (!item) return null;
@@ -603,46 +476,38 @@
 
   async function processItem(item) {
     const login = currentLogin();
-    if (!login) throw new Error('Logged-in user could not be detected');
+    if (!login) throw new RequestError('Logged-in user could not be detected', { phase: 'identity', status: 0 });
     const started = performance.now();
+    const timeouts = {
+      validate: TIMEOUT_VALIDATE_MS,
+      summary: TIMEOUT_SUMMARY_MS,
+      unbind: TIMEOUT_UNBIND_MS
+    };
+    const messages = {
+      validate: `Validating ${item.id}`,
+      summary: `Checking bindings ${item.id}`,
+      unbind: `Unbinding ${item.id}`
+    };
 
-    state.phase = item.phase = 'validate';
-    state.message = `Validating ${item.id}`;
-    saveState();
-    render();
-    const validated = await postJson(
-      API_VALIDATE,
-      { warehouseId: WAREHOUSE_ID, scannableId: item.id },
-      TIMEOUT_VALIDATE_MS,
-      'validate'
-    );
-    assertValidate(validated.data, item.id);
+    await ACTIONS.runUnbind({
+      container: item.id,
+      login,
+      warehouseId: WAREHOUSE_ID,
+      endpoints: {
+        validate: API_VALIDATE,
+        summary: API_SUMMARY,
+        unbind: API_UNBIND
+      },
+      onPhase: phase => {
+        state.phase = item.phase = phase;
+        state.message = messages[phase] || phase;
+        saveState();
+        render();
+      },
+      request: ({ phase, url, body }) => postJson(url, body, timeouts[phase], phase)
+    });
 
-    state.phase = item.phase = 'summary';
-    state.message = `Checking bindings ${item.id}`;
-    saveState();
-    render();
-    const summary = await postJson(
-      API_SUMMARY,
-      { warehouseId: WAREHOUSE_ID, scannableId: item.id },
-      TIMEOUT_SUMMARY_MS,
-      'summary'
-    );
-    assertSummary(summary.data);
-
-    state.phase = item.phase = 'unbind';
-    state.message = `Unbinding ${item.id}`;
-    saveState();
-    render();
-    const unbound = await postJson(
-      API_UNBIND,
-      { sourceWarehouseId: WAREHOUSE_ID, scannableId: item.id, employeeLogin: login },
-      TIMEOUT_UNBIND_MS,
-      'unbind'
-    );
-    assertUnbind(unbound.data);
     clearSessionRecovery();
-
     item.status = 'done';
     item.phase = 'done';
     item.error = '';
@@ -1027,6 +892,7 @@
       'background:#fff', 'color:#111827', 'box-shadow:0 10px 30px #0005', 'font:12px Arial,sans-serif'
     ].join(';'));
     ui.panel.id = 'bwu2-unbind-queue';
+    ACTIONS.markUi(ui.panel);
 
     ui.mini = element('button', null, [
       'display:none', 'position:fixed', 'top:10px', 'right:10px', 'z-index:2147483647',
@@ -1036,6 +902,7 @@
     ].join(';'));
     ui.mini.type = 'button';
     ui.mini.setAttribute('aria-label', 'Open Unbind Queue');
+    ACTIONS.markUi(ui.mini);
     ui.miniRing = element('span', null,
       'box-sizing:border-box;width:17px;height:17px;border:3px solid #94a3b8;border-top-color:#475569;border-radius:50%'
     );
