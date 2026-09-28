@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.18
+// @version      0.0.19
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.18-REBUILD';
+  const VERSION = '0.0.19-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -730,6 +730,34 @@
   #sh-dock,#sh-lazy,#sh-queue{width:calc(100vw - 28px)}
 }
 
+/* v0.0.19 — non-modal RED/ASIDE sidecar */
+#sh-aside{
+  position:fixed;right:742px;bottom:58px;z-index:2147483645;
+  width:250px;max-height:360px;box-sizing:border-box;overflow:auto;
+  padding:8px;background:#fff;border:2px solid #991b1b;border-radius:5px;
+  box-shadow:0 3px 10px #0002;font:11px Arial,sans-serif;color:#7f1d1d
+}
+#sh-aside[hidden]{display:none!important}
+#sh-aside .sh-aside-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin:-8px -8px 7px;padding:7px 8px;background:#fff1f2;
+  border-bottom:1px solid #fecaca;font-weight:1000
+}
+#sh-aside .sh-aside-total{font-size:10px;color:#991b1b;white-space:nowrap}
+#sh-aside .sh-aside-list{display:grid;gap:6px}
+#sh-aside .sh-aside-card{
+  padding:6px 7px;border:1px solid #fecaca;border-left:5px solid #b91c1c;
+  border-radius:3px;background:#fff7f7
+}
+#sh-aside .sh-aside-code{font:1000 12px Consolas,monospace;color:#7f1d1d}
+#sh-aside .sh-aside-reason{margin-top:3px;font-weight:900;line-height:1.25;color:#991b1b}
+#sh-aside .sh-aside-qty{margin-top:4px;font-weight:1000;color:#111827}
+#sh-aside .sh-aside-note{
+  margin-top:7px;padding-top:6px;border-top:1px solid #fecaca;
+  font-size:10px;font-weight:800;color:#7f1d1d
+}
+@media(max-width:1100px){#sh-aside{right:14px;bottom:calc(58px + 330px);width:230px;max-height:220px}}
+
 `;
   document.documentElement.appendChild(style);
 
@@ -1176,7 +1204,10 @@
   function syncPreflightSource() {
     const source = validContainer(lSrc.value) ? clean(lSrc.value) : '';
     const key = source ? norm(source) : '';
-    if (key !== preflightLookup.sourceKey) resetPreflightLookups(source);
+    if (key !== preflightLookup.sourceKey) {
+      if (key && preflightLookup.sourceKey !== key) clearAsidePanel();
+      resetPreflightLookups(source);
+    }
     return source;
   }
 
@@ -1350,6 +1381,17 @@
   const pfYellow = $('[data-pf="yellow"]', lazyPanel);
   const pfRed = $('[data-pf="red"]', lazyPanel);
 
+  const asidePanel = document.createElement('div');
+  asidePanel.id = 'sh-aside';
+  asidePanel.hidden = true;
+  asidePanel.innerHTML =
+    '<div class="sh-aside-head"><span>ASIDE / NOT PROCESSING</span><span class="sh-aside-total"></span></div>' +
+    '<div class="sh-aside-list"></div>' +
+    '<div class="sh-aside-note">These units will be removed when RUN starts.</div>';
+  document.body.appendChild(asidePanel);
+  const asideList = $('.sh-aside-list', asidePanel);
+  const asideTotal = $('.sh-aside-total', asidePanel);
+
   lClear.checked = localStorage.getItem(CLEAR_SOURCE_KEY) === '1';
   lClear.addEventListener('change', () => localStorage.setItem(CLEAR_SOURCE_KEY, lClear.checked ? '1' : '0'));
 
@@ -1365,6 +1407,7 @@
     pendingOccurrences:new Map(),
     trackedCounts:new Map(),
     redPendingCounts:new Map(),
+    asideEntries:new Map(),
     dateCache:new Map(),
     dateQueue:[],
     dateBusy:false,
@@ -1374,6 +1417,46 @@
 
   function itemKey(code) {
     return clean(code).toUpperCase();
+  }
+
+  function clearAsidePanel() {
+    preflightState.asideEntries.clear();
+    renderAsidePanel();
+  }
+
+  function renderAsidePanel() {
+    if (!asidePanel) return;
+    const entries = [...preflightState.asideEntries.values()]
+      .filter(entry => entry.qty > 0)
+      .sort((a,b) => a.code.localeCompare(b.code));
+    const total = entries.reduce((sum,entry) => sum + entry.qty,0);
+
+    asidePanel.hidden = !entries.length;
+    if (!entries.length) {
+      asideList.innerHTML = '';
+      asideTotal.textContent = '';
+      return;
+    }
+
+    asideTotal.textContent = `${total} unit${total===1?'':'s'} affected`;
+    asideList.innerHTML = entries.map(entry =>
+      `<div class="sh-aside-card">` +
+        `<div class="sh-aside-code">${esc(entry.code)}</div>` +
+        `<div class="sh-aside-reason">${esc(entry.reason || 'NOT PROCESSING')}</div>` +
+        `<div class="sh-aside-qty">Qty: ${entry.qty}</div>` +
+      `</div>`
+    ).join('');
+  }
+
+  function addAsideEntry(code, reason, count=1) {
+    const key = itemKey(code);
+    if (!key) return;
+    const existing = preflightState.asideEntries.get(key) || {code:clean(code),reason:'',qty:0};
+    existing.code = clean(code) || existing.code;
+    existing.reason = clean(reason) || existing.reason || 'NOT PROCESSING';
+    existing.qty += Math.max(1,Number(count)||1);
+    preflightState.asideEntries.set(key,existing);
+    renderAsidePanel();
   }
 
   function resetPreflightWorkflowState() {
@@ -1500,6 +1583,7 @@
     if (result.kind === 'red') {
       preflightState.stats.red++;
       addRedPending(code);
+      addAsideEntry(code,result.reason);
       preflightState.last = {kind:'red',code,reason:result.reason};
       renderPreflight();
       return;
@@ -1993,6 +2077,7 @@
 
   function resetLazy(note='reset') {
     cancelLazyRun();
+    clearAsidePanel();
     resetPreflightLookups();
     clearMoveCorner('lazy');
     lazyProgressShape = '';
@@ -2249,13 +2334,6 @@
       (line.code && norm(line.code) === norm(lDest.value)) ||
       (line.code && norm(line.code) === norm(START_TRIGGER));
 
-    if (!specialLine) {
-      const removed = purgeKnownRedTextareaLines();
-      if (removed) {
-        lazy.note = `${removed} rejected barcode${removed===1?'':'s'} removed from queue`;
-        line = currentTextareaLine();
-      }
-    }
     const sameSrc = line.code && norm(line.code) === norm(lSrc.value);
     const sameDest = line.code && norm(line.code) === norm(lDest.value);
     const startTrigger = line.code && norm(line.code) === norm(START_TRIGGER);
@@ -3512,14 +3590,14 @@
     lazy.index = 0;
 
     if (!lazy.items.length) {
-      lazy.error = removedRed ? 'All scanned items were rejected by preflight.' : 'No item barcodes.';
-      lazy.note = removedRed ? `${removedRed} rejected barcode${removedRed===1?'':'s'} removed` : '';
+      lazy.error = removedRed ? 'All scanned items are ASIDE — nothing will be processed.' : 'No item barcodes.';
+      lazy.note = removedRed ? `${removedRed} ASIDE unit${removedRed===1?'':'s'} excluded from RUN` : '';
       renderLazy();
       return;
     }
 
     if (removedRed) {
-      lazy.note = `${removedRed} rejected barcode${removedRed===1?'':'s'} removed before Start`;
+      lazy.note = `${removedRed} ASIDE unit${removedRed===1?'':'s'} excluded — processing valid items only`;
       renderLazy();
     }
 
