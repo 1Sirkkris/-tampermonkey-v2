@@ -2,7 +2,7 @@
 // @name         TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @name:en      TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.9
+// @version      7.4.10
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,7 +19,7 @@
   if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2BinCheckOverlay = true;
 
-  const VERSION = '7.4.9';
+  const VERSION = '7.4.10';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('BIN', VERSION);
 
@@ -32,13 +32,9 @@
 
   const { clean } = globalThis.BWU2Fleet;
 
-  function usage(key, ms = 0, count = 1) {
-    window.dispatchEvent(new CustomEvent('fcr-usage:event', {
-      detail: JSON.stringify({ key: 'overlay.' + key, ms, count })
-    }));
-  }
-
-  function trace(type, data = {}) {
+  const usage = (key, ms = 0, count = 1) => globalThis.BWU2Fleet.usage('overlay', key, ms, count);
+  const trace = globalThis.BWU2Fleet.trace;
+) {
     try {
       if (typeof window.BWU2Trace === 'function') window.BWU2Trace(type, data);
       else window.postMessage({ __BWU2_TRACE__: true, type, data }, '*');
