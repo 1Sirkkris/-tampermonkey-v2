@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.14
+// @version      0.0.15
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      pandash.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // ==/UserScript==
@@ -15,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.14-REBUILD';
+  const VERSION = '0.0.15-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -50,6 +51,8 @@
   const API_CLOSE_CONTAINER = '/api/close-container';
   const API_SCAN_ITEM = '/api/scanitem';
   const API_MOVE_ITEMS = '/api/move-items';
+  const API_BOOTSTRAP = '/api/get-bootstrap-data';
+  const HAZMAT_MARKETPLACE = 'AU';
 
   const itemQty = item => Math.max(1, Number(item?.qty) || 1);
   const sumQty = items => items.reduce((sum, item) => sum + itemQty(item), 0);
@@ -62,6 +65,109 @@
   const esc = v => String(v ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  let warehouseIdPromise = null;
+  const hazmatRestrictionCache = new Map();
+  const hazmatEligibilityCache = new Map();
+  const hazmatEligibilityInFlight = new Map();
+
+  function gmJsonRequest(options) {
+    return new Promise((resolve,reject) => {
+      GM_xmlhttpRequest({
+        timeout:8000,
+        responseType:'json',
+        ...options,
+        onload:response => {
+          if (response.status >= 200 && response.status < 300) resolve(response.response);
+          else reject(new Error(`HTTP ${response.status || 0}`));
+        },
+        onerror:() => reject(new Error('NETWORK ERROR')),
+        ontimeout:() => reject(new Error('TIMEOUT'))
+      });
+    });
+  }
+
+  async function warehouseId() {
+    if (warehouseIdPromise) return warehouseIdPromise;
+    warehouseIdPromise = (async () => {
+      try {
+        const response = await fetch(`${API_BOOTSTRAP}?tool=${encodeURIComponent(TOOL)}`, {
+          method:'GET',
+          credentials:'same-origin'
+        });
+        if (response.ok) {
+          const payload = await response.json();
+          const info = payload?.warehouseInfo;
+          const candidate = clean(
+            (typeof info === 'string' ? info : '') ||
+            info?.warehouseId || info?.id || info?.warehouse || info?.fc || info?.code ||
+            payload?.warehouseId || ''
+          ).toUpperCase();
+          if (candidate) return candidate;
+        }
+      } catch {}
+
+      const text = clean(document.body?.innerText || '').toUpperCase();
+      return text.match(/\b[A-Z]{3}\d\b/)?.[0] || '';
+    })();
+    return warehouseIdPromise;
+  }
+
+  async function pandashHazmatEligibility(asinValue) {
+    const asin = clean(asinValue).toUpperCase();
+    const fc = await warehouseId();
+    if (!/^B[A-Z0-9]{9}$/.test(asin) || !fc) throw new Error('HAZMAT LOOKUP CONTEXT MISSING');
+
+    const key = `${fc}|${asin}`;
+    if (hazmatEligibilityCache.has(key)) return hazmatEligibilityCache.get(key);
+    if (hazmatEligibilityInFlight.has(key)) return hazmatEligibilityInFlight.get(key);
+
+    const work = (async () => {
+      let restriction = hazmatRestrictionCache.get(fc) || '';
+      if (!restriction) {
+        const bootstrap = await gmJsonRequest({
+          method:'GET',
+          url:`https://pandash.amazon.com/GridServlet?fc=${encodeURIComponent(fc)}`
+        });
+        restriction = clean(bootstrap?.restriction || 'default') || 'default';
+        hazmatRestrictionCache.set(fc,restriction);
+      }
+
+      const body =
+        `language=default&source=${encodeURIComponent(restriction)}-hazmat-FC` +
+        `&marketPlaces=${HAZMAT_MARKETPLACE}` +
+        `&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`;
+
+      const payload = await gmJsonRequest({
+        method:'POST',
+        url:'https://pandash.amazon.com/GridServlet',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        data:body
+      });
+
+      const row = Array.isArray(payload?.rows)
+        ? payload.rows.find(item => clean(item?.asin).toUpperCase() === asin)
+        : null;
+      if (!row) throw new Error('NO PANDASH RESULT');
+
+      const message = clean(row.message);
+      const result = {
+        asin,
+        level:Number(row.level || 0),
+        message,
+        allowed:/can be processed/i.test(message)
+      };
+      hazmatEligibilityCache.set(key,result);
+      return result;
+    })();
+
+    hazmatEligibilityInFlight.set(key,work);
+    try {
+      return await work;
+    } finally {
+      hazmatEligibilityInFlight.delete(key);
+    }
+  }
 
   function setTextIfChanged(el, value) {
     const text = String(value);
@@ -1060,7 +1166,21 @@
           preflightLookup.entries.get(entry.key) === entry
         ) {
           entry.response = payload;
-          entry.result = classifyPreflight(payload,entry.code);
+          const baseResult = classifyPreflight(payload,entry.code);
+          entry.result = await deepenHazmatPreflight(baseResult);
+
+          if (entry.result?.kind === 'retry') {
+            preflightState.last = {
+              kind:'red',
+              code:entry.code,
+              reason:entry.result.reason
+            };
+            renderPreflight();
+            entry.state = 'failed';
+            finishPreflightEntry(entry,null);
+            return;
+          }
+
           entry.state = 'done';
           finishPreflightEntry(entry,entry.result);
           onPreflightResolved(entry.code,entry.result);
@@ -1281,6 +1401,36 @@
     }
 
     return {kind:'green',reason:'GOOD TO GO',ctx};
+  }
+
+  async function deepenHazmatPreflight(result) {
+    const ctx = result?.ctx;
+    if (!ctx?.ok || ctx.hazmat !== true || result.kind === 'red') return result;
+
+    try {
+      const hazmat = await pandashHazmatEligibility(ctx.asin);
+      if (hazmat.allowed) {
+        return {
+          ...result,
+          reason:result.kind === 'yellow'
+            ? result.reason
+            : `HAZMAT L${hazmat.level} — OK TO PROCESS`,
+          hazmat
+        };
+      }
+      return {
+        kind:'red',
+        reason:`HAZMAT L${hazmat.level} — NOT PROCESSABLE`,
+        ctx,
+        hazmat
+      };
+    } catch (error) {
+      return {
+        kind:'retry',
+        reason:`HAZMAT CHECK FAILED — ${clean(error?.message || error || 'RETRY')}`,
+        ctx
+      };
+    }
   }
 
   function addRedPending(code,count=1) {
@@ -2430,21 +2580,14 @@
   }
 
   function scanStageIssue(ctx) {
-    if (ctx?.hazmat === true) {
-      return {
-        kind:'hazmat',
-        title:'HAZMAT — PUT ASIDE',
-        reason:'HAZMAT — DO NOT PROCESS IN THIS WORKFLOW'
-      };
-    }
-
     const permissionLevel = clean(ctx?.permissionLevel).toUpperCase();
     if (permissionLevel !== 'UNDER_REVIEW') return null;
 
+    const hazmat = ctx?.hazmat === true;
     return {
-      kind:'under-review',
-      title:'ASIN UNDER REVIEW — ITEM NOT MOVED',
-      reason:'ASIN UNDER REVIEW — RIVER REQUIRED'
+      kind:hazmat ? 'hazmat' : 'under-review',
+      title:hazmat ? 'HAZMAT / UNDER REVIEW — PUT ASIDE' : 'ASIN UNDER REVIEW — ITEM NOT MOVED',
+      reason:hazmat ? 'HAZMAT / UNDER REVIEW — RIVER REQUIRED' : 'ASIN UNDER REVIEW — RIVER REQUIRED'
     };
   }
 
