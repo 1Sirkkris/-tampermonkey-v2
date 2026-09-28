@@ -9,7 +9,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.6.2
+// @version      5.6.3
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -23,7 +23,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.2';
+  const VERSION = '5.6.3';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -84,12 +84,7 @@
   const coreRequest = (type, payload = {}, timeout = 17000) =>
     coreClient.request(type, payload, { timeout });
 
-  function usage(key, ms = 0, count = 1) {
-    window.dispatchEvent(new CustomEvent('fcr-usage:event', {
-      detail: JSON.stringify({ key: 'stow.' + key, ms, count })
-    }));
-  }
-
+  const usage = (key, ms = 0, count = 1) => globalThis.BWU2Fleet.usage('stow', key, ms, count);
   function observe(type, data = {}) {
     try {
       window.dispatchEvent(new CustomEvent('bwu2-observability:event', {
