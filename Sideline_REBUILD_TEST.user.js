@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.9
+// @version      0.0.10
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.9-REBUILD';
+  const VERSION = '0.0.10-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1216,6 +1216,7 @@
     dateQueue:[],
     dateBusy:false,
     workflowDate:null,
+    workflowExpiryByKey:new Map(),
     history:loadExpiryHistory(),
     stats:{green:0,yellow:0,red:0},
     last:{kind:'idle',code:'',reason:'Scan an item'}
@@ -1234,6 +1235,7 @@
     preflightState.dateQueue.length = 0;
     preflightState.dateBusy = false;
     preflightState.workflowDate = null;
+    preflightState.workflowExpiryByKey.clear();
     preflightState.stats = {green:0,yellow:0,red:0};
     preflightState.last = {kind:'idle',code:'',reason:'Scan an item'};
     renderPreflight();
@@ -1267,6 +1269,26 @@
       preflightState.history = Object.fromEntries(entries.slice(0,800));
     }
     try { localStorage.setItem(EXPIRY_HISTORY_KEY,JSON.stringify(preflightState.history)); } catch {}
+  }
+
+  function getWorkflowExpiry(code,ctx) {
+    let newest = null;
+    for (const key of expiryHistoryKeys(code,ctx)) {
+      const record = preflightState.workflowExpiryByKey.get(key);
+      if (!record) continue;
+      if (!newest || Number(record.confirmedAt||0) > Number(newest.confirmedAt||0)) newest = record;
+    }
+    return newest;
+  }
+
+  function saveWorkflowExpiry(code,ctx,choice) {
+    if (!choice?.enteredMs) return;
+    const record = {
+      enteredMs:Number(choice.enteredMs),
+      finalExpirationMs:Number(choice.finalExpirationMs || choice.enteredMs),
+      confirmedAt:Date.now()
+    };
+    for (const key of expiryHistoryKeys(code,ctx)) preflightState.workflowExpiryByKey.set(key,record);
   }
 
   function dateChoiceForCtx(ctx,enteredMs) {
@@ -1437,10 +1459,16 @@
 
         const remembered = getRememberedExpiry(next.code,next.ctx);
         const workflow = preflightState.workflowDate;
+        const confirmedThisWorkflow = getWorkflowExpiry(next.code,next.ctx);
         const suggestedMs = workflow?.enteredMs || remembered?.enteredMs || 0;
-        let chosen = null;
+        let chosen = confirmedThisWorkflow
+          ? {
+              enteredMs:Number(confirmedThisWorkflow.enteredMs),
+              finalExpirationMs:Number(confirmedThisWorkflow.finalExpirationMs)
+            }
+          : null;
 
-        if (suggestedMs) {
+        if (!chosen && suggestedMs) {
           const same = await showReuseDatePrompt(
             item,
             suggestedMs,
@@ -1453,8 +1481,12 @@
         if (!chosen) chosen = await showApiDatePicker(item);
         if (!chosen) continue;
 
-        // Remember what the user physically confirmed, even if this item must be put aside.
-        saveRememberedExpiry(next.code,next.ctx,chosen.enteredMs);
+        if (!confirmedThisWorkflow) {
+          // Remember what the user physically confirmed. Any matching ASIN/FNSKU/barcode
+          // in this same workflow reuses that exact answer without prompting again.
+          saveRememberedExpiry(next.code,next.ctx,chosen.enteredMs);
+          saveWorkflowExpiry(next.code,next.ctx,chosen);
+        }
 
         if (!preflightState.workflowDate) preflightState.workflowDate = chosen;
 
