@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.80
+// @version      0.1.81
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.80';
+  const VERSION = '0.1.81';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FC-LITE', VERSION);
 
@@ -80,8 +80,7 @@
   let liteContainerText;
   let systemSussyBadge;
 
-  const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  const upper = value => clean(value).toUpperCase();
+  const { clean, upper } = globalThis.BWU2Fleet;
   const isContainer = value => /^(?:TSX|CSX)[A-Z0-9]+$/i.test(clean(value));
 
   function navigateMode(url) {
@@ -878,12 +877,7 @@
     }
   }
 
-  async function runWithConcurrency(items, limit, worker) {
-    let index = 0;
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (index < items.length) await worker(items[index++]);
-    }));
-  }
+  const { runWithConcurrency } = globalThis.BWU2Fleet;
 
   async function annotateSystemHazmat(failuresOnly = false) {
     if (!systemTbody) return;
