@@ -2,7 +2,7 @@
 // @name         MAIN Screenshot Mode
 // @name:en      MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.1.4
+// @version      0.2.0
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
 // @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -47,8 +47,9 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.1.4';
+  const VERSION = '0.2.0';
   const MODE_ATTR = 'data-bwu2-screenshot-mode';
+  const UI_MARKER = 'data-bwu2-ui';
   const LEGACY_ATTR = 'data-bwu2-screenshot-owned';
   const STYLE_ID = 'bwu2-screenshot-mode-style';
 
@@ -69,130 +70,26 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
   }
 
+  // New UI uses one shared marker. The compact legacy groups keep older
+  // fleet scripts hidden until they naturally migrate to data-bwu2-ui.
   const UI_SELECTORS = [
+    `[${UI_MARKER}]`,
     '#bwu2-runtime-version-stamp',
     `[${LEGACY_ATTR}]`,
-
-    // Prefix catch-alls for script-owned UI ids. This is intentionally broader
-    // than the individual selectors below so new panels/toasts from the same
-    // fleet stay invisible without needing another screenshot-mode update.
-    '[id^="fcrm-"]',
-    '[id^="fcratc-"]',
-    '[id^="vm-"]',
-    '[id^="pLevel"]',
-    '[id^="p-level-"]',
-    '[id^="sh-"]',
-    '[id^="aftm-"]',
-    '[id^="fnsku-direct-"]',
-    '[id^="moveapp-"]',
-    '[id^="bwu2-"]',
-    '[id^="aavf-"]',
-    '[id^="aft-super-"]',
-    '[id^="aft-ui-state-logger-"]',
-
-    // FCResearch Master / FC-Lite / helpers.
-    '[data-fcr-master-ui]',
-    '[data-fcr-tool-ui="1"]',
-    '#fcratc-root',
-    '#fcratc-hover-card',
-    '#vm-safe-gear',
-    '#vm-safe-settings',
-    '#vm-safe-toast',
-    '#vm-safe-hover',
-    '.vm-drop-inline',
-    '#vm-fcsku-conflict-summary',
-    '#vm-suspicious-dims-summary',
-    '#p-level-overlay-start-btn',
-    '#pLevelOverlay',
-
-    // Sideline / AFT Edit-SKU-Move.
-    '.sh-panel',
-    '#sh-dock',
-    '#sh-move-corner',
-    '#sh-scrub-warning',
-    '#sh-invalid-toast',
-    '#sh-damage-alert',
-    '#sh-lazy-running-indicator',
-    '#sh-og-expiry',
-    '.aftm',
-
-    // FNSKU mapping / MoveContainer / Observability.
-    '#fnsku-direct-wrap',
-    '#moveapp-dz-selector',
-    '#bwu2-observability-inline',
-
-    // SIM ticket helper.
-    '.sim-md-toolbar',
-    '.sim-image-actions',
-
-    // Calm Code / Unbind / RIVER.
-    '#toolbox',
-    '#bwu2-unbind-queue',
-    'button[aria-label="Open Unbind Queue"]',
-    '#bwu2-river-assistant',
-    '.bwu2-river-capture-indicator',
-
-    // Amazon AU variation helper.
-    '#aavf-context-menu',
-    '#aavf-panel',
-    '#aavf-toast',
-
-    // Temporary diagnostics still present in the repo.
-    '#aft-super-test',
-    '#aft-ui-state-logger-panel',
-
-    // FC-Lite can enhance native FCResearch DOM outside #fcratc-root.
-    // These are elements FC-Lite itself creates; native rows/tables that merely
-    // receive an fcrlite-* class are left in place and lose their script CSS below.
-    '.fcrlite-native-tools',
-    '.fcrlite-native-info',
-    '.fcrlite-history-tools',
-    '.fcrlite-inventory-search',
-    '.fcrlite-inventory-summary',
-    '.fcrlite-inventory-sticky-shell',
-    '.fcrlite-id-map',
-    '.fcrlite-thumb-head',
-    '.fcrlite-qty-head',
-    '.fcrlite-thumb-cell',
-    '.fcrlite-asin-total'
+    ':is([id^="fcrm-"],[id^="fcratc-"],[id^="vm-"],[id^="pLevel"],[id^="p-level-"],[id^="sh-"],[id^="aftm-"],[id^="fnsku-direct-"],[id^="moveapp-"],[id^="bwu2-"],[id^="aavf-"],[id^="aft-super-"],[id^="aft-ui-state-logger-"])',
+    ':is([data-fcr-master-ui],[data-fcr-tool-ui="1"],.vm-drop-inline,.sh-panel,.aftm,.sim-md-toolbar,.sim-image-actions,#toolbox,.bwu2-river-capture-indicator)',
+    ':is(.fcrlite-native-tools,.fcrlite-native-info,.fcrlite-history-tools,.fcrlite-inventory-search,.fcrlite-inventory-summary,.fcrlite-inventory-sticky-shell,.fcrlite-id-map,.fcrlite-thumb-head,.fcrlite-qty-head,.fcrlite-thumb-cell,.fcrlite-asin-total)'
   ];
 
-  const SCRIPT_STYLE_IDS = new Set([
-    'fcrm-clean-style',
-    'fcrm-section-load-visibility',
-    'vm-safe-trim-css',
-    'fcratc-style',
-    'p-level-overlay-style',
-    'sim-md-style',
-    'aftm-style',
-    'bwu2-observability-style',
-    'aavf-styles',
-    'aft-super-test-style'
-  ]);
-
-  const SCRIPT_STYLE_SIGNATURES = [
-    '#fnsku-direct-wrap',
-    '.sh-panel',
-    '#body > #toolbox',
-    '#bwu2-river-assistant',
-    'fcrm-prop-true',
-    '#fcratc-root',
-    '#vm-safe-gear',
-    '#pLevelOverlay',
-    '.sim-md-toolbar',
-    '.aftm{',
-    '#bwu2-observability-inline',
-    '#aavf-context-menu',
-    '#aft-super-test'
-  ];
+  const SCRIPT_STYLE_ID_RE = /^(?:fcrm-|fcratc-|vm-|pLevel|p-level-|sim-md-|aftm-|bwu2-|aavf-|aft-super-|moveapp-|fnsku-direct-|sh-)/;
+  const SCRIPT_STYLE_TEXT_RE = /(?:data-bwu2-ui|#(?:fcrm-|fcratc-|vm-|pLevel|p-level-|sh-|aftm-|fnsku-direct-|moveapp-|bwu2-|aavf-|aft-super-)|\.(?:sh-panel|aftm|sim-md-toolbar|vm-drop-inline|fcrlite-)|#body\s*>\s*#toolbox|fcrm-prop-true)/;
 
   const disabledStyleState = new Map();
 
   function isScriptStyle(node) {
     if (!(node instanceof HTMLStyleElement) || node.id === STYLE_ID) return false;
-    if (SCRIPT_STYLE_IDS.has(node.id)) return true;
-    const text = String(node.textContent || '');
-    return SCRIPT_STYLE_SIGNATURES.some(signature => text.includes(signature));
+    if (SCRIPT_STYLE_ID_RE.test(node.id || '')) return true;
+    return SCRIPT_STYLE_TEXT_RE.test(String(node.textContent || ''));
   }
 
   function disableScriptStyle(node) {
