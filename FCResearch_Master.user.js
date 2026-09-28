@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.71
+// @version      0.1.72
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -24,7 +24,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.71';
+  const VERSION = '0.1.72';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -317,13 +317,7 @@
   const coreRequest = (type, payload = {}, timeout = 17000) =>
     coreClient.request(type, payload, { timeout });
 
-  function usage(key, ms = 0, count = 1) {
-    window.dispatchEvent(new CustomEvent('fcr-usage:event', {
-      detail: JSON.stringify({ key: 'master.' + key, ms, count })
-    }));
-  }
-
-
+  const usage = (key, ms = 0, count = 1) => globalThis.BWU2Fleet.usage('master', key, ms, count);
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const debounce = (fn, ms) => {
     let timer = 0;
