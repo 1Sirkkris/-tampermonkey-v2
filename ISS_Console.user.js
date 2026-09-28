@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.33
+// @version      0.1.34
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.33';
+  const VERSION = '0.1.34';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -114,7 +114,7 @@
   let activePanel = storeGet('activePanel', 'edit');
   let editMode = ['each','sku'].includes(storeGet('editMode', 'sku')) ? storeGet('editMode', 'sku') : 'sku';
   let moveMode = ['all','each','qty'].includes(storeGet('moveMode', 'all')) ? storeGet('moveMode', 'all') : 'all';
-  let sidelineMode = ['scrubber','queue','lazy','live'].includes(storeGet('sidelineMode', 'lazy'))
+  let sidelineMode = ['queue','lazy'].includes(storeGet('sidelineMode', 'lazy'))
     ? storeGet('sidelineMode', 'lazy')
     : 'lazy';
   let sidelineRunBusy = false;
@@ -848,7 +848,7 @@
       '    <section class="iss-panel" data-panel="sideline" data-active="' + (activePanel === 'sideline' ? '1' : '0') + '">',
       '      <div class="iss-panel-head"><div><strong class="iss-panel-title">SIDELINE</strong><span class="iss-panel-subtitle">Container workflow</span></div><span class="iss-engine" data-side-engine>' + esc(sidelineMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
-      '        <div class="iss-segment iss-segment-side" data-side-modes><button type="button" data-side-mode="scrubber">SCRUBBER</button><button type="button" data-side-mode="queue">QUEUE</button><button type="button" data-side-mode="lazy">LAZY</button><button type="button" data-side-mode="live">LIVE</button></div>',
+      '        <div class="iss-segment iss-segment-side" data-side-modes><button type="button" data-side-mode="queue">QUEUE</button><button type="button" data-side-mode="lazy">LAZY</button></div>',
       '        <label class="iss-field"><span data-side-source-label>SOURCE</span><input data-side-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field"><span>DESTINATION</span><input data-side-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
@@ -1116,32 +1116,28 @@
     const lazyMetrics = $('[data-side-lazy-metrics]');
 
     if (source) source.disabled = sidelineMode === 'queue';
-    if (dest) dest.disabled = sidelineMode === 'queue' || sidelineMode === 'scrubber';
-    if (items) items.disabled = sidelineMode === 'scrubber';
+    if (dest) dest.disabled = sidelineMode === 'queue';
+    if (items) items.disabled = false;
 
-    if (sourceLabel) sourceLabel.textContent = sidelineMode === 'scrubber' ? 'TOTE' : 'SOURCE';
+    if (sourceLabel) sourceLabel.textContent = 'SOURCE';
     if (itemsLabel) itemsLabel.textContent = sidelineMode === 'queue' ? 'CONTAINERS' : 'ITEM BARCODES';
-    if (clearWrap) clearWrap.dataset.show = ['lazy','live'].includes(sidelineMode) ? '1' : '0';
+    if (clearWrap) clearWrap.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
     if (clearSourceButton) clearSourceButton.hidden = sidelineMode !== 'lazy';
     if (lazyDelayButton) lazyDelayButton.hidden = sidelineMode !== 'lazy';
-    if (liveDelayButton) liveDelayButton.hidden = sidelineMode !== 'live';
+    if (liveDelayButton) liveDelayButton.hidden = true;
     if (lazyMetrics) lazyMetrics.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
     if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
     paintClearSourceToggle();
 
     if (run) {
-      run.disabled = sidelineMode === 'scrubber';
-      run.textContent =
-        sidelineMode === 'queue' ? 'RUN QUEUE' :
-        sidelineMode === 'lazy' ? 'RUN LAZY' :
-        sidelineMode === 'live' ? 'ARM LIVE' :
-        'SCAN TOTE';
+      run.disabled = false;
+      run.textContent = sidelineMode === 'queue' ? 'RUN QUEUE' : 'RUN LAZY';
     }
     if (save) storeSet('sidelineMode', sidelineMode);
   }
 
   async function switchSidelineMode(mode) {
-    if (!['scrubber','queue','lazy','live'].includes(mode)) return;
+    if (!['queue','lazy'].includes(mode)) return;
     if (sidelineMode === mode) {
       syncSidelineModeUi();
       return;
