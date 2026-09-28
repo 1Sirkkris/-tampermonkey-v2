@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.34
+// @version      0.1.35
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.34';
+  const VERSION = '0.1.35';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -100,10 +100,10 @@
       restartPromise: null
     },
     sideline: {
-      origin: location.origin,
+      origin: SIDELINE_ORIGIN,
       url: SIDELINE_WORKER_URL,
       frame: null,
-      local: true,
+      local: false,
       ready: false,
       version: '',
       pending: new Map()
@@ -431,23 +431,6 @@
     };
   }
 
-  function lazyMetricsFromItems(items = []) {
-    const rows = Array.isArray(items) ? items : [];
-    let total = 0;
-    let moved = 0;
-    let remaining = 0;
-
-    for (const item of rows) {
-      const qty = Math.max(1, Number(item?.qty) || 1);
-      const status = upper(item?.status || '');
-      total += qty;
-      if (status === 'MOVED') moved += qty;
-      if (!['MOVED','FAILED','INVALID','SKIPPED'].includes(status)) remaining += qty;
-    }
-
-    return { total, unique: rows.length, moved, remaining };
-  }
-
   function paintLazyMetrics(metrics = {}) {
     const host = $('[data-side-lazy-metrics]');
     if (!host) return;
@@ -538,7 +521,7 @@
     if (!['edit','move','sideline'].includes(area)) return;
 
     const attention = area === 'sideline' ? String(message.attention || '') : '';
-    const needsUser = ['rescan-destination','live-destination'].includes(attention);
+    const needsUser = attention === 'rescan-destination';
     const preserveLazyCompletion =
       area === 'sideline' &&
       sidelineMode === 'lazy' &&
@@ -575,11 +558,9 @@
       const panel = $('[data-panel="sideline"]');
       const alert = $('[data-side-alert]');
       const alertText = $('[data-side-alert-text]');
-      const liveSkip = $('[data-side-live-skip]');
       const items = $('[data-side-items]');
       if (panel) panel.dataset.sideAttention = attention;
-      if (alert) alert.dataset.show = ['rescan-destination','live-destination'].includes(attention) ? '1' : '0';
-      if (liveSkip) liveSkip.hidden = attention !== 'live-destination';
+      if (alert) alert.dataset.show = attention === 'rescan-destination' ? '1' : '0';
 
       if (attention === 'rescan-destination') {
         const dest = clean($('[data-side-dest]')?.value);
@@ -592,21 +573,6 @@
       } else if (attention === 'predicant-recovery') {
         setPanelLoading('sideline', true, 'Destination confirmed • emptying destination…');
         panelStatus('sideline', message.message || 'Destination confirmed • emptying destination…', 'working');
-      } else if (attention === 'live-destination') {
-        const issue = message.issue || {};
-        const destInput = $('[data-side-dest]');
-        setPanelLoading('sideline', false);
-        if (alertText) {
-          const identity = [clean(issue.asin), clean(issue.fnsku)].filter(Boolean).join(' / ');
-          alertText.textContent = 'SCAN A NEW DESTINATION' +
-            (identity ? ' • ' + identity : '') +
-            (clean(issue.reason) ? ' • ' + clean(issue.reason) : '');
-        }
-        if (previousAttention !== attention) {
-          destInput?.focus();
-          destInput?.select?.();
-          destInput?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
-        }
       } else if (previousAttention === 'predicant-recovery' && sidelineRunBusy) {
         setPanelLoading('sideline', false);
         setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
@@ -616,20 +582,7 @@
 
       if (message.mode === 'lazy' && Array.isArray(message.items)) {
         renderSidelineItems(message.items, false);
-        paintLazyMetrics(lazyMetricsFromItems(message.items));
-      } else if (message.mode === 'live') {
-        if (message.failure) {
-          renderSidelineItems([{
-            code:message.failure.scan || '',
-            qty:message.failure.qty || 1,
-            status:'FAILED',
-            asin:message.failure.asin || '',
-            fnsku:message.failure.fnsku || '',
-            issue:message.failure.reason || message.failure.title || 'NOT MOVED'
-          }], false);
-        } else if (!message.issue) {
-          renderSidelineItems([], false);
-        }
+        if (message.metrics && typeof message.metrics === 'object') paintLazyMetrics(message.metrics);
       }
 
       const meta = $('[data-progress="sideline"]');
@@ -855,9 +808,9 @@
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
       '        <div class="iss-side-metrics" data-side-lazy-metrics><div class="iss-side-metric"><span>TOTAL UNITS</span><b data-side-metric="total">0</b></div><div class="iss-side-metric"><span>UNIQUE ITEMS</span><b data-side-metric="unique">0</b></div><div class="iss-side-metric"><span>MOVED</span><b data-side-metric="moved">0</b></div><div class="iss-side-metric"><span>REMAINING</span><b data-side-metric="remaining">0</b></div></div>',
-      '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span><button type="button" class="iss-alert-action" data-side-live-skip hidden>SKIP ITEM</button></div>',
+      '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
       '        <div class="iss-side-items" data-side-items-state></div>',
-      '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><button type="button" class="iss-toggle-button" data-live-delay-toggle>DELAY 5–11s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden><input type="checkbox" data-live-delay hidden></div>',
+      '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
       '      </div>',
@@ -1091,12 +1044,6 @@
       delayButton.textContent = 'DELAY 2–8s: ' + (delayBox.checked ? 'ON' : 'OFF');
     }
 
-    const liveDelayBox = $('[data-live-delay]');
-    const liveDelayButton = $('[data-live-delay-toggle]');
-    if (liveDelayBox && liveDelayButton) {
-      liveDelayButton.dataset.active = liveDelayBox.checked ? '1' : '0';
-      liveDelayButton.textContent = 'DELAY 5–11s: ' + (liveDelayBox.checked ? 'ON' : 'OFF');
-    }
   }
 
   function syncSidelineModeUi(save = true) {
@@ -1112,7 +1059,6 @@
     const clearWrap = $('[data-clear-source-wrap]');
     const clearSourceButton = $('[data-clear-source-toggle]');
     const lazyDelayButton = $('[data-lazy-delay-toggle]');
-    const liveDelayButton = $('[data-live-delay-toggle]');
     const lazyMetrics = $('[data-side-lazy-metrics]');
 
     if (source) source.disabled = sidelineMode === 'queue';
@@ -1124,7 +1070,6 @@
     if (clearWrap) clearWrap.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
     if (clearSourceButton) clearSourceButton.hidden = sidelineMode !== 'lazy';
     if (lazyDelayButton) lazyDelayButton.hidden = sidelineMode !== 'lazy';
-    if (liveDelayButton) liveDelayButton.hidden = true;
     if (lazyMetrics) lazyMetrics.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
     if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
     paintClearSourceToggle();
@@ -1275,40 +1220,6 @@
     }
   }
 
-  async function configureLiveFromFields() {
-    const source = clean($('[data-side-source]')?.value);
-    const dest = clean($('[data-side-dest]')?.value);
-    if (!validContainer(source)) throw new Error('Invalid source container');
-    if (!validContainer(dest)) throw new Error('Invalid destination container');
-    if (upper(source) === upper(dest)) throw new Error('Source and destination cannot match');
-
-    setPanelLoading('sideline', true, 'Arming LIVE…');
-    panelStatus('sideline', 'Validating Live source/destination…', 'working');
-    try {
-      await rpc('sideline', 'live.configure', { source, dest, delayEnabled:!!$('[data-live-delay]')?.checked }, 45000);
-      panelStatus('sideline', 'LIVE ready • scan items', 'ok');
-      $('[data-side-items]')?.focus();
-    } finally {
-      setPanelLoading('sideline', false);
-    }
-  }
-
-  async function recoverLiveDestinationFromField() {
-    const dest = clean($('[data-side-dest]')?.value);
-    if (!validContainer(dest)) throw new Error('Invalid destination container');
-
-    setActivePanel('sideline');
-    setPanelLoading('sideline', true, 'Retrying destination…', { lock:false });
-    panelStatus('sideline', 'Retrying blocked Live item…', 'working');
-    try {
-      await rpc('sideline', 'live.destination', { dest }, 30000);
-      panelStatus('sideline', 'LIVE destination accepted • retrying item', 'ok');
-      $('[data-side-items]')?.focus();
-    } finally {
-      setPanelLoading('sideline', false);
-    }
-  }
-
   async function runSideline() {
     const source = clean($('[data-side-source]')?.value);
     const dest = clean($('[data-side-dest]')?.value);
@@ -1318,12 +1229,6 @@
       : collectLines(itemText);
 
     setActivePanel('sideline');
-
-    if (sidelineMode === 'live') {
-      try { await configureLiveFromFields(); }
-      catch (error) { panelStatus('sideline', error.message, 'error'); }
-      return;
-    }
 
     if (sidelineMode === 'queue') {
       if (!clean(itemText)) return panelStatus('sideline', 'Paste/scan containers into CONTAINERS', 'error');
@@ -1378,12 +1283,12 @@
         sidelineItemsSignature = '';
         if (failures.length) {
           sidelineCompletionStatus = '';
-          paintLazyMetrics(lazyMetricsFromItems(result.items || failures));
+          if (result.metrics) paintLazyMetrics(result.metrics);
           renderSidelineItems(failures, true);
           panelStatus('sideline', 'INCOMPLETE • ' + movedUnits + '/' + expectedUnits + ' moved • ' + (result.failed || failures.length) + ' NOT MOVED', 'error');
         } else if (!fullyMoved) {
           sidelineCompletionStatus = '';
-          paintLazyMetrics(lazyMetricsFromItems(result.items || []));
+          if (result.metrics) paintLazyMetrics(result.metrics);
           renderSidelineItems(result.items || [], true);
           panelStatus('sideline', 'INCOMPLETE • ' + movedUnits + '/' + expectedUnits + ' moved — VERIFY BEFORE RETRY', 'error');
         } else {
@@ -1399,38 +1304,6 @@
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);
       }
-    }
-  }
-
-  async function scrubScan(code) {
-    const value = clean(code);
-    if (!validContainer(value)) return panelStatus('sideline', 'Tote must start with tsX/csX', 'error');
-    try {
-      await rpc('sideline', 'scrub.scan', { item: value }, 15000);
-      panelStatus('sideline', value + ' queued for scrub', 'working');
-      const input = $('[data-side-source]');
-      if (input) {
-        input.value = '';
-        input.focus();
-      }
-    } catch (error) {
-      panelStatus('sideline', error.message, 'error');
-    }
-  }
-
-  async function liveItemScan(code) {
-    const value = clean(code);
-    if (!value) return;
-    try {
-      await rpc('sideline', 'live.item', { item: value }, 15000);
-      panelStatus('sideline', value + ' queued', 'working');
-      const items = $('[data-side-items]');
-      if (items) {
-        items.value = '';
-        items.focus();
-      }
-    } catch (error) {
-      panelStatus('sideline', error.message, 'error');
     }
   }
 
@@ -1543,13 +1416,6 @@
 
   function textareaScannerHandler(event, area) {
     if (event.key !== 'Enter' || event.shiftKey) return;
-    if (area === 'sideline' && sidelineMode === 'live') {
-      event.preventDefault();
-      const value = clean(event.currentTarget.value);
-      if (value) liveItemScan(value);
-      return;
-    }
-
     const el = event.currentTarget;
     if (area === 'move') {
       const line = currentTextareaLine(el);
@@ -1666,10 +1532,6 @@
       event.preventDefault();
       const source = requireContainerField('sideline', event.currentTarget, 'SOURCE');
       if (!source) return;
-      if (sidelineMode === 'scrubber') {
-        scrubScan(source);
-        return;
-      }
       $('[data-side-dest]')?.focus();
       $('[data-side-dest]')?.select();
     });
@@ -1677,15 +1539,6 @@
       if (event.key !== 'Enter') return;
       event.preventDefault();
       if (!requireContainerField('sideline', event.currentTarget, 'DESTINATION')) return;
-      if (sidelineMode === 'live') {
-        try {
-          if (sidelineAttention === 'live-destination') await recoverLiveDestinationFromField();
-          else await configureLiveFromFields();
-        } catch (error) {
-          panelStatus('sideline', error.message, 'error');
-        }
-        return;
-      }
       $('[data-side-items]')?.focus();
     });
     $('[data-side-items]')?.addEventListener('keydown', event => textareaScannerHandler(event, 'sideline'));
@@ -1703,7 +1556,6 @@
     $('[data-move-qty]').value = storeGet('moveQty', '');
     $('[data-clear-source]').checked = storeGet('sideClearSource', '0') === '1';
     $('[data-lazy-delay]').checked = storeGet('sideLazyDelay', '1') !== '0';
-    $('[data-live-delay]').checked = storeGet('sideLiveDelay', '1') !== '0';
 
     $('[data-move-qty]').addEventListener('input', event => storeSet('moveQty', event.target.value));
     $('[data-clear-source]').addEventListener('change', event => {
@@ -1726,26 +1578,6 @@
       box.checked = !box.checked;
       box.dispatchEvent(new Event('change', { bubbles:true }));
     });
-    $('[data-live-delay]').addEventListener('change', event => {
-      storeSet('sideLiveDelay', event.target.checked ? '1' : '0');
-      paintClearSourceToggle();
-      if (sidelineMode === 'live' && workers.sideline.ready) {
-        rpc('sideline', 'live.delay', { enabled:event.target.checked }, 10000)
-          .catch(error => panelStatus('sideline', error.message, 'error'));
-      }
-    });
-    $('[data-live-delay-toggle]')?.addEventListener('click', () => {
-      const box = $('[data-live-delay]');
-      if (!box) return;
-      box.checked = !box.checked;
-      box.dispatchEvent(new Event('change', { bubbles:true }));
-    });
-    $('[data-side-live-skip]')?.addEventListener('click', () => {
-      rpc('sideline', 'live.skip', {}, 15000)
-        .then(() => panelStatus('sideline', 'Item skipped • Live continuing', 'working'))
-        .catch(error => panelStatus('sideline', error.message, 'error'));
-    });
-
     for (const el of document.querySelectorAll('[data-side-source],[data-side-dest],[data-side-items]')) {
       el.addEventListener('input', () => {
         if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
