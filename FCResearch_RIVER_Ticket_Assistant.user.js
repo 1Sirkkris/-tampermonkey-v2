@@ -2,7 +2,7 @@
 // @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @name:en      TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.15
+// @version      0.3.16
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -23,7 +23,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.15';
+  const VERSION = '0.3.16';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -39,7 +39,7 @@
   const RIVER_WORKFLOW_ID = '0dbb253e-c43a-4a8b-a316-e32b8ab9be21'; // Australia
   const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
 
-  const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const { clean } = globalThis.BWU2Fleet;
   const norm = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const code = value => clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
   const visible = element => !!element && element.isConnected && (() => {
