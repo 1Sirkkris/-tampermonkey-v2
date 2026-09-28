@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        TEST v0.1.81 FC-Lite — Accessible MADCAT Green
+// @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.81
+// @version      0.1.80
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -11,6 +11,7 @@
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FC_Lite.user.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Fleet_Core.lib.js
 // ==/UserScript==
 
 (() => {
@@ -36,23 +37,8 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.81';
-  function registerRuntimeVersion(label, version) {
-    const mount = () => {
-      const root = document.body || document.documentElement; if (!root) return;
-      let host = document.getElementById('bwu2-runtime-version-stamp');
-      if (!host) {
-        host = document.createElement('div'); host.id = 'bwu2-runtime-version-stamp'; host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)'; root.appendChild(host);
-      }
-      let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
-      if (!item) { item = document.createElement('span'); item.dataset.bwu2RuntimeKey = label; host.appendChild(item); }
-      item.textContent = `${label} · v${version}`;
-      [...host.children].sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || ''))).forEach(node => host.appendChild(node));
-    };
-    mount();
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true });
-  }
+  const VERSION = '0.1.80';
+  const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FC-LITE', VERSION);
 
   const MEASUREMENT_BRIDGE_SITE = 'https://jp.item-measurement.aft.a2z.com/item';
@@ -197,45 +183,9 @@
     loadContainer(wanted);
   }
 
-  const CORE_REQUEST_EVENT = 'fcr-data-core:request';
-  const CORE_RESPONSE_EVENT = 'fcr-data-core:response';
-  const CORE_PROGRESS_EVENT = 'fcr-data-core:progress';
-  const CORE_CANCEL_EVENT = 'fcr-data-core:cancel';
-  const CORE_TIMEOUT_MS = 17000;
-  const corePending = new Map();
-
-  window.addEventListener(CORE_RESPONSE_EVENT, event => {
-    let message;
-    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
-    const pending = corePending.get(message?.id);
-    if (!pending) return;
-    corePending.delete(message.id);
-    clearTimeout(pending.timer);
-    if (message.ok) pending.resolve(message.data);
-    else pending.reject(new Error(message.error || 'FCR Data Core request failed'));
-  });
-
-  window.addEventListener(CORE_PROGRESS_EVENT, event => {
-    let message;
-    try { message = JSON.parse(String(event.detail || '')); } catch { return; }
-    const pending = corePending.get(message?.id);
-    if (!pending?.onProgress) return;
-    try { pending.onProgress(message.data); } catch {}
-  });
-
-  function coreRequest(type, payload = {}, timeout = CORE_TIMEOUT_MS, group = '', onProgress = null) {
-    const id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        corePending.delete(id);
-        reject(new Error('FCR Data Core missing / timed out'));
-      }, timeout);
-      corePending.set(id, { resolve, reject, timer, onProgress });
-      window.dispatchEvent(new CustomEvent(CORE_REQUEST_EVENT, {
-        detail: JSON.stringify({ id, type, payload, client: 'fclite', group: clean(group) })
-      }));
-    });
-  }
+  const coreClient = globalThis.BWU2Fleet.createCoreClient({ client: 'fclite', defaultTimeout: 17000 });
+  const coreRequest = (type, payload = {}, timeout = 17000, group = '', onProgress = null) =>
+    coreClient.request(type, payload, { timeout, group, onProgress });
 
   function usage(key, ms = 0, count = 1) {
     window.dispatchEvent(new CustomEvent('fcr-usage:event', {
