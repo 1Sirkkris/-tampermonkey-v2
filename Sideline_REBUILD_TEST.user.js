@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Sideline REBUILD TEST v0.0.9
+// @name         Sideline REBUILD TEST v0.0.21
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.20
+// @version      0.0.21
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.20-REBUILD';
+  const VERSION = '0.0.21-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1470,17 +1470,6 @@
     preflightState.stats = {green:0,yellow:0,red:0};
     preflightState.last = {kind:'idle',code:'',reason:'Scan an item'};
     renderPreflight();
-  }
-
-  function dateChoiceForCtx(ctx,enteredMs) {
-    const entered = Number(enteredMs);
-    if (!entered) return null;
-    return {
-      enteredMs:entered,
-      finalExpirationMs:ctx?.dateType === 'PRODUCTION_DATE'
-        ? entered + Number(ctx?.dateDetail?.shelfLife || 0)
-        : entered
-    };
   }
 
   function renderPreflight() {

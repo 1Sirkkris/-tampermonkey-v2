@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        MAIN v5.1.5 SIM Markdown Toolbar
+// @name        MAIN v5.1.8 SIM Markdown Toolbar
 // @name:en      MAIN SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.7
+// @version      5.1.8
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -13,7 +13,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "5.1.7";
+    const VERSION = "5.1.8";
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -599,6 +599,7 @@
         const sn = isEdit ? snippets[edit] : { name:"", text:"" };
 
         const bd=document.createElement("div");
+        bd.setAttribute("data-bwu2-ui", "sim-snippets");
         bd.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999";
         const m=document.createElement("div");
         m.style.cssText="background:#fff;padding:16px;border-radius:6px;width:640px";
@@ -632,6 +633,7 @@
         snippets = loadSnippets();
 
         const bd=document.createElement("div");
+        bd.setAttribute("data-bwu2-ui", "sim-snippets");
         bd.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999";
         const m=document.createElement("div");
         m.style.cssText="background:#fff;padding:16px;border-radius:6px;width:520px";

@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name       MAIN v7.3 Carton PrEditor
+// @name       MAIN v7.6 Carton PrEditor
 // @name:en      MAIN Carton PrEditor
 // @namespace    http://tampermonkey.net/
-// @version      7.5
+// @version      7.6
 // @description  Auto-click Complete when a valid barcode appears AND count ≥ 2; beeps + toggle
 // @match        https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*
 // @grant        none
@@ -12,7 +12,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '7.5';
+  const VERSION = '7.6';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -145,6 +145,7 @@
   // ON/OFF toggle
   const makeToggle = () => {
     const div = document.createElement("div");
+    div.setAttribute("data-bwu2-ui", "carton-preditor");
     div.style.cssText = `
       position:fixed;bottom:12px;right:12px;z-index:999999;
       display:flex;align-items:center;gap:6px;

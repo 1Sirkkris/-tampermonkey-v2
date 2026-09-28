@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
+// @name         TEST v0.1.69 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.68
+// @version      0.1.69
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.68';
+  const VERSION = '0.1.69';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -1208,6 +1208,8 @@
   let inventoryRunId = 0;
   let productRunId = 0;
 
+  const HAZMAT_LOOKUP_ERROR = Symbol('hazmat-lookup-error');
+
   async function getHazmat(id, force = false) {
     if (!isAsin(id)) return null;
     try {
@@ -1215,12 +1217,21 @@
       const hazmat = result?.hazmat;
       return hazmat ? [Number(hazmat.level || 0), String(hazmat.message || '')] : null;
     } catch {
-      return null;
+      return HAZMAT_LOOKUP_ERROR;
     }
   }
 
   function renderHazmatBadge(badge, result, { river = false, inventory = false } = {}) {
     if (!badge) return false;
+    if (result === HAZMAT_LOOKUP_ERROR) {
+      badge.style.background = LEVEL_COLORS[6];
+      badge.textContent = 'Hazmat ERROR';
+      badge.classList.remove('fc-river-l0');
+      badge.setAttribute('role', 'status');
+      badge.removeAttribute('tabindex');
+      badge.title = 'Hazmat lookup failed — use Pandash/Recheck to retry';
+      return false;
+    }
     if (!result) {
       const clickable = river;
       badge.style.background = LEVEL_COLORS[0];

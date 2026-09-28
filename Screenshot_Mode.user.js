@@ -2,7 +2,7 @@
 // @name         MAIN Screenshot Mode
 // @name:en      MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
-// @version      0.2.0
+// @version      0.2.1
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
 // @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -47,10 +47,9 @@
 
   if (window.top !== window.self) return;
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const MODE_ATTR = 'data-bwu2-screenshot-mode';
   const UI_MARKER = 'data-bwu2-ui';
-  const LEGACY_ATTR = 'data-bwu2-screenshot-owned';
   const STYLE_ID = 'bwu2-screenshot-mode-style';
 
   function registerRuntimeVersion(label, version) {
@@ -75,7 +74,6 @@
   const UI_SELECTORS = [
     `[${UI_MARKER}]`,
     '#bwu2-runtime-version-stamp',
-    `[${LEGACY_ATTR}]`,
     ':is([id^="fcrm-"],[id^="fcratc-"],[id^="vm-"],[id^="pLevel"],[id^="p-level-"],[id^="sh-"],[id^="aftm-"],[id^="fnsku-direct-"],[id^="moveapp-"],[id^="bwu2-"],[id^="aavf-"],[id^="aft-super-"],[id^="aft-ui-state-logger-"])',
     ':is([data-fcr-master-ui],[data-fcr-tool-ui="1"],.vm-drop-inline,.sh-panel,.aftm,.sim-md-toolbar,.sim-image-actions,#toolbox,.bwu2-river-capture-indicator)',
     ':is(.fcrlite-native-tools,.fcrlite-native-info,.fcrlite-history-tools,.fcrlite-inventory-search,.fcrlite-inventory-summary,.fcrlite-inventory-sticky-shell,.fcrlite-id-map,.fcrlite-thumb-head,.fcrlite-qty-head,.fcrlite-thumb-cell,.fcrlite-asin-total)'
@@ -128,40 +126,15 @@
     (document.head || document.documentElement).appendChild(style);
   }
 
-  function markLegacyUi() {
-    const body = document.body;
-    if (!body) return;
-
-    // Carton PrEditor toggle predates the shared UI marker and has no id/class.
-    for (const span of body.querySelectorAll('span')) {
-      if (!String(span.textContent || '').startsWith('AutoComplete:')) continue;
-      const box = span.parentElement;
-      if (!(box instanceof HTMLElement)) continue;
-      if (box.style.position !== 'fixed') continue;
-      box.setAttribute(LEGACY_ATTR, 'carton-preditor');
-    }
-
-    // SIM snippet editor/manager backdrops also predate a stable UI id/class.
-    for (const box of body.children) {
-      if (!(box instanceof HTMLElement) || box.hasAttribute(LEGACY_ATTR)) continue;
-      if (box.style.position !== 'fixed') continue;
-      const text = String(box.textContent || '');
-      const snippetUi = /(?:Add|Edit|Manage) Snippet/i.test(text)
-        && Boolean(box.querySelector('#save, #cancel, #close, [data-e], [data-d]'));
-      if (snippetUi) box.setAttribute(LEGACY_ATTR, 'sim-snippets');
-    }
-  }
-
   let observer = null;
-  let markQueued = false;
+  let styleRefreshQueued = false;
 
-  function queueLegacyMark() {
-    if (markQueued) return;
-    markQueued = true;
+  function queueScriptStyleRefresh() {
+    if (styleRefreshQueued) return;
+    styleRefreshQueued = true;
     requestAnimationFrame(() => {
-      markQueued = false;
+      styleRefreshQueued = false;
       if (document.documentElement.getAttribute(MODE_ATTR) !== '1') return;
-      markLegacyUi();
       disableScriptStyles();
     });
   }
@@ -170,9 +143,8 @@
     installCss();
     if (enabled) {
       document.documentElement.setAttribute(MODE_ATTR, '1');
-      markLegacyUi();
       disableScriptStyles();
-      if (!observer) observer = new MutationObserver(queueLegacyMark);
+      if (!observer) observer = new MutationObserver(queueScriptStyleRefresh);
       observer.observe(document.documentElement, { childList: true, subtree: true });
       window.dispatchEvent(new CustomEvent('bwu2:screenshot-mode', { detail: { enabled: true } }));
       return;
