@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 Dropzone Selector Queue
 // @name:en      TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.3.2
+// @version      0.3.3
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.2';
+  const VERSION = '0.3.3';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('DROPZONE', VERSION);
@@ -83,15 +83,6 @@
   }
 
   const traceQueue = globalThis.BWU2Fleet.trace;
-) {
-    try {
-      if (typeof window.BWU2Trace === 'function') {
-        window.BWU2Trace(event, data);
-      } else {
-        window.postMessage({ __BWU2_TRACE__: true, type: event, data }, '*');
-      }
-    } catch (_) {}
-  }
 
   function queueItem(id = queueState.currentId) {
     const key = String(id || '').toLowerCase();
@@ -99,8 +90,11 @@
   }
 
   const nextQueuedItem = () => globalThis.BWU2Fleet.nextQueued(queueState.items);
+
   const queueCounts = () => globalThis.BWU2Fleet.queueCounts(queueState.items);
+
   const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, /^(?:tsX|csX)[A-Za-z0-9]+$/i);
+
   function getQueueDraft() {
     try { return localStorage.getItem(STORAGE_QUEUE_DRAFT) || ''; }
     catch (_) { return ''; }
