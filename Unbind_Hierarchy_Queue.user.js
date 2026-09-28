@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.2
+// @version      1.1.3
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.2';
+  const VERSION = '1.1.3';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
@@ -55,11 +55,7 @@
 
   const { clean } = globalThis.BWU2Fleet;
 
-  function normalizeContainer(value) {
-    const id = clean(value);
-    return CONTAINER_PATTERN.test(id) ? id : '';
-  }
-
+  const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
   function defaultState() {
     return {
       running: false,
@@ -143,7 +139,8 @@
     try { localStorage.removeItem(SESSION_RECOVERY_KEY); } catch (_) {}
   }
 
-  function trace(event, data = {}) {
+  const trace = globalThis.BWU2Fleet.trace;
+) {
     try {
       if (typeof window.BWU2Trace === 'function') window.BWU2Trace(event, data);
       else window.postMessage({ __BWU2_TRACE__: true, type: event, data }, '*');
@@ -155,18 +152,8 @@
     return state.items.find(item => item.id.toLowerCase() === key) || null;
   }
 
-  function nextQueued() {
-    return state.items.find(item => item.status === 'queued') || null;
-  }
-
-  function counts() {
-    const result = { total: state.items.length, queued: 0, active: 0, done: 0, attention: 0 };
-    for (const item of state.items) {
-      if (Object.prototype.hasOwnProperty.call(result, item.status)) result[item.status]++;
-    }
-    return result;
-  }
-
+  const nextQueued = () => globalThis.BWU2Fleet.nextQueued(state.items);
+  const counts = () => globalThis.BWU2Fleet.queueCounts(state.items);
   function recoverAfterReload() {
     const active = state.items.find(item => item.status === 'active');
     if (active) {
