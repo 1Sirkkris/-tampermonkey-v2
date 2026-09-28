@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.3
+// @version      1.1.4
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.3';
+  const VERSION = '1.1.4';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
@@ -56,6 +56,7 @@
   const { clean } = globalThis.BWU2Fleet;
 
   const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
+
   function defaultState() {
     return {
       running: false,
@@ -140,12 +141,6 @@
   }
 
   const trace = globalThis.BWU2Fleet.trace;
-) {
-    try {
-      if (typeof window.BWU2Trace === 'function') window.BWU2Trace(event, data);
-      else window.postMessage({ __BWU2_TRACE__: true, type: event, data }, '*');
-    } catch (_) {}
-  }
 
   function itemFor(id = state.currentId) {
     const key = clean(id).toLowerCase();
@@ -153,7 +148,9 @@
   }
 
   const nextQueued = () => globalThis.BWU2Fleet.nextQueued(state.items);
+
   const counts = () => globalThis.BWU2Fleet.queueCounts(state.items);
+
   function recoverAfterReload() {
     const active = state.items.find(item => item.status === 'active');
     if (active) {
