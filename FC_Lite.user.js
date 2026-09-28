@@ -2,7 +2,7 @@
 // @name        TEST v0.1.79 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.79
+// @version      0.1.80
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -21,6 +21,8 @@
 
   const TOTE_HASH = '#fcr-tote-checker';
   const NATIVE_HASH = '#fcr-native';
+  const TOTE_MODE_PARAM = 'fcrMode';
+  const TOTE_MODE_VALUE = 'tote-audit';
   const RESULTS_PAGE = /\/results(?:\/|$)/i.test(location.pathname);
   const STANDALONE = location.hash.startsWith(TOTE_HASH);
 
@@ -34,7 +36,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.79';
+  const VERSION = '0.1.80';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -98,16 +100,16 @@
 
   function navigateMode(url) {
     const target = String(url || '');
-    if (!target) return;
-    location.href = target;
-    // Hash-only navigation is same-document, but FC-Lite/FCR Master choose mode at boot.
-    // Reload automatically so the new mode mounts immediately without user intervention.
-    setTimeout(() => location.reload(), 0);
+    if (!target || target === location.href) return;
+    location.assign(target);
   }
 
-  function toteAuditUrl(containerValue = new URLSearchParams(location.search).get('s')) {
+  function toteAuditUrl(containerValue = '') {
     const url = new URL(location.href);
     url.search = '';
+    // The query marker deliberately makes this a real document navigation.
+    // The hash remains the canonical Tote Audit surface marker used across the FCR fleet.
+    url.searchParams.set(TOTE_MODE_PARAM, TOTE_MODE_VALUE);
     const wanted = clean(containerValue);
     if (wanted) url.searchParams.set('s', wanted);
     url.hash = TOTE_HASH;
@@ -122,7 +124,7 @@
       if (!cell.closest('[data-section-type="product"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      navigateMode(toteAuditUrl());
+      navigateMode(toteAuditUrl(''));
     }, true);
   }
 
