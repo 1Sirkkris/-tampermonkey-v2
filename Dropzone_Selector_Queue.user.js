@@ -2,10 +2,11 @@
 // @name         TEST v0.2.18 Dropzone Selector Queue
 // @name:en      TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.2.20
+// @version      0.3.0
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
@@ -14,7 +15,8 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.20';
+  const VERSION = '0.3.0';
+  const ACTIONS = globalThis.BWU2Actions;
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -368,64 +370,56 @@
     renderQueueState();
   }
 
-  function directMoveRequest(container, destinationId) {
+  function moveApiRequest({ url, body, container, destination }) {
     return new Promise((resolve, reject) => {
       const started = performance.now();
 
       traceQueue('MOVECONTAINER_API_REQUEST', {
         container,
-        destination: destinationId
+        destination
       });
 
       try {
         GM_xmlhttpRequest({
           method: 'POST',
-          url: MOVE_URL,
+          url,
           timeout: QUEUE_REQUEST_TIMEOUT_MS,
           headers: { 'Content-Type': 'application/json' },
-          data: JSON.stringify({
-            sourceScannableId: null,
-            destinationScannableId: destinationId,
-            containerScannableId: container,
-            confirmed: 'true'
-          }),
+          data: JSON.stringify(body),
           onload: response => {
             const ms = Math.round(performance.now() - started);
             traceQueue('MOVECONTAINER_API_RESPONSE', {
               container,
-              destination: destinationId,
+              destination,
               status: response.status,
               ms
             });
 
             if (response.status >= 200 && response.status < 300) {
               resolve({ status: response.status, ms });
-            } else {
-              const err = new Error(`HTTP ${response.status}`);
-              err.status = response.status;
-              err.ms = ms;
-              reject(err);
+              return;
             }
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            error.ms = ms;
+            reject(error);
           },
-          onerror: () => {
-            const err = new Error('Network error');
-            err.status = 0;
-            reject(err);
-          },
-          ontimeout: () => {
-            const err = new Error('Timed out');
-            err.status = 0;
-            reject(err);
-          },
-          onabort: () => {
-            const err = new Error('Aborted');
-            err.status = 0;
-            reject(err);
-          }
+          onerror: () => reject(Object.assign(new Error('Network error'), { status: 0 })),
+          ontimeout: () => reject(Object.assign(new Error('Timed out'), { status: 0 })),
+          onabort: () => reject(Object.assign(new Error('Aborted'), { status: 0 }))
         });
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  function directMoveRequest(container, destinationId) {
+    return ACTIONS.moveContainer({
+      container,
+      destination: destinationId,
+      url: MOVE_URL,
+      request: moveApiRequest
     });
   }
 
@@ -936,6 +930,7 @@
     if (!root) {
       root = document.createElement('div');
       root.id = 'moveapp-dz-selector';
+      ACTIONS.markUi(root);
       document.documentElement.appendChild(root);
     }
 
