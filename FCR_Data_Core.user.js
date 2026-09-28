@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.34
+// @version      0.2.35
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.34';
+  const VERSION = '0.2.35';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -72,6 +72,7 @@
   const HISTORY_TTL = 2 * 60 * 1000;
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
   const HAZ_FAILURE_TTL = 60 * 1000;
+  const HAZMAT_RETRY_DELAYS_MS = [500, 1500];
   const REQUEST_TIMEOUT_MS = 15000;
   const MEASUREMENT_TIMEOUT_MS = 10000;
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
@@ -1069,6 +1070,21 @@
     try { GM_setValue(hazStoreKey(fc, asin), JSON.stringify(pack)); } catch {}
   }
 
+  async function hazmatRequestWithRetry(options, label='Pandash') {
+    let lastError = null;
+    for (let attempt = 0; attempt <= HAZMAT_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        return await gmRequest(options);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= HAZMAT_RETRY_DELAYS_MS.length) break;
+        recordUsage(`network.hazmat.retry.${attempt + 1}`);
+        await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAYS_MS[attempt]));
+      }
+    }
+    throw new Error(`${label} failed after retries: ${clean(lastError?.message || lastError || 'request failed')}`);
+  }
+
   async function fetchHazmat(asinValue, force = false) {
     const asin = upper(asinValue);
     const fc = warehouseId();
@@ -1098,8 +1114,8 @@
       try {
         const value = await inFlight.get(flightKey);
         return { hazmat: value, source: 'dedupe' };
-      } catch {
-        return { hazmat: null, source: 'error' };
+      } catch (error) {
+        throw error;
       }
     }
 
@@ -1110,11 +1126,11 @@
       try { restriction = GM_getValue(hazLevelKey(fc), null); } catch {}
       if (!restriction) {
         try {
-          const response = await gmRequest({
+          const response = await hazmatRequestWithRetry({
             method: 'GET',
             url: `https://pandash.amazon.com/GridServlet?fc=${encodeURIComponent(fc)}`,
             responseType: 'json'
-          });
+          }, 'Pandash restriction lookup');
           restriction = response.response?.restriction || 'default';
           try { GM_setValue(hazLevelKey(fc), restriction); } catch {}
         } catch {
@@ -1122,13 +1138,13 @@
         }
       }
 
-      const response = await gmRequest({
+      const response = await hazmatRequestWithRetry({
         method: 'POST',
         url: 'https://pandash.amazon.com/GridServlet',
         data: `language=default&source=${encodeURIComponent(restriction || 'default')}-hazmat-FC&marketPlaces=${MARKETPLACE}&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         responseType: 'json'
-      });
+      }, 'Pandash hazmat lookup');
 
       const row = response.response?.rows?.find(item => upper(item?.asin) === asin);
       const value = row ? {
@@ -1146,9 +1162,9 @@
     try {
       const value = await work;
       return { hazmat: value, source: 'network' };
-    } catch {
-      hazMemory.set(key, { ts: Date.now(), ttl: HAZ_FAILURE_TTL, value: null });
-      return { hazmat: null, source: 'error' };
+    } catch (error) {
+      hazMemory.delete(key);
+      throw error;
     } finally {
       if (inFlight.get(flightKey) === work) inFlight.delete(flightKey);
     }
