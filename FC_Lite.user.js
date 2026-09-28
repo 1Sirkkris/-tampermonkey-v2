@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.77
+// @version      0.1.78
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -34,7 +34,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.77';
+  const VERSION = '0.1.78';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -96,6 +96,15 @@
   const upper = value => clean(value).toUpperCase();
   const isContainer = value => /^(?:TSX|CSX)[A-Z0-9]+$/i.test(clean(value));
 
+  function navigateMode(url) {
+    const target = String(url || '');
+    if (!target) return;
+    location.href = target;
+    // Hash-only navigation is same-document, but FC-Lite/FCR Master choose mode at boot.
+    // Reload automatically so the new mode mounts immediately without user intervention.
+    setTimeout(() => location.reload(), 0);
+  }
+
   function toteAuditUrl(containerValue = new URLSearchParams(location.search).get('s')) {
     const url = new URL(location.href);
     url.search = '';
@@ -113,7 +122,7 @@
       if (!cell.closest('[data-section-type="product"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      location.href = toteAuditUrl();
+      navigateMode(toteAuditUrl());
     }, true);
   }
 
@@ -128,7 +137,7 @@
 
   function returnToFullFCResearch() {
     usage('full_fcresearch');
-    location.href = fullFCResearchUrl();
+    navigateMode(fullFCResearchUrl());
   }
 
   function ensureStandaloneDocument() {
