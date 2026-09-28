@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.11
+// @version      0.0.12
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.11-REBUILD';
+  const VERSION = '0.0.12-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -46,7 +46,6 @@
   const LAZY_DELAY_MIN_MS = 2000;
   const LAZY_DELAY_MAX_MS = 8000;
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
-  const EXPIRY_HISTORY_KEY = 'sidelineRebuild.expiryHistory.v1';
   const API_SCAN_SOURCE = '/api/scan-source-container';
   const API_CLOSE_CONTAINER = '/api/close-container';
   const API_SCAN_ITEM = '/api/scanitem';
@@ -1191,15 +1190,6 @@
     return /^(?:|c|t|cs|ts|csx|tsx|csx[0-9a-z_-]*|tsx[0-9a-z_-]*)$/i.test(clean(v));
   }
 
-  function loadExpiryHistory() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(EXPIRY_HISTORY_KEY) || '{}');
-      return raw && typeof raw === 'object' ? raw : {};
-    } catch {
-      return {};
-    }
-  }
-
   const preflightState = {
     pendingOccurrences:new Map(),
     trackedCounts:new Map(),
@@ -1208,7 +1198,6 @@
     dateQueue:[],
     dateBusy:false,
     workflowDate:null,
-    history:loadExpiryHistory(),
     stats:{green:0,yellow:0,red:0},
     last:{kind:'idle',code:'',reason:'Scan an item'}
   };
@@ -1229,36 +1218,6 @@
     preflightState.stats = {green:0,yellow:0,red:0};
     preflightState.last = {kind:'idle',code:'',reason:'Scan an item'};
     renderPreflight();
-  }
-
-  function expiryHistoryKeys(code,ctx={}) {
-    return [
-      clean(ctx?.asin) ? `asin:${clean(ctx.asin).toUpperCase()}` : '',
-      clean(ctx?.fnsku) ? `fnsku:${clean(ctx.fnsku).toUpperCase()}` : '',
-      clean(code) ? `barcode:${itemKey(code)}` : ''
-    ].filter(Boolean);
-  }
-
-  function getRememberedExpiry(code,ctx) {
-    let newest = null;
-    for (const key of expiryHistoryKeys(code,ctx)) {
-      const record = preflightState.history[key];
-      if (!record?.enteredMs) continue;
-      if (!newest || Number(record.updatedAt||0) > Number(newest.updatedAt||0)) newest = record;
-    }
-    return newest;
-  }
-
-  function saveRememberedExpiry(code,ctx,enteredMs) {
-    const record = {enteredMs:Number(enteredMs),updatedAt:Date.now()};
-    for (const key of expiryHistoryKeys(code,ctx)) preflightState.history[key] = record;
-
-    const entries = Object.entries(preflightState.history);
-    if (entries.length > 800) {
-      entries.sort((a,b)=>Number(b[1]?.updatedAt||0)-Number(a[1]?.updatedAt||0));
-      preflightState.history = Object.fromEntries(entries.slice(0,800));
-    }
-    try { localStorage.setItem(EXPIRY_HISTORY_KEY,JSON.stringify(preflightState.history)); } catch {}
   }
 
   function dateChoiceForCtx(ctx,enteredMs) {
@@ -1409,44 +1368,11 @@
           if (!chosen) continue;
           preflightState.workflowDate = chosen;
         } else {
-          const remembered = getRememberedExpiry(next.code,next.ctx);
-          if (remembered?.enteredMs) {
-            const rememberedChoice = dateChoiceForCtx(next.ctx, remembered.enteredMs);
-            if (
-              rememberedChoice &&
-              Number(rememberedChoice.finalExpirationMs) !== Number(workflow.finalExpirationMs)
-            ) {
-              preflightState.stats.red++;
-              addRedPending(next.code);
-              preflightState.last = {
-                kind:'red',
-                code:next.code,
-                reason:`REMEMBERED EXPIRY ${dateLabel(rememberedChoice.enteredMs)} ≠ WORKFLOW ${dateLabel(workflow.enteredMs)}`
-              };
-              renderPreflight();
-              continue;
-            }
-          }
-
+          // The first expiry-required item owns the date for this workflow.
+          // Every later expiry-required item silently uses that same entered date.
           chosen = dateChoiceForCtx(next.ctx, workflow.enteredMs);
           if (!chosen) continue;
-
-          if (Number(chosen.finalExpirationMs) !== Number(workflow.finalExpirationMs)) {
-            preflightState.stats.red++;
-            addRedPending(next.code);
-            preflightState.last = {
-              kind:'red',
-              code:next.code,
-              reason:`WORKFLOW DATE DOES NOT MATCH THIS ITEM — ${dateLabel(workflow.enteredMs)}`
-            };
-            renderPreflight();
-            continue;
-          }
         }
-
-        // The workflow date is the value applied to this item, so remember it for later
-        // conflict detection without asking the user again in this workflow.
-        saveRememberedExpiry(next.code,next.ctx,chosen.enteredMs);
 
         preflightState.dateCache.set(key,chosen);
         preflightState.stats.yellow++;
