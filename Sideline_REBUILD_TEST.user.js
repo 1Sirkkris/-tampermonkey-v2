@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.13
+// @version      0.0.14
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.13-REBUILD';
+  const VERSION = '0.0.14-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -1197,7 +1197,6 @@
     dateCache:new Map(),
     dateQueue:[],
     dateBusy:false,
-    workflowDate:null,
     stats:{green:0,yellow:0,red:0},
     last:{kind:'idle',code:'',reason:'Scan an item'}
   };
@@ -1214,7 +1213,6 @@
     preflightState.dateCache.clear();
     preflightState.dateQueue.length = 0;
     preflightState.dateBusy = false;
-    preflightState.workflowDate = null;
     preflightState.stats = {green:0,yellow:0,red:0};
     preflightState.last = {kind:'idle',code:'',reason:'Scan an item'};
     renderPreflight();
@@ -1358,23 +1356,15 @@
         const key = itemKey(next.code);
         const item = {code:next.code,qty:1,ctx:next.ctx,status:'DATE'};
 
-        const workflow = preflightState.workflowDate;
-        let chosen = null;
+        let chosen = preflightState.dateCache.get(key) || null;
 
-        if (!workflow) {
-          // One user question per workflow: the first expiry-required item establishes
-          // the workflow date. Everything after this reuses it automatically.
+        if (!chosen) {
+          // One question per DISTINCT barcode per RUN.
+          // Repeated units of the same barcode silently reuse this RUN-only answer.
           chosen = await showApiDatePicker(item);
           if (!chosen) continue;
-          preflightState.workflowDate = chosen;
-        } else {
-          // The first expiry-required item owns the date for this workflow.
-          // Every later expiry-required item silently uses that same entered date.
-          chosen = dateChoiceForCtx(next.ctx, workflow.enteredMs);
-          if (!chosen) continue;
+          preflightState.dateCache.set(key,chosen);
         }
-
-        preflightState.dateCache.set(key,chosen);
         preflightState.stats.yellow++;
         preflightState.last = {kind:'yellow',code:next.code,reason:`DATE ${dateLabel(chosen.enteredMs)} — READY`};
         renderPreflight();
@@ -3405,7 +3395,12 @@
       lazy.note = `DATE ${i+1}/${lazy.deferred.length} | ${ctx.asin || item.code}`;
       renderLazy();
 
-      const chosen = await showApiDatePicker(item);
+      const key = itemKey(item.code);
+      let chosen = preflightState.dateCache.get(key) || null;
+      if (!chosen) {
+        chosen = await showApiDatePicker(item);
+        if (chosen) preflightState.dateCache.set(key,chosen);
+      }
       if (!chosen || !lazy.running || !currentLazyRun(run)) break;
 
       await moveResolved(item, ctx, chosen.finalExpirationMs, run);
@@ -3432,6 +3427,7 @@
         ? `complete | moved ${movedUnits} qty | skipped ${skippedUnits} removed qty | source left open`
         : `complete | moved ${movedUnits} qty to ${lazy.dest}`;
       finishLazyRun(run);
+      preflightState.dateCache.clear();
       finishMoveCorner('lazy', false);
       renderLazy();
       return;
@@ -3441,6 +3437,7 @@
     if (lClear.checked && !clearOk) {
       lazy.note = 'complete';
       finishLazyRun(run);
+      preflightState.dateCache.clear();
       finishMoveCorner('lazy', false);
       renderLazy();
       return;
@@ -3448,6 +3445,7 @@
 
     lazy.note = 'complete';
     finishLazyRun(run);
+    preflightState.dateCache.clear();
     finishMoveCorner('lazy', true);
     renderLazy();
 
