@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.12
+// @version      0.0.13
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.12-REBUILD';
+  const VERSION = '0.0.13-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -2440,14 +2440,21 @@
   }
 
   function scanStageIssue(ctx) {
+    if (ctx?.hazmat === true) {
+      return {
+        kind:'hazmat',
+        title:'HAZMAT — PUT ASIDE',
+        reason:'HAZMAT — DO NOT PROCESS IN THIS WORKFLOW'
+      };
+    }
+
     const permissionLevel = clean(ctx?.permissionLevel).toUpperCase();
     if (permissionLevel !== 'UNDER_REVIEW') return null;
 
-    const hazmat = ctx?.hazmat === true;
     return {
-      kind:hazmat ? 'hazmat' : 'under-review',
-      title:hazmat ? 'HAZMAT — ITEM NOT MOVED' : 'ASIN UNDER REVIEW — ITEM NOT MOVED',
-      reason:hazmat ? 'HAZMAT / UNDER REVIEW — RIVER REQUIRED' : 'ASIN UNDER REVIEW — RIVER REQUIRED'
+      kind:'under-review',
+      title:'ASIN UNDER REVIEW — ITEM NOT MOVED',
+      reason:'ASIN UNDER REVIEW — RIVER REQUIRED'
     };
   }
 
