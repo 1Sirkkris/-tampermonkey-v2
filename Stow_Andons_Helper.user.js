@@ -8,7 +8,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.10
+// @version      5.5.11
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -21,7 +21,8 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.5.10';
+  const VERSION = '5.5.11';
+  const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -441,33 +442,106 @@
 
   function normalizeUnbindLogin(value) {
     const login = clean(value).toLowerCase();
-    return /^[a-z][a-z0-9-]{2,31}$/i.test(login) ? login : '';
+    if (!/^[a-z][a-z0-9-]{2,31}$/i.test(login)) return '';
+    if (/^(?:login|username|user|employee|alias|autoid)$/i.test(login)) return '';
+    return login;
+  }
+
+  function findUnbindLoginInObject(value, depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 3) return '';
+    for (const key of ['employeeLogin','userLogin','username','login','alias','autoId','autoID']) {
+      const found = normalizeUnbindLogin(value[key]);
+      if (found) return found;
+    }
+    for (const [key, child] of Object.entries(value).slice(0, 40)) {
+      if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
+      const found = findUnbindLoginInObject(child, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  function unbindCookieLogin() {
+    try {
+      for (const rawPart of document.cookie.split(';')) {
+        const part = rawPart.trim();
+        const split = part.indexOf('=');
+        if (split < 1) continue;
+        const key = clean(part.slice(0, split)).toLowerCase();
+        if (!/^(?:employeelogin|userlogin|username|login|alias|autoid)$/.test(key)) continue;
+        let value = clean(part.slice(split + 1));
+        try { value = decodeURIComponent(value); } catch {}
+        const found = normalizeUnbindLogin(value);
+        if (found) return found;
+      }
+    } catch {}
+    return '';
+  }
+
+  function discoverLiveUnbindLogin() {
+    const globals = [
+      PAGE_WINDOW.employeeLogin,
+      PAGE_WINDOW.userLogin,
+      PAGE_WINDOW.autoId,
+      PAGE_WINDOW.autoID,
+      PAGE_WINDOW.currentUser,
+      PAGE_WINDOW.user,
+      PAGE_WINDOW.employee,
+      PAGE_WINDOW.bootstrapData,
+      PAGE_WINDOW.__INITIAL_STATE__
+    ];
+    for (const value of globals) {
+      const found = typeof value === 'string' ? normalizeUnbindLogin(value) : findUnbindLoginInObject(value);
+      if (found) return found;
+    }
+
+    const selectors = [
+      '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
+      'input[name="employeeLogin"]', 'input[name="userLogin"]', 'input[name="autoid"]',
+      'meta[name="employeeLogin"]', 'meta[name="username"]', 'meta[name="autoid"]'
+    ];
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (!element) continue;
+      const found = normalizeUnbindLogin(
+        element.dataset?.employeeLogin ||
+        element.dataset?.userLogin ||
+        element.dataset?.username ||
+        element.dataset?.autoid ||
+        element.value ||
+        element.content
+      );
+      if (found) return found;
+    }
+
+    const fromCookie = unbindCookieLogin();
+    if (fromCookie) return fromCookie;
+
+    for (const storage of [localStorage, sessionStorage]) {
+      try {
+        for (let index = 0; index < storage.length; index++) {
+          const key = storage.key(index) || '';
+          if (key === UNBIND_LOGIN_KEY) continue;
+          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
+          if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
+          const raw = storage.getItem(key);
+          let found = normalizeUnbindLogin(raw);
+          if (!found) {
+            try { found = findUnbindLoginInObject(JSON.parse(raw)); } catch {}
+          }
+          if (found) return found;
+        }
+      } catch {}
+    }
+
+    return '';
   }
 
   function unbindLogin() {
-    try {
-      const saved = normalizeUnbindLogin(localStorage.getItem(UNBIND_LOGIN_KEY));
-      if (saved) return saved;
-    } catch {}
-
-    for (const rawPart of document.cookie.split(';')) {
-      const part = rawPart.trim();
-      const split = part.indexOf('=');
-      if (split < 1) continue;
-      const name = part.slice(0, split).trim();
-      if (!/^(?:user|login|name|username|alias)$/i.test(name)) continue;
-      let value = part.slice(split + 1);
-      try { value = decodeURIComponent(value); } catch {}
-      const found = normalizeUnbindLogin(value);
-      if (!found) continue;
-      try { localStorage.setItem(UNBIND_LOGIN_KEY, found); } catch {}
-      return found;
-    }
-
-    const entered = normalizeUnbindLogin(window.prompt('Employee login for Unbind:', '') || '');
-    if (!entered) return '';
-    try { localStorage.setItem(UNBIND_LOGIN_KEY, entered); } catch {}
-    return entered;
+    const login = discoverLiveUnbindLogin();
+    if (!login) return '';
+    try { localStorage.setItem(UNBIND_LOGIN_KEY, login); } catch {}
+    return login;
   }
 
   function inlineUnbindResponseShape(phase, data, container) {
@@ -594,7 +668,7 @@
     const container = currentContainer();
     if (!/^tsX[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX', true);
     const login = unbindLogin();
-    if (!login) return toast('Employee login required', true);
+    if (!login) return toast('Logged-in user could not be detected — refresh/sign in', true);
 
     usage('unbind');
     unbindBusy = true;
