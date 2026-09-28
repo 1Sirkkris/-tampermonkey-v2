@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.36
+// @version      0.2.37
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.36';
+  const VERSION = '0.2.37';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -817,6 +817,17 @@
     return entry.value || null;
   }
 
+  function nativeInventorySuppressedByMaster() {
+    try {
+      const raw = localStorage.getItem('fcrm_native_section_load_v4.inventory');
+      if (!raw) return false;
+      const record = JSON.parse(raw);
+      return record?.enabled === false;
+    } catch {
+      return false;
+    }
+  }
+
   function installNativeInventoryTap() {
     const pageWindow = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
     const XHR = pageWindow.XMLHttpRequest;
@@ -835,7 +846,9 @@
 
     XHR.prototype.send = function(body) {
       const info = NATIVE_INVENTORY_XHR.get(this);
-      if (!info?.inventory || info.method !== 'POST') return originalSend.apply(this, arguments);
+      if (!info?.inventory || info.method !== 'POST' || nativeInventorySuppressedByMaster()) {
+        return originalSend.apply(this, arguments);
+      }
 
       const search = nativeInventorySearch(body);
       const key = upper(search);
