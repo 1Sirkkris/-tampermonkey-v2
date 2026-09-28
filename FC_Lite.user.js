@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.81
+// @version      0.1.82
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.81';
+  const VERSION = '0.1.82';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FC-LITE', VERSION);
 
@@ -186,13 +186,7 @@
   const coreRequest = (type, payload = {}, timeout = 17000, group = '', onProgress = null) =>
     coreClient.request(type, payload, { timeout, group, onProgress });
 
-  function usage(key, ms = 0, count = 1) {
-    window.dispatchEvent(new CustomEvent('fcr-usage:event', {
-      detail: JSON.stringify({ key: 'fclite.' + key, ms, count })
-    }));
-  }
-
-
+  const usage = (key, ms = 0, count = 1) => globalThis.BWU2Fleet.usage('fclite', key, ms, count);
   async function updateCoreStatus() {
     const badge = root?.querySelector('.fcratc-core-status');
     if (!badge) return;
