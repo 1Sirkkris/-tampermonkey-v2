@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.70
+// @version      0.1.71
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -24,7 +24,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.70';
+  const VERSION = '0.1.71';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -87,7 +87,7 @@
   const $$ = (selector, root = document) => {
     try { return [...root.querySelectorAll(selector)]; } catch { return []; }
   };
-  const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const { clean } = globalThis.BWU2Fleet;
   const norm = value => clean(value).toLowerCase();
 
   function nativeSectionMode() {
@@ -1303,13 +1303,7 @@
     return pill;
   }
 
-  async function runWithConcurrency(items, limit, worker) {
-    if (!items.length) return;
-    let index = 0;
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (index < items.length) await worker(items[index++]);
-    }));
-  }
+  const { runWithConcurrency } = globalThis.BWU2Fleet;
 
   function inventoryBadgeNeedsRecheck(badge) {
     const text = clean(badge?.textContent || '');
