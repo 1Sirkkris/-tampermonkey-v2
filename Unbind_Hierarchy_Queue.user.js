@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.0.7
+// @version      1.0.8
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -20,7 +20,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.0.7';
+  const VERSION = '1.0.8';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement; if (!root) return;
@@ -336,20 +336,14 @@
     return '';
   }
 
-  function discoverLogin() {
-    const live = discoverLiveLogin();
-    if (live) return live;
-    try { return normalizeLogin(localStorage.getItem(LOGIN_KEY)); } catch (_) { return ''; }
-  }
-
   function currentLogin() {
-    return persistLogin(discoverLiveLogin() || ui.login?.value || discoverLogin());
+    const live = discoverLiveLogin();
+    return live ? persistLogin(live) : '';
   }
 
-  function saveLogin() {
+  function refreshDetectedLogin() {
     const login = currentLogin();
-    if (!login) return '';
-    if (ui.login) ui.login.value = login;
+    if (ui.login) ui.login.textContent = login || 'NOT DETECTED';
     return login;
   }
 
@@ -609,6 +603,7 @@
 
   async function processItem(item) {
     const login = currentLogin();
+    if (!login) throw new Error('Logged-in user could not be detected');
     const started = performance.now();
 
     state.phase = item.phase = 'validate';
@@ -704,13 +699,12 @@
       return;
     }
 
-    const login = saveLogin();
+    const login = refreshDetectedLogin();
     if (!login) {
       clearSessionRecovery();
-      state.message = 'Session refreshed — enter employee login once';
+      state.message = 'Session refreshed — logged-in user could not be detected';
       saveState();
       render();
-      ui.login?.focus();
       return;
     }
 
@@ -735,12 +729,11 @@
 
   function startQueue() {
     if (state.running || processing) return;
-    const login = saveLogin();
+    const login = refreshDetectedLogin();
     if (!login) {
-      state.message = 'Enter your employee login first';
+      state.message = 'Logged-in user could not be detected — refresh/sign in';
       saveState();
       render();
-      ui.login?.focus();
       return;
     }
 
@@ -1070,21 +1063,10 @@
       'display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;margin-bottom:7px'
     );
     loginRow.appendChild(element('strong', 'Login'));
-    ui.login = element('input');
-    ui.login.type = 'text';
-    ui.login.autocomplete = 'off';
-    ui.login.spellcheck = false;
-    ui.login.placeholder = 'employee login — AutoID detected / saved fallback';
-    ui.login.value = discoverLogin();
-    ui.login.style.cssText = 'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;font:12px Consolas,monospace';
-    ui.login.addEventListener('input', () => { persistLogin(ui.login.value); });
-    ui.login.addEventListener('change', () => { saveLogin(); render(); });
-    isolateTextField(ui.login, event => {
-      event.preventDefault();
-      saveLogin();
-      ui.draft?.focus();
-      render();
-    });
+    ui.login = element('strong', 'Detecting…',
+      'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;font:12px Consolas,monospace;color:#0f172a'
+    );
+    refreshDetectedLogin();
     loginRow.append(ui.login, element('strong', WAREHOUSE_ID,
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
     ));
