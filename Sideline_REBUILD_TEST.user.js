@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.16
+// @version      0.0.17
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.16-REBUILD';
+  const VERSION = '0.0.17-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -817,19 +817,50 @@
     document.body.appendChild(dock);
   }
 
+  function nativeRightControlsBottom() {
+    const label = /^(?:change container|back to source container|damaged|no match|item dimension problem|record prep)\b/i;
+    let bottom = 0;
+
+    for (const el of appElements('button,[role="button"]')) {
+      if (!visible(el)) continue;
+      const text = clean(el.innerText || el.textContent);
+      if (!label.test(text)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.left < innerWidth * 0.55) continue;
+      bottom = Math.max(bottom, rect.bottom);
+    }
+    return bottom;
+  }
+
   function applyPanels() {
     for (const b of dockButtons) b.classList.toggle('sh-on', feature[b.dataset.key]);
     for (const [key,p] of Object.entries(panels)) {
       const display = feature[key] ? 'block' : 'none';
       if (p.style.display !== display) p.style.display = display;
     }
+
+    const nativeBottom = nativeRightControlsBottom();
+    let stackTop = nativeBottom ? Math.ceil(nativeBottom + 10) : 0;
     let bottom = 58;
+
     for (const key of ['lazy','queue']) {
       const p = panels[key];
       if (!p || !feature[key]) continue;
-      const position = `${bottom}px`;
-      if (p.style.bottom !== position) p.style.bottom = position;
-      bottom += Math.max(80, p.offsetHeight) + 10;
+
+      if (stackTop) {
+        const available = Math.max(180, innerHeight - stackTop - 68);
+        p.style.top = `${stackTop}px`;
+        p.style.bottom = 'auto';
+        p.style.maxHeight = `${available}px`;
+        p.style.overflowY = 'auto';
+        stackTop += Math.min(p.scrollHeight, available) + 10;
+      } else {
+        p.style.top = 'auto';
+        p.style.bottom = `${bottom}px`;
+        p.style.maxHeight = '';
+        p.style.overflowY = '';
+        bottom += Math.max(80, p.offsetHeight) + 10;
+      }
     }
   }
 
@@ -4280,6 +4311,7 @@
         }
         screenDirty = true;
         scheduleNativeExpiry();
+        requestPanelLayout();
         break;
       }
     });
@@ -4300,7 +4332,11 @@
     for (const type of ['keydown', 'input', 'change', 'click']) {
       document.addEventListener(type, recoverAfterInteraction, true);
     }
-    window.addEventListener('pageshow', () => armRecoveryWatchdog(15000));
+    window.addEventListener('pageshow', () => {
+      armRecoveryWatchdog(15000);
+      requestPanelLayout();
+    });
+    window.addEventListener('resize', requestPanelLayout);
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) armRecoveryWatchdog(8000);
     });
