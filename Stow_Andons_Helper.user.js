@@ -9,7 +9,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.6.1
+// @version      5.6.2
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -23,7 +23,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.1';
+  const VERSION = '5.6.2';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -70,7 +70,7 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const { clean } = globalThis.BWU2Fleet;
   const canonical = value => clean(value).toUpperCase();
 
   const TOTE_LITE_HASH = '#fcr-tote-checker';
@@ -953,17 +953,7 @@
     return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
-  async function runWithConcurrency(items, limit, worker) {
-    let next = 0;
-    async function run() {
-      while (true) {
-        const index = next++;
-        if (index >= items.length) return;
-        await worker(items[index], index);
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, run));
-  }
+  const { runWithConcurrency } = globalThis.BWU2Fleet;
 
   async function scanSussy(containerPage) {
     if (!containerPage) {
