@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 Dropzone Selector Queue
 // @name:en      TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.3.1
+// @version      0.3.2
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.1';
+  const VERSION = '0.3.2';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('DROPZONE', VERSION);
@@ -82,7 +82,8 @@
     try { localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queueState)); } catch (_) {}
   }
 
-  function traceQueue(event, data = {}) {
+  const traceQueue = globalThis.BWU2Fleet.trace;
+) {
     try {
       if (typeof window.BWU2Trace === 'function') {
         window.BWU2Trace(event, data);
@@ -97,23 +98,9 @@
     return queueState.items.find(x => String(x.id).toLowerCase() === key) || null;
   }
 
-  function nextQueuedItem() {
-    return queueState.items.find(x => x.status === 'queued') || null;
-  }
-
-  function queueCounts() {
-    const out = { total: queueState.items.length, queued: 0, active: 0, done: 0, attention: 0 };
-    for (const item of queueState.items) {
-      if (Object.prototype.hasOwnProperty.call(out, item.status)) out[item.status]++;
-    }
-    return out;
-  }
-
-  function normalizeContainer(raw) {
-    const value = String(raw || '').trim();
-    return /^(?:tsX|csX)[A-Za-z0-9]+$/i.test(value) ? value : '';
-  }
-
+  const nextQueuedItem = () => globalThis.BWU2Fleet.nextQueued(queueState.items);
+  const queueCounts = () => globalThis.BWU2Fleet.queueCounts(queueState.items);
+  const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, /^(?:tsX|csX)[A-Za-z0-9]+$/i);
   function getQueueDraft() {
     try { return localStorage.getItem(STORAGE_QUEUE_DRAFT) || ''; }
     catch (_) { return ''; }
