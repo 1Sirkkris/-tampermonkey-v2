@@ -5,10 +5,11 @@
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @grant        GM_xmlhttpRequest
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.5.11
+// @version      5.6.0
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -21,7 +22,8 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.5.11';
+  const VERSION = '5.6.0';
+  const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   function registerRuntimeVersion(label, version) {
     const mount = () => {
@@ -47,7 +49,6 @@
   const UNBIND_VALIDATE_URL = `${UNBIND_BASE}/validateContainer`;
   const UNBIND_SUMMARY_URL = `${UNBIND_BASE}/getTransshipmentBindingSummary`;
   const UNBIND_URL = `${UNBIND_BASE}/unbindContainer`;
-  const UNBIND_LOGIN_KEY = 'vm_fc_unbind_login_v1';
 
   const COOKIE = {
     floor: 'vm_fc_floor',
@@ -395,6 +396,31 @@
     }));
   }
 
+  function moveContainerRequest({ url, body }) {
+    return new Promise((resolve, reject) => {
+      const started = performance.now();
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url,
+        timeout: 15000,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify(body),
+        onload: response => {
+          const ms = Math.round(performance.now() - started);
+          if (response.status >= 200 && response.status < 300) {
+            resolve({ status: response.status, ms });
+            return;
+          }
+          const error = new Error(`HTTP ${response.status}`);
+          error.status = response.status;
+          reject(error);
+        },
+        onerror: () => reject(Object.assign(new Error('Network error'), { status: 0 })),
+        ontimeout: () => reject(Object.assign(new Error('Timed out'), { status: 0 }))
+      });
+    });
+  }
+
   function moveContainer(key, button) {
     usage(`move.${clean(key).toLowerCase() || 'unknown'}`);
     if (button?.disabled) return;
@@ -415,9 +441,10 @@
         button.disabled = false;
         button.textContent = text;
         const timer = setTimeout(() => {
-          if (button.isConnected) button.textContent = original;
+          if (!button.isConnected) return;
+          button.textContent = original;
           moveButtonFeedback.delete(button);
-        }, 1200);
+        }, failed ? 2200 : 1200);
         moveButtonFeedback.set(button, { original, timer });
       }
       if (failed) toast(text, true);
@@ -425,123 +452,23 @@
       refocusSearch(400);
     };
 
-    GM_xmlhttpRequest({
-      method: 'POST', url: MOVE_URL, timeout: 15000,
-      headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ sourceScannableId: null, destinationScannableId: dest, containerScannableId: container, confirmed: 'true' }),
-      onload: response => {
-        if (response.status >= 300) return finish(`Failed ${response.status}`, true);
-        finish('Moved ✓');
-        toast(`Moved to ${dest}`);
-        if (printEnabled()) printLabel(dest).catch(error => toast(`Print failed: ${error.message}`, true));
-      },
-      onerror: () => finish('Move failed', true),
-      ontimeout: () => finish('Timed out', true)
+    ACTIONS.moveContainer({
+      container,
+      destination: dest,
+      url: MOVE_URL,
+      request: moveContainerRequest
+    }).then(() => {
+      finish('Moved ✓');
+      toast(`Moved to ${dest}`);
+      if (printEnabled()) printLabel(dest).catch(error => toast(`Print failed: ${error.message}`, true));
+    }).catch(error => {
+      const status = Number(error?.status || 0);
+      finish(status ? `Failed ${status}` : clean(error?.message || 'Move failed'), true);
     });
   }
 
-  function normalizeUnbindLogin(value) {
-    const login = clean(value).toLowerCase();
-    if (!/^[a-z][a-z0-9-]{2,31}$/i.test(login)) return '';
-    if (/^(?:login|username|user|employee|alias|autoid)$/i.test(login)) return '';
-    return login;
-  }
-
-  function findUnbindLoginInObject(value, depth = 0) {
-    if (!value || typeof value !== 'object' || depth > 3) return '';
-    for (const key of ['employeeLogin','userLogin','username','login','alias','autoId','autoID']) {
-      const found = normalizeUnbindLogin(value[key]);
-      if (found) return found;
-    }
-    for (const [key, child] of Object.entries(value).slice(0, 40)) {
-      if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-      const found = findUnbindLoginInObject(child, depth + 1);
-      if (found) return found;
-    }
-    return '';
-  }
-
-  function unbindCookieLogin() {
-    try {
-      for (const rawPart of document.cookie.split(';')) {
-        const part = rawPart.trim();
-        const split = part.indexOf('=');
-        if (split < 1) continue;
-        const key = clean(part.slice(0, split)).toLowerCase();
-        if (!/^(?:employeelogin|userlogin|username|login|alias|autoid)$/.test(key)) continue;
-        let value = clean(part.slice(split + 1));
-        try { value = decodeURIComponent(value); } catch {}
-        const found = normalizeUnbindLogin(value);
-        if (found) return found;
-      }
-    } catch {}
-    return '';
-  }
-
-  function discoverLiveUnbindLogin() {
-    const globals = [
-      PAGE_WINDOW.employeeLogin,
-      PAGE_WINDOW.userLogin,
-      PAGE_WINDOW.autoId,
-      PAGE_WINDOW.autoID,
-      PAGE_WINDOW.currentUser,
-      PAGE_WINDOW.user,
-      PAGE_WINDOW.employee,
-      PAGE_WINDOW.bootstrapData,
-      PAGE_WINDOW.__INITIAL_STATE__
-    ];
-    for (const value of globals) {
-      const found = typeof value === 'string' ? normalizeUnbindLogin(value) : findUnbindLoginInObject(value);
-      if (found) return found;
-    }
-
-    const selectors = [
-      '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
-      'input[name="employeeLogin"]', 'input[name="userLogin"]', 'input[name="autoid"]',
-      'meta[name="employeeLogin"]', 'meta[name="username"]', 'meta[name="autoid"]'
-    ];
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (!element) continue;
-      const found = normalizeUnbindLogin(
-        element.dataset?.employeeLogin ||
-        element.dataset?.userLogin ||
-        element.dataset?.username ||
-        element.dataset?.autoid ||
-        element.value ||
-        element.content
-      );
-      if (found) return found;
-    }
-
-    const fromCookie = unbindCookieLogin();
-    if (fromCookie) return fromCookie;
-
-    for (const storage of [localStorage, sessionStorage]) {
-      try {
-        for (let index = 0; index < storage.length; index++) {
-          const key = storage.key(index) || '';
-          if (key === UNBIND_LOGIN_KEY) continue;
-          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
-          if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-          const raw = storage.getItem(key);
-          let found = normalizeUnbindLogin(raw);
-          if (!found) {
-            try { found = findUnbindLoginInObject(JSON.parse(raw)); } catch {}
-          }
-          if (found) return found;
-        }
-      } catch {}
-    }
-
-    return '';
-  }
-
   function unbindLogin() {
-    const login = discoverLiveUnbindLogin();
-    if (!login) return '';
-    try { localStorage.setItem(UNBIND_LOGIN_KEY, login); } catch {}
-    return login;
+    return ACTIONS.resolveEmployeeLogin({ document, pageWindow: PAGE_WINDOW }).login;
   }
 
   function inlineUnbindResponseShape(phase, data, container) {
@@ -641,28 +568,6 @@
     });
   }
 
-  function assertInlineUnbindValidate(data, container) {
-    if (!data || typeof data !== 'object') throw new Error('Unexpected validation response');
-    if (data.scannableId && clean(data.scannableId).toLowerCase() !== container.toLowerCase()) {
-      throw new Error('Validation returned another container');
-    }
-  }
-
-  function assertInlineUnbindSummary(data) {
-    if (!data || !Array.isArray(data.transferBindingSummaryList)) {
-      throw new Error('Unexpected binding summary');
-    }
-  }
-
-  function assertInlineUnbindResult(data) {
-    if (!data || typeof data.hostName !== 'string' || !clean(data.hostName)) {
-      const error = new Error('Unexpected unbind response');
-      error.phase = 'unbind';
-      error.ambiguous = true;
-      throw error;
-    }
-  }
-
   async function unbindCurrentContainer(button) {
     if (unbindBusy || button?.disabled) return;
     const container = currentContainer();
@@ -684,56 +589,39 @@
     let finalText = original;
     let resetDelay = 1400;
     try {
-      const validated = await unbindPostJson(
-        UNBIND_VALIDATE_URL,
-        { warehouseId: 'BWU2', scannableId: container },
-        12000,
-        'validate',
-        container
-      );
-      assertInlineUnbindValidate(validated.data, container);
-      observe('STOW_UNBIND_PHASE_OK', {
-        phase:'validate',
-        status:validated.status,
-        ms:validated.ms,
+      await ACTIONS.runUnbind({
         container,
-        ...inlineUnbindResponseShape('validate', validated.data, container)
-      });
-
-      currentPhase = 'summary';
-      if (button) button.textContent = 'Checking…';
-      const summary = await unbindPostJson(
-        UNBIND_SUMMARY_URL,
-        { warehouseId: 'BWU2', scannableId: container },
-        12000,
-        'summary',
-        container
-      );
-      assertInlineUnbindSummary(summary.data);
-      observe('STOW_UNBIND_PHASE_OK', {
-        phase:'summary',
-        status:summary.status,
-        ms:summary.ms,
-        container,
-        ...inlineUnbindResponseShape('summary', summary.data, container)
-      });
-
-      currentPhase = 'unbind';
-      if (button) button.textContent = 'Unbinding…';
-      const unbound = await unbindPostJson(
-        UNBIND_URL,
-        { sourceWarehouseId: 'BWU2', scannableId: container, employeeLogin: login },
-        20000,
-        'unbind',
-        container
-      );
-      assertInlineUnbindResult(unbound.data);
-      observe('STOW_UNBIND_PHASE_OK', {
-        phase:'unbind',
-        status:unbound.status,
-        ms:unbound.ms,
-        container,
-        ...inlineUnbindResponseShape('unbind', unbound.data, container)
+        login,
+        warehouseId: 'BWU2',
+        endpoints: {
+          validate: UNBIND_VALIDATE_URL,
+          summary: UNBIND_SUMMARY_URL,
+          unbind: UNBIND_URL
+        },
+        onPhase: phase => {
+          currentPhase = phase;
+          if (!button) return;
+          button.textContent = phase === 'validate' ? 'Validating…'
+            : phase === 'summary' ? 'Checking…'
+            : 'Unbinding…';
+        },
+        request: async ({ phase, url, body }) => {
+          const result = await unbindPostJson(
+            url,
+            body,
+            phase === 'unbind' ? 20000 : 12000,
+            phase,
+            container
+          );
+          observe('STOW_UNBIND_PHASE_OK', {
+            phase,
+            status:result.status,
+            ms:result.ms,
+            container,
+            ...inlineUnbindResponseShape(phase, result.data, container)
+          });
+          return result;
+        }
       });
 
       finalText = 'Unbound ✓';
@@ -749,11 +637,11 @@
         phase:clean(error?.phase || currentPhase),
         status:Number(error?.status) || 0,
         ambiguous:!!error?.ambiguous,
-        totalMs:Math.round(performance.now() - runStarted),
-        error:clean(error?.message || error || 'Unbind failed').slice(0, 180)
+        message:clean(error?.message || error || 'Unbind failed'),
+        totalMs:Math.round(performance.now() - runStarted)
       });
-      if (error?.ambiguous) {
-        finalText = 'Check result';
+      if (error?.ambiguous || clean(error?.phase || currentPhase) === 'unbind' && Number(error?.status || 0) === 0) {
+        finalText = 'CHECK RESULT';
         resetDelay = 2600;
         toast(`Unbind result unknown — check ${container}`, true);
       } else {
@@ -852,7 +740,7 @@
     const toteLite = isToteLiteSurface();
     const wrap = document.createElement(toteLite ? 'div' : 'span');
     wrap.className = `vm-drop-inline${toteLite ? ' vm-drop-fclite' : ''}`;
-    wrap.dataset.vmSafeUi = '1'; wrap.dataset.fcrToolUi = '1';
+    wrap.dataset.vmSafeUi = '1'; wrap.dataset.fcrToolUi = '1'; ACTIONS.markUi(wrap);
     wrap.innerHTML = `${toteLite ? '<b class="vm-drop-move">MOVE</b>' : ''}<b>Floor:</b>${FLOORS.map(item => `<button type="button" class="vm-floor-btn ${item === floor ? 'active' : ''}" data-floor="${item}">${item}</button>`).join('')}<span class="vm-drop-divider">|</span><b>Drop:</b><span id="vm-drop-buttons-wrap">${renderDropButtons()}</span>`;
 
     if (toteLite) {
