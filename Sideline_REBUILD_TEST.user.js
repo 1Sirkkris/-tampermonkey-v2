@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.10
+// @version      0.0.11
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -15,7 +15,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.10-REBUILD';
+  const VERSION = '0.0.11-REBUILD';
   function registerRuntimeVersion(label, version) {
     const mount = () => {
       const root = document.body || document.documentElement;
@@ -577,14 +577,6 @@
 .sh-preflight-idle{color:#475569}
 @media(max-width:560px){#sh-dock,.sh-panel{width:calc(100vw - 28px)}.sh-field-grid{grid-template-columns:1fr}.sh-preflight{grid-template-columns:1fr}}
 
-#sh-og-expiry .og-confirm-wrap{width:560px;max-width:calc(100vw - 24px)}
-#sh-og-expiry .og-confirm-question{margin-top:8px;padding:24px 18px;background:#fff;border-radius:8px;text-align:center;font-size:24px;font-weight:900;color:#111827}
-#sh-og-expiry .og-confirm-question strong{display:inline-block;padding:5px 9px;border:2px solid #315f7f;border-radius:4px;background:#eef6fb;color:#173c5d}
-#sh-og-expiry .og-confirm-note{padding:8px 12px;background:#fff;text-align:center;font-weight:800;color:#52677a}
-#sh-og-expiry .og-confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-#sh-og-expiry .og-confirm-actions button{min-height:64px;border:0;border-radius:6px;font-size:18px;font-weight:1000;cursor:pointer}
-#sh-og-expiry .og-confirm-actions button[data-a="yes"]{background:#315f7f;color:#fff}
-#sh-og-expiry .og-confirm-actions button[data-a="no"]{background:#fff1f2;color:#991b1b;border:2px solid #dc2626}
 `;
   document.documentElement.appendChild(style);
 
@@ -1216,7 +1208,6 @@
     dateQueue:[],
     dateBusy:false,
     workflowDate:null,
-    workflowExpiryByKey:new Map(),
     history:loadExpiryHistory(),
     stats:{green:0,yellow:0,red:0},
     last:{kind:'idle',code:'',reason:'Scan an item'}
@@ -1235,7 +1226,6 @@
     preflightState.dateQueue.length = 0;
     preflightState.dateBusy = false;
     preflightState.workflowDate = null;
-    preflightState.workflowExpiryByKey.clear();
     preflightState.stats = {green:0,yellow:0,red:0};
     preflightState.last = {kind:'idle',code:'',reason:'Scan an item'};
     renderPreflight();
@@ -1269,26 +1259,6 @@
       preflightState.history = Object.fromEntries(entries.slice(0,800));
     }
     try { localStorage.setItem(EXPIRY_HISTORY_KEY,JSON.stringify(preflightState.history)); } catch {}
-  }
-
-  function getWorkflowExpiry(code,ctx) {
-    let newest = null;
-    for (const key of expiryHistoryKeys(code,ctx)) {
-      const record = preflightState.workflowExpiryByKey.get(key);
-      if (!record) continue;
-      if (!newest || Number(record.confirmedAt||0) > Number(newest.confirmedAt||0)) newest = record;
-    }
-    return newest;
-  }
-
-  function saveWorkflowExpiry(code,ctx,choice) {
-    if (!choice?.enteredMs) return;
-    const record = {
-      enteredMs:Number(choice.enteredMs),
-      finalExpirationMs:Number(choice.finalExpirationMs || choice.enteredMs),
-      confirmedAt:Date.now()
-    };
-    for (const key of expiryHistoryKeys(code,ctx)) preflightState.workflowExpiryByKey.set(key,record);
   }
 
   function dateChoiceForCtx(ctx,enteredMs) {
@@ -1420,34 +1390,6 @@
     }
   }
 
-  function showReuseDatePrompt(item,enteredMs,sourceLabel) {
-    return new Promise(resolve => {
-      const root = document.createElement('div');
-      root.id = 'sh-og-expiry';
-      root.dataset.owner = 'lazy';
-      root.innerHTML =
-        `<div class="og-wrap og-confirm-wrap">` +
-          `<div class="og-id"><div>${esc(item.ctx?.asin || item.code)}</div><div>EXPIRY CHECK</div></div>` +
-          `<div class="og-confirm-question">Same date as <strong>${esc(dateLabel(enteredMs))}</strong>?</div>` +
-          `<div class="og-confirm-note">${esc(sourceLabel)}</div>` +
-          `<div class="og-confirm-actions"><button data-a="yes">YES — SAME</button><button data-a="no">NO — DIFFERENT</button></div>` +
-        `</div>`;
-      document.body.appendChild(root);
-
-      lazy.dateResolve = value => {
-        lazy.dateResolve = null;
-        root.remove();
-        resolve(value);
-      };
-
-      root.addEventListener('click',e=>{
-        const b=e.target.closest('button[data-a]');
-        if(!b)return;
-        lazy.dateResolve?.(b.dataset.a === 'yes');
-      });
-    });
-  }
-
   async function pumpPreflightDates() {
     if (preflightState.dateBusy || !preflightState.dateQueue.length || lazy.running) return;
     preflightState.dateBusy = true;
@@ -1457,50 +1399,54 @@
         const key = itemKey(next.code);
         const item = {code:next.code,qty:1,ctx:next.ctx,status:'DATE'};
 
-        const remembered = getRememberedExpiry(next.code,next.ctx);
         const workflow = preflightState.workflowDate;
-        const confirmedThisWorkflow = getWorkflowExpiry(next.code,next.ctx);
-        const suggestedMs = workflow?.enteredMs || remembered?.enteredMs || 0;
-        let chosen = confirmedThisWorkflow
-          ? {
-              enteredMs:Number(confirmedThisWorkflow.enteredMs),
-              finalExpirationMs:Number(confirmedThisWorkflow.finalExpirationMs)
+        let chosen = null;
+
+        if (!workflow) {
+          // One user question per workflow: the first expiry-required item establishes
+          // the workflow date. Everything after this reuses it automatically.
+          chosen = await showApiDatePicker(item);
+          if (!chosen) continue;
+          preflightState.workflowDate = chosen;
+        } else {
+          const remembered = getRememberedExpiry(next.code,next.ctx);
+          if (remembered?.enteredMs) {
+            const rememberedChoice = dateChoiceForCtx(next.ctx, remembered.enteredMs);
+            if (
+              rememberedChoice &&
+              Number(rememberedChoice.finalExpirationMs) !== Number(workflow.finalExpirationMs)
+            ) {
+              preflightState.stats.red++;
+              addRedPending(next.code);
+              preflightState.last = {
+                kind:'red',
+                code:next.code,
+                reason:`REMEMBERED EXPIRY ${dateLabel(rememberedChoice.enteredMs)} ≠ WORKFLOW ${dateLabel(workflow.enteredMs)}`
+              };
+              renderPreflight();
+              continue;
             }
-          : null;
+          }
 
-        if (!chosen && suggestedMs) {
-          const same = await showReuseDatePrompt(
-            item,
-            suggestedMs,
-            workflow ? 'Current destination/workflow date' : 'Remembered from the last workflow'
-          );
-          if (same === null) continue;
-          if (same) chosen = dateChoiceForCtx(next.ctx,suggestedMs);
+          chosen = dateChoiceForCtx(next.ctx, workflow.enteredMs);
+          if (!chosen) continue;
+
+          if (Number(chosen.finalExpirationMs) !== Number(workflow.finalExpirationMs)) {
+            preflightState.stats.red++;
+            addRedPending(next.code);
+            preflightState.last = {
+              kind:'red',
+              code:next.code,
+              reason:`WORKFLOW DATE DOES NOT MATCH THIS ITEM — ${dateLabel(workflow.enteredMs)}`
+            };
+            renderPreflight();
+            continue;
+          }
         }
 
-        if (!chosen) chosen = await showApiDatePicker(item);
-        if (!chosen) continue;
-
-        if (!confirmedThisWorkflow) {
-          // Remember what the user physically confirmed. Any matching ASIN/FNSKU/barcode
-          // in this same workflow reuses that exact answer without prompting again.
-          saveRememberedExpiry(next.code,next.ctx,chosen.enteredMs);
-          saveWorkflowExpiry(next.code,next.ctx,chosen);
-        }
-
-        if (!preflightState.workflowDate) preflightState.workflowDate = chosen;
-
-        if (Number(chosen.finalExpirationMs) !== Number(preflightState.workflowDate.finalExpirationMs)) {
-          preflightState.stats.red++;
-          addRedPending(next.code);
-          preflightState.last = {
-            kind:'red',
-            code:next.code,
-            reason:`DIFFERENT EXPIRY ${dateLabel(chosen.enteredMs)} — WORKFLOW ${dateLabel(preflightState.workflowDate.enteredMs)}`
-          };
-          renderPreflight();
-          continue;
-        }
+        // The workflow date is the value applied to this item, so remember it for later
+        // conflict detection without asking the user again in this workflow.
+        saveRememberedExpiry(next.code,next.ctx,chosen.enteredMs);
 
         preflightState.dateCache.set(key,chosen);
         preflightState.stats.yellow++;
