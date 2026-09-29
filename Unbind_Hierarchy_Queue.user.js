@@ -2,7 +2,7 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.4
+// @version      1.1.5
 // @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.4';
+  const VERSION = '1.1.5';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
