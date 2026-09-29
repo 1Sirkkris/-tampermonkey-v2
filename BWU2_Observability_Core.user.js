@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.32
+// @version      0.1.33
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -29,7 +29,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.32';
+  const VERSION = '0.1.33';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -251,6 +251,52 @@
     return `<${kind}#${hash(text)}:${text.length}>`;
   }
 
+  function workflowTool() {
+    const host = String(location.hostname || '').toLowerCase();
+    const path = String(location.pathname || '').toLowerCase();
+    const hashValue = String(location.hash || '').toLowerCase();
+
+    if (hashValue.startsWith('#fcr-tote-checker')) return 'tote-audit';
+    if (hashValue.startsWith('#iss-console')) return 'iss-console';
+    if (/aft-poirot-website/.test(host)) return 'sideline';
+    if (/aft-moveapp/.test(host)) return 'move-app';
+    if (/aft-qt-/.test(host) && /moveitems/.test(path)) return 'aft-moveitems';
+    if (/aft-qt-/.test(host) && /edititems/.test(path)) return 'aft-edititems';
+    if (/unbind/i.test(host + path)) return 'unbind';
+    if (/dropzone/i.test(host + path)) return 'dropzone';
+    if (FCR_HOST.test(host)) return 'fcresearch';
+    if (PO_PORTAL_HOST.test(host)) return 'po-portal';
+    if (RIVER_HOST.test(host)) return 'river';
+    return scrubText(host || 'unknown');
+  }
+
+  function workflowIdentity(element, info = {}) {
+    if (!fullFatMode || !(element instanceof Element)) return null;
+    const input = element.matches?.('input,textarea,select') ? element : element.closest?.('input,textarea,select');
+    if (!input) return null;
+
+    const type = String(input.getAttribute('type') || '').toLowerCase();
+    const descriptor = [
+      info.id, info.name, info.label,
+      input.getAttribute('placeholder'),
+      input.getAttribute('aria-label')
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (type === 'password' || SENSITIVE_KEY.test(descriptor)) return null;
+
+    const raw = String(input.value ?? '').trim();
+    if (!raw) return null;
+
+    if (/^(?:ts|cs)x[a-z0-9_-]+$/i.test(raw)) return { kind:'container', id:fingerprint(raw.toUpperCase(), 'container') };
+    if (/^(?:B0|X0|ZZ)[A-Z0-9]{8}$/i.test(raw)) return { kind:'item', id:fingerprint(raw.toUpperCase(), 'item') };
+    if (/^LPN[A-Z0-9_-]+$/i.test(raw)) return { kind:'lpn', id:fingerprint(raw.toUpperCase(), 'lpn') };
+
+    if (/(?:asin|barcode|container|destination|fcsku|fnsku|item|lpn|scannable|sku|source|tote)/i.test(descriptor)) {
+      return { kind:'field-value', id:fingerprint(raw.toUpperCase(), 'workflow') };
+    }
+    return null;
+  }
+
   function scrubText(value) {
     let text = String(value ?? '');
     text = text
@@ -331,7 +377,7 @@
     return output;
   }
 
-  function rememberResearchAction(kind, info = {}) {
+  function rememberResearchAction(kind, info = {}, element = null) {
     lastResearchAction = {
       at: performance.now(),
       kind: scrubText(kind || 'ui'),
@@ -342,7 +388,11 @@
     };
     if (fullFatMode) {
       const { at, ...safe } = lastResearchAction;
-      add('workflow.action', safe);
+      add('workflow.action', {
+        ...safe,
+        tool: workflowTool(),
+        identity: workflowIdentity(element, info)
+      });
     }
   }
 
@@ -1540,25 +1590,25 @@
       if (!event.isTrusted) return;
       const action = clickTarget(event.target);
       const info = action ? targetInfo(action, true) : null;
-      if (info) rememberResearchAction('click', info);
+      if (info) rememberResearchAction('click', info, action);
     }, true);
 
     document.addEventListener('submit', event => {
       if (!event.isTrusted) return;
       const info = targetInfo(event.target);
-      if (info) rememberResearchAction('submit', info);
+      if (info) rememberResearchAction('submit', info, event.target);
     }, true);
 
     document.addEventListener('change', event => {
       if (!event.isTrusted) return;
       const info = targetInfo(event.target);
-      if (info) rememberResearchAction('change', info);
+      if (info) rememberResearchAction('change', info, event.target);
     }, true);
 
     document.addEventListener('keydown', event => {
       if (!event.isTrusted || event.key !== 'Enter') return;
       const info = targetInfo(event.target);
-      if (info) rememberResearchAction('enter', info);
+      if (info) rememberResearchAction('enter', info, event.target);
     }, true);
   }
 
@@ -1988,8 +2038,17 @@
     host: location.hostname,
     path: sanitizePath(location.pathname),
     title: sanitizeTitle(document.title || ''),
+    tool: workflowTool(),
     viewport: viewportSnapshot()
   });
+  if (fullFatMode) {
+    add('workflow.tool-entry', {
+      tool: workflowTool(),
+      host: scrubText(location.hostname),
+      path: sanitizePath(location.pathname),
+      hash: scrubText(location.hash || '')
+    });
+  }
 
   installFetchTrace();
   installXhrTrace();
