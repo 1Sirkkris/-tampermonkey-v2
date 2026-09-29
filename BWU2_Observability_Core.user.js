@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.31
+// @version      0.1.32
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -29,7 +29,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.31';
+  const VERSION = '0.1.32';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -38,7 +38,12 @@
   const PAGE_PREFIX = `${PREFIX}page:`;
   const COUNT_PREFIX = `${PREFIX}count:`;
   const REVISION_KEY = `${PREFIX}revision`;
-  const MAX_EVENTS = 6000;
+  const NORMAL_MAX_EVENTS = 6000;
+  const FULL_FAT_MAX_EVENTS = 50000;
+  const FULL_FAT_KEY = 'bwu2.obs.fullFat.v1';
+  let fullFatMode = false;
+  try { fullFatMode = GM_getValue(FULL_FAT_KEY, false) === true; } catch {}
+  const MAX_EVENTS = fullFatMode ? FULL_FAT_MAX_EVENTS : NORMAL_MAX_EVENTS;
   const WARN_AT = Math.floor(MAX_EVENTS * 0.80);
   const FLUSH_MS = 300;
   const MAX_BODY_CHARS = 5000;
@@ -335,6 +340,10 @@
       type: scrubText(info.type || ''),
       label: scrubText(info.label || '').slice(0, 80)
     };
+    if (fullFatMode) {
+      const { at, ...safe } = lastResearchAction;
+      add('workflow.action', safe);
+    }
   }
 
   function recentResearchAction() {
@@ -881,6 +890,13 @@
 
   function recordPollNetwork(base, rawUrl) {
     const url = parsedUrl(rawUrl);
+    if (fullFatMode) {
+      add('network.poll', {
+        ...base,
+        host: scrubText(url?.hostname || ''),
+        path: sanitizePath(url?.pathname || '')
+      });
+    }
     const key = `${base.method} ${url?.hostname || ''}${url?.pathname || ''}`;
     const stat = pollNetworkStats.get(key) || {
       method: base.method, host: url?.hostname || '', path: url?.pathname || '',
@@ -909,6 +925,13 @@
 
   function recordRoutineNetwork(base, rawUrl) {
     const url = parsedUrl(rawUrl);
+    if (fullFatMode) {
+      add('network.routine', {
+        ...base,
+        host: scrubText(url?.hostname || ''),
+        path: sanitizePath(url?.pathname || '')
+      });
+    }
     const key = `${base.method} ${url?.hostname || ''}${url?.pathname || ''}`;
     const stat = routineNetworkStats.get(key) || {
       method: base.method, host: url?.hostname || '', path: sanitizePath(url?.pathname || ''),
@@ -1185,6 +1208,7 @@
       `Started: ${new Date(meta.startedAt || Date.now()).toISOString()}`,
       `Exported: ${new Date().toISOString()}`,
       `Events: ${events.length}/${MAX_EVENTS}`,
+      `Mode: ${fullFatMode ? 'FULL FAT' : 'NORMAL'}`,
       '',
       'EVENTS'
     ];
@@ -1844,6 +1868,7 @@
       #bwu2-observability-inline button{appearance:none;border:0;background:transparent;padding:1px 3px;margin:0;color:inherit;font:inherit;cursor:pointer;border-radius:3px}
       #bwu2-observability-inline button:hover{text-decoration:underline;background:rgba(0,0,0,.05)}
       #bwu2-observability-count{font-variant-numeric:tabular-nums}
+      #bwu2-observability-fat[data-on="1"]{background:#7f1d1d!important;color:#fff!important;box-shadow:0 0 0 1px #450a0a;font-weight:900}
       #bwu2-observability-inline.warn #bwu2-observability-count{animation:bwu2ObsFlash .32s steps(1,end) infinite;background:#ffea00;color:#7f1d1d;box-shadow:0 0 0 1px #dc2626}
       #bwu2-observability-inline.full #bwu2-observability-count{animation-duration:.16s;background:#ff2d2d;color:#fff;box-shadow:0 0 0 1px #7f1d1d}
       @keyframes bwu2ObsFlash{0%,49%{opacity:1}50%,100%{opacity:.12}}
@@ -1861,6 +1886,8 @@
       uiRoot = document.getElementById('bwu2-observability-inline');
       uiCount = document.getElementById('bwu2-observability-count');
       uiClear = document.getElementById('bwu2-observability-clear');
+      const fat = document.getElementById('bwu2-observability-fat');
+      if (fat) { fat.dataset.on = fullFatMode ? '1' : '0'; fat.textContent = `FAT ${fullFatMode ? 'ON' : 'OFF'}`; }
       return true;
     }
 
@@ -1874,7 +1901,9 @@
     host.id = 'bwu2-observability-inline';
     host.dataset.fcrToolUi = '1';
     host.innerHTML =
-      '<button type="button" id="bwu2-observability-count" title="Download current observability log and start a fresh session">OBS 0/6000</button>' +
+      `<button type="button" id="bwu2-observability-count" title="Download current observability log and start a fresh session">OBS 0/${MAX_EVENTS}</button>` +
+      '<span aria-hidden="true">·</span>' +
+      `<button type="button" id="bwu2-observability-fat" data-on="${fullFatMode ? '1' : '0'}" title="Toggle one-hour high-detail audit logging">FAT ${fullFatMode ? 'ON' : 'OFF'}</button>` +
       '<span aria-hidden="true">·</span>' +
       '<button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
 
@@ -1885,6 +1914,12 @@
     uiClear = host.querySelector('#bwu2-observability-clear');
 
     uiCount.addEventListener('click', downloadAndReset);
+    host.querySelector('#bwu2-observability-fat')?.addEventListener('click', () => {
+      const next = !fullFatMode;
+      try { GM_setValue(FULL_FAT_KEY, next); } catch {}
+      resetSession(next ? 'full-fat-on' : 'full-fat-off');
+      location.reload();
+    });
     uiClear.addEventListener('click', () => resetSession('clear'));
 
     renderUi(true);
