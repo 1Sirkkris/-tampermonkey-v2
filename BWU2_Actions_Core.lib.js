@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
@@ -79,6 +79,8 @@
     const globals = [
       ['employeeLogin', pageWindow?.employeeLogin],
       ['userLogin', pageWindow?.userLogin],
+      ['autoId', pageWindow?.autoId],
+      ['autoID', pageWindow?.autoID],
       ['currentUser', pageWindow?.currentUser],
       ['user', pageWindow?.user],
       ['employee', pageWindow?.employee],
@@ -99,10 +101,13 @@
       '[data-employee-login]',
       '[data-user-login]',
       '[data-username]',
+      '[data-autoid]',
       'input[name="employeeLogin"]',
       'input[name="userLogin"]',
+      'input[name="autoid"]',
       'meta[name="employeeLogin"]',
-      'meta[name="username"]'
+      'meta[name="username"]',
+      'meta[name="autoid"]'
     ];
     for (const selector of selectors) {
       const element = doc?.querySelector?.(selector);
@@ -111,6 +116,7 @@
         element.dataset?.employeeLogin ||
         element.dataset?.userLogin ||
         element.dataset?.username ||
+        element.dataset?.autoid ||
         element.value ||
         element.content ||
         element.textContent;
@@ -122,6 +128,30 @@
       const match = clean(row.textContent).match(/\bSearch\s+([a-z][a-z0-9-]{2,31})\b/i);
       const result = remember(match?.[1], 'dom:aui-nav-row');
       if (result) return result;
+    }
+
+    const storageCandidates = [
+      pageWindow?.sessionStorage,
+      pageWindow?.localStorage,
+      globalThis.sessionStorage,
+      storage
+    ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
+    for (const candidateStorage of storageCandidates) {
+      try {
+        for (let index = 0; index < candidateStorage.length; index++) {
+          const key = candidateStorage.key(index) || '';
+          if (key === TRUSTED_LOGIN_KEY) continue;
+          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
+          if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
+          const raw = candidateStorage.getItem(key);
+          let found = normalizeLogin(raw);
+          if (!found) {
+            try { found = findLoginInObject(JSON.parse(raw)); } catch {}
+          }
+          const result = remember(found, `storage:${key}`);
+          if (result) return result;
+        }
+      } catch {}
     }
 
     for (const cookieName of ['employeeLogin', 'userLogin', 'username', 'login', 'alias', 'autoid']) {
