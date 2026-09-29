@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.34
+// @version      0.1.35
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -29,7 +29,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.34';
+  const VERSION = '0.1.35';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -1914,7 +1914,7 @@
     const style = document.createElement('style');
     style.id = 'bwu2-observability-style';
     style.textContent = `
-      #bwu2-observability-inline{display:inline-flex;align-items:center;gap:5px;margin-left:9px;vertical-align:middle;font:700 11px/1.2 Arial,sans-serif;white-space:nowrap;color:#374151}
+      #bwu2-observability-inline{display:inline-flex;align-items:center;gap:5px;margin-left:8px;vertical-align:baseline;font:700 11px/1.2 Arial,sans-serif;white-space:nowrap;color:#374151}
       #bwu2-observability-inline button{appearance:none;border:0;background:transparent;padding:1px 3px;margin:0;color:inherit;font:inherit;cursor:pointer;border-radius:3px}
       #bwu2-observability-inline button:hover{text-decoration:underline;background:rgba(0,0,0,.05)}
       #bwu2-observability-count{font-variant-numeric:tabular-nums}
@@ -1931,6 +1931,11 @@
     if (!document.documentElement) return false;
 
     injectUiStyles();
+    const warehouseEl = document.querySelector('.warehouse-id');
+    if (warehouseEl instanceof HTMLElement) {
+      warehouseEl.style.display = 'inline';
+      warehouseEl.style.verticalAlign = 'baseline';
+    }
 
     if (document.getElementById('bwu2-observability-inline')) {
       uiRoot = document.getElementById('bwu2-observability-inline');
@@ -1957,8 +1962,7 @@
       '<span aria-hidden="true">·</span>' +
       '<button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
 
-    if (warehouse) warehouse.appendChild(host);
-    else anchor.insertAdjacentElement('afterend', host);
+    anchor.insertAdjacentElement('afterend', host);
 
     uiRoot = host;
     uiCount = host.querySelector('#bwu2-observability-count');
