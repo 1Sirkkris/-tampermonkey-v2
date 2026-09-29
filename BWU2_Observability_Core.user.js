@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.33
+// @version      0.1.34
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -29,7 +29,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.33';
+  const VERSION = '0.1.34';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -1945,7 +1945,7 @@
     const warehouse = document.querySelector('.warehouse-id');
     const anchor = warehouse || logoResearch;
 
-    if (!anchor?.parentElement) return false;
+    if (!anchor) return false;
 
     const host = document.createElement('span');
     host.id = 'bwu2-observability-inline';
@@ -1957,7 +1957,8 @@
       '<span aria-hidden="true">·</span>' +
       '<button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
 
-    anchor.insertAdjacentElement('afterend', host);
+    if (warehouse) warehouse.appendChild(host);
+    else anchor.insertAdjacentElement('afterend', host);
 
     uiRoot = host;
     uiCount = host.querySelector('#bwu2-observability-count');
