@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
@@ -65,6 +65,36 @@
     }
   }
 
+  function visibleHeaderLogin(doc, pageWindow) {
+    const viewportWidth = Number(pageWindow?.innerWidth || doc?.documentElement?.clientWidth || 0);
+    if (!viewportWidth || !doc?.querySelectorAll) return '';
+
+    const blocked = /^(?:search|profile|refresh|settings|sections|inventory|history|product|employee|events|problem|problems|shipment|receive|container|items|title|bwui?2)$/i;
+    const candidates = [];
+
+    for (const element of doc.querySelectorAll('a,span,strong,b,button,div')) {
+      if (element.children?.length) continue;
+      const raw = clean(element.textContent);
+      if (!raw || raw !== raw.toLowerCase() || blocked.test(raw)) continue;
+      const login = normalizeLogin(raw);
+      if (!login) continue;
+
+      let rect;
+      try { rect = element.getBoundingClientRect(); } catch { continue; }
+      if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+      if (rect.top < -2 || rect.top > 140) continue;
+      if (rect.left < viewportWidth * 0.68) continue;
+
+      const style = pageWindow?.getComputedStyle?.(element);
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) continue;
+
+      candidates.push({ login, left: rect.left, top: rect.top });
+    }
+
+    candidates.sort((a, b) => (b.left - a.left) || (a.top - b.top));
+    return candidates[0]?.login || '';
+  }
+
   function resolveEmployeeLogin(options = {}) {
     const doc = options.document || globalThis.document;
     const pageWindow = options.pageWindow || globalThis.window || ROOT;
@@ -123,6 +153,9 @@
       const result = remember(candidate, `dom:${selector}`);
       if (result) return result;
     }
+
+    const visibleLogin = remember(visibleHeaderLogin(doc, pageWindow), 'dom:top-right-visible-login');
+    if (visibleLogin) return visibleLogin;
 
     for (const row of doc?.querySelectorAll?.('.aui-nav-row') || []) {
       const match = clean(row.textContent).match(/\bSearch\s+([a-z][a-z0-9-]{2,31})\b/i);
