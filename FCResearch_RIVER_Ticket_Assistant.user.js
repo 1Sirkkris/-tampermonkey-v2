@@ -2,7 +2,7 @@
 // @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @name:en      TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.17
+// @version      0.3.18
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -23,7 +23,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.17';
+  const VERSION = '0.3.18';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -1006,11 +1006,11 @@
     if (page === 'information') {
       const values = [
         [['x0 asin', 'x00 asin / fnsku', 'x00 asin', 'fnsku', 'asin/fnsku'], payloadValue(payload, 'fnsku'), 'fnsku'],
-        [['asin title', 'product title', 'title'], payloadValue(payload, 'title'), 'title'],
         [['purchase order', 'po'], payloadValue(payload, 'purchaseOrder'), 'purchaseOrder'],
         [['vendor code / seller id', 'vendor code', 'seller id'], payloadValue(payload, 'vendorCode'), 'vendorCode'],
         [['inventory cost per unit', 'inventory cost', 'cost per unit'], payloadValue(payload, 'inventoryCost'), 'inventoryCost'],
-        [['physical location of the units', 'physical location', 'location'], 'TBD', 'physicalLocation']
+        [['physical location of the units', 'physical location', 'location'], 'TBD', 'physicalLocation'],
+        [['asin title', 'product title', 'title'], payloadValue(payload, 'title'), 'title']
       ];
       status.textContent = 'Information W1 • waiting for form readiness…';
       await waitForInformationReady(values);
@@ -1019,6 +1019,7 @@
       let filled = 0;
       for (const [aliases, value, fieldName] of values) {
         const element = field(aliases);
+        if (fieldName === 'title') await new Promise(resolve => setTimeout(resolve, 500));
         if (!await setInformationValue(element, value)) throw new Error(`Information W1 ${fieldName} did not retain.`);
         if (fieldName === 'title') {
           if (!await setInformationValue(element, `${String(value ?? '')} `)) throw new Error('Information W1 title space nudge did not retain.');
