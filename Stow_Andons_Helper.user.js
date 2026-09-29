@@ -9,7 +9,7 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
-// @version      5.6.3
+// @version      5.6.4
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -23,7 +23,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.3';
+  const VERSION = '5.6.4';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -527,7 +527,7 @@
   async function unbindCurrentContainer(button) {
     if (unbindBusy || button?.disabled) return;
     const container = currentContainer();
-    if (!/^tsX[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX', true);
+    if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
     const login = unbindLogin();
     if (!login) return toast('Logged-in user could not be detected — refresh/sign in', true);
 
@@ -622,8 +622,8 @@
 
   function renderDropButtons() {
     const buttons = activeDrops().map(item => `<button type="button" class="vm-tag-btn" data-drop="${item.key}" title="${item.dest || item.pattern}">${item.label}</button>`).join('');
-    const unbind = /^tsX[A-Z0-9]+$/i.test(currentContainer())
-      ? '<span class="vm-drop-divider">|</span><button type="button" class="vm-tag-btn" data-unbind title="Unbind current tsX hierarchy">Unbind</button>'
+    const unbind = /^(?:ts|cs)X[A-Z0-9]+$/i.test(currentContainer())
+      ? '<span class="vm-drop-divider">|</span><button type="button" class="vm-tag-btn" data-unbind title="Unbind current container hierarchy">Unbind</button>'
       : '';
     return `${buttons}<button type="button" class="vm-tag-btn" data-drop="Prime" title="dz-P-PRIME">Prime</button>${unbind}`;
   }
