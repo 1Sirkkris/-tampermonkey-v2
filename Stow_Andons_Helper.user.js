@@ -8,8 +8,9 @@
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
+// @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.4
+// @version      5.6.5
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -23,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.4';
+  const VERSION = '5.6.5';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -423,8 +424,43 @@
     });
   }
 
-  function unbindLogin() {
-    return ACTIONS.resolveEmployeeLogin({ document, pageWindow: PAGE_WINDOW }).login;
+  function cacheUnbindLogin(login, source = '') {
+    const value = clean(login).toLowerCase();
+    if (!/^[a-z][a-z0-9-]{2,31}$/i.test(value)) return '';
+    try {
+      localStorage.setItem('bwu2.actions.trustedEmployeeLogin.v1', JSON.stringify({
+        login: value,
+        source: clean(source),
+        at: Date.now()
+      }));
+    } catch {}
+    return value;
+  }
+
+  function wikiLogin() {
+    return new Promise(resolve => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: 'https://w.amazon.com/bin/view/Main/',
+        timeout: 10000,
+        anonymous: false,
+        onload: response => {
+          const html = String(response.responseText || '');
+          const match =
+            html.match(/\/bin\/view\/Users\/([a-z][a-z0-9-]{2,31})/i) ||
+            html.match(/[?&]userAlias=([a-z][a-z0-9-]{2,31})/i);
+          resolve(cacheUnbindLogin(match?.[1] || '', 'wiki'));
+        },
+        onerror: () => resolve(''),
+        ontimeout: () => resolve('')
+      });
+    });
+  }
+
+  async function unbindLogin() {
+    const local = ACTIONS.resolveEmployeeLogin({ document, pageWindow: PAGE_WINDOW }).login;
+    if (local) return cacheUnbindLogin(local, 'local');
+    return wikiLogin();
   }
 
   function inlineUnbindResponseShape(phase, data, container) {
@@ -528,8 +564,8 @@
     if (unbindBusy || button?.disabled) return;
     const container = currentContainer();
     if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
-    const login = unbindLogin();
-    if (!login) return toast('Logged-in user could not be detected — refresh/sign in', true);
+    const login = await unbindLogin();
+    if (!login) return toast('Could not detect Amazon login', true);
 
     usage('unbind');
     unbindBusy = true;
