@@ -2,7 +2,7 @@
 // @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @name:en      TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.16
+// @version      0.3.17
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -23,7 +23,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.16';
+  const VERSION = '0.3.17';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -1020,6 +1020,10 @@
       for (const [aliases, value, fieldName] of values) {
         const element = field(aliases);
         if (!await setInformationValue(element, value)) throw new Error(`Information W1 ${fieldName} did not retain.`);
+        if (fieldName === 'title') {
+          if (!await setInformationValue(element, `${String(value ?? '')} `)) throw new Error('Information W1 title space nudge did not retain.');
+          emit('automation.action', { step: page, action: 'title-space-nudge' });
+        }
         filled++;
         emit('automation.action', { step: page, action: 'fill-field', field: fieldName, available: clean(value) !== 'N/A' });
       }
