@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.41
+// @version      0.1.42
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.41';
+  const VERSION = '0.1.42';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -35,7 +35,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.28-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.29-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -150,6 +150,30 @@
     } catch {}
   }
 
+  function armRpcTimeout(worker, id, pending) {
+    const state = workers[worker];
+    if (!state || !pending) return;
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      if (pending.timedOut) return;
+      pending.timedOut = true;
+      observe('RPC_TIMEOUT', { worker, command:pending.command, outcome:'unknown' });
+      pending.reject(new Error(pending.command + ' timed out — worker outcome UNKNOWN; wait for completion or verify before retry'));
+      // Keep ownership. A late worker result clears this UNKNOWN lock instead
+      // of becoming orphaned while the worker may still be mutating.
+    }, pending.timeoutMs);
+  }
+
+  function touchRpcProgress(worker) {
+    const state = workers[worker];
+    if (!state) return;
+    for (const [id, pending] of state.pending) {
+      if (!pending || pending.timedOut || pending.command === 'ping') continue;
+      pending.lastProgressAt = Date.now();
+      armRpcTimeout(worker, id, pending);
+    }
+  }
+
   function rpcRaw(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
     const state = workers[worker];
     if (!state) return Promise.reject(new Error('Unknown worker'));
@@ -161,20 +185,30 @@
     const id = nextRpcId(worker);
     observe('RPC_SEND', { worker, command });
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        state.pending.delete(id);
-        observe('RPC_TIMEOUT', { worker, command });
-        reject(new Error(command + ' timed out'));
-      }, timeout);
-
-      state.pending.set(id, { resolve, reject, timer, command });
-      workerFrame(worker).postMessage({
-        type: 'ISS_CONSOLE_RPC',
-        worker,
-        id,
+      const pending = {
+        resolve,
+        reject,
+        timer:0,
         command,
-        payload
-      }, state.local ? location.origin : state.origin);
+        timeoutMs:timeout,
+        timedOut:false,
+        lastProgressAt:Date.now()
+      };
+      state.pending.set(id, pending);
+      armRpcTimeout(worker, id, pending);
+      try {
+        workerFrame(worker).postMessage({
+          type: 'ISS_CONSOLE_RPC',
+          worker,
+          id,
+          command,
+          payload
+        }, state.local ? location.origin : state.origin);
+      } catch (error) {
+        clearTimeout(pending.timer);
+        state.pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -261,6 +295,13 @@
   }
 
   async function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
+    const state = workers[worker];
+    const unresolved = state
+      ? [...state.pending.values()].find(item => item?.timedOut && item?.command !== 'ping')
+      : null;
+    if (unresolved && !['ping','stop'].includes(command)) {
+      throw new Error(`Previous ${unresolved.command} outcome is UNKNOWN — wait for its result or verify state before another run`);
+    }
     if (['aft','sideline'].includes(worker) && !['ping','stop'].includes(command)) {
       await ensureWorkerHealthy(worker);
     }
@@ -646,6 +687,7 @@
 
     if (message.type === 'ISS_CONSOLE_PROGRESS') {
       state.lastHealthyAt = Date.now();
+      touchRpcProgress(worker);
       if (!state.ready) markWorker(worker, true, message.version || state.version || '');
       observe('WORKER_PROGRESS', {
         worker,
@@ -684,6 +726,14 @@
       error:message.ok ? '' : clean(message.error || pending.command + ' failed').slice(0, 180),
       result:resultSummary
     });
+    if (pending.timedOut) {
+      observe('RPC_LATE_RESULT', {
+        worker,
+        command:pending.command,
+        ok:!!message.ok
+      });
+      return;
+    }
     if (message.ok) {
       pending.resolve(message.data);
     } else {
@@ -1219,21 +1269,22 @@
       const remaining = Array.isArray(partial?.remaining)
         ? partial.remaining.map(value => clean(value)).filter(Boolean)
         : [];
+      const uncertain = Array.isArray(partial?.uncertain)
+        ? partial.uncertain.map(value => clean(value)).filter(Boolean)
+        : [];
 
-      if (partial && Number(partial.done) > 0) {
-        if (remaining.length) {
-          if (moveItems) moveItems.value = remaining.join('\n');
-        } else if (Number(partial.done) >= Number(partial.total) && moveItems) {
-          moveItems.value = '';
-        }
+      if (partial && moveItems) {
+        moveItems.value = remaining.join('\n');
       }
 
       panelStatus(
         'move',
         error.message + (
-          partial && Number(partial.done) >= Number(partial.total) && Number(partial.total) > 0
-            ? ' • VERIFY FINAL STATE — do not blindly rerun'
-            : ''
+          uncertain.length
+            ? ` • UNKNOWN: ${uncertain.join(', ')} removed from runnable queue — VERIFY before retry`
+            : partial && Number(partial.done) >= Number(partial.total) && Number(partial.total) > 0
+              ? ' • VERIFY FINAL STATE — do not blindly rerun'
+              : ''
         ),
         'error'
       );
