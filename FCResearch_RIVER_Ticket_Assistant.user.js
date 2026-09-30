@@ -2,7 +2,7 @@
 // @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
 // @name:en      TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.18
+// @version      0.3.19
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -23,7 +23,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.18';
+  const VERSION = '0.3.19';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -1018,11 +1018,17 @@
       status.textContent = 'Information W1 ready • filling…';
       let filled = 0;
       for (const [aliases, value, fieldName] of values) {
+        if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
         const element = field(aliases);
-        if (fieldName === 'title') await new Promise(resolve => setTimeout(resolve, 500));
+        if (fieldName === 'title') {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
+        }
         if (!await setInformationValue(element, value)) throw new Error(`Information W1 ${fieldName} did not retain.`);
+        if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
         if (fieldName === 'title') {
           if (!await setInformationValue(element, `${String(value ?? '')} `)) throw new Error('Information W1 title space nudge did not retain.');
+          if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
           emit('automation.action', { step: page, action: 'title-space-nudge' });
         }
         filled++;
