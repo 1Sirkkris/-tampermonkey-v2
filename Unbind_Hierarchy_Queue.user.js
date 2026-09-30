@@ -2,8 +2,8 @@
 // @name         Unbind Hierarchy Queue v1.0.1
 // @name:en      Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.5
-// @description  BWU2 Endless-style sequential tsX hierarchy unbind queue using the proven native backend flow.
+// @version      1.1.6
+// @description  BWU2 Endless-style sequential tsX/csX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.5';
+  const VERSION = '1.1.6';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
@@ -43,7 +43,7 @@
   const SESSION_RECOVERY_MAX_AGE_MS = 60 * 1000;
   const SESSION_RECOVERY_MAX_ATTEMPTS = 2;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const CONTAINER_PATTERN = /^tsX[A-Za-z0-9]+$/i;
+  const CONTAINER_PATTERN = /^(?:tsX|csX)[A-Za-z0-9_-]+$/i;
 
   let processing = false;
   let lockTimer = 0;
@@ -255,7 +255,7 @@
     saveDraft('');
     state.message = added
       ? `${added} added${invalid.length ? ` | ${invalid.length} rejected` : ''}`
-      : invalid.length ? 'Rejected — tsX containers only' : 'Already in queue';
+      : invalid.length ? 'Rejected — tsX/csX containers only' : 'Already in queue';
     saveState();
     render();
 
@@ -499,7 +499,7 @@
 
     const item = itemFor() || activateNext();
     if (!item) {
-      state.message = 'RUNNING — scan next tsX';
+      state.message = 'RUNNING — scan next tsX/csX';
       saveState();
       render();
       ui.draft?.focus();
@@ -582,7 +582,7 @@
 
     const queued = counts().queued;
     state.running = true;
-    state.message = queued ? `RUNNING — ${queued} queued` : 'RUNNING — scan next tsX';
+    state.message = queued ? `RUNNING — ${queued} queued` : 'RUNNING — scan next tsX/csX';
     saveState();
     trace('UNBIND_QUEUE_START', { queued, warehouseId: WAREHOUSE_ID });
     render();
@@ -809,7 +809,7 @@
       return;
     }
     ui.invalid.style.display = 'block';
-    ui.invalid.textContent = `REJECTED — tsX only (${state.invalid.length})\n${state.invalid.join('\n')}`;
+    ui.invalid.textContent = `REJECTED — tsX/csX only (${state.invalid.length})\n${state.invalid.join('\n')}`;
   }
 
   function render() {
@@ -908,7 +908,7 @@
 
     ui.draft = element('textarea');
     ui.draft.value = savedDraft();
-    ui.draft.placeholder = 'Scan or paste tsX containers — one per line';
+    ui.draft.placeholder = 'Scan or paste tsX/csX containers — one per line';
     ui.draft.rows = 4;
     ui.draft.spellcheck = false;
     ui.draft.style.cssText = 'box-sizing:border-box;width:100%;resize:vertical;padding:7px;border:2px solid #64748b;border-radius:6px;font:13px Consolas,monospace';
