@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name       MAIN v1.4.0-test FNSKU mapping Lookup
 // @name:en      MAIN FNSKU mapping Lookup
-// @version      1.4.3-test
+// @version      1.4.4-test
 // @description  Read-only regional FNSKU lookup with polished HOME/JP comparison, native JP handoff and compact minimize mode.
 // @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
@@ -21,7 +21,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.4.3-test';
+  const VERSION = '1.4.4-test';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FNSKU', VERSION);
 
@@ -285,8 +285,7 @@
       throw new Error(`${region.toUpperCase()}: authentication response instead of results`);
     }
 
-    const exact = rows.filter(r => r.fnsku === fnsku);
-    const usable = exact.length ? exact : rows;
+    const usable = rows.filter(r => r.fnsku === fnsku);
     const asins = unique(usable.map(r => r.asin).filter(x => /^B0[A-Z0-9]{8}$/.test(x)));
 
     debug('FNSKU_RESULT', { region, fnsku, rows: usable.length, asins });
@@ -302,8 +301,7 @@
       throw new Error('JP: authentication response instead of results');
     }
 
-    const exact = rows.filter(r => r.asin === asin);
-    const usable = uniqueRows(exact.length ? exact : rows);
+    const usable = uniqueRows(rows.filter(r => r.asin === asin));
     const fnskus = unique(usable.map(r => r.fnsku));
     const pageInfo = nextPageInfo(response.text, response.finalUrl || url);
     const hasMore = pageInfo.hasNext;
