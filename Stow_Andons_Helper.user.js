@@ -10,7 +10,7 @@
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.6
+// @version      5.6.7
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.6';
+  const VERSION = '5.6.7';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -365,7 +365,12 @@
         onload: response => {
           const ms = Math.round(performance.now() - started);
           if (response.status >= 200 && response.status < 300) {
-            resolve({ status: response.status, ms });
+            try {
+              ACTIONS.assertMoveContainerResponse(response, url);
+              resolve({ status: response.status, ms });
+            } catch (error) {
+              reject(error);
+            }
             return;
           }
           const error = new Error(`HTTP ${response.status}`);
@@ -447,9 +452,10 @@
         onload: response => {
           const html = String(response.responseText || '');
           const match =
-            html.match(/\/bin\/view\/Users\/([a-z][a-z0-9-]{2,31})/i) ||
-            html.match(/[?&]userAlias=([a-z][a-z0-9-]{2,31})/i);
-          resolve(cacheUnbindLogin(match?.[1] || '', 'wiki'));
+            html.match(/[?&]userAlias=([a-z][a-z0-9-]{2,31})/i) ||
+            html.match(/\b(?:currentUser|userAlias|employeeLogin)\s*[:=]\s*["']([a-z][a-z0-9-]{2,31})["']/i) ||
+            html.match(/\bdata-(?:user|employee)-(?:alias|login)=["']([a-z][a-z0-9-]{2,31})["']/i);
+          resolve(cacheUnbindLogin(match?.[1] || '', 'wiki-current-user'));
         },
         onerror: () => resolve(''),
         ontimeout: () => resolve('')
