@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.22
+// @version      0.0.23
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -17,7 +17,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.22-REBUILD';
+  const VERSION = '0.0.23-REBUILD';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
@@ -4355,12 +4355,12 @@
 
   // Boot
   function boot() {
-    refreshItems();
-
     if (ISS_CONSOLE_WORKER) {
       installIssConsoleSidelineWorkerBridge();
       return;
     }
+
+    refreshItems();
 
     document.addEventListener('click', handleUniversalReturnClick, true);
     mountDock();
