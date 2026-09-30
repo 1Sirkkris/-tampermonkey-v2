@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.26
+// @version      0.0.27
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -18,7 +18,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.26-REBUILD';
+  const VERSION = '0.0.27-REBUILD';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
@@ -39,7 +39,11 @@
   const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
-  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  // Poirot can redirect away the query/hash, and Firefox may clear window.name
+  // on cross-origin navigation. Being embedded is the durable worker signal:
+  // standalone Sideline is top-level; ISS Console Sideline runs in its hidden iframe.
+  const ISS_WORKER_BY_FRAME = window.self !== window.top;
+  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_FRAME || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
 
   function issControllerWindow() {
     try {
