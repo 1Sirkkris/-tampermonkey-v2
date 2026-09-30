@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.40
+// @version      0.1.41
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,16 +15,19 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.40';
+  const VERSION = '0.1.41';
   const HASH = '#iss-console';
-  if (!location.hash.startsWith(HASH)) return;
+  if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
   window.__bwu2IssConsole = true;
 
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const AFT_WORKER_URL = AFT_ORIGIN + '/app/edititems?experience=Desktop#iss-console-worker';
-  const SIDELINE_WORKER_URL = SIDELINE_ORIGIN + '/?tool=V3&issConsoleWorker=1#iss-console-worker';
+  // Firefox/Poirot does not reliably stay inside a cross-origin hidden iframe.
+  // Run the installed Sideline REBUILD engine in a same-origin hidden FCR iframe;
+  // that worker talks to Poirot through GM_xmlhttpRequest.
+  const SIDELINE_WORKER_URL = location.origin + location.pathname + location.search + '#iss-console-sideline-worker';
   const STORE_PREFIX = 'issConsole.v1.';
   const DEFAULT_TIMEOUT = 20000;
   const LONG_TIMEOUT = 12 * 60 * 1000;
@@ -32,7 +35,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.27-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.28-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -101,7 +104,7 @@
       restartPromise: null
     },
     sideline: {
-      origin: SIDELINE_ORIGIN,
+      origin: location.origin,
       url: SIDELINE_WORKER_URL,
       frame: null,
       local: false,
