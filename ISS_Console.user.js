@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.36
+// @version      0.1.37
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.36';
+  const VERSION = '0.1.37';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -103,6 +103,7 @@
       origin: SIDELINE_ORIGIN,
       url: SIDELINE_WORKER_URL,
       frame: null,
+      popup: null,
       local: false,
       ready: false,
       version: '',
@@ -132,6 +133,7 @@
     const state = workers[worker];
     if (!state) return null;
     if (state.local) return window;
+    if (worker === 'sideline' && state.popup && !state.popup.closed) return state.popup;
     return state.frame?.contentWindow || null;
   }
 
@@ -256,9 +258,45 @@
     return state.healthPromise;
   }
 
+  function openSidelineWorkerPopup() {
+    const state = workers.sideline;
+    if (!state) throw new Error('Sideline worker missing');
+    if (state.popup && !state.popup.closed) return state.popup;
+
+    const oldFrame = state.frame;
+    state.frame = null;
+    try { oldFrame?.remove(); } catch {}
+
+    observe('WORKER_POPUP_OPEN', { worker:'sideline' });
+    const popup = window.open(
+      SIDELINE_WORKER_URL,
+      'iss-console-sideline-worker',
+      'popup=yes,width=420,height=220,left=20,top=20,resizable=yes,scrollbars=no'
+    );
+    if (!popup) throw new Error('Sideline worker popup blocked — allow popups for FCResearch');
+
+    state.popup = popup;
+    markWorker('sideline', false);
+    try { popup.blur(); window.focus(); } catch {}
+    return popup;
+  }
+
+  async function ensureSidelineWorkerReady() {
+    const state = workers.sideline;
+    if (!state) throw new Error('Sideline worker missing');
+    if (state.ready && workerFrame('sideline')) return true;
+
+    openSidelineWorkerPopup();
+    await waitForWorkerReady('sideline', WORKER_READY_TIMEOUT);
+    return true;
+  }
+
   async function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
     if (worker === 'aft' && !['ping','stop'].includes(command)) {
       await ensureWorkerHealthy(worker);
+    }
+    if (worker === 'sideline' && !['ping','stop'].includes(command)) {
+      await ensureSidelineWorkerReady();
     }
     return rpcRaw(worker, command, payload, timeout);
   }
