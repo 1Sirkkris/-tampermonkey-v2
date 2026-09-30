@@ -2,7 +2,7 @@
 // @name         Bind Hierarchy Queue
 // @name:en      Bind Hierarchy Queue
 // @namespace    BWU2
-// @version      0.1.0
+// @version      0.1.1
 // @description  Sequential BWU2 hierarchy bind queue locked to BWU1, seeded from the proven native bind flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
 // @run-at       document-start
@@ -19,7 +19,7 @@
   if (window.__bwu2BindHierarchyQueue) return;
   window.__bwu2BindHierarchyQueue = true;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const SOURCE_FC = 'BWU2';
   const DESTINATION_FC = 'BWU1';
   const API_VALIDATE_DEST = '/validateDestination';
@@ -52,7 +52,13 @@
   const networkWaiters = new Set();
   const ui = {};
 
-  const normalizeContainerId = value => normalizeContainer(value, CONTAINER_PATTERN);
+  const normalizeContainerId = value => {
+    const id = normalizeContainer(value, CONTAINER_PATTERN);
+    if (!id) return '';
+    if (/^csx/i.test(id)) return `csX${id.slice(3)}`;
+    if (/^tsx/i.test(id)) return `tsX${id.slice(3)}`;
+    return '';
+  };
 
   class RequestError extends Error {
     constructor(message, details = {}) {
@@ -453,6 +459,8 @@
   }
 
   async function emitNativeScan(container) {
+    container = normalizeContainerId(container);
+    if (!container) throw new RequestError('Invalid container barcode',{phase:'validate',status:0});
     const field = findContainerInput();
     if (field) {
       try { field.focus(); } catch {}
@@ -577,6 +585,8 @@
   }
 
   async function seedNativeTemplate(container) {
+    container = normalizeContainerId(container);
+    if (!container) throw new RequestError('Invalid container barcode',{phase:'validate',status:0});
     await ensureDestination();
     state.phase = 'native-validate';
     render();
@@ -688,6 +698,8 @@
   }
 
   async function processDirect(container) {
+    container = normalizeContainerId(container);
+    if (!container) throw new RequestError('Invalid container barcode',{phase:'validate',status:0});
     if (!directTemplate) throw new RequestError('Bind API template is not ready',{phase:'template',status:0});
     await ensureDestination();
 
