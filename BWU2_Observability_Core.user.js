@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.36
+// @version      0.1.37
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -13,6 +13,7 @@
 // @include      /^https?:\/\/fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com\//
 // @include      /^https?:\/\/river\.amazon\.com\//
 // @include      /^https?:\/\/console\.harmony\.a2z\.com\/poportal\/fe(?:[/?#]|$)/
+// @include      /^https?:\/\/tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com\/(?:bindHierarchy|unbindHierarchy)(?:[/?#]|$)/
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_getValue
@@ -29,7 +30,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.36';
+  const VERSION = '0.1.37';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -76,6 +77,7 @@
   const CARTON_HOST = /^aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com$/i;
   const RIVER_HOST = /^river\.amazon\.com$/i;
   const PO_PORTAL_HOST = /^console\.harmony\.a2z\.com$/i;
+  const HIERARCHY_HOST = /^tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com$/i;
   const PO_PORTAL_API_HOST = /(?:^|\.)execute-api\.(?:us-east-1|us-west-2)\.amazonaws\.com$/i;
   const PO_PORTAL_API_PATH = /^\/beta\/(?:getPoHeaders|getEmidFromPolReadService|getInboundRecordsForShipmentByFnsku|getShipmentItems)\/?$/i;
 
@@ -262,6 +264,7 @@
     if (/aft-moveapp/.test(host)) return 'move-app';
     if (/aft-qt-/.test(host) && /moveitems/.test(path)) return 'aft-moveitems';
     if (/aft-qt-/.test(host) && /edititems/.test(path)) return 'aft-edititems';
+    if (HIERARCHY_HOST.test(host) && /bindhierarchy/i.test(path)) return 'bind-hierarchy';
     if (/unbind/i.test(host + path)) return 'unbind';
     if (/dropzone/i.test(host + path)) return 'dropzone';
     if (FCR_HOST.test(host)) return 'fcresearch';
@@ -456,6 +459,57 @@
     if (CARTON_HOST.test(location.hostname) && url?.origin === location.origin && !isStatic) return true;
     if (url) return DETAILED_PATH.test(url.pathname);
     return DETAILED_PATH.test(String(rawUrl || ''));
+  }
+
+  function isHierarchyNetwork(rawUrl) {
+    if (!HIERARCHY_HOST.test(location.hostname)) return false;
+    const url = parsedUrl(rawUrl);
+    if (!url || url.origin !== location.origin) return false;
+    return !/\.(?:css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?)(?:$|[?#])/i.test(url.pathname);
+  }
+
+  function hierarchyBodySummary(body) {
+    let value = body;
+    try {
+      if (typeof body === 'string') {
+        try { value = JSON.parse(body); }
+        catch { value = Object.fromEntries(new URLSearchParams(body).entries()); }
+      } else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        value = Object.fromEntries(body.entries());
+      } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        value = Object.fromEntries(body.entries());
+      }
+    } catch {}
+
+    if (value == null) return { kind:'empty' };
+    if (typeof value === 'object') return { kind:Array.isArray(value) ? 'array' : 'object', body:sanitize(value) };
+    return { kind:typeof value, chars:String(value).length };
+  }
+
+  function hierarchyResponseSummary(text, contentType = '') {
+    const raw = String(text ?? '');
+    const base = { chars:raw.length };
+    if (/json/i.test(contentType) || /^\s*[\[{]/.test(raw)) {
+      try {
+        const parsed = JSON.parse(raw);
+        return {
+          ...base,
+          kind:Array.isArray(parsed) ? 'json-array' : 'json-object',
+          body:sanitize(parsed)
+        };
+      } catch {}
+    }
+    return { ...base, ...summarizeFcrResponse(raw, contentType) };
+  }
+
+  function recordHierarchyNetwork(base, rawUrl, body, responseText = '', contentType = '') {
+    const url = parsedUrl(rawUrl);
+    add('hierarchy.network', {
+      ...base,
+      path:sanitizePath(url?.pathname || ''),
+      request:hierarchyBodySummary(body),
+      response:hierarchyResponseSummary(responseText, contentType)
+    });
   }
 
   function isPoPortalPage() {
@@ -1351,9 +1405,10 @@
         const method = String(init?.method || input?.method || 'GET').toUpperCase();
         const noise = isNoise(rawUrl);
         const fcr = !noise && isFcrNetwork(rawUrl);
-        const poPortal = !noise && !fcr && isPoPortalNetwork(rawUrl);
-        const aftMoveProbe = !noise && !fcr && !poPortal && isAftMoveProbe(rawUrl);
-        const detailed = !noise && !fcr && !poPortal && !aftMoveProbe && isDetailedApi(rawUrl);
+        const hierarchy = !noise && !fcr && isHierarchyNetwork(rawUrl);
+        const poPortal = !noise && !fcr && !hierarchy && isPoPortalNetwork(rawUrl);
+        const aftMoveProbe = !noise && !fcr && !hierarchy && !poPortal && isAftMoveProbe(rawUrl);
+        const detailed = !noise && !fcr && !hierarchy && !poPortal && !aftMoveProbe && isDetailedApi(rawUrl);
         const researchCause = recentResearchAction();
         const started = performance.now();
 
@@ -1377,6 +1432,15 @@
             void response.clone().text()
               .then(text => recordFcrNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
               .catch(() => recordFcrNetwork(base, rawUrl, init?.body));
+          } else if (hierarchy) {
+            void response.clone().text()
+              .then(text => recordHierarchyNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
+              .catch(error => add('hierarchy.network', {
+                ...base,
+                path:sanitizePath(parsedUrl(rawUrl)?.pathname || ''),
+                request:hierarchyBodySummary(init?.body),
+                responseReadError:scrubText(error?.message || error)
+              }));
           } else if (poPortal) {
             void response.clone().text()
               .then(text => recordPoPortalNetwork(base, rawUrl, init?.body, text, response.headers.get('content-type') || ''))
@@ -1424,7 +1488,7 @@
               transport: 'fetch',
               method,
               url: sanitizeUrl(rawUrl),
-              request: aborted ? null : (aftMoveProbe ? summarizeAftMoveRequest(init?.body) : (detailed ? summarizeRequestShape(init?.body) : null)),
+              request: aborted ? null : (hierarchy ? hierarchyBodySummary(init?.body) : (aftMoveProbe ? summarizeAftMoveRequest(init?.body) : (detailed ? summarizeRequestShape(init?.body) : null))),
               ms: Math.round(performance.now() - started),
               error: message
             });
@@ -1469,9 +1533,10 @@
         if (noise) return originalSend.apply(this, arguments);
 
         const fcr = isFcrNetwork(info.url);
-        const poPortal = !fcr && isPoPortalNetwork(info.url);
-        const aftMoveProbe = !fcr && !poPortal && isAftMoveProbe(info.url);
-        const detailed = !fcr && !poPortal && !aftMoveProbe && isDetailedApi(info.url);
+        const hierarchy = !fcr && isHierarchyNetwork(info.url);
+        const poPortal = !fcr && !hierarchy && isPoPortalNetwork(info.url);
+        const aftMoveProbe = !fcr && !hierarchy && !poPortal && isAftMoveProbe(info.url);
+        const detailed = !fcr && !hierarchy && !poPortal && !aftMoveProbe && isDetailedApi(info.url);
         const researchCause = recentResearchAction();
         const started = performance.now();
 
@@ -1496,6 +1561,14 @@
               contentType = this.getResponseHeader('content-type') || '';
             } catch {}
             recordFcrNetwork(base, info.url, body, text, contentType);
+          } else if (hierarchy) {
+            let text = '';
+            let contentType = '';
+            try {
+              if (!this.responseType || this.responseType === 'text') text = this.responseText || '';
+              contentType = this.getResponseHeader('content-type') || '';
+            } catch {}
+            recordHierarchyNetwork(base, info.url, body, text, contentType);
           } else if (poPortal) {
             let text = '';
             let contentType = '';
