@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Unbind Hierarchy Queue v1.0.1
-// @name:en      Unbind Hierarchy Queue
+// @name:en      Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.6
-// @description  BWU2 Endless-style sequential tsX/csX hierarchy unbind queue using the proven native backend flow.
+// @version      2.0.0
+// @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
+// @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
 // @grant        none
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
 // @run-at       document-end
@@ -16,34 +17,53 @@
 (() => {
   'use strict';
 
-  if (window.__bwu2UnbindHierarchyQueue) return;
+  if (window.__bwu2HierarchyQueue) return;
+  window.__bwu2HierarchyQueue = true;
   window.__bwu2UnbindHierarchyQueue = true;
+  window.__bwu2BindHierarchyQueue = true;
 
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.6';
+  const VERSION = '2.0.0';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
-  registerRuntimeVersion('UNBIND', VERSION);
+  const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
+  const IS_BIND = MODE === 'bind';
+  registerRuntimeVersion(IS_BIND ? 'BIND' : 'UNBIND', VERSION);
 
   const WAREHOUSE_ID = 'BWU2';
+  const DESTINATION_FC = 'BWU1';
+  const API_VALIDATE_DEST = '/validateDestination';
   const API_VALIDATE = '/validateContainer';
   const API_SUMMARY = '/getTransshipmentBindingSummary';
+  const API_BIND = '/forceBind';
   const API_UNBIND = '/unbindContainer';
   const TIMEOUT_VALIDATE_MS = 12000;
   const TIMEOUT_SUMMARY_MS = 12000;
-  const TIMEOUT_UNBIND_MS = 20000;
+  const TIMEOUT_MUTATION_MS = 25000;
+  const NATIVE_SEED_TIMEOUT_MS = 30000;
   const NEXT_GAP_MS = 180;
-  const STATE_KEY = 'bwu2.unbindQueue.state.v1';
-  const DRAFT_KEY = 'bwu2.unbindQueue.draft.v1';
-  const LOCK_KEY = 'bwu2.unbindQueue.lock.v1';
-  const MINIMIZED_KEY = 'bwu2.unbindQueue.minimized.v1';
-  const SESSION_RECOVERY_KEY = 'bwu2.unbindQueue.sessionRecovery.v1';
+  const STATE_KEY = IS_BIND ? 'bwu2.bindQueue.state.v2' : 'bwu2.unbindQueue.state.v1';
+  const DRAFT_KEY = IS_BIND ? 'bwu2.bindQueue.draft.v2' : 'bwu2.unbindQueue.draft.v1';
+  const LOCK_KEY = 'bwu2.hierarchyQueue.lock.v1';
+  const MINIMIZED_KEY = IS_BIND ? 'bwu2.bindQueue.minimized.v2' : 'bwu2.unbindQueue.minimized.v1';
+  const SESSION_RECOVERY_KEY = IS_BIND ? 'bwu2.bindQueue.sessionRecovery.v2' : 'bwu2.unbindQueue.sessionRecovery.v1';
+  const BIND_TEMPLATE_KEY = 'bwu2.bindQueue.template.v2';
   const SESSION_RECOVERY_MAX_AGE_MS = 60 * 1000;
   const SESSION_RECOVERY_MAX_ATTEMPTS = 2;
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const CONTAINER_PATTERN = /^(?:tsX|csX)[A-Za-z0-9_-]+$/i;
+
+  const { clean } = globalThis.BWU2Fleet;
+
+  const normalizeContainer = value => {
+    const id = globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
+    if (!id || !IS_BIND) return id;
+    if (/^csx/i.test(id)) return `csX${id.slice(3)}`;
+    if (/^tsx/i.test(id)) return `tsX${id.slice(3)}`;
+    return '';
+  };
 
   let processing = false;
   let lockTimer = 0;
@@ -51,11 +71,18 @@
   let lastAnchorTop = 10;
   let minimized = loadMinimized();
   let state = loadState();
+  let directTemplate = null;
+  let bindTemplateVerified = false;
+  let destinationToken = '';
+  let nativeSeq = 0;
+  const nativeHistory = [];
+  const nativeWaiters = new Set();
   const ui = {};
 
-  const { clean } = globalThis.BWU2Fleet;
-
-  const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
+  if (IS_BIND) {
+    directTemplate = loadBindTemplate();
+    destinationToken = directTemplate?.destinationWarehouseId || '';
+  }
 
   function defaultState() {
     return {
@@ -140,7 +167,13 @@
     try { localStorage.removeItem(SESSION_RECOVERY_KEY); } catch (_) {}
   }
 
-  const trace = globalThis.BWU2Fleet.trace;
+  const trace = (event, data = {}) => {
+    const name = IS_BIND ? String(event).replace(/^UNBIND_/, 'BIND_') : event;
+    globalThis.BWU2Fleet.trace(name, data);
+  };
+
+  const mutationPhase = () => IS_BIND ? 'bind' : 'unbind';
+  const isMutationPhase = phase => clean(phase) === mutationPhase();
 
   function itemFor(id = state.currentId) {
     const key = clean(id).toLowerCase();
@@ -155,8 +188,8 @@
     const active = state.items.find(item => item.status === 'active');
     if (active) {
       active.status = 'attention';
-      active.error = state.phase === 'unbind'
-        ? 'Page refreshed during unbind — verify before retrying'
+      active.error = isMutationPhase(state.phase)
+        ? `Page refreshed during ${mutationPhase()} — verify before retrying`
         : 'Page refreshed during processing — verify container';
       active.phase = state.phase;
     }
@@ -168,6 +201,7 @@
   }
 
   recoverAfterReload();
+  if (IS_BIND) installBindNativeTap();
 
   function readLock() {
     try { return JSON.parse(localStorage.getItem(LOCK_KEY) || 'null'); }
@@ -210,6 +244,506 @@
     const login = currentLogin();
     if (ui.login) ui.login.textContent = login || 'NOT DETECTED';
     return login;
+  }
+
+
+  function loadBindTemplate() {
+    if (!IS_BIND) return null;
+    try {
+      const value = JSON.parse(sessionStorage.getItem(BIND_TEMPLATE_KEY) || 'null');
+      if (!value) return null;
+      const sourceWarehouseId = clean(value.sourceWarehouseId);
+      const destinationWarehouseId = clean(value.destinationWarehouseId);
+      if (!sourceWarehouseId || !destinationWarehouseId || clean(value.destination).toUpperCase() !== DESTINATION_FC) return null;
+      return { sourceWarehouseId, destinationWarehouseId, destination: DESTINATION_FC };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveBindTemplate(sourceWarehouseId, destinationWarehouseId) {
+    const value = {
+      sourceWarehouseId: clean(sourceWarehouseId),
+      destinationWarehouseId: clean(destinationWarehouseId),
+      destination: DESTINATION_FC
+    };
+    if (!value.sourceWarehouseId || !value.destinationWarehouseId) return false;
+    directTemplate = Object.freeze(value);
+    destinationToken = value.destinationWarehouseId;
+    bindTemplateVerified = true;
+    try { sessionStorage.setItem(BIND_TEMPLATE_KEY, JSON.stringify(value)); } catch (_) {}
+    trace('UNBIND_TEMPLATE_READY', { destination: DESTINATION_FC });
+    return true;
+  }
+
+  function clearBindTemplate() {
+    directTemplate = null;
+    destinationToken = '';
+    bindTemplateVerified = false;
+    try { sessionStorage.removeItem(BIND_TEMPLATE_KEY); } catch (_) {}
+  }
+
+  function parseNativeBody(body) {
+    if (body == null) return null;
+    if (typeof body === 'object') {
+      if (body instanceof URLSearchParams) return Object.fromEntries(body.entries());
+      if (typeof FormData !== 'undefined' && body instanceof FormData) return Object.fromEntries(body.entries());
+      return body;
+    }
+    const raw = String(body || '');
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) {}
+    try { return Object.fromEntries(new URLSearchParams(raw).entries()); } catch (_) {}
+    return raw;
+  }
+
+  function parseNativeResponse(raw) {
+    const text = String(raw ?? '');
+    if (!text) return null;
+    try { return JSON.parse(text); } catch (_) { return text; }
+  }
+
+  function pathOf(rawUrl) {
+    try { return new URL(String(rawUrl || ''), location.href).pathname; }
+    catch (_) { return ''; }
+  }
+
+  function isBindNativeEndpoint(path) {
+    return [API_VALIDATE_DEST, API_VALIDATE, API_SUMMARY, API_BIND].includes(path);
+  }
+
+  function recordBindNative(record) {
+    record.seq = ++nativeSeq;
+    nativeHistory.push(record);
+    if (nativeHistory.length > 120) nativeHistory.splice(0, nativeHistory.length - 120);
+
+    if (
+      record.path === API_VALIDATE_DEST &&
+      record.ok &&
+      clean(record.response).toUpperCase() === DESTINATION_FC
+    ) {
+      const token = clean(record.request?.destinationWarehouseId);
+      if (token) destinationToken = token;
+    }
+
+    for (const waiter of [...nativeWaiters]) {
+      if (record.seq <= waiter.afterSeq || record.path !== waiter.path) continue;
+      if (waiter.predicate && !waiter.predicate(record)) continue;
+      nativeWaiters.delete(waiter);
+      clearTimeout(waiter.timer);
+      waiter.resolve(record);
+    }
+
+    trace('UNBIND_NATIVE_API', {
+      path: record.path,
+      method: record.method,
+      status: record.status,
+      ok: record.ok,
+      ms: record.ms
+    });
+  }
+
+  function waitBindNative(path, afterSeq, predicate = null, timeoutMs = TIMEOUT_VALIDATE_MS) {
+    for (const record of nativeHistory) {
+      if (record.seq <= afterSeq || record.path !== path) continue;
+      if (predicate && !predicate(record)) continue;
+      return Promise.resolve(record);
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = { path, afterSeq, predicate, resolve, reject, timer: 0 };
+      waiter.timer = setTimeout(() => {
+        nativeWaiters.delete(waiter);
+        reject(new RequestError(`No native ${path} request detected`, {
+          phase: path === API_BIND ? 'bind' : 'native',
+          status: 0,
+          ambiguous: path === API_BIND
+        }));
+      }, timeoutMs);
+      nativeWaiters.add(waiter);
+    });
+  }
+
+  function installBindNativeTap() {
+    try {
+      const XHR = window.XMLHttpRequest;
+      if (!XHR?.prototype || XHR.prototype.__bwu2HierarchyBindTapV2) return;
+      const nativeOpen = XHR.prototype.open;
+      const nativeSend = XHR.prototype.send;
+
+      XHR.prototype.open = function(method, url) {
+        this.__bwu2HierarchyBindTap = {
+          method: String(method || 'GET').toUpperCase(),
+          url: String(url || ''),
+          path: pathOf(url)
+        };
+        return nativeOpen.apply(this, arguments);
+      };
+
+      XHR.prototype.send = function(body) {
+        const info = this.__bwu2HierarchyBindTap || {};
+        if (!isBindNativeEndpoint(info.path)) return nativeSend.apply(this, arguments);
+
+        const started = performance.now();
+        const request = parseNativeBody(body);
+        this.addEventListener('loadend', () => {
+          let raw = '';
+          try {
+            if (!this.responseType || this.responseType === 'text') raw = this.responseText || '';
+            else if (this.responseType === 'json') raw = JSON.stringify(this.response ?? null);
+          } catch (_) {}
+
+          recordBindNative({
+            transport: 'xhr',
+            method: info.method || 'GET',
+            url: info.url || '',
+            path: info.path,
+            request,
+            response: parseNativeResponse(raw),
+            status: Number(this.status) || 0,
+            ok: Number(this.status) >= 200 && Number(this.status) < 300,
+            ms: Math.round(performance.now() - started)
+          });
+        }, { once: true });
+
+        return nativeSend.apply(this, arguments);
+      };
+
+      XHR.prototype.__bwu2HierarchyBindTapV2 = true;
+    } catch (error) {
+      trace('UNBIND_TAP_ERROR', { error: clean(error?.message || error) });
+    }
+  }
+
+  function visible(element) {
+    if (!(element instanceof Element) || !element.isConnected) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
+  }
+
+  function nativeDescriptor(input) {
+    let label = '';
+    try {
+      const direct = input.id ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null;
+      label = clean(direct?.textContent || input.closest('label')?.textContent || '');
+    } catch (_) {}
+    return clean([
+      label,
+      input.getAttribute('name'),
+      input.getAttribute('id'),
+      input.getAttribute('placeholder'),
+      input.getAttribute('aria-label')
+    ].filter(Boolean).join(' ')).toLowerCase();
+  }
+
+  function nativeInputs() {
+    return [...document.querySelectorAll('input[type="text"],input:not([type]),textarea,[role="combobox"]')]
+      .filter(input => !ui.panel?.contains(input) && !ui.mini?.contains(input) && visible(input));
+  }
+
+  function findDestinationInput() {
+    const rows = nativeInputs().map(input => {
+      const descriptor = nativeDescriptor(input);
+      const value = clean(input.value || input.textContent || '').toUpperCase();
+      let score = 0;
+      if (/destination/.test(descriptor)) score += 8;
+      if (/warehouse|location|site|fc/.test(descriptor)) score += 4;
+      if (value === DESTINATION_FC) score += 12;
+      return { input, score };
+    }).sort((a, b) => b.score - a.score);
+    return rows[0]?.score > 0 ? rows[0].input : (rows.length === 1 ? rows[0].input : null);
+  }
+
+  function findContainerInput() {
+    const rows = nativeInputs().map(input => {
+      const descriptor = nativeDescriptor(input);
+      let score = 0;
+      if (/container|scannable|scan|tote/.test(descriptor)) score += 10;
+      if (/destination|warehouse|location|site/.test(descriptor)) score -= 12;
+      return { input, score };
+    }).sort((a, b) => b.score - a.score);
+    return rows[0]?.score > 0 ? rows[0].input : null;
+  }
+
+  function setNativeValue(input, value) {
+    if (!input) return false;
+    try {
+      const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(input, value);
+      else input.value = value;
+    } catch (_) {
+      try { input.value = value; } catch (_) { return false; }
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  function scannerKeyboardEvent(type, key, { keyCode = 0, which = keyCode, charCode = 0, shiftKey = false } = {}) {
+    const event = new KeyboardEvent(type, {
+      key,
+      code: key === 'Enter' ? 'Enter' : (/^[A-Za-z]$/.test(key) ? `Key${key.toUpperCase()}` : ''),
+      shiftKey,
+      bubbles: true,
+      cancelable: true
+    });
+    try { Object.defineProperty(event, 'keyCode', { get: () => keyCode }); } catch (_) {}
+    try { Object.defineProperty(event, 'which', { get: () => which }); } catch (_) {}
+    try { Object.defineProperty(event, 'charCode', { get: () => charCode }); } catch (_) {}
+    return event;
+  }
+
+  async function pressNativeEnter(target) {
+    const node = target || document.body || document.documentElement;
+    node.dispatchEvent(scannerKeyboardEvent('keydown', 'Enter', { keyCode: 13, which: 13 }));
+    node.dispatchEvent(scannerKeyboardEvent('keypress', 'Enter', { keyCode: 13, which: 13, charCode: 13 }));
+    node.dispatchEvent(scannerKeyboardEvent('keyup', 'Enter', { keyCode: 13, which: 13 }));
+    await sleep(2);
+  }
+
+  async function typeScannerToBody(value) {
+    const target = document.body || document.documentElement;
+    try { target.focus?.(); } catch (_) {}
+    for (const char of String(value)) {
+      const virtualCode = /^[A-Za-z]$/.test(char) ? char.toUpperCase().charCodeAt(0) : char.charCodeAt(0);
+      const exactCharCode = char.charCodeAt(0);
+      const shiftKey = /^[A-Z]$/.test(char);
+      target.dispatchEvent(scannerKeyboardEvent('keydown', char, { keyCode: virtualCode, which: virtualCode, shiftKey }));
+      target.dispatchEvent(scannerKeyboardEvent('keypress', char, { keyCode: exactCharCode, which: exactCharCode, charCode: exactCharCode, shiftKey }));
+      target.dispatchEvent(scannerKeyboardEvent('keyup', char, { keyCode: virtualCode, which: virtualCode, shiftKey }));
+      await sleep(2);
+    }
+    await pressNativeEnter(target);
+  }
+
+  async function emitNativeScan(container) {
+    const id = normalizeContainer(container);
+    if (!id) throw new RequestError('Invalid container barcode', { phase: 'validate', status: 0 });
+    const field = findContainerInput();
+    if (field) {
+      try { field.focus(); } catch (_) {}
+      setNativeValue(field, id);
+      await pressNativeEnter(field);
+      return 'field';
+    }
+    await typeScannerToBody(id);
+    return 'body';
+  }
+
+  function requestContainer(record) {
+    return clean(record?.request?.scannableId);
+  }
+
+  function assertNativeNetwork(record, phase) {
+    if (!record) throw new RequestError(`Missing ${phase} response`, { phase, status: 0 });
+    if (!record.ok) {
+      const sessionExpired = [401, 403, 419].includes(Number(record.status));
+      throw new RequestError(sessionExpired ? 'SESSION EXPIRED — refresh page, then press START' : `HTTP ${record.status || 0}`, {
+        phase,
+        status: Number(record.status) || 0,
+        sessionExpired,
+        ambiguous: phase === 'bind'
+      });
+    }
+    return record;
+  }
+
+  function assertBindValidate(data, container, status = 200) {
+    if (!data || typeof data !== 'object') throw new RequestError('Unexpected validation response', { phase: 'validate', status });
+    if (clean(data.warehouseId).toUpperCase() !== WAREHOUSE_ID) {
+      throw new RequestError(`Container is not validated in ${WAREHOUSE_ID}`, { phase: 'validate', status });
+    }
+    if (clean(data.scannableId).toLowerCase() !== clean(container).toLowerCase()) {
+      throw new RequestError('Validation returned another container', { phase: 'validate', status });
+    }
+  }
+
+  function assertBindSummary(data, status = 200) {
+    if (!data || !Array.isArray(data.transferBindingSummaryList)) {
+      throw new RequestError('Unexpected binding summary', { phase: 'summary', status });
+    }
+  }
+
+  function assertBindMutation(data, status = 200) {
+    if (!data || typeof data !== 'object' || !clean(data.hostName)) {
+      throw new RequestError('Unexpected bind response — verify container', {
+        phase: 'bind',
+        status,
+        ambiguous: true
+      });
+    }
+  }
+
+  async function ensureNativeDestination() {
+    if (destinationToken) return true;
+    const input = findDestinationInput();
+    if (!input) throw new RequestError('BWU1 destination field was not found', { phase: 'destination', status: 0 });
+
+    const marker = nativeSeq;
+    const current = clean(input.value || input.textContent || '').toUpperCase();
+    try { input.focus(); } catch (_) {}
+    if (current !== DESTINATION_FC) setNativeValue(input, DESTINATION_FC);
+    await pressNativeEnter(input);
+
+    const result = await waitBindNative(
+      API_VALIDATE_DEST,
+      marker,
+      record => record.ok && clean(record.response).toUpperCase() === DESTINATION_FC,
+      8000
+    );
+    destinationToken = clean(result.request?.destinationWarehouseId);
+    if (!destinationToken) {
+      throw new RequestError('BWU1 validated but destination token was not captured', { phase: 'destination', status: 0 });
+    }
+    return true;
+  }
+
+  async function verifyBindTemplate() {
+    if (!directTemplate) return false;
+    if (bindTemplateVerified) return true;
+    const response = await postJson(
+      API_VALIDATE_DEST,
+      { destinationWarehouseId: directTemplate.destinationWarehouseId },
+      TIMEOUT_VALIDATE_MS,
+      'destination'
+    );
+    if (clean(response.data).toUpperCase() !== DESTINATION_FC) {
+      clearBindTemplate();
+      return false;
+    }
+    destinationToken = directTemplate.destinationWarehouseId;
+    bindTemplateVerified = true;
+    return true;
+  }
+
+  function setItemPhase(item, phase, message) {
+    state.phase = item.phase = phase;
+    state.message = message;
+    saveState();
+    render();
+  }
+
+  async function seedBindTemplate(item) {
+    await ensureNativeDestination();
+    const container = item.id;
+
+    setItemPhase(item, 'validate', `Validating ${container}`);
+    const firstMarker = nativeSeq;
+    const firstTransport = await emitNativeScan(container);
+    trace('UNBIND_QUEUE_NATIVE_SCAN', { container, pass: 1, transport: firstTransport });
+
+    const validate = await waitBindNative(
+      API_VALIDATE,
+      firstMarker,
+      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
+      NATIVE_SEED_TIMEOUT_MS
+    );
+    assertNativeNetwork(validate, 'validate');
+    assertBindValidate(validate.response, container, validate.status);
+
+    const summary = await waitBindNative(
+      API_SUMMARY,
+      firstMarker,
+      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
+      NATIVE_SEED_TIMEOUT_MS
+    );
+    assertNativeNetwork(summary, 'summary');
+    assertBindSummary(summary.response, summary.status);
+
+    if (!state.running) throw new SafePauseError();
+
+    setItemPhase(item, 'bind', `Binding ${container} → ${DESTINATION_FC}`);
+    const bindMarker = nativeSeq;
+    const secondTransport = await emitNativeScan(container);
+    trace('UNBIND_QUEUE_NATIVE_SCAN', { container, pass: 2, transport: secondTransport });
+
+    const bound = await waitBindNative(
+      API_BIND,
+      bindMarker,
+      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
+      NATIVE_SEED_TIMEOUT_MS
+    );
+    assertNativeNetwork(bound, 'bind');
+    assertBindMutation(bound.response, bound.status);
+
+    const sourceWarehouseId = clean(bound.request?.sourceWarehouseId);
+    const destinationWarehouseId = clean(bound.request?.destinationWarehouseId);
+    if (!destinationWarehouseId || destinationWarehouseId !== destinationToken) {
+      throw new RequestError('Bind succeeded but BWU1 destination could not be confirmed — verify container', {
+        phase: 'bind',
+        status: bound.status,
+        ambiguous: true
+      });
+    }
+    if (!sourceWarehouseId || !saveBindTemplate(sourceWarehouseId, destinationWarehouseId)) {
+      clearBindTemplate();
+      trace('UNBIND_TEMPLATE_UNAVAILABLE', { container });
+    }
+  }
+
+  async function processBindDirect(item) {
+    const container = item.id;
+    const login = currentLogin();
+    if (!login) throw new RequestError('Logged-in user could not be detected', { phase: 'identity', status: 0 });
+
+    setItemPhase(item, 'validate', `Validating ${container}`);
+    const validated = await postJson(
+      API_VALIDATE,
+      { warehouseId: WAREHOUSE_ID, scannableId: container },
+      TIMEOUT_VALIDATE_MS,
+      'validate'
+    );
+    assertBindValidate(validated.data, container, validated.status);
+
+    setItemPhase(item, 'summary', `Checking bindings ${container}`);
+    const summary = await postJson(
+      API_SUMMARY,
+      { warehouseId: WAREHOUSE_ID, scannableId: container },
+      TIMEOUT_SUMMARY_MS,
+      'summary'
+    );
+    assertBindSummary(summary.data, summary.status);
+
+    if (!state.running) throw new SafePauseError();
+
+    setItemPhase(item, 'bind', `Binding ${container} → ${DESTINATION_FC}`);
+    const bound = await postJson(
+      API_BIND,
+      {
+        sourceWarehouseId: directTemplate.sourceWarehouseId,
+        destinationWarehouseId: directTemplate.destinationWarehouseId,
+        scannableId: container,
+        employeeLogin: login
+      },
+      TIMEOUT_MUTATION_MS,
+      'bind'
+    );
+    assertBindMutation(bound.data, bound.status);
+  }
+
+  async function processBindItem(item) {
+    const started = performance.now();
+    if (directTemplate && !bindTemplateVerified) {
+      const valid = await verifyBindTemplate();
+      if (!valid) clearBindTemplate();
+    }
+    if (!directTemplate) await seedBindTemplate(item);
+    else await processBindDirect(item);
+
+    clearSessionRecovery();
+    item.status = 'done';
+    item.phase = 'done';
+    item.error = '';
+    item.ms = Math.round(performance.now() - started);
+    state.currentId = '';
+    state.phase = 'idle';
+    state.message = `BOUND ${item.id} → ${DESTINATION_FC} (${item.ms}ms) — scan next`;
+    saveState();
+    render();
+    trace('UNBIND_QUEUE_ITEM_DONE', { container: item.id, destination: DESTINATION_FC, ms: item.ms });
   }
 
   function rememberInvalid(values) {
@@ -273,6 +807,14 @@
     }
   }
 
+  class SafePauseError extends Error {
+    constructor(message = 'Paused safely before mutation') {
+      super(message);
+      this.name = 'SafePauseError';
+      this.safePause = true;
+    }
+  }
+
   async function postJson(path, body, timeoutMs, phase) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -316,7 +858,7 @@
           status: response.status,
           phase,
           data,
-          ambiguous: phase === 'unbind'
+          ambiguous: isMutationPhase(phase)
         });
       }
 
@@ -327,7 +869,7 @@
       throw new RequestError(timedOut ? 'Timed out' : (error?.message || 'Network error'), {
         status: 0,
         phase,
-        ambiguous: phase === 'unbind'
+        ambiguous: isMutationPhase(phase)
       });
     } finally {
       clearTimeout(timeout);
@@ -346,41 +888,50 @@
     state.message = `Validating ${item.id}`;
     saveState();
     render();
-    trace('UNBIND_QUEUE_ITEM_START', { container: item.id });
+    trace('UNBIND_QUEUE_ITEM_START', { container: item.id, mode: MODE });
     return item;
   }
 
   function shouldPause(error) {
     const status = Number(error?.status || 0);
-    return !!error?.sessionExpired || error?.phase === 'unbind' || status === 0 || status === 401 || status === 403 || status === 429 || status >= 500;
+    return !!error?.sessionExpired || isMutationPhase(error?.phase) || status === 0 || status === 401 || status === 403 || status === 429 || status >= 500;
   }
 
   function markAttention(item, error) {
+    if (error?.safePause) {
+      item.status = 'queued';
+      item.phase = '';
+      item.error = '';
+      item.ms = 0;
+      state.currentId = '';
+      state.phase = 'idle';
+      state.running = false;
+      state.message = 'PAUSED SAFELY — current container requeued before mutation';
+      releaseLock();
+      saveState();
+      render();
+      trace('UNBIND_QUEUE_SAFE_PAUSE', { container: item.id, mode: MODE });
+      return;
+    }
+
     if (error?.sessionExpired) {
       const phase = clean(error.phase);
       const previous = readSessionRecovery();
       const attempts = previous?.resume ? Math.max(1, Number(previous.attempts) || 1) + 1 : 1;
-
       state.currentId = '';
       state.phase = 'idle';
       state.running = false;
       releaseLock();
 
-      if (phase === 'unbind') {
+      if (isMutationPhase(phase)) {
         item.status = 'attention';
-        item.phase = 'unbind';
-        item.error = 'Session expired during unbind — verify container before retrying';
-        saveSessionRecovery({
-          at: Date.now(),
-          resume: false,
-          ambiguous: true,
-          container: item.id,
-          phase
-        });
-        state.message = 'SESSION EXPIRED DURING UNBIND — refreshing automatically; verify attention row';
+        item.phase = mutationPhase();
+        item.error = `Session expired during ${mutationPhase()} — verify container before retrying`;
+        saveSessionRecovery({ at: Date.now(), resume: false, ambiguous: true, container: item.id, phase });
+        state.message = `SESSION EXPIRED DURING ${mutationPhase().toUpperCase()} — refreshing; verify attention row`;
         saveState();
         render();
-        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: false });
+        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: false, mode: MODE });
         queueMicrotask(() => location.reload());
         return;
       }
@@ -395,21 +946,15 @@
         state.message = 'SESSION STILL EXPIRED — queue preserved; sign in again if required';
         saveState();
         render();
-        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: false, attempts });
+        trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: false, attempts, mode: MODE });
         return;
       }
 
-      saveSessionRecovery({
-        at: Date.now(),
-        resume: true,
-        attempts,
-        container: item.id,
-        phase
-      });
+      saveSessionRecovery({ at: Date.now(), resume: true, attempts, container: item.id, phase });
       state.message = `SESSION EXPIRED — refreshing automatically (${attempts}/${SESSION_RECOVERY_MAX_ATTEMPTS})`;
       saveState();
       render();
-      trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: true, attempts });
+      trace('UNBIND_QUEUE_SESSION_EXPIRED', { container: item.id, phase, autoRefresh: true, resume: true, attempts, mode: MODE });
       queueMicrotask(() => location.reload());
       return;
     }
@@ -438,19 +983,16 @@
       phase: item.phase,
       reason: item.error,
       paused: pause,
-      ambiguous: !!error?.ambiguous
+      ambiguous: !!error?.ambiguous,
+      mode: MODE
     });
   }
 
-  async function processItem(item) {
+  async function processUnbindItem(item) {
     const login = currentLogin();
     if (!login) throw new RequestError('Logged-in user could not be detected', { phase: 'identity', status: 0 });
     const started = performance.now();
-    const timeouts = {
-      validate: TIMEOUT_VALIDATE_MS,
-      summary: TIMEOUT_SUMMARY_MS,
-      unbind: TIMEOUT_UNBIND_MS
-    };
+    const timeouts = { validate: TIMEOUT_VALIDATE_MS, summary: TIMEOUT_SUMMARY_MS, unbind: TIMEOUT_MUTATION_MS };
     const messages = {
       validate: `Validating ${item.id}`,
       summary: `Checking bindings ${item.id}`,
@@ -461,12 +1003,9 @@
       container: item.id,
       login,
       warehouseId: WAREHOUSE_ID,
-      endpoints: {
-        validate: API_VALIDATE,
-        summary: API_SUMMARY,
-        unbind: API_UNBIND
-      },
+      endpoints: { validate: API_VALIDATE, summary: API_SUMMARY, unbind: API_UNBIND },
       onPhase: phase => {
+        if (phase === 'unbind' && !state.running) throw new SafePauseError();
         state.phase = item.phase = phase;
         state.message = messages[phase] || phase;
         saveState();
@@ -485,7 +1024,12 @@
     state.message = `DONE ${item.id} (${item.ms}ms) — scan next`;
     saveState();
     render();
-    trace('UNBIND_QUEUE_ITEM_DONE', { container: item.id, ms: item.ms });
+    trace('UNBIND_QUEUE_ITEM_DONE', { container: item.id, ms: item.ms, mode: MODE });
+  }
+
+  async function processItem(item) {
+    if (IS_BIND) return processBindItem(item);
+    return processUnbindItem(item);
   }
 
   async function runQueue() {
@@ -499,7 +1043,7 @@
 
     const item = itemFor() || activateNext();
     if (!item) {
-      state.message = 'RUNNING — scan next tsX/csX';
+      state.message = `RUNNING — scan next tsX/csX${IS_BIND ? ` → ${DESTINATION_FC}` : ''}`;
       saveState();
       render();
       ui.draft?.focus();
@@ -542,7 +1086,7 @@
     }
 
     if (!acquireLock()) {
-      state.message = 'Session refreshed — another tab owns the Unbind queue';
+      state.message = 'Session refreshed — another tab owns the Hierarchy queue';
       saveState();
       render();
       return;
@@ -574,7 +1118,7 @@
     state.invalid = [];
     addDraftToQueue();
     if (!acquireLock()) {
-      state.message = 'Another tab already owns the Unbind queue';
+      state.message = 'Another tab already owns the Hierarchy queue';
       saveState();
       render();
       return;
@@ -582,19 +1126,32 @@
 
     const queued = counts().queued;
     state.running = true;
-    state.message = queued ? `RUNNING — ${queued} queued` : 'RUNNING — scan next tsX/csX';
+    state.message = queued
+      ? `RUNNING — ${queued} queued${IS_BIND ? ` → ${DESTINATION_FC}` : ''}`
+      : `RUNNING — scan next tsX/csX${IS_BIND ? ` → ${DESTINATION_FC}` : ''}`;
     saveState();
-    trace('UNBIND_QUEUE_START', { queued, warehouseId: WAREHOUSE_ID });
+    trace('UNBIND_QUEUE_START', {
+      queued,
+      warehouseId: WAREHOUSE_ID,
+      destination: IS_BIND ? DESTINATION_FC : '',
+      mode: MODE
+    });
     render();
     setTimeout(runQueue, 0);
   }
 
   function pauseQueue(reason = 'Paused safely') {
     state.running = false;
-    state.message = processing ? `${reason} — current request will finish` : reason;
+    if (processing && isMutationPhase(state.phase)) {
+      state.message = `${reason} — current ${mutationPhase()} will finish; no next container`;
+    } else if (processing) {
+      state.message = `${reason} — current check will finish; mutation blocked`;
+    } else {
+      state.message = reason;
+    }
     saveState();
     if (!processing) releaseLock();
-    trace('UNBIND_QUEUE_PAUSE', { reason, currentId: state.currentId, phase: state.phase });
+    trace('UNBIND_QUEUE_PAUSE', { reason, currentId: state.currentId, phase: state.phase, mode: MODE });
     render();
   }
 
@@ -615,7 +1172,7 @@
     saveState();
     if (ui.draft) ui.draft.value = '';
     saveDraft('');
-    trace('UNBIND_QUEUE_CLEAR', { wasRunning });
+    trace('UNBIND_QUEUE_CLEAR', { wasRunning, mode: MODE });
     render();
   }
 
@@ -756,7 +1313,7 @@
 
   function isolateTextField(field, onEnter) {
     const blockNativeHotkeys = event => {
-      // The native Unbind page treats printable keys as global menu shortcuts
+      // The native hierarchy pages may treat printable keys as global menu shortcuts
       // (notably T = TextBox and S = Sign Out). Scanner input belongs only to
       // our focused field and must never bubble into those handlers.
       event.stopPropagation();
@@ -782,7 +1339,7 @@
       const styles = {
         queued: ['QUEUED', '#475569', '#f1f5f9'],
         active: [`${clean(item.phase || 'ACTIVE').toUpperCase()}`, '#1d4ed8', '#dbeafe'],
-        done: ['DONE', '#166534', '#dcfce7'],
+        done: [IS_BIND ? 'BOUND' : 'DONE', '#166534', '#dcfce7'],
         attention: ['ATTENTION', '#9a3412', '#ffedd5']
       };
       const [label, color, background] = styles[item.status] || styles.queued;
@@ -815,7 +1372,7 @@
   function render() {
     if (!ui.panel) return;
     const summary = counts();
-    ui.version.textContent = `UNBIND QUEUE v${VERSION}`;
+    ui.version.textContent = `HIERARCHY · ${IS_BIND ? 'BIND' : 'UNBIND'} v${VERSION}`;
     ui.mode.textContent = state.running ? 'RUNNING' : 'PAUSED';
     ui.mode.style.background = state.running ? '#1d4ed8' : '#475569';
     ui.status.textContent = state.message;
@@ -832,8 +1389,8 @@
     ui.mini.style.display = minimized ? 'flex' : 'none';
     ui.mini.title = processing
       ? state.message
-      : state.running ? `Unbind Queue running — ${summary.queued} queued` : 'Open Unbind Queue';
-    ui.miniRing.style.animation = processing ? 'bwu2-unbind-spin .75s linear infinite' : 'none';
+      : state.running ? `${IS_BIND ? 'Bind' : 'Unbind'} Queue running — ${summary.queued} queued` : `Open ${IS_BIND ? 'Bind' : 'Unbind'} Queue`;
+    ui.miniRing.style.animation = processing ? 'bwu2-hierarchy-spin .75s linear infinite' : 'none';
     ui.miniRing.style.borderColor = summary.attention
       ? '#fdba74'
       : state.running ? '#93c5fd' : '#94a3b8';
@@ -851,7 +1408,7 @@
     if (ui.panel || !document.body) return;
 
     const style = element('style');
-    style.textContent = '@keyframes bwu2-unbind-spin{to{transform:rotate(360deg)}}';
+    style.textContent = '@keyframes bwu2-hierarchy-spin{to{transform:rotate(360deg)}}';
     document.head?.appendChild(style);
 
     ui.panel = element('section', null, [
@@ -859,7 +1416,7 @@
       'max-width:calc(100vw - 20px)', 'overflow:auto', 'border:3px solid #1e3a8a', 'border-radius:9px',
       'background:#fff', 'color:#111827', 'box-shadow:0 10px 30px #0005', 'font:12px Arial,sans-serif'
     ].join(';'));
-    ui.panel.id = 'bwu2-unbind-queue';
+    ui.panel.id = 'bwu2-hierarchy-queue';
     ACTIONS.markUi(ui.panel);
 
     ui.mini = element('button', null, [
@@ -869,7 +1426,7 @@
       'box-shadow:0 6px 18px #0005', 'cursor:pointer'
     ].join(';'));
     ui.mini.type = 'button';
-    ui.mini.setAttribute('aria-label', 'Open Unbind Queue');
+    ui.mini.setAttribute('aria-label', `Open ${IS_BIND ? 'Bind' : 'Unbind'} Queue`);
     ACTIONS.markUi(ui.mini);
     ui.miniRing = element('span', null,
       'box-sizing:border-box;width:17px;height:17px;border:3px solid #94a3b8;border-top-color:#475569;border-radius:50%'
@@ -880,7 +1437,7 @@
     const header = element('div', null,
       'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#0f172a;color:#fff'
     );
-    ui.version = element('strong', `UNBIND QUEUE v${VERSION}`, 'font-size:14px');
+    ui.version = element('strong', `HIERARCHY · ${IS_BIND ? 'BIND' : 'UNBIND'} v${VERSION}`, 'font-size:14px');
     const headerActions = element('div', null, 'display:flex;align-items:center;gap:6px');
     ui.mode = element('strong', 'PAUSED',
       'padding:3px 7px;border-radius:999px;background:#475569;color:#fff;font-size:10px;letter-spacing:.4px'
@@ -889,7 +1446,7 @@
       'padding:1px 7px;border-color:#64748b;background:#1e293b;color:#fff;font-size:14px;line-height:16px'
     );
     ui.minimize.title = 'Minimize';
-    ui.minimize.setAttribute('aria-label', 'Minimize Unbind Queue');
+    ui.minimize.setAttribute('aria-label', `Minimize ${IS_BIND ? 'Bind' : 'Unbind'} Queue`);
     headerActions.append(ui.mode, ui.minimize);
     header.append(ui.version, headerActions);
 
@@ -902,7 +1459,7 @@
       'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;font:12px Consolas,monospace;color:#0f172a'
     );
     refreshDetectedLogin();
-    loginRow.append(ui.login, element('strong', WAREHOUSE_ID,
+    loginRow.append(ui.login, element('strong', IS_BIND ? `${WAREHOUSE_ID} → ${DESTINATION_FC} 🔒` : WAREHOUSE_ID,
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
     ));
 
@@ -960,6 +1517,10 @@
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', schedulePosition, { passive: true });
 
+    if (IS_BIND && directTemplate) {
+      state.message = 'Bind API template cached — will verify before use';
+      saveState();
+    }
     render();
     positionUi();
     if (!minimized) setTimeout(() => ui.draft.focus(), 0);
