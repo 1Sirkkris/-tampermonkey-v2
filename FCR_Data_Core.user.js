@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
 // @name:en      TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.39
+// @version      0.2.40
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -26,7 +26,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.39';
+  const VERSION = '0.2.40';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
@@ -1034,11 +1034,13 @@
       if (seenTokens.has(token)) {
         complete = false;
         warning = 'inventory pagination repeated token';
+        if (!allowPartial) throw new Error(`Inventory incomplete: ${warning}`);
         break;
       }
       if (pages >= 200) {
         complete = false;
         warning = 'inventory pagination safety limit reached';
+        if (!allowPartial) throw new Error(`Inventory incomplete: ${warning}`);
         break;
       }
       seenTokens.add(token);
@@ -1119,7 +1121,7 @@
       ms: result.ms,
       pages: result.pages,
       totalQuantity: result.totalQuantity,
-      complete: true
+      complete: result.complete
     };
   }
 
