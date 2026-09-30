@@ -2,7 +2,7 @@
 // @name         MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.43
+// @version      0.9.44
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -23,7 +23,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.43';
+  const VERSION = '0.9.44';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -249,8 +249,27 @@
     const action = async (objectId, actionName, input, label, opts = {}) => {
       if (!opts.ignoreStop && stopped()) throw new Error('Stopped by user');
 
-      await post('/action', { ...id(objectId), action: actionName, input }, `${label} action`);
-      return wait(objectId, label, opts);
+      try {
+        await post('/action', { ...id(objectId), action: actionName, input }, `${label} action`);
+      } catch (error) {
+        // Explicit 4xx means the action was rejected. Network loss / 5xx is
+        // uncertain because the backend may have received the mutation.
+        if (!/\bHTTP 4\d\d\b/i.test(String(error?.message || error))) {
+          if (error && typeof error === 'object') error.aftActionSubmitted = true;
+        }
+        throw error;
+      }
+
+      try {
+        return await wait(objectId, label, opts);
+      } catch (error) {
+        // A backend ERRORED status is a definitive rejection. Lost/malformed/
+        // timed-out confirmation after submission is not safe to replay.
+        if (!/backend ERRORED/i.test(String(error?.message || error))) {
+          if (error && typeof error === 'object') error.aftActionSubmitted = true;
+        }
+        throw error;
+      }
     };
 
     return {
@@ -4010,7 +4029,14 @@
           current: i + 1,
           total: items.length
         });
-        await MoveApi.input(objectId, dest, `Destination ${i + 1}`);
+        try {
+          await MoveApi.input(objectId, dest, `Destination ${i + 1}`);
+        } catch (error) {
+          if (error?.aftActionSubmitted) {
+            error.aftUncertainMove = { index:i, barcode };
+          }
+          throw error;
+        }
         done++;
       }
 
@@ -4022,15 +4048,23 @@
     } catch (error) {
       try { await MoveApi.end(objectId); } catch {}
       const message = String(error?.message || error);
+      const uncertainIndex = Number.isInteger(error?.aftUncertainMove?.index)
+        ? error.aftUncertainMove.index
+        : -1;
+      const uncertain = uncertainIndex >= 0 ? [items[uncertainIndex]] : [];
+      const remaining = uncertainIndex >= 0 ? items.slice(uncertainIndex + 1) : items.slice(done);
       error.aftPartial = {
         kind:'move',
         done,
         total:items.length,
-        remaining:items.slice(done),
+        uncertain,
+        remaining,
         source,
         dest
       };
-      if (done > 0) {
+      if (uncertain.length) {
+        error.message = `${message} • ${done} confirmed moved • ${uncertain[0]} OUTCOME UNKNOWN — VERIFY BEFORE RETRY • remaining queue kept`;
+      } else if (done > 0) {
         error.message = `${message} • ${done} already moved • remaining queue kept`;
       }
       throw error;
