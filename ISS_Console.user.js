@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.38
+// @version      0.1.39
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.38';
+  const VERSION = '0.1.39';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -100,10 +100,10 @@
       restartPromise: null
     },
     sideline: {
-      origin: location.origin,
+      origin: SIDELINE_ORIGIN,
       url: SIDELINE_WORKER_URL,
       frame: null,
-      local: true,
+      local: false,
       ready: false,
       version: '',
       pending: new Map()
@@ -256,41 +256,31 @@
     return state.healthPromise;
   }
 
-  async function ensureSidelineWorkerReady() {
-    const state = workers.sideline;
-    if (!state) throw new Error('Sideline worker missing');
-    if (state.ready && workerFrame('sideline')) return true;
-    spawnWorker('sideline');
-    await waitForWorkerReady('sideline', WORKER_READY_TIMEOUT);
-    return true;
-  }
-
   async function rpc(worker, command, payload = {}, timeout = DEFAULT_TIMEOUT) {
-    if (worker === 'aft' && !['ping','stop'].includes(command)) {
+    if (['aft','sideline'].includes(worker) && !['ping','stop'].includes(command)) {
       await ensureWorkerHealthy(worker);
-    }
-    if (worker === 'sideline' && !['ping','stop'].includes(command)) {
-      await ensureSidelineWorkerReady();
     }
     return rpcRaw(worker, command, payload, timeout);
   }
 
   function startWorkerWatchdog() {
     setInterval(() => {
-      const state = workers.aft;
-      if (!state || state.restartPromise || state.healthPromise || state.pending.size) return;
-      const age = Date.now() - Number(state.lastHealthyAt || state.lastSeenAt || 0);
-      if (age < WORKER_HEARTBEAT_MS) return;
+      for (const worker of ['aft','sideline']) {
+        const state = workers[worker];
+        if (!state || state.local || state.restartPromise || state.healthPromise || state.pending.size) continue;
+        const age = Date.now() - Number(state.lastHealthyAt || state.lastSeenAt || 0);
+        if (age < WORKER_HEARTBEAT_MS) continue;
 
-      ensureWorkerHealthy('aft').catch(error => {
-        markWorker('aft', false);
-        observe('WORKER_HEALTH', {
-          worker:'aft',
-          ok:false,
-          watchdog:true,
-          error:clean(error?.message || error).slice(0, 180)
+        ensureWorkerHealthy(worker).catch(error => {
+          markWorker(worker, false);
+          observe('WORKER_HEALTH', {
+            worker,
+            ok:false,
+            watchdog:true,
+            error:clean(error?.message || error).slice(0, 180)
+          });
         });
-      });
+      }
     }, WORKER_HEARTBEAT_MS);
   }
 
@@ -638,6 +628,8 @@
     }
 
     if (message.type === 'ISS_CONSOLE_PROGRESS') {
+      state.lastHealthyAt = Date.now();
+      if (!state.ready) markWorker(worker, true, message.version || state.version || '');
       observe('WORKER_PROGRESS', {
         worker,
         area:message.area || '',
@@ -652,6 +644,8 @@
     }
 
     if (message.type !== 'ISS_CONSOLE_RPC_RESULT') return;
+    state.lastHealthyAt = Date.now();
+    if (!state.ready) markWorker(worker, true, message.version || state.version || '');
     const pending = state.pending.get(String(message.id || ''));
     if (!pending) return;
     state.pending.delete(String(message.id || ''));
