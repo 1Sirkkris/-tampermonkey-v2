@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.28
+// @version      0.0.29
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.28-REBUILD';
+  const VERSION = '0.0.29-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -274,17 +274,36 @@
   async function postJson(path, body, state, run=state.activeRun, cancelMessage='Run cancelled') {
     if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
 
-    const response = await sidelineFetch(path, {
-      method:'POST',
-      credentials:'same-origin',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify(body),
-      signal:run.controller.signal
-    });
+    let response;
+    try {
+      response = await sidelineFetch(path, {
+        method:'POST',
+        credentials:'same-origin',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify(body),
+        signal:run.controller.signal
+      });
+    } catch (error) {
+      if (error && typeof error === 'object') {
+        error.submitted = true;
+        error.responseReceived = false;
+      }
+      throw error;
+    }
 
-    if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
+    if (!currentRun(state, run)) {
+      const error = makeAbortError(cancelMessage);
+      error.submitted = true;
+      error.responseReceived = true;
+      throw error;
+    }
     const raw = await response.text();
-    if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
+    if (!currentRun(state, run)) {
+      const error = makeAbortError(cancelMessage);
+      error.submitted = true;
+      error.responseReceived = true;
+      throw error;
+    }
 
     let payload = raw;
     try { payload = raw ? JSON.parse(raw) : null; } catch {}
@@ -292,6 +311,8 @@
     if (!response.ok) {
       const error = new Error(`HTTP ${response.status}`);
       error.payload = payload;
+      error.submitted = true;
+      error.responseReceived = true;
       throw error;
     }
     return payload;
@@ -1832,6 +1853,7 @@
 
   function lazyRowView(it, i) {
     const cls = it.status === 'MOVED' ? 'moved'
+      : it.status === 'UNKNOWN' ? 'failed'
       : it.status === 'INVALID' || it.status === 'FAILED' ? 'failed'
       : it.status === 'DEST_RETRY' ? 'retry'
       : it.status === 'DATE' ? 'parked'
@@ -1841,6 +1863,13 @@
       return {
         cls,
         html:`✓ MOVED → ${esc(lazy.dest || lDest.value || 'DEST')} &nbsp; | &nbsp; ${esc(it.code)} ×${it.qty}`
+      };
+    }
+
+    if (it.status === 'UNKNOWN') {
+      return {
+        cls,
+        html:`⚠ OUTCOME UNKNOWN — VERIFY BEFORE RETRY &nbsp; | &nbsp; ${esc(it.code)} ×${it.qty}${it.failReason ? ` &nbsp; | &nbsp; ${esc(it.failReason)}` : ''}`
       };
     }
 
@@ -1907,9 +1936,11 @@
     let total = 0;
     let movedUnits = 0;
     let failedUnits = 0;
+    let unknownUnits = 0;
     let skippedUnits = 0;
     const movedItems = [];
     const failedItems = [];
+    const unknownItems = [];
 
     for (const item of lazy.items) {
       const qty = itemQty(item);
@@ -1918,6 +1949,9 @@
       if (item.status === 'MOVED') {
         movedUnits += qty;
         movedItems.push(item);
+      } else if (item.status === 'UNKNOWN') {
+        unknownUnits += qty;
+        unknownItems.push(item);
       } else if (item.status === 'INVALID' || item.status === 'FAILED') {
         failedUnits += qty;
         failedItems.push(item);
@@ -1926,13 +1960,13 @@
       }
     }
 
-    const remainingUnits = Math.max(0, total - movedUnits - failedUnits - skippedUnits);
+    const remainingUnits = Math.max(0, total - movedUnits - failedUnits - unknownUnits - skippedUnits);
 
     const uniqueItems = lazy.items.length;
     setTextIfChanged(mTotal, total);
     setTextIfChanged(mUnique, uniqueItems);
     setTextIfChanged(mMoved, movedUnits);
-    setTextIfChanged(mFailed, failedUnits);
+    setTextIfChanged(mFailed, failedUnits + unknownUnits);
     setTextIfChanged(mRemaining, remainingUnits);
 
     const compactInput = !!lazy.inputCollapsed;
@@ -1990,9 +2024,13 @@
     setTextIfChanged(lError, lazy.error);
 
     let summaryHtml = '';
-    if (!lazy.running && (movedItems.length || failedItems.length)) {
+    if (!lazy.running && (movedItems.length || failedItems.length || unknownItems.length)) {
       const movedLine = movedUnits
         ? `<div class="sh-result-ok">✓ ${movedUnits} MOVED → ${esc(lazy.dest || lDest.value || 'DESTINATION')}</div>`
+        : '';
+
+      const unknownLine = unknownItems.length
+        ? `<div class="sh-result-bad"><div class="sh-result-bad-head"><div class="sh-result-bad-title">⚠ ${unknownUnits} OUTCOME UNKNOWN — VERIFY BEFORE RETRY</div></div><div class="sh-failed-list">${unknownItems.map(it => `<div class="sh-failed-card"><div class="sh-failed-top">${esc(it.code)}</div><div class="sh-failed-grid"><b>Qty:</b><span>${esc(String(it.qty))}</span><b>Issue:</b><span>${esc(it.failReason || 'MOVE OUTCOME UNKNOWN')}</span></div></div>`).join('')}</div></div>`
         : '';
 
       const failedLine = failedItems.length
@@ -2021,7 +2059,7 @@
           `</div>`
         : '';
 
-      summaryHtml = movedLine + failedLine;
+      summaryHtml = movedLine + unknownLine + failedLine;
     }
 
     setSummaryHtml(summaryHtml);
@@ -2971,6 +3009,24 @@
     return currentLazyRun(run) && lazy.running;
   }
 
+  function haltUnknownMove(item, ctx, reason, run=lazy.activeRun) {
+    const detail = clean(reason || 'confirmation lost');
+    item.status = 'UNKNOWN';
+    item.failReason = `MOVE OUTCOME UNKNOWN: ${detail}`;
+    lazy.errors++;
+    lazy.error = `${ctx.barcode} — MOVE OUTCOME UNKNOWN — VERIFY RESULT BEFORE RETRY`;
+    lazy.note = 'RUN HALTED — backend result must be verified';
+    lazy.running = false;
+    lazy.paused = false;
+    shared.owner = '';
+    setLazyRunningIndicator(false);
+    finishLazyRun(run);
+    preflightState.dateCache.clear();
+    finishMoveCorner('lazy', false);
+    renderLazy();
+    return false;
+  }
+
   async function moveResolved(item, ctx, expirationMs=null, run=lazy.activeRun) {
     if (lazyItemShouldSkip(item)) {
       markLazyItemSkipped(item);
@@ -2997,7 +3053,13 @@
         if (!await waitLazyMovePacing(run)) return false;
         response = await api(API_MOVE_ITEMS, payload, run);
       } catch (error) {
-        if (runWasCancelled(error, run)) return false;
+        if (error?.submitted && error?.responseReceived !== true) {
+          return haltUnknownMove(item, ctx, error?.message || error, run);
+        }
+        if (runWasCancelled(error, run)) {
+          if (error?.submitted) return haltUnknownMove(item, ctx, 'run stopped after submission', run);
+          return false;
+        }
         if (isAllowedOverageResponse(error?.payload)) {
           response = error.payload;
         } else {
@@ -3008,6 +3070,10 @@
           renderLazy();
           return false;
         }
+      }
+
+      if (!response || typeof response !== 'object') {
+        return haltUnknownMove(item, ctx, 'unexpected move confirmation', run);
       }
 
       if (hasPredicant(response) && !moveOk(response)) {
