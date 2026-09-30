@@ -1,13 +1,14 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
   const TRUSTED_LOGIN_KEY = 'bwu2.actions.trustedEmployeeLogin.v1';
   const LOGIN_RE = /^[a-z][a-z0-9-]{2,31}$/i;
-  const RESERVED_LOGINS = /^(?:login|username|user|employee|alias|autoid)$/i;
+  const RESERVED_LOGINS = /^(?:login|username|user|employee|alias|autoid|logout|logoff|signout|sign-out|signin|sign-in|profile|account|settings)$/i;
+  const TRUSTED_LOGIN_TTL_MS = 12 * 60 * 60 * 1000;
 
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -18,12 +19,13 @@
   }
 
   function findLoginInObject(value, depth = 0) {
-    if (!value || typeof value !== 'object' || depth > 3) return '';
+    if (!value || typeof value !== 'object' || depth > 1) return '';
     for (const key of ['employeeLogin', 'userLogin', 'username', 'login', 'alias', 'autoId', 'autoID']) {
       const found = normalizeLogin(value[key]);
       if (found) return found;
     }
-    for (const [key, child] of Object.entries(value).slice(0, 40)) {
+    for (const [key, child] of Object.entries(value).slice(0, 24)) {
+      if (!/(?:current|employee|user|profile|identity|operator)/i.test(key)) continue;
       if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
       const found = findLoginInObject(child, depth + 1);
       if (found) return found;
@@ -46,19 +48,29 @@
     return '';
   }
 
-  function saveTrustedLogin(storage, login, source) {
+  function saveTrustedLogin(storage, login, source, host = '') {
     const value = normalizeLogin(login);
     if (!value || !storage) return value;
     try {
-      storage.setItem(TRUSTED_LOGIN_KEY, JSON.stringify({ login: value, source: clean(source), at: Date.now() }));
+      storage.setItem(TRUSTED_LOGIN_KEY, JSON.stringify({
+        login: value,
+        source: clean(source),
+        host: clean(host).toLowerCase(),
+        at: Date.now()
+      }));
     } catch {}
     return value;
   }
 
-  function readTrustedLogin(storage) {
+  function readTrustedLogin(storage, host = '') {
     if (!storage) return '';
     try {
       const saved = JSON.parse(storage.getItem(TRUSTED_LOGIN_KEY) || 'null');
+      const at = Number(saved?.at || 0);
+      if (!at || Date.now() - at > TRUSTED_LOGIN_TTL_MS) return '';
+      const wantedHost = clean(host).toLowerCase();
+      const savedHost = clean(saved?.host).toLowerCase();
+      if (wantedHost && savedHost && wantedHost !== savedHost) return '';
       return normalizeLogin(saved?.login);
     } catch {
       return '';
@@ -69,7 +81,7 @@
     const viewportWidth = Number(pageWindow?.innerWidth || doc?.documentElement?.clientWidth || 0);
     if (!viewportWidth || !doc?.querySelectorAll) return '';
 
-    const blocked = /^(?:search|profile|refresh|settings|sections|inventory|history|product|employee|events|problem|problems|shipment|receive|container|items|title|bwui?2)$/i;
+    const blocked = /^(?:search|profile|refresh|settings|sections|inventory|history|product|employee|events|problem|problems|shipment|receive|container|items|title|bwui?2|logout|logoff|signout|sign-in|signin|account)$/i;
     const candidates = [];
 
     for (const element of doc.querySelectorAll('a,span,strong,b,button,div')) {
@@ -78,6 +90,9 @@
       if (!raw || raw !== raw.toLowerCase() || blocked.test(raw)) continue;
       const login = normalizeLogin(raw);
       if (!login) continue;
+
+      const owner = element.closest('header,nav,[role="banner"],[role="navigation"],[class*="user" i],[class*="profile" i],[class*="account" i],[id*="user" i],[id*="profile" i],[id*="account" i]');
+      if (!owner) continue;
 
       let rect;
       try { rect = element.getBoundingClientRect(); } catch { continue; }
@@ -102,7 +117,7 @@
     const remember = (candidate, source) => {
       const login = normalizeLogin(candidate);
       if (!login) return null;
-      saveTrustedLogin(storage, login, source);
+      saveTrustedLogin(storage, login, source, pageWindow?.location?.hostname || '');
       return { login, source };
     };
 
@@ -132,9 +147,6 @@
       '[data-user-login]',
       '[data-username]',
       '[data-autoid]',
-      'input[name="employeeLogin"]',
-      'input[name="userLogin"]',
-      'input[name="autoid"]',
       'meta[name="employeeLogin"]',
       'meta[name="username"]',
       'meta[name="autoid"]'
@@ -163,31 +175,7 @@
       if (result) return result;
     }
 
-    const storageCandidates = [
-      pageWindow?.sessionStorage,
-      pageWindow?.localStorage,
-      globalThis.sessionStorage,
-      storage
-    ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
-    for (const candidateStorage of storageCandidates) {
-      try {
-        for (let index = 0; index < candidateStorage.length; index++) {
-          const key = candidateStorage.key(index) || '';
-          if (key === TRUSTED_LOGIN_KEY) continue;
-          if (!/(?:employee.*login|user.*login|username|alias|auto.?id)/i.test(key)) continue;
-          if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-          const raw = candidateStorage.getItem(key);
-          let found = normalizeLogin(raw);
-          if (!found) {
-            try { found = findLoginInObject(JSON.parse(raw)); } catch {}
-          }
-          const result = remember(found, `storage:${key}`);
-          if (result) return result;
-        }
-      } catch {}
-    }
-
-    for (const cookieName of ['employeeLogin', 'userLogin', 'username', 'login', 'alias', 'autoid']) {
+    for (const cookieName of ['employeeLogin', 'userLogin', 'username', 'autoid']) {
       const result = remember(readCookie(doc, cookieName), `cookie:${cookieName}`);
       if (result) return result;
     }
@@ -200,8 +188,53 @@
       if (result) return result;
     }
 
-    const cached = readTrustedLogin(storage);
-    return cached ? { login: cached, source: 'trusted-cache' } : { login: '', source: '' };
+    if (options.allowCachedLogin === true) {
+      const cached = readTrustedLogin(storage, pageWindow?.location?.hostname || '');
+      if (cached) return { login: cached, source: 'trusted-cache' };
+    }
+    return { login: '', source: '' };
+  }
+
+  function responseHeader(response, name) {
+    const wanted = clean(name).toLowerCase();
+    for (const line of String(response?.responseHeaders || '').split(/\r?\n/)) {
+      const split = line.indexOf(':');
+      if (split < 1) continue;
+      if (clean(line.slice(0, split)).toLowerCase() === wanted) return clean(line.slice(split + 1));
+    }
+    return '';
+  }
+
+  function assertMoveContainerResponse(response, requestedUrl = '') {
+    const status = Number(response?.status || 0);
+    if (status < 200 || status >= 300) {
+      throw actionError(`HTTP ${status || 0}`, 'move', { status });
+    }
+
+    const raw = String(response?.responseText ?? (typeof response?.response === 'string' ? response.response : ''));
+    const contentType = responseHeader(response, 'content-type').toLowerCase();
+    const finalUrl = clean(response?.finalUrl || response?.responseURL || '');
+    const looksHtml = /text\/html|application\/xhtml/i.test(contentType) || /^\s*(?:<!doctype\s+html|<html\b)/i.test(raw);
+    const looksAuth = /(?:^|[\/?#._-])(?:login|signin|sign-in|midway|sso|auth|authenticate|federat)(?:[\/?#._-]|$)/i.test(finalUrl)
+      || (looksHtml && /\b(?:sign\s*in|log\s*in|authentication|midway|single\s+sign[- ]?on)\b/i.test(raw));
+
+    let unexpectedRedirect = false;
+    if (finalUrl && requestedUrl) {
+      try {
+        const actual = new URL(finalUrl, globalThis.location?.href || undefined);
+        const expected = new URL(requestedUrl, globalThis.location?.href || undefined);
+        const trimPath = value => value.replace(/\/+$/, '') || '/';
+        unexpectedRedirect = trimPath(actual.pathname) !== trimPath(expected.pathname);
+      } catch {}
+    }
+
+    if (looksHtml || looksAuth || unexpectedRedirect) {
+      throw actionError('Move confirmation was not the MoveContainer API response', 'move', {
+        status,
+        ambiguous: true
+      });
+    }
+    return response;
   }
 
   function actionError(message, phase, details = {}) {
@@ -295,6 +328,7 @@
     runUnbind,
     movePayload,
     moveContainer,
+    assertMoveContainerResponse,
     markUi
   });
 })();
