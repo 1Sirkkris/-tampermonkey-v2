@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.27
+// @version      0.0.28
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
+// @include      /^https?:\/\/.*fcresearch.*\//
+// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @connect      pandash.amazon.com
+// @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Fleet_Core.lib.js
@@ -15,10 +18,16 @@
 (() => {
   'use strict';
 
+  const IS_POIROT = location.hostname === 'aft-poirot-website-nrt.nrt.proxy.amazon.com';
+  const IS_FCR = /fcresearch/i.test(location.hostname) || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
+  const ISS_LOCAL_FCR_WORKER = IS_FCR && location.hash === '#iss-console-sideline-worker';
+  if (!IS_POIROT && !ISS_LOCAL_FCR_WORKER) return;
+
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.27-REBUILD';
+  const VERSION = '0.0.28-REBUILD';
+  const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
@@ -39,11 +48,7 @@
   const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
-  // Poirot can redirect away the query/hash, and Firefox may clear window.name
-  // on cross-origin navigation. Being embedded is the durable worker signal:
-  // standalone Sideline is top-level; ISS Console Sideline runs in its hidden iframe.
-  const ISS_WORKER_BY_FRAME = window.self !== window.top;
-  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_FRAME || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  const ISS_CONSOLE_WORKER = ISS_LOCAL_FCR_WORKER || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
 
   function issControllerWindow() {
     try {
@@ -85,11 +90,78 @@
     });
   }
 
+  function sidelineFetch(path, options = {}) {
+    if (!ISS_LOCAL_FCR_WORKER) return fetch(path, options);
+
+    const url = /^https?:\/\//i.test(String(path || ''))
+      ? String(path)
+      : POIROT_ORIGIN + String(path || '');
+    const method = String(options.method || 'GET').toUpperCase();
+    const headers = options.headers || {};
+    const body = options.body == null ? undefined : String(options.body);
+
+    return new Promise((resolve,reject) => {
+      if (options.signal?.aborted) {
+        reject(makeAbortError('Run cancelled'));
+        return;
+      }
+
+      let settled = false;
+      let request = null;
+      const cleanup = () => {
+        try { options.signal?.removeEventListener('abort', abort); } catch {}
+      };
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        try { request?.abort?.(); } catch {}
+        cleanup();
+        reject(makeAbortError('Run cancelled'));
+      };
+
+      request = GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data:body,
+        anonymous:false,
+        timeout:15000,
+        onload:response => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const raw = String(response.responseText || '');
+          resolve({
+            ok:response.status >= 200 && response.status < 300,
+            status:response.status,
+            url:response.finalUrl || url,
+            text:async () => raw,
+            json:async () => raw ? JSON.parse(raw) : null
+          });
+        },
+        onerror:error => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
+        },
+        ontimeout:() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error('Poirot request timed out'));
+        }
+      });
+
+      try { options.signal?.addEventListener('abort', abort, {once:true}); } catch {}
+    });
+  }
+
   async function warehouseId() {
     if (warehouseIdPromise) return warehouseIdPromise;
     warehouseIdPromise = (async () => {
       try {
-        const response = await fetch(`${API_BOOTSTRAP}?tool=${encodeURIComponent(TOOL)}`, {
+        const response = await sidelineFetch(`${API_BOOTSTRAP}?tool=${encodeURIComponent(TOOL)}`, {
           method:'GET',
           credentials:'same-origin'
         });
@@ -202,7 +274,7 @@
   async function postJson(path, body, state, run=state.activeRun, cancelMessage='Run cancelled') {
     if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
 
-    const response = await fetch(path, {
+    const response = await sidelineFetch(path, {
       method:'POST',
       credentials:'same-origin',
       headers:{'content-type':'application/json'},
@@ -1225,7 +1297,7 @@
       entry.controller = controller;
       preflightLookup.controllers.add(controller);
 
-      fetch(API_SCAN_ITEM,{
+      sidelineFetch(API_SCAN_ITEM,{
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -2450,7 +2522,7 @@
 
     let response;
     try {
-      response = await fetch(API_SCAN_SOURCE, {
+      response = await sidelineFetch(API_SCAN_SOURCE, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -2518,7 +2590,7 @@
 
     let response;
     try {
-      response = await fetch(API_CLOSE_CONTAINER, {
+      response = await sidelineFetch(API_CLOSE_CONTAINER, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
