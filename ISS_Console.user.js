@@ -2,7 +2,7 @@
 // @name         MAIN ISS Console
 // @name:en      MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.39
+// @version      0.1.40
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.39';
+  const VERSION = '0.1.40';
   const HASH = '#iss-console';
   if (!location.hash.startsWith(HASH)) return;
   if (window.__bwu2IssConsole) return;
@@ -32,6 +32,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
+  const SIDELINE_EXPECTED_VERSION = '0.0.27-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -295,19 +296,24 @@
       host.style.cssText = 'position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);box-shadow:0 0 0 1px rgba(15,23,42,.05);backdrop-filter:blur(1.5px);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-shadow:0 1px 1px rgba(255,255,255,.95),0 0 3px rgba(255,255,255,.75)';
       root.appendChild(host);
     }
+    const actualSideline = clean(workers.sideline?.version);
     const values = {
-      ISS: VERSION,
-      AFT: clean(workers.aft?.version) || '…',
-      SIDELINE: clean(workers.sideline?.version) || '…'
+      ISS: { text:`ISS · v${VERSION}` },
+      AFT: { text:`AFT · v${clean(workers.aft?.version) || '…'}` },
+      SIDELINE: {
+        text:actualSideline
+          ? `SIDELINE · v${actualSideline}${actualSideline === SIDELINE_EXPECTED_VERSION ? '' : ` ⚠ EXPECT v${SIDELINE_EXPECTED_VERSION}`}`
+          : `SIDELINE · v${SIDELINE_EXPECTED_VERSION} (expected / offline)`
+      }
     };
-    for (const [label, version] of Object.entries(values)) {
+    for (const [label, value] of Object.entries(values)) {
       let item = [...host.children].find(node => node.dataset?.bwu2RuntimeKey === label);
       if (!item) {
         item = document.createElement('span');
         item.dataset.bwu2RuntimeKey = label;
         host.appendChild(item);
       }
-      item.textContent = `${label} · v${version}`;
+      item.textContent = value.text;
     }
     [...host.children]
       .sort((a,b) => String(a.dataset?.bwu2RuntimeKey || '').localeCompare(String(b.dataset?.bwu2RuntimeKey || '')))
@@ -327,9 +333,17 @@
     const dot = $('[data-worker-dot="' + worker + '"]');
     const label = $('[data-worker-label="' + worker + '"]');
     if (dot) dot.dataset.ready = ready ? '1' : '0';
-    if (label) label.textContent = worker === 'aft'
-      ? 'AFT ' + (ready ? 'READY' : 'OFFLINE')
-      : 'SIDELINE ' + (ready ? 'READY' : 'OFFLINE');
+    if (label) {
+      if (worker === 'aft') {
+        label.textContent = 'AFT ' + (ready ? 'READY' : 'OFFLINE') + (state.version ? ' · v' + state.version : '');
+      } else {
+        const shownVersion = clean(state.version) || SIDELINE_EXPECTED_VERSION;
+        const mismatch = ready && state.version && state.version !== SIDELINE_EXPECTED_VERSION;
+        label.textContent = 'SIDELINE ' + (ready ? 'READY' : 'OFFLINE') +
+          ' · v' + shownVersion +
+          (ready ? (mismatch ? ' ⚠' : '') : ' EXPECTED');
+      }
+    }
 
     if (ready && worker === 'aft') {
       for (const area of ['edit','move']) {
@@ -761,7 +775,7 @@
       '    </div>',
       '    <div class="iss-worker-status">',
       '      <span class="iss-worker"><i data-worker-dot="aft"></i><span data-worker-label="aft">AFT CONNECTING</span></span>',
-      '      <span class="iss-worker"><i data-worker-dot="sideline"></i><span data-worker-label="sideline">SIDELINE CONNECTING</span></span>',
+      '      <span class="iss-worker"><i data-worker-dot="sideline"></i><span data-worker-label="sideline">SIDELINE CONNECTING · v' + esc(SIDELINE_EXPECTED_VERSION) + '</span></span>',
       '      <button type="button" class="iss-exit" data-exit>FCResearch</button>',
       '    </div>',
       '  </header>',
