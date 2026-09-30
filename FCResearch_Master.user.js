@@ -2,7 +2,7 @@
 // @name         TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
 // @name:en      TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.79
+// @version      0.1.80
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -11,7 +11,7 @@
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js?ver=0.1.41
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js?ver=0.1.42
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/FCResearch_Master.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.79';
+  const VERSION = '0.1.80';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1494,9 +1494,23 @@
   function titleFromRow(row) { const table = row?.closest('table'); const index = findColumnIndex(table, [/(^|\b)title(\b|$)/,/(^|\b)product(\b|$)/,/(^|\b)description(\b|$)/,/(^|\b)item\s*name(\b|$)/]); return index >= 0 ? clean($$('td', row)[index]?.textContent || '') : ''; }
   function skuAnchorFromRow(row) { const table = row?.closest('table'); const index = findColumnIndex(table, [/(^|\b)sku(\b|$)/,/(^|\b)fnsku(\b|$)/,/(^|\b)fcsku(\b|$)/,/(^|\b)asin(\b|$)/,/(^|\b)isbn(\b|$)/]); return index >= 0 ? $('a', $$('td', row)[index]) : $('a', row); }
 
+  function panelMatchesPrintCode(panel, targetUpper) {
+    if (!panel || !targetUpper) return false;
+    const codes = [
+      panel.primaryId,
+      panel.fnskuId,
+      clean(panel.fcsku?.text || '').match(/\b(?:[A-Z0-9]{10}|\d{8,14})\b/i)?.[0] || ''
+    ].map(upperForCompare).filter(Boolean);
+    return codes.includes(targetUpper);
+  }
+
   async function waitForProductTitle(targetUpper, timeout = 2500) {
     const end = Date.now() + timeout;
-    while (Date.now() < end) { const panel = readProductPanel(); if (panel?.title?.text && panel.primaryId === targetUpper) return clean(panel.title.text); await sleep(80); }
+    while (Date.now() < end) {
+      const panel = readProductPanel();
+      if (panel?.title?.text && panelMatchesPrintCode(panel, targetUpper)) return clean(panel.title.text);
+      await sleep(80);
+    }
     return '';
   }
 
@@ -1513,7 +1527,8 @@
       const row = event.target instanceof Element ? event.target.closest('tr') : null;
       let title = titleFromRow(row);
       if (!title && row) { const anchor = skuAnchorFromRow(row); if (anchor) { const target = upperForCompare(code); anchor.click(); title = await waitForProductTitle(target, 2500); } }
-      if (!title) title = productTitle();
+      // Never borrow a description from an unrelated product panel.
+      // If the clicked code cannot be bound to the current panel, print code-only.
       quickPrint(code, 1, title, type);
     }, true);
   }
