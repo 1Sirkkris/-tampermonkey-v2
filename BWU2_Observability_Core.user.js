@@ -2,7 +2,7 @@
 // @name         CORE v0.1.11 BWU2 Observability Core
 // @name:en      CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.35
+// @version      0.1.36
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -29,7 +29,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.35';
+  const VERSION = '0.1.36';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -1926,16 +1926,47 @@
     (document.head || document.documentElement).appendChild(style);
   }
 
+  function resolveHeaderRow() {
+    const warehouse = document.querySelector('.warehouse-id');
+    if (!warehouse) return null;
+
+    let row = warehouse.closest('.a-row');
+    if (!row) row = warehouse.parentElement?.parentElement || warehouse.parentElement || null;
+    if (!(row instanceof HTMLElement)) return null;
+
+    const search = row.querySelector('input[type="search"], input[placeholder*="search" i], input[name*="search" i]');
+    if (!search) {
+      const nearby = row.parentElement?.querySelector('input[type="search"], input[placeholder*="search" i], input[name*="search" i]');
+      if (nearby) row = nearby.closest('.a-row') || row;
+    }
+    return row instanceof HTMLElement ? row : null;
+  }
+
+  function anchorUiToHeader(host) {
+    if (!(host instanceof HTMLElement)) return false;
+    const warehouse = document.querySelector('.warehouse-id');
+    const row = resolveHeaderRow();
+    if (!warehouse || !row) return false;
+
+    if (getComputedStyle(row).position === 'static') row.style.position = 'relative';
+
+    const rowRect = row.getBoundingClientRect();
+    const warehouseRect = warehouse.getBoundingClientRect();
+
+    host.style.position = 'absolute';
+    host.style.left = Math.max(0, Math.round(warehouseRect.right - rowRect.left + 8)) + 'px';
+    host.style.top = Math.max(0, Math.round(warehouseRect.top - rowRect.top)) + 'px';
+    host.style.zIndex = '20';
+
+    if (host.parentElement !== row) row.appendChild(host);
+    return true;
+  }
+
   function mountUi() {
     if (!isFCResearch() || location.hash.startsWith('#iss-console')) return true;
     if (!document.documentElement) return false;
 
     injectUiStyles();
-    const warehouseEl = document.querySelector('.warehouse-id');
-    if (warehouseEl instanceof HTMLElement) {
-      warehouseEl.style.display = 'inline';
-      warehouseEl.style.verticalAlign = 'baseline';
-    }
 
     if (document.getElementById('bwu2-observability-inline')) {
       uiRoot = document.getElementById('bwu2-observability-inline');
@@ -1943,14 +1974,14 @@
       uiClear = document.getElementById('bwu2-observability-clear');
       const fat = document.getElementById('bwu2-observability-fat');
       if (fat) { fat.dataset.on = fullFatMode ? '1' : '0'; fat.textContent = `FAT ${fullFatMode ? 'ON' : 'OFF'}`; }
+      anchorUiToHeader(uiRoot);
       return true;
     }
 
-    const logoResearch = document.querySelector('.logo-research');
     const warehouse = document.querySelector('.warehouse-id');
-    const anchor = warehouse || logoResearch;
+    const headerRow = resolveHeaderRow();
 
-    if (!anchor) return false;
+    if (!warehouse || !headerRow) return false;
 
     const host = document.createElement('span');
     host.id = 'bwu2-observability-inline';
@@ -1962,7 +1993,8 @@
       '<span aria-hidden="true">·</span>' +
       '<button type="button" id="bwu2-observability-clear" title="Delete current observability log and start fresh">Clear</button>';
 
-    anchor.insertAdjacentElement('afterend', host);
+    headerRow.appendChild(host);
+    anchorUiToHeader(host);
 
     uiRoot = host;
     uiCount = host.querySelector('#bwu2-observability-count');
@@ -1991,6 +2023,8 @@
     uiRoot.classList.toggle('warn', count >= WARN_AT && count < MAX_EVENTS);
     uiRoot.classList.toggle('full', count >= MAX_EVENTS);
 
+    anchorUiToHeader(uiRoot);
+
     uiCount.title =
       count >= MAX_EVENTS
         ? 'FULL — click to download and start fresh'
@@ -2001,6 +2035,20 @@
 
   function bootUi() {
     if (!isFCResearch() || location.hash.startsWith('#iss-console')) return;
+
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        if (uiRoot?.isConnected) anchorUiToHeader(uiRoot);
+        else mountUi();
+      }, 250);
+      setTimeout(() => {
+        if (uiRoot?.isConnected) anchorUiToHeader(uiRoot);
+      }, 1200);
+    }, { once:true });
+
+    window.addEventListener('resize', () => {
+      if (uiRoot?.isConnected) anchorUiToHeader(uiRoot);
+    }, { passive:true });
 
     const start = () => {
       if (mountUi()) return;
