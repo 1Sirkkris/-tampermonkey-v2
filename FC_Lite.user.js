@@ -2,7 +2,7 @@
 // @name        TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.82
+// @version      0.1.83
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.82';
+  const VERSION = '0.1.83';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FC-LITE', VERSION);
 
@@ -82,6 +82,39 @@
 
   const { clean, upper } = globalThis.BWU2Fleet;
   const isContainer = value => /^(?:TSX|CSX)[A-Z0-9]+$/i.test(clean(value));
+  const getCookie = name => (document.cookie.split('; ').find(row => row.startsWith(`${name}=`)) || '').split('=')[1] || '';
+  const asciiHex = value => Array.from(String(value ?? '')).map(char => char.charCodeAt(0).toString(16)).join('');
+
+  function printAuditBarcode(code, description = '') {
+    const value = clean(code).replace(/[\s-]/g, '');
+    if (!value) return;
+    const badgeId = getCookie('fcmenu-employeeId');
+    const sequence = Math.floor(Math.random() * 1e10);
+    const url = `http://localhost:5965/printer?action=print&type=barcode&data=${asciiHex(value)}&text=${asciiHex(value)}&quantity=1&desc=${asciiHex(description)}&badgeid=${badgeId}&seq=${sequence}`;
+    fetch(url).catch(() => setStatus('Printmon not running or printer not connected', 'error'));
+  }
+
+  function bindAuditPrint(row, rawScan, product) {
+    const codeNode = row?.querySelector?.('.scan-code');
+    if (!codeNode) return;
+    const printable = clean(rawScan || product?.fnsku || product?.fcsku || product?.asin || product?.isbn || product?.primary);
+    if (!printable) return;
+    codeNode.dataset.printCode = printable;
+    codeNode.title = `Click to print ${printable}`;
+    codeNode.tabIndex = 0;
+    codeNode.setAttribute('role', 'button');
+    const print = event => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      printAuditBarcode(printable, clean(product?.title || ''));
+      focusScanner();
+    };
+    codeNode.onclick = print;
+    codeNode.onkeydown = event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      print(event);
+    };
+  }
 
   function navigateMode(url) {
     const target = String(url || '');
@@ -754,6 +787,7 @@
       else missingCount++;
 
       paintResult(row, rawScan, product, matches);
+      bindAuditPrint(row, rawScan, product);
       if (found) allocatePhysicalScans(matches, 1);
       updateToteResultProgress(row);
       binSizePromise.then(size => paintBinSize(row, size));
