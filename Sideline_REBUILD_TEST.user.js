@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.23
+// @version      0.0.24
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -17,7 +17,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.23-REBUILD';
+  const VERSION = '0.0.24-REBUILD';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
@@ -39,6 +39,13 @@
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
   const ISS_CONSOLE_WORKER = ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+
+  function issControllerWindow() {
+    try {
+      if (window.opener && !window.opener.closed) return window.opener;
+    } catch {}
+    return window.parent;
+  }
 
   const itemQty = item => Math.max(1, Number(item?.qty) || 1);
   const sumQty = items => items.reduce((sum, item) => sum + itemQty(item), 0);
@@ -4034,7 +4041,7 @@
   function issSideSend(type, detail = {}) {
     if (!ISS_CONSOLE_WORKER) return;
     try {
-      window.parent.postMessage({
+      issControllerWindow().postMessage({
         type,
         worker:'sideline',
         version:VERSION,
@@ -4295,7 +4302,7 @@
 
     window.addEventListener('message', async event => {
       const message = event.data;
-      const sourceOk = event.source === window.parent;
+      const sourceOk = event.source === issControllerWindow();
       const originOk = /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
       if (!sourceOk || !originOk || message?.type !== 'ISS_CONSOLE_RPC' || message?.worker !== 'sideline') return;
 
