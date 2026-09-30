@@ -1,15 +1,12 @@
 // ==UserScript==
 // @name         Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.25
+// @version      0.0.26
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
-// @include      /^https?:\/\/.*fcresearch.*\//
-// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @connect      pandash.amazon.com
-// @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Sideline_REBUILD_TEST.user.js
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Fleet_Core.lib.js
@@ -18,16 +15,10 @@
 (() => {
   'use strict';
 
-  const IS_POIROT = location.hostname === 'aft-poirot-website-nrt.nrt.proxy.amazon.com';
-  const IS_FCR = /fcresearch/i.test(location.hostname) || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
-  const ISS_CONSOLE_LOCAL = IS_FCR && location.hash.startsWith('#iss-console');
-  if (!IS_POIROT && !ISS_CONSOLE_LOCAL) return;
-
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.25-REBUILD';
-  const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
+  const VERSION = '0.0.26-REBUILD';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
 
@@ -48,10 +39,9 @@
   const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
   const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
   const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
-  const ISS_CONSOLE_WORKER = ISS_CONSOLE_LOCAL || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  const ISS_CONSOLE_WORKER = ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
 
   function issControllerWindow() {
-    if (ISS_CONSOLE_LOCAL) return window;
     try {
       if (window.opener && !window.opener.closed) return window.opener;
     } catch {}
@@ -91,74 +81,11 @@
     });
   }
 
-  function sidelineFetch(path, options = {}) {
-    if (!ISS_CONSOLE_LOCAL) return fetch(path, options);
-
-    const url = /^https?:\/\//i.test(String(path || '')) ? String(path) : POIROT_ORIGIN + String(path || '');
-    const method = String(options.method || 'GET').toUpperCase();
-    const headers = options.headers || {};
-    const body = options.body == null ? undefined : String(options.body);
-
-    return new Promise((resolve,reject) => {
-      if (options.signal?.aborted) {
-        reject(makeAbortError('Run cancelled'));
-        return;
-      }
-
-      let settled = false;
-      const request = GM_xmlhttpRequest({
-        method,
-        url,
-        headers,
-        data:body,
-        anonymous:false,
-        timeout:15000,
-        onload:response => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          const raw = String(response.responseText || '');
-          resolve({
-            ok:response.status >= 200 && response.status < 300,
-            status:response.status,
-            url:response.finalUrl || url,
-            text:async () => raw,
-            json:async () => raw ? JSON.parse(raw) : null
-          });
-        },
-        onerror:error => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
-        },
-        ontimeout:() => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error('Poirot request timed out'));
-        }
-      });
-
-      const abort = () => {
-        if (settled) return;
-        settled = true;
-        try { request.abort(); } catch {}
-        cleanup();
-        reject(makeAbortError('Run cancelled'));
-      };
-      const cleanup = () => {
-        try { options.signal?.removeEventListener('abort',abort); } catch {}
-      };
-      try { options.signal?.addEventListener('abort',abort,{once:true}); } catch {}
-    });
-  }
-
   async function warehouseId() {
     if (warehouseIdPromise) return warehouseIdPromise;
     warehouseIdPromise = (async () => {
       try {
-        const response = await sidelineFetch(`${API_BOOTSTRAP}?tool=${encodeURIComponent(TOOL)}`, {
+        const response = await fetch(`${API_BOOTSTRAP}?tool=${encodeURIComponent(TOOL)}`, {
           method:'GET',
           credentials:'same-origin'
         });
@@ -271,7 +198,7 @@
   async function postJson(path, body, state, run=state.activeRun, cancelMessage='Run cancelled') {
     if (!currentRun(state, run)) throw makeAbortError(cancelMessage);
 
-    const response = await sidelineFetch(path, {
+    const response = await fetch(path, {
       method:'POST',
       credentials:'same-origin',
       headers:{'content-type':'application/json'},
@@ -1294,7 +1221,7 @@
       entry.controller = controller;
       preflightLookup.controllers.add(controller);
 
-      sidelineFetch(API_SCAN_ITEM,{
+      fetch(API_SCAN_ITEM,{
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -2519,7 +2446,7 @@
 
     let response;
     try {
-      response = await sidelineFetch(API_SCAN_SOURCE, {
+      response = await fetch(API_SCAN_SOURCE, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -2587,7 +2514,7 @@
 
     let response;
     try {
-      response = await sidelineFetch(API_CLOSE_CONTAINER, {
+      response = await fetch(API_CLOSE_CONTAINER, {
         method:'POST',
         credentials:'same-origin',
         headers:{'content-type':'application/json'},
@@ -4377,9 +4304,7 @@
     window.addEventListener('message', async event => {
       const message = event.data;
       const sourceOk = event.source === issControllerWindow();
-      const originOk = ISS_CONSOLE_LOCAL
-        ? event.origin === location.origin
-        : /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
+      const originOk = /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
       if (!sourceOk || !originOk || message?.type !== 'ISS_CONSOLE_RPC' || message?.worker !== 'sideline') return;
 
       const id = String(message.id || '');
