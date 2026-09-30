@@ -2,7 +2,7 @@
 // @name         TEST v0.2.18 Dropzone Selector Queue
 // @name:en      TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.3.3
+// @version      0.3.4
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
@@ -363,7 +363,13 @@
             });
 
             if (response.status >= 200 && response.status < 300) {
-              resolve({ status: response.status, ms });
+              try {
+                ACTIONS.assertMoveContainerResponse(response, url);
+                resolve({ status: response.status, ms });
+              } catch (error) {
+                error.ms = ms;
+                reject(error);
+              }
               return;
             }
             const error = new Error(`HTTP ${response.status}`);
@@ -512,16 +518,23 @@
   // A refresh while a move is mid-flight is deliberately NOT auto-resubmitted.
   // The list survives, but the uncertain active row is marked for attention.
   function recoverQueueAfterReload() {
-    if (!queueState.running) return;
     const current = queueItem();
-    if (current && current.status === 'active') {
+    const uncertain = !!(
+      current &&
+      (current.status === 'active' || queueState.phase === 'api_move')
+    );
+    if (!queueState.running && !uncertain) return;
+
+    if (uncertain) {
       current.status = 'attention';
-      current.error = 'Page refreshed during API move — verify before retry';
+      current.error = 'Page refreshed with move outcome unknown — verify before retry';
     }
     queueState.running = false;
     queueState.currentId = '';
     queueState.phase = 'idle';
-    queueState.message = 'Queue preserved after refresh — verify red row, then RUN';
+    queueState.message = uncertain
+      ? 'Queue preserved after refresh — UNKNOWN row requires verification'
+      : 'Queue preserved after refresh';
     saveQueueState();
   }
 
