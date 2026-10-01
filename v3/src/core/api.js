@@ -56,7 +56,8 @@ V3.api = (() => {
         ms:Math.round(performance.now()-started), auth:auth.auth, html:auth.html, mutation
       });
 
-      if (auth.auth || auth.html) {
+      const htmlRejected = auth.html && options.allowHtml !== true;
+      if (auth.auth || htmlRejected) {
         if (mutation) {
           operation?.unknown({ status:response.status, reason:'auth-or-html' });
           throw new OutcomeUnknownError('Mutation confirmation was not an API response', { status:response.status });
@@ -122,7 +123,8 @@ V3.api = (() => {
               ms:Math.round(performance.now()-started), auth:auth.auth, html:auth.html, mutation
             });
 
-            if (auth.auth || auth.html) {
+            const htmlRejected = auth.html && options.allowHtml !== true;
+            if (auth.auth || htmlRejected) {
               if (mutation) {
                 operation?.unknown({ status:response.status, reason:'auth-or-html' });
                 reject(new OutcomeUnknownError('Mutation confirmation was not an API response', { status:response.status }));
