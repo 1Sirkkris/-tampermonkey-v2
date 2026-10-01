@@ -6,52 +6,17 @@ V3.boot = () => {
   const settings=V3.storage.create('moveapp.settings');
   const shell=V3.ui.createShell({id:'bwu2-v3-moveapp',title:'BWU2 V3 MoveApp',subtitle:'Dropzone Queue',version:VERSION,life,tabs:[]});
   V3.screenshot.install({life,roots:[shell.host]});
-  const MOVE_URL='https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container';
-  const FLOORS=['P1','P2','P3','P4'];
-  const UPPER=[
-    ['Cubiscan','dz-Pcubiscan-{floor}'],['Prep','dz-P-Prep-{floor}'],['ISS','dz-P-ISS-{floor}'],
-    ['Damages','dz-P-Damages-{floor}'],['Hazmat','dz-P-Hazmat-{floor}'],['Nonsort','dz-Pnonsort-{floor}']
-  ];
-  const P1=[
-    ['Hazmat','dz-P-HAZMAT_OUT'],['Ticketland','dz-P-Ticketland'],['Consolidation','dz-P-issconsol'],
-    ['ISS WIP','dz-S-ISSWIP1'],['Nonsort','dz-P-IB-nonsort'],['Shipdock','dz-P-ISS-Shipdock'],
-    ['OB IOL','dz-P-OBIOL'],['Damageland','dz-Pdamageland'],['Receive Damages','dz-P-rcv-Damages']
-  ];
+  const FLOORS=V3.moveContainer.FLOORS;
   let busy=false;
   let floor=settings.get('floor','P2');
   if(!FLOORS.includes(floor))floor='P2';
   let type=settings.get('type','PRIME');
 
-  function destination(){
-    if(type==='PRIME')return'dz-P-PRIME';
-    const list=floor==='P1'?P1:UPPER;
-    const found=list.find(([name])=>name===type);
-    if(!found)return'';
-    return floor==='P1'?found[1]:found[1].replace('{floor}',floor);
-  }
-  function validateConfirmation(result,requestedUrl,operation){
-    const response=result.response;
-    const finalUrl=V3.base.clean(result.finalUrl||'');
-    let unexpected=false;
-    if(finalUrl){
-      try{unexpected=new URL(finalUrl).pathname.replace(/\/+$/,'')!==new URL(requestedUrl).pathname.replace(/\/+$/,'');}catch{}
-    }
-    if(unexpected){
-      operation.unknown({reason:'redirect'});
-      throw new V3.operation.OutcomeUnknownError('Move confirmation redirected unexpectedly');
-    }
-    operation.confirmed({status:result.status});
-  }
+  function destination(){ return V3.moveContainer.destination(floor,type); }
   async function moveOne(item,dz){
-    const operation=V3.operation.create({kind:'move-container',ref:item.id,telemetry});
     queue.itemSet(item,{status:'active',phase:'move',error:''});
     queue.set({currentId:item.id,phase:'move',message:'Moving '+item.id+' → '+dz});
-    const payload={sourceScannableId:null,destinationScannableId:dz,containerScannableId:item.id,confirmed:'true'};
-    const result=await V3.api.gmRequest(MOVE_URL,{
-      method:'POST',data:JSON.stringify(payload),headers:{'Content-Type':'application/json'},
-      timeout:15000,mutation:true,operation,telemetry
-    });
-    validateConfirmation(result,MOVE_URL,operation);
+    await V3.moveContainer.move(item.id,dz,{telemetry});
     queue.itemSet(item,{status:'done',phase:'done',error:''});
     queue.set({currentId:'',phase:'idle',message:'MOVED '+item.id+' → '+dz});
   }
@@ -76,7 +41,7 @@ V3.boot = () => {
     const s=queue.state,dz=s.lockedDestination||destination();
     shell.setStatus(s.running?'RUNNING':(s.items.some(i=>i.status==='attention')?'ATTENTION':'READY'),s.items.some(i=>i.status==='attention')?'bad':s.running?'work':'');
     const root=document.createElement('div');
-    const options=(floor==='P1'?P1:UPPER).map(([name])=>'<option'+(name===type?' selected':'')+'>'+V3.base.esc(name)+'</option>').join('');
+    const options=V3.moveContainer.choices(floor).filter(([name])=>name!=='PRIME').map(([name])=>'<option'+(name===type?' selected':'')+'>'+V3.base.esc(name)+'</option>').join('');
     root.innerHTML=
       '<section class="v3-section"><h3>MoveContainer</h3><div class="v3-note">Destination locks when RUN starts. PRIME is always dz-P-PRIME.</div></section>'+
       '<section class="v3-section"><div class="v3-grid">'+
