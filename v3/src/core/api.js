@@ -70,6 +70,12 @@ V3.api = (() => {
           operation?.unknown({ status:response.status, reason:'server' });
           throw new OutcomeUnknownError('HTTP ' + response.status + '; mutation outcome unknown', { status:response.status });
         }
+        if (options.allowHttpError === true) {
+          return {
+            status:response.status, raw, data:parseRaw(raw), finalUrl, contentType,
+            ms:Math.round(performance.now()-started), response, httpError:true
+          };
+        }
         operation?.rejected({ status:response.status });
         throw new RejectedError('HTTP ' + response.status, { status:response.status, data:parseRaw(raw) });
       }
@@ -136,10 +142,17 @@ V3.api = (() => {
               if (mutation && response.status >= 500) {
                 operation?.unknown({ status:response.status, reason:'server' });
                 reject(new OutcomeUnknownError('HTTP ' + response.status + '; mutation outcome unknown', { status:response.status }));
-              } else {
-                operation?.rejected({ status:response.status });
-                reject(new RejectedError('HTTP ' + response.status, { status:response.status, data:parseRaw(raw) }));
+                return;
               }
+              if (options.allowHttpError === true) {
+                resolve({
+                  status:response.status, raw, data:parseRaw(raw), finalUrl, contentType,
+                  ms:Math.round(performance.now()-started), response, httpError:true
+                });
+                return;
+              }
+              operation?.rejected({ status:response.status });
+              reject(new RejectedError('HTTP ' + response.status, { status:response.status, data:parseRaw(raw) }));
               return;
             }
 
