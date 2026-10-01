@@ -1,5 +1,19 @@
 # V3 Architecture
 
+## Rebuild doctrine
+
+V3 is designed from required behavior and proven contracts, not from V2 file boundaries.
+
+Before a module is implemented:
+1. identify the workflow and user-visible contract,
+2. identify the authoritative backend/API or DOM state,
+3. identify evidence from V2/OBS/history showing what worked and what failed,
+4. write the smallest fresh implementation that satisfies that contract,
+5. add focused regression coverage,
+6. only then consider whether any old workaround is still necessary.
+
+Default assumption for historical patches is **do not carry forward**.
+
 ## Core runtime
 
 Every suite is assembled from the same source-level core contracts:
@@ -63,11 +77,14 @@ Routes:
 - Unbind
 
 Principles:
-- one canonical implementation
+- one fresh canonical V3 implementation
+- do not port standalone V2 Unbind
+- do not port the merged V2 hierarchy source wholesale
+- use proven Bind/Unbind backend behavior and live contracts as reference
 - shared queue engine
 - BWU1 bind destination validation
 - automatic authenticated identity
-- standalone V2 Unbind remains rollback only during proving; it is not ported into V3
+- standalone V2 Unbind remains V2-only and is not a V3 rollback component
 
 ### 4. MoveApp Suite
 Routes:
