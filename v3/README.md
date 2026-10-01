@@ -58,3 +58,16 @@ See `MIGRATION_MATRIX.md`.
 
 ## Architecture
 See `ARCHITECTURE.md`.
+
+
+## Runtime independence
+V3 must run correctly with every V2 userscript disabled.
+
+V3 production code must not:
+- detect V2 scripts and branch around them,
+- depend on V2 globals, storage, DOM markers, events or runtime libraries,
+- load V2 files through `@require`,
+- preserve V2 attachment hacks solely for coexistence,
+- delay/disable V3 behavior because V2 may be present.
+
+V2 may be consulted during development as evidence/reference only. Coexistence is not an architectural requirement.
