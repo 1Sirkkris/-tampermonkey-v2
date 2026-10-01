@@ -36,7 +36,10 @@ V3.boot = () => {
     if(!barcodeEl)return;
     const barcode=V3.base.clean(barcodeEl.innerText||barcodeEl.textContent);
     const scanned=count();
-    if(!barcode||!BARCODE_RE.test(barcode)||scanned<2)return;
+    // Readiness dropping below 2 marks a new workflow. This deliberately
+    // allows the same barcode to complete again in a later carton.
+    if(scanned<2){completedIdentity='';return;}
+    if(!barcode||!BARCODE_RE.test(barcode))return;
     const identity=barcode+'|'+scanned;
     if(identity===completedIdentity)return;
     const button=document.getElementById(BUTTON_ID);
