@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         V3 | BWU2 Carton PrEditor
-// @name:en      V3 | BWU2 Carton PrEditor
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 Carton PrEditor auto-complete after barcode and count readiness.

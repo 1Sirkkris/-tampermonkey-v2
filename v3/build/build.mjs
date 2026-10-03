@@ -16,7 +16,6 @@ function metadata(entry,buildId){
   const lines=[
     '// ==UserScript==',
     metaLine('name',entry.name),
-    metaLine('name:en',entry.name),
     metaLine('namespace',entry.namespace),
     metaLine('version',entry.version),
     metaLine('description',entry.description)

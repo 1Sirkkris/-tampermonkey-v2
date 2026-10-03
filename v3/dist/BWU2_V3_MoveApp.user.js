@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         V3 | BWU2 MoveApp
-// @name:en      V3 | BWU2 MoveApp
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 direct sequential MoveContainer / Dropzone queue.
