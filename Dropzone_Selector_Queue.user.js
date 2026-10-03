@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | TEST v0.2.18 Dropzone Selector Queue
-// @name:en      V2 | TEST Dropzone Selector Queue
+// @name         V2 | TEST Dropzone Selector Queue
 // @namespace    MONKIES
 // @version      0.3.4
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.

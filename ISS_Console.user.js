@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
-// @name:en      V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.42
+// @version      0.1.43
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -15,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.42';
+  const VERSION = '0.1.43';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -393,13 +392,13 @@
       for (const area of ['edit','move']) {
         const status = $('[data-status="' + area + '"]');
         if (status && /^Waiting for AFT worker/i.test(status.textContent || '')) {
-          panelStatus(area, 'AFT ready', 'ok');
+          panelStatus(area, 'Ready', 'ok');
         }
       }
     } else if (ready && worker === 'sideline') {
       const status = $('[data-status="sideline"]');
       if (status && /^Waiting for Sideline worker/i.test(status.textContent || '')) {
-        panelStatus('sideline', 'Sideline ready', 'ok');
+        panelStatus('sideline', 'Ready', 'ok');
       }
     }
 
@@ -899,6 +898,8 @@
     return [
       ':root{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#eaeded}',
       '*{box-sizing:border-box}',
+      '[hidden]{display:none!important}',
+      '.iss-subtitle,.iss-panel-subtitle,.iss-engine,.iss-auto-source,.iss-footer{display:none!important}',
       'html,body{margin:0;min-height:100%;background:#eaeded}',
       'body{min-width:1120px}',
       '#iss-shell{min-height:100vh;display:flex;flex-direction:column;background:#eaeded}',
@@ -1030,11 +1031,9 @@
     sourceDamage?.setAttribute('data-show', !each && source?.value === 'Unsellable' ? '1' : '0');
     destDamage?.setAttribute('data-show', dest?.value === 'Unsellable' ? '1' : '0');
 
-    if (itemLabel) itemLabel.textContent = each
-      ? 'ITEM ROWS — TOTE ASIN [FNSKU]'
-      : 'ITEM BARCODES / ASIN / FNSKU / FCSKU';
+    if (itemLabel) itemLabel.textContent = 'ITEMS';
     if (items) items.placeholder = each
-      ? 'tsX...  B0...  [X0...] — one row per item'
+      ? 'tsX  B0…  [X0…]'
       : 'Scan or paste one per line';
     if (run) run.textContent = each ? 'RUN EACH' : 'RUN SKU';
     const engine = $('[data-edit-engine]');
@@ -1075,7 +1074,7 @@
 
     try {
       await rpc('aft', 'mode', { key: 'edit:' + mode }, 30000);
-      panelStatus('edit', mode.toUpperCase() + ' ready', 'ok');
+      panelStatus('edit', 'Ready', 'ok');
     } catch (error) {
       editMode = previous;
       syncEditUi();
@@ -1098,8 +1097,7 @@
     moveMode = mode;
     paintMoveMode();
     setActivePanel('move');
-    const label = mode === 'qty' ? 'QTY mode selected' : mode === 'each' ? 'EACH selected • 1 unit per item' : 'ALL quantity selected';
-    panelStatus('move', label, 'ok');
+    panelStatus('move', 'Ready', 'ok');
   }
 
   function paintClearSourceToggle() {
@@ -1171,7 +1169,7 @@
 
     try {
       await rpc('sideline', 'mode', { mode }, 20000);
-      panelStatus('sideline', mode.toUpperCase() + ' ready', 'ok');
+      panelStatus('sideline', 'Ready', 'ok');
     } catch (error) {
       sidelineMode = previous;
       syncSidelineModeUi();

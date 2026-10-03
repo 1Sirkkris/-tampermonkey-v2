@@ -1,10 +1,8 @@
 // ==UserScript==
 // @name         V2 | MAIN Screenshot Mode
-// @name:en      V2 | MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
 // @version      0.2.2
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.
-// @author       Kris + ChatGPT
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      *://aft-qt-*.corp.amazon.com/*
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\//

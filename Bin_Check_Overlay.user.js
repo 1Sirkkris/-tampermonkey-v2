@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | TEST v7.4.3 Bin check Overlay — Filter Snapshot
-// @name:en      V2 | TEST Bin check Overlay — Filter Snapshot
+// @name         V2 | TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
 // @version      7.4.11
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.

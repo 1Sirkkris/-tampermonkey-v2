@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | MAIN v0.9.17 AFT Edit/SKU/Move master
-// @name:en      V2 | MAIN AFT Edit/SKU/Move master
+// @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
 // @version      0.9.45
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.

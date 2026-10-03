@@ -1,10 +1,8 @@
 // ==UserScript==
-// @name         V2 | TEST v0.1.65 FC-Lite — Accessible MADCAT Green
-// @name:en      V2 | TEST FC-Lite — Accessible MADCAT Green
+// @name         V2 | TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.83
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
-// @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-start

@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | MAIN v7.3 Carton PrEditor
-// @name:en      V2 | MAIN Carton PrEditor
+// @name         V2 | MAIN Carton PrEditor
 // @namespace    http://tampermonkey.net/
 // @version      7.7
 // @description  Auto-click Complete when a valid barcode appears AND count ≥ 2; beeps + toggle

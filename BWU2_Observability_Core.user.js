@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | CORE v0.1.11 BWU2 Observability Core
-// @name:en      V2 | CORE BWU2 Observability Core
+// @name         V2 | CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.37
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.

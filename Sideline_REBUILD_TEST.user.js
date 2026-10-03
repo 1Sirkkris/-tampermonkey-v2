@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         V2 | Sideline REBUILD TEST v0.0.9
+// @name         V2 | Sideline REBUILD TEST
 // @namespace    https://github.com/1Sirkkris
 // @version      0.0.29
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.

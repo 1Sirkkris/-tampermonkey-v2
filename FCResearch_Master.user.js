@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | TEST v0.1.27 FCResearch Master — Accessible MADCAT Green
-// @name:en      V2 | TEST FCResearch Master — Accessible MADCAT Green
+// @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.80
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.

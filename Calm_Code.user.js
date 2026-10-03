@@ -1,6 +1,5 @@
 // ==UserScript==
-// @name         V2 | MAIN v1.3.1 Calm Code
-// @name:en      V2 | MAIN Calm Code
+// @name         V2 | MAIN Calm Code
 // @version      1.3.4
 // @description Adds Calm Code Buttons into the FCLM Labor Tracking Kiosk for AFE. Initial code from jeickels@, dkingamz@ & salloumr@
 // @author      @blelliot and @nichpres edit by @phanmpet
