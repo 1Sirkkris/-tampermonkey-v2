@@ -14,6 +14,7 @@ V3.fcr = (() => {
       asin:V3.base.clean(data.asin),isbn:V3.base.clean(data.isbn),primary:V3.base.clean(data.asin||data.isbn),
       fnsku:V3.base.clean(data.fnsku),fcsku:V3.base.clean(data.fcsku),title:V3.base.clean(data.title),
       dimensions:V3.base.clean(data.dimensions),weight:V3.base.clean(data.weight),img:V3.base.clean(data.img),
+      inventoryCost:V3.base.clean(data['list price']||data.price||data['inventory cost']||''),
       sortable,sortableText:sortable==null?V3.base.clean(data.sortable):String(sortable),
       suspicious:suspiciousDimensions(data.dimensions)
     };
