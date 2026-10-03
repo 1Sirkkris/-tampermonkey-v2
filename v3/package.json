@@ -1,0 +1,11 @@
+{
+  "name": "bwu2-tampermonkey-v3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build/build.mjs",
+    "check:dist": "node build/build.mjs --check",
+    "test": "node tests/core.test.mjs",
+    "verify": "node build/build.mjs --check && node tests/verify_dist.mjs && node tests/core.test.mjs"
+  }
+}
