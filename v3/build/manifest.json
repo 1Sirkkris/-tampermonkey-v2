@@ -1,0 +1,308 @@
+{
+  "suites": [
+    {
+      "id": "fcr",
+      "name": "BWU2 V3 FCResearch Suite",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 FCResearch suite: FCR, Tote Audit, ISS, direct Sideline, RIVER and integrated OBS.",
+      "include": [
+        "/^https?:\\/\\/.*fcresearch.*\\//",
+        "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+      ],
+      "match": [
+        "https://river.amazon.com/*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "GM_xmlhttpRequest",
+        "GM_getValue",
+        "GM_setValue",
+        "GM_openInTab"
+      ],
+      "connect": [
+        "aft-poirot-website-nrt.nrt.proxy.amazon.com",
+        "pandash.amazon.com",
+        "aft-qt-jp.aka.nrt.corp.amazon.com",
+        "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com",
+        "localhost"
+      ],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js",
+      "output": "BWU2_V3_FCResearch.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/operation.js",
+        "src/core/api.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/core/print.js",
+        "src/services/fcr.js",
+        "src/services/movecontainer.js",
+        "src/services/aft.js",
+        "src/services/aft-workflows.js",
+        "src/services/sideline.js",
+        "src/suites/fcr/native.js",
+        "src/suites/fcr/tote.js",
+        "src/suites/fcr/iss.js",
+        "src/suites/fcr/river.js",
+        "src/suites/fcr/index.js"
+      ]
+    },
+    {
+      "id": "aft",
+      "name": "BWU2 V3 AFT Suite",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 AFT EditItems, MoveItems and FCSKU workflows.",
+      "include": [
+        "*://aft-qt-*.corp.amazon.com/app/edititems*",
+        "*://aft-qt-*.corp.amazon.com/app/fcskuflip*",
+        "*://aft-qt-*.corp.amazon.com/app/moveitems*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "none"
+      ],
+      "connect": [],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_AFT.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_AFT.user.js",
+      "output": "BWU2_V3_AFT.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/operation.js",
+        "src/core/api.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/services/aft.js",
+        "src/services/aft-workflows.js",
+        "src/suites/aft/index.js"
+      ]
+    },
+    {
+      "id": "hierarchy",
+      "name": "BWU2 V3 Hierarchy",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 canonical Bind/Unbind hierarchy queue.",
+      "match": [
+        "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
+        "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "GM_xmlhttpRequest",
+        "unsafeWindow"
+      ],
+      "connect": [
+        "w.amazon.com"
+      ],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Hierarchy.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Hierarchy.user.js",
+      "output": "BWU2_V3_Hierarchy.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/operation.js",
+        "src/core/api.js",
+        "src/core/identity.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/core/queue.js",
+        "src/suites/hierarchy/index.js"
+      ]
+    },
+    {
+      "id": "moveapp",
+      "name": "BWU2 V3 MoveApp",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 direct sequential MoveContainer / Dropzone queue.",
+      "include": [
+        "/^https?:\\/\\/aft-moveapp-[^\\/.]+(?:\\.nrt)?\\.proxy\\.amazon\\.com\\/move-container(?:[\\/?#]|$)/"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "GM_xmlhttpRequest"
+      ],
+      "connect": [
+        "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com"
+      ],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_MoveApp.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_MoveApp.user.js",
+      "output": "BWU2_V3_MoveApp.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/operation.js",
+        "src/core/api.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/core/queue.js",
+        "src/services/movecontainer.js",
+        "src/suites/moveapp/index.js"
+      ]
+    },
+    {
+      "id": "fnsku",
+      "name": "BWU2 V3 FNSKU Mapping",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 exact regional FNSKU to ASIN to JP/AU mapping lookup.",
+      "match": [
+        "https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*",
+        "https://fba-fnsku-commingling-console-na.aka.amazon.com/tool/fnsku-mappings-tool*",
+        "https://fba-fnsku-commingling-console-jp.aka.amazon.com/tool/fnsku-mappings-tool*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "GM_xmlhttpRequest",
+        "GM_setClipboard"
+      ],
+      "connect": [
+        "fba-fnsku-commingling-console-eu.aka.amazon.com",
+        "fba-fnsku-commingling-console-na.aka.amazon.com",
+        "fba-fnsku-commingling-console-jp.aka.amazon.com"
+      ],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FNSKU.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FNSKU.user.js",
+      "output": "BWU2_V3_FNSKU.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/operation.js",
+        "src/core/api.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/suites/fnsku/index.js"
+      ]
+    },
+    {
+      "id": "poportal",
+      "name": "BWU2 V3 PO Portal",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 lightweight AU ISS PO Portal search and table view.",
+      "include": [
+        "/^https?:\\/\\/console\\.harmony\\.a2z\\.com\\/poportal(?:[\\/?#]|$)/"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "none"
+      ],
+      "connect": [],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_PO_Portal.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_PO_Portal.user.js",
+      "output": "BWU2_V3_PO_Portal.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/suites/poportal/index.js"
+      ]
+    },
+    {
+      "id": "carton",
+      "name": "BWU2 V3 Carton PrEditor",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 Carton PrEditor auto-complete after barcode and count readiness.",
+      "match": [
+        "https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "none"
+      ],
+      "connect": [],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Carton.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Carton.user.js",
+      "output": "BWU2_V3_Carton.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/screenshot.js",
+        "src/suites/carton/index.js"
+      ]
+    },
+    {
+      "id": "calm",
+      "name": "BWU2 V3 Calm Code",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 compact Calm Code role controls.",
+      "match": [
+        "https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
+        "http://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
+        "https://fcmenu-nrt-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
+        "http://fcmenu-nrt-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
+        "https://fcmenu-nrt-regionalized.corp.amazon.com/*/calmCode*",
+        "http://fcmenu-nrt-regionalized.corp.amazon.com/*/calmCode*"
+      ],
+      "exclude": [
+        "http://fcmenu-iad-regionalized.corp.amazon.com/do/laborTrackingKiosk*",
+        "https://fcmenu-iad-regionalized.corp.amazon.com/do/laborTrackingKiosk*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "none"
+      ],
+      "connect": [],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Calm.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_Calm.user.js",
+      "output": "BWU2_V3_Calm.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/ui.js",
+        "src/core/screenshot.js",
+        "src/suites/calm/index.js"
+      ]
+    },
+    {
+      "id": "sim",
+      "name": "BWU2 V3 SIM Toolbar",
+      "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
+      "version": "0.1.0",
+      "description": "V3 SIM Markdown toolbar, snippets and image helpers.",
+      "match": [
+        "https://t.corp.amazon.com/*"
+      ],
+      "runAt": "document-body",
+      "grant": [
+        "none"
+      ],
+      "connect": [],
+      "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_SIM.user.js",
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_SIM.user.js",
+      "output": "BWU2_V3_SIM.user.js",
+      "sources": [
+        "src/core/base.js",
+        "src/core/lifecycle.js",
+        "src/core/storage.js",
+        "src/core/telemetry.js",
+        "src/core/screenshot.js",
+        "src/suites/sim/index.js"
+      ]
+    }
+  ]
+}
