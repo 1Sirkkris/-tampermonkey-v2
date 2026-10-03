@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root=path.resolve(import.meta.dirname,'..');
+const here=path.dirname(fileURLToPath(import.meta.url));
+const root=path.resolve(here,'..');
 const context={
-  console, setTimeout, clearTimeout, setInterval, clearInterval,
-  AbortController, DOMException, performance, crypto,
+  console,setTimeout,clearTimeout,setInterval,clearInterval,
+  AbortController,DOMException,performance,crypto,
   localStorage:(()=>{const m=new Map();return{getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k)}})()
 };
 context.V3={build:{id:'test',version:'test',suite:'test'}};
