@@ -50,7 +50,8 @@ V3.boot = () => {
   };
 
   async function login(){
-    let identity=V3.identity.resolve();
+    const pageWindow=typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window;
+    let identity=V3.identity.resolve({doc:document,pageWindow});
     if(!identity.login) identity=await V3.identity.resolveWiki();
     if(!identity.login) throw new Error('Current authenticated employee could not be determined');
     telemetry.emit('identity',{source:identity.source});
