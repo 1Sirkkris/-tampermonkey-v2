@@ -10,13 +10,13 @@
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_MoveApp.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_MoveApp.user.js
-// @v3-build     moveapp-0.1.0-21c08d43
+// @v3-build     moveapp-0.1.0-4b3c3945
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"moveapp-0.1.0-21c08d43","version":"0.1.0","suite":"moveapp"});
+V3.build=Object.freeze({"id":"moveapp-0.1.0-4b3c3945","version":"0.1.0","suite":"moveapp"});
 
 // ---- src/core/base.js ----
 V3.base = (() => {
@@ -735,7 +735,7 @@ V3.boot = () => {
     if(busy||!queue.state.running)return;
     if(!queue.acquire()){queue.set({running:false,message:'Move queue is active in another tab'});render();return;}
     const item=queue.next();
-    if(!item){queue.set({running:false,currentId:'',phase:'idle',message:'Queue complete'});queue.release();render();return;}
+    if(!item){queue.set({running:false,currentId:'',phase:'idle',message:'Queue complete',lockedDestination:''});queue.release();render();return;}
     const dz=queue.state.lockedDestination||destination();
     if(!dz){queue.set({running:false,message:'Select a destination'});queue.release();render();return;}
     busy=true;render();
@@ -765,8 +765,8 @@ V3.boot = () => {
     const list=root.querySelector('[data-list]');
     for(const item of s.items){const row=document.createElement('div');row.className='v3-item';row.dataset.state=item.status;row.innerHTML='<span>'+V3.base.esc(item.id)+(item.error?'<br><small>'+V3.base.esc(item.error)+'</small>':'')+'</span><b>'+item.status.toUpperCase()+'</b>';list.appendChild(row);}
     shell.setContent(root);
-    shell.body.querySelector('[data-floor]').onchange=e=>{if(s.running)return;floor=e.target.value;settings.set('floor',floor);type='PRIME';settings.set('type',type);render();};
-    shell.body.querySelector('[data-type]').onchange=e=>{if(s.running)return;type=e.target.value;settings.set('type',type);render();};
+    shell.body.querySelector('[data-floor]').onchange=e=>{if(s.running)return;floor=e.target.value;settings.set('floor',floor);type='PRIME';settings.set('type',type);s.lockedDestination='';queue.save();render();};
+    shell.body.querySelector('[data-type]').onchange=e=>{if(s.running)return;type=e.target.value;settings.set('type',type);s.lockedDestination='';queue.save();render();};
     shell.body.querySelector('[data-add]').onclick=()=>{const input=shell.body.querySelector('[data-input]');queue.addMany(String(input.value||'').split(/[\n,]+/).map(V3.base.clean));input.value='';render();};
     shell.body.querySelector('[data-run]').onclick=()=>{
       if(s.items.some(i=>i.status==='attention')){queue.set({message:'Resolve ATTENTION rows before RUN'});render();return;}
