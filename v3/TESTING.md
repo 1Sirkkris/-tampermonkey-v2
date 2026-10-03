@@ -1,6 +1,6 @@
 # BWU2 Tampermonkey V3 — Preliminary Test Pack
 
-Version: 0.1.0
+FCResearch version: 0.1.1\nOther preliminary suites: 0.1.0
 Branch: `v3-rebuild`
 
 ## Installers
@@ -62,7 +62,7 @@ V3 stores:
 
 These are deliberately separate.
 
-If both exist and disagree, Severity pauses for manual review.
+If both exist and disagree, Severity shows large **PO LINE** and **LIVE INVENTORY** quantity buttons plus a **MANUAL** quantity box. Clicking a quantity fills `Units impacted` and sets `Shipments impacted = 0`, but does **not** auto-click Next. Review the populated RIVER field, then continue manually.\n\nIf the two quantities agree, V3 keeps the fast path and fills/continues automatically.
 
 Preliminary RIVER keeps these choice pages manual rather than selecting by brittle option number:
 - Pandash choice
