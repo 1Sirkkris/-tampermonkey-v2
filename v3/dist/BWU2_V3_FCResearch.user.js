@@ -2,7 +2,7 @@
 // @name         BWU2 V3 FCResearch Suite
 // @name:en      BWU2 V3 FCResearch Suite
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
-// @version      0.1.0
+// @version      0.1.1
 // @description  V3 FCResearch suite: FCR, Tote Audit, ISS, direct Sideline, RIVER and integrated OBS.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,13 +19,13 @@
 // @connect      localhost
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
-// @v3-build     fcr-0.1.0-954b2647
+// @v3-build     fcr-0.1.1-b09a610c
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"fcr-0.1.0-954b2647","version":"0.1.0","suite":"fcr"});
+V3.build=Object.freeze({"id":"fcr-0.1.1-b09a610c","version":"0.1.1","suite":"fcr"});
 
 // ---- src/core/base.js ----
 V3.base = (() => {
@@ -2274,7 +2274,7 @@ V3.fcrRiver = (() => {
     const life=options.life,telemetry=options.telemetry;
     const shell=V3.ui.createShell({id:'bwu2-v3-river',title:'BWU2 V3 RIVER',subtitle:'Manual-assisted',version:V3.build.version,life,tabs:[]});
     V3.screenshot.install({life,roots:[shell.host]});
-    let generation=0,busy=false,watcher=null,lastPage='';
+    let generation=0,busy=false,watcher=null,lastPage='',severityChoice=null;
     const payload=()=>typeof GM_getValue==='function'?GM_getValue(KEY,null):null;
     const associatedLabel=element=>{
       if(!(element instanceof Element))return'';
@@ -2336,6 +2336,34 @@ V3.fcrRiver = (() => {
       return{value:null,reason:'No positive quantity available'};
     };
     const manual=message=>{shell.setStatus('MANUAL','warn');render(message);return{wait:false};};
+
+    async function applySeverityChoice(value,source){
+      const qty=Number(value);
+      if(!Number.isInteger(qty)||qty<0){
+        severityChoice={...(severityChoice||{}),error:'Enter a whole number 0 or greater'};
+        render('SEVERITY quantity needs review');
+        return false;
+      }
+      const units=field(['units impacted','number of units impacted']);
+      const shipments=field(['shipments impacted','number of shipments impacted']);
+      if(!units||!shipments){
+        severityChoice={...(severityChoice||{}),error:'RIVER Severity fields are not ready'};
+        render('SEVERITY quantity needs review');
+        return false;
+      }
+      const unitsOk=await setValue(units,qty);
+      const shipmentsOk=await setValue(shipments,0);
+      if(!unitsOk||!shipmentsOk){
+        severityChoice={...(severityChoice||{}),error:'RIVER did not retain the selected quantity'};
+        render('SEVERITY quantity needs review');
+        return false;
+      }
+      severityChoice={...(severityChoice||{}),selected:qty,source,error:''};
+      shell.setStatus('FILLED · REVIEW + NEXT','');
+      telemetry.emit('river.severity.choice',{value:qty,source});
+      render('Units impacted = '+qty+' ('+source+'). Review it, then click RIVER Next.');
+      return true;
+    }
     async function drive(reason='RUN',gen=generation){
       if(gen!==generation)return;
       const p=payload();if(!p)return manual('No V3 FCResearch capture. Capture the item first.');
@@ -2374,7 +2402,19 @@ V3.fcrRiver = (() => {
       if(page==='severity'){
         const selected=chooseUnits(p);
         const shipments=field(['shipments impacted','number of shipments impacted']);
-        if(!selected.value){if(shipments)await setValue(shipments,0);return manual('SEVERITY quantity needs review · '+selected.reason);}
+        if(!selected.value){
+          if(shipments)await setValue(shipments,0);
+          severityChoice={
+            po:Number.isFinite(Number(p?.poLineQuantity))?Number(p.poLineQuantity):null,
+            live:Number.isFinite(Number(p?.liveInventoryQuantity))?Number(p.liveInventoryQuantity):null,
+            reason:selected.reason,
+            selected:null,
+            source:'',
+            error:''
+          };
+          return manual('SEVERITY quantity needs review · '+selected.reason);
+        }
+        severityChoice=null;
         const units=field(['units impacted','number of units impacted']);
         if(!await setValue(units,selected.value)||!await setValue(shipments,0))throw new Error('Severity fields did not retain');
         const next=nextButton();if(!next)return manual('Severity filled ('+selected.reason+'), but Next not found.');
@@ -2408,15 +2448,36 @@ V3.fcrRiver = (() => {
     function render(message=''){
       const p=payload(),units=chooseUnits(p);
       const root=document.createElement('div');
+      const severityHtml=severityChoice
+        ? '<section class="v3-section"><h3>Units impacted</h3>'+
+          '<div class="v3-note"><b>'+V3.base.esc(severityChoice.reason||'Choose quantity')+'</b></div>'+
+          '<div class="v3-grid" style="margin-top:9px">'+
+            (severityChoice.po!=null?'<button class="v3-btn'+(severityChoice.source==='PO'?' primary':'')+'" data-severity-po style="min-height:58px"><b style="font-size:20px">'+severityChoice.po+'</b><br><small>PO LINE</small></button>':'')+
+            (severityChoice.live!=null?'<button class="v3-btn'+(severityChoice.source==='LIVE'?' primary':'')+'" data-severity-live style="min-height:58px"><b style="font-size:20px">'+severityChoice.live+'</b><br><small>LIVE INVENTORY</small></button>':'')+
+          '</div>'+
+          '<div class="v3-row" style="margin-top:9px"><input class="v3-input" data-severity-manual type="number" min="0" step="1" placeholder="Manual qty"><button class="v3-btn" data-severity-apply>APPLY MANUAL</button></div>'+
+          (severityChoice.selected!=null?'<div class="v3-note" style="color:var(--v3-ok);margin-top:8px"><b>FILLED: '+severityChoice.selected+' · '+V3.base.esc(severityChoice.source)+'</b><br>Review RIVER, then click Next.</div>':'')+
+          (severityChoice.error?'<div class="v3-note" style="color:var(--v3-bad);margin-top:8px"><b>'+V3.base.esc(severityChoice.error)+'</b></div>':'')+
+        '</section>'
+        : '';
       root.innerHTML='<section class="v3-section"><h3>RIVER Assistant</h3>'+
         '<div class="v3-note">Item: <b>'+V3.base.esc(p?.fnsku||p?.asin||'NO CAPTURE')+'</b></div>'+
         (p?'<div class="v3-grid" style="margin-top:8px"><div class="v3-note"><b>PO qty</b><br>'+(p.poLineQuantity??'N/A')+'</div><div class="v3-note"><b>Live qty</b><br>'+(p.liveInventoryQuantity??'N/A')+'</div></div>':'')+
         '<div class="v3-note" style="margin-top:8px">'+V3.base.esc(message||('Current: '+(label()||pageKind())))+'</div>'+
-        (p&&p.quantityDisagreement?'<div class="v3-note" style="color:var(--v3-warn);margin-top:6px"><b>QUANTITY DISAGREEMENT — Severity will pause.</b></div>':'')+
-        '<div class="v3-row" style="margin-top:9px"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn danger" data-clear>CLEAR</button></div></section>';
+        (p&&p.quantityDisagreement?'<div class="v3-note" style="color:var(--v3-warn);margin-top:6px"><b>QUANTITY DISAGREEMENT — choose below.</b></div>':'')+
+        '<div class="v3-row" style="margin-top:9px"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn danger" data-clear>CLEAR</button></div></section>'+
+        severityHtml;
       shell.setContent(root);
       root.querySelector('[data-run]').onclick=()=>run('Manual RUN');
-      root.querySelector('[data-clear]').onclick=()=>{generation++;clearWatch();if(typeof GM_setValue==='function')GM_setValue(KEY,null);shell.setStatus('CLEARED','');render('STOPPED / CLEARED');};
+      root.querySelector('[data-clear]').onclick=()=>{generation++;severityChoice=null;clearWatch();if(typeof GM_setValue==='function')GM_setValue(KEY,null);shell.setStatus('CLEARED','');render('STOPPED / CLEARED');};
+      root.querySelector('[data-severity-po]')?.addEventListener('click',()=>applySeverityChoice(severityChoice.po,'PO'));
+      root.querySelector('[data-severity-live]')?.addEventListener('click',()=>applySeverityChoice(severityChoice.live,'LIVE'));
+      root.querySelector('[data-severity-apply]')?.addEventListener('click',()=>applySeverityChoice(root.querySelector('[data-severity-manual]')?.value,'MANUAL'));
+      root.querySelector('[data-severity-manual]')?.addEventListener('keydown',event=>{
+        if(event.key!=='Enter')return;
+        event.preventDefault();
+        void applySeverityChoice(event.currentTarget.value,'MANUAL');
+      });
     }
     render();
     return Object.freeze({run,render});
