@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name       MAIN v1.4.0-test FNSKU mapping Lookup
-// @name:en      MAIN FNSKU mapping Lookup
+// @name         V2 | MAIN v1.4.0-test FNSKU mapping Lookup
+// @name:en      V2 | MAIN FNSKU mapping Lookup
 // @version      1.4.4-test
 // @description  Read-only regional FNSKU lookup with polished HOME/JP comparison, native JP handoff and compact minimize mode.
 // @author       (USER)

@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
-// @name:en      TEST FCR Data Core — MADCAT Auto Auth
+// @name         V2 | TEST v0.2.18 FCR Data Core — MADCAT Auto Auth
+// @name:en      V2 | TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
 // @version      0.2.40
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.

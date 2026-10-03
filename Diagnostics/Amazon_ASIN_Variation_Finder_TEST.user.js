@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         TEST v0.1.1 Amazon AU ASIN Variation Finder
-// @name:en      TEST Amazon AU ASIN Variation Finder
+// @name         V2 | TEST v0.1.1 Amazon AU ASIN Variation Finder
+// @name:en      V2 | TEST Amazon AU ASIN Variation Finder
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
 // @version      0.1.2
 // @description  Right-click an Amazon product variation and choose Find ASIN to reveal child ASINs, including unavailable options when Amazon exposes them in the loaded page.

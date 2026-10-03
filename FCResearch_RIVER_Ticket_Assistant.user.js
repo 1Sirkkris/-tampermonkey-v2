@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         TEST FCResearch → RIVER Ticket Assistant v0.3.9
-// @name:en      TEST FCResearch → RIVER Ticket Assistant
+// @name         V2 | TEST FCResearch → RIVER Ticket Assistant v0.3.9
+// @name:en      V2 | TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
 // @version      0.3.19
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.

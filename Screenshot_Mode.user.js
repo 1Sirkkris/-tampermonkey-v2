@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         MAIN Screenshot Mode
-// @name:en      MAIN Screenshot Mode
+// @name         V2 | MAIN Screenshot Mode
+// @name:en      V2 | MAIN Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2
 // @version      0.2.2
 // @description  Ctrl+Q hides/shows visible UI added by the BWU2 userscript fleet for clean screenshots.

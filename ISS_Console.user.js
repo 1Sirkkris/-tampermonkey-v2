@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         MAIN ISS Console
-// @name:en      MAIN ISS Console
+// @name         V2 | MAIN ISS Console
+// @name:en      V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.42
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.

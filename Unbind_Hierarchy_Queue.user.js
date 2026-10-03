@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Unbind Hierarchy Queue v1.0.1
-// @name:en      Unbind Hierarchy Queue
+// @name         V2 | Unbind Hierarchy Queue v1.0.1
+// @name:en      V2 | Unbind Hierarchy Queue
 // @namespace    BWU2
 // @version      1.1.6
 // @description  BWU2 Endless-style sequential tsX/csX hierarchy unbind queue using the proven native backend flow.

@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Bind Hierarchy Queue
-// @name:en      Hierarchy Queue
+// @name         V2 | Bind Hierarchy Queue
+// @name:en      V2 | Hierarchy Queue
 // @namespace    BWU2
 // @version      0.3.0
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.

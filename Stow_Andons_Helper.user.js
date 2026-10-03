@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         TEST v5.5.3 Stow Andons Helper — FCSKU Conflict Alert
-// @name:en      TEST Stow Andons Helper — FCSKU Conflict Alert
+// @name         V2 | TEST v5.5.3 Stow Andons Helper — FCSKU Conflict Alert
+// @name:en      V2 | TEST Stow Andons Helper — FCSKU Conflict Alert
 // @namespace    Violentmonkey Scripts
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
