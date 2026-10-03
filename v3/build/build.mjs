@@ -9,7 +9,7 @@ const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
 const checkOnly=process.argv.includes('--check');
 
 function metaLine(key,value){
-  return '// @'+key.padEnd(12,' ')+value;
+  return '// @'+key.padEnd(13,' ')+value;
 }
 
 function metadata(entry,buildId){
