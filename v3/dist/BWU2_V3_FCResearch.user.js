@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 FCResearch Suite
-// @name:en      BWU2 V3 FCResearch Suite
+// @name         V3 | BWU2 FCResearch Suite
+// @name:en      V3 | BWU2 FCResearch Suite
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.1
 // @description  V3 FCResearch suite: FCR, Tote Audit, ISS, direct Sideline, RIVER and integrated OBS.

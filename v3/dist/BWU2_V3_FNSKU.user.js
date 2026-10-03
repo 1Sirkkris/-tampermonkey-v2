@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 FNSKU Mapping
-// @name:en      BWU2 V3 FNSKU Mapping
+// @name         V3 | BWU2 FNSKU Mapping
+// @name:en      V3 | BWU2 FNSKU Mapping
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 exact regional FNSKU to ASIN to JP/AU mapping lookup.

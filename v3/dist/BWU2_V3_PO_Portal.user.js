@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 PO Portal
-// @name:en      BWU2 V3 PO Portal
+// @name         V3 | BWU2 PO Portal
+// @name:en      V3 | BWU2 PO Portal
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 lightweight AU ISS PO Portal search and table view.

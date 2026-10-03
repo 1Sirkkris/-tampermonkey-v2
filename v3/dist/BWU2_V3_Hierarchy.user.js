@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 Hierarchy
-// @name:en      BWU2 V3 Hierarchy
+// @name         V3 | BWU2 Hierarchy
+// @name:en      V3 | BWU2 Hierarchy
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 canonical Bind/Unbind hierarchy queue.

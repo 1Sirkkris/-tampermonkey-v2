@@ -2,7 +2,7 @@
   "suites": [
     {
       "id": "fcr",
-      "name": "BWU2 V3 FCResearch Suite",
+      "name": "V3 | BWU2 FCResearch Suite",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.1",
       "description": "V3 FCResearch suite: FCR, Tote Audit, ISS, direct Sideline, RIVER and integrated OBS.",
@@ -54,7 +54,7 @@
     },
     {
       "id": "aft",
-      "name": "BWU2 V3 AFT Suite",
+      "name": "V3 | BWU2 AFT Suite",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 AFT EditItems, MoveItems and FCSKU workflows.",
@@ -87,7 +87,7 @@
     },
     {
       "id": "hierarchy",
-      "name": "BWU2 V3 Hierarchy",
+      "name": "V3 | BWU2 Hierarchy",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 canonical Bind/Unbind hierarchy queue.",
@@ -122,7 +122,7 @@
     },
     {
       "id": "moveapp",
-      "name": "BWU2 V3 MoveApp",
+      "name": "V3 | BWU2 MoveApp",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 direct sequential MoveContainer / Dropzone queue.",
@@ -155,7 +155,7 @@
     },
     {
       "id": "fnsku",
-      "name": "BWU2 V3 FNSKU Mapping",
+      "name": "V3 | BWU2 FNSKU Mapping",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 exact regional FNSKU to ASIN to JP/AU mapping lookup.",
@@ -191,7 +191,7 @@
     },
     {
       "id": "poportal",
-      "name": "BWU2 V3 PO Portal",
+      "name": "V3 | BWU2 PO Portal",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 lightweight AU ISS PO Portal search and table view.",
@@ -218,7 +218,7 @@
     },
     {
       "id": "carton",
-      "name": "BWU2 V3 Carton PrEditor",
+      "name": "V3 | BWU2 Carton PrEditor",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 Carton PrEditor auto-complete after barcode and count readiness.",
@@ -244,7 +244,7 @@
     },
     {
       "id": "calm",
-      "name": "BWU2 V3 Calm Code",
+      "name": "V3 | BWU2 Calm Code",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 compact Calm Code role controls.",
@@ -280,7 +280,7 @@
     },
     {
       "id": "sim",
-      "name": "BWU2 V3 SIM Toolbar",
+      "name": "V3 | BWU2 SIM Toolbar",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
       "version": "0.1.0",
       "description": "V3 SIM Markdown toolbar, snippets and image helpers.",

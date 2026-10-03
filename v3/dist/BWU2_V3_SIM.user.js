@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 SIM Toolbar
-// @name:en      BWU2 V3 SIM Toolbar
+// @name         V3 | BWU2 SIM Toolbar
+// @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 SIM Markdown toolbar, snippets and image helpers.

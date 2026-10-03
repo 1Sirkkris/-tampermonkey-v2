@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         BWU2 V3 Calm Code
-// @name:en      BWU2 V3 Calm Code
+// @name         V3 | BWU2 Calm Code
+// @name:en      V3 | BWU2 Calm Code
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3
 // @version      0.1.0
 // @description  V3 compact Calm Code role controls.
