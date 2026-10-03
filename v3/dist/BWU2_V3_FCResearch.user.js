@@ -19,13 +19,13 @@
 // @connect      localhost
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
-// @v3-build     fcr-0.1.0-d6012e4a
+// @v3-build     fcr-0.1.0-954b2647
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"fcr-0.1.0-d6012e4a","version":"0.1.0","suite":"fcr"});
+V3.build=Object.freeze({"id":"fcr-0.1.0-954b2647","version":"0.1.0","suite":"fcr"});
 
 // ---- src/core/base.js ----
 V3.base = (() => {
@@ -1804,7 +1804,8 @@ V3.fcrIss = (() => {
     const side={
       source:'',destination:'',text:'',lookups:new Map(),generation:0,active:0,queue:[],
       running:false,paused:false,clearSource:settings.get('side.clearSource',true)!==false,
-      delay:settings.get('side.delay',true)!==false,message:'',lastOutcome:'',dateCache:new Map(),skipped:new Map()
+      delay:settings.get('side.delay',true)!==false,message:'',lastOutcome:'',dateCache:new Map(),skipped:new Map(),
+      workflowExpirationMs:null,workflowDone:false,attention:''
     };
     let preflightTimer=0;
 
@@ -1819,11 +1820,12 @@ V3.fcrIss = (() => {
     };
     const lookupKey=(source,code)=>V3.base.upper(source)+'|'+V3.base.upper(code);
     const resetPreflight=()=>{
-      side.generation++;side.lookups.clear();side.queue=[];side.active=0;side.dateCache.clear();side.skipped.clear();
+      side.generation++;side.lookups.clear();side.queue=[];side.active=0;
+      side.dateCache.clear();side.skipped.clear();side.workflowExpirationMs=null;
     };
     const setSource=value=>{
       const next=V3.base.clean(value);
-      if(V3.base.upper(next)!==V3.base.upper(side.source)){side.source=next;resetPreflight();}
+      if(V3.base.upper(next)!==V3.base.upper(side.source)){side.source=next;side.workflowDone=false;resetPreflight();}
       else side.source=next;
     };
     const queuePreflight=()=>{
@@ -1878,6 +1880,8 @@ V3.fcrIss = (() => {
     const randomDelay=()=>2000+Math.floor(Math.random()*6001);
 
     async function runSideline(){
+      if(side.attention)throw new Error('ATTENTION BLOCKED — verify the unknown move, then clear attention');
+      if(side.workflowDone){resetPreflight();side.workflowDone=false;}
       if(!V3.base.validContainer(side.source)||!V3.base.validContainer(side.destination))throw new Error('Source and destination must be tsX/csX');
       if(V3.base.upper(side.source)===V3.base.upper(side.destination))throw new Error('Source and destination cannot match');
       const items=await settlePreflight();
@@ -1927,6 +1931,7 @@ V3.fcrIss = (() => {
         await sideline.close(side.source,true);
       }
       side.lastOutcome='COMPLETE · moved '+moved+(failed?' · failed '+failed:'')+(skipped?' · aside '+skipped:'');
+      side.workflowDone=true;
       setStatus(side.lastOutcome,failed||skipped?'warn':'');
       telemetry.emit('sideline.done',{moved,failed,skipped,clearSource:side.clearSource});
       return{moved,failed,skipped};
@@ -1940,6 +1945,7 @@ V3.fcrIss = (() => {
         lastMessage=tab==='sideline'?(side.lastOutcome||'DONE'):'DONE';
       }).catch(error=>{
         const unknown=error?.outcome==='unknown';
+        if(tab==='sideline'&&unknown)side.attention='OUTCOME UNKNOWN — VERIFY BEFORE RETRY';
         lastMessage=(unknown?'OUTCOME UNKNOWN — VERIFY BEFORE RETRY · ':'')+String(error?.message||error);
         setStatus(unknown?'UNKNOWN':'STOPPED',unknown?'bad':'warn');
         telemetry.emit('iss.run.error',{tab,message:String(error?.message||error),unknown});
@@ -1995,6 +2001,7 @@ V3.fcrIss = (() => {
           '<div class="v3-row" style="margin-top:8px"><button class="v3-btn" data-clear-source>CLEAR SOURCE: '+(side.clearSource?'ON':'OFF')+'</button>'+
           '<button class="v3-btn" data-delay>DELAY 2–8s: '+(side.delay?'ON':'OFF')+'</button>'+
           (side.running?'<button class="v3-btn" data-pause>'+(side.paused?'RESUME':'PAUSE')+'</button>':'')+'</div>'+
+          (side.attention?'<div class="v3-note" style="color:var(--v3-bad);margin-top:8px"><b>'+V3.base.esc(side.attention)+'</b><br><button class="v3-btn danger" data-ack style="margin-top:6px">I VERIFIED IT · CLEAR ATTENTION</button></div>':'')+
           commonControls(runSideline)+
         '</section>'+
         '<section class="v3-section"><h3>Preflight</h3><div class="v3-list" data-preflight></div></section>';
@@ -2017,6 +2024,13 @@ V3.fcrIss = (() => {
               try{
                 const value=controls.querySelector('[data-date]').value;
                 const chosen=sideline.expirationFromDate(entry.result.ctx,value);
+                if(side.workflowExpirationMs!=null&&side.workflowExpirationMs!==chosen.finalExpirationMs){
+                  side.skipped.set(key,'MIXED EXPIRY — NEXT WORKFLOW');
+                  entry.state='red';
+                  entry.result={...entry.result,kind:'red',reason:'MIXED EXPIRY — NEXT WORKFLOW'};
+                  render();return;
+                }
+                if(side.workflowExpirationMs==null)side.workflowExpirationMs=chosen.finalExpirationMs;
                 side.dateCache.set(key,chosen);render();
               }catch(error){lastMessage=String(error.message||error);render();}
             };
@@ -2028,11 +2042,17 @@ V3.fcrIss = (() => {
       }
       const src=host.querySelector('[data-side-source]'),dest=host.querySelector('[data-side-dest]'),text=host.querySelector('[data-side-items]');
       src.oninput=()=>{setSource(src.value);schedulePreflight();};
-      dest.oninput=()=>{side.destination=V3.base.clean(dest.value);};
+      dest.oninput=()=>{
+        const next=V3.base.clean(dest.value);
+        if(V3.base.upper(next)!==V3.base.upper(side.destination)){side.destination=next;side.workflowDone=false;resetPreflight();}
+        else side.destination=next;
+      };
       text.oninput=()=>{side.text=text.value;schedulePreflight();};
       host.querySelector('[data-clear-source]').onclick=()=>{side.clearSource=!side.clearSource;settings.set('side.clearSource',side.clearSource);render();};
       host.querySelector('[data-delay]').onclick=()=>{side.delay=!side.delay;settings.set('side.delay',side.delay);render();};
       host.querySelector('[data-pause]')?.addEventListener('click',()=>{side.paused=!side.paused;render();});
+      host.querySelector('[data-ack]')?.addEventListener('click',()=>{side.attention='';side.workflowDone=false;resetPreflight();lastMessage='Attention cleared after verification';render();});
+      const runButton=host.querySelector('[data-run]');if(runButton&&side.attention)runButton.disabled=true;
       wireCommon(host,runSideline);
       schedulePreflight();
     }
