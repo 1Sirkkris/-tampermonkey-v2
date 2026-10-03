@@ -2,7 +2,7 @@
 // @name         V2 | MAIN v0.9.17 AFT Edit/SKU/Move master
 // @name:en      V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.44
+// @version      0.9.45
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -23,7 +23,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.44';
+  const VERSION = '0.9.45';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -3564,6 +3564,13 @@
         }
 
         if (current.status === 'COMPLETE') {
+          const endedObjectId = current.objectId;
+          await this.end(current, definition);
+          current = await this.waitFresh(definition, endedObjectId);
+          continue;
+        }
+
+        if (current.status === 'ERRORED') {
           const endedObjectId = current.objectId;
           await this.end(current, definition);
           current = await this.waitFresh(definition, endedObjectId);
