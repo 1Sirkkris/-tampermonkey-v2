@@ -260,6 +260,7 @@ V3.fcrRiver = (() => {
       shell.setStatus('FILLED · REVIEW + NEXT','');
       telemetry.emit('river.severity.choice',{value:qty,source});
       render('Units impacted = '+qty+' ('+source+'). Review it, then click RIVER Next.');
+      armWatch('severity');
       return true;
     }
     async function drive(reason='RUN',gen=generation){
