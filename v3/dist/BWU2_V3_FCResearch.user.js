@@ -19,13 +19,13 @@
 // @connect      localhost
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-rebuild/v3/dist/BWU2_V3_FCResearch.user.js
-// @v3-build     fcr-0.1.1-b09a610c
+// @v3-build     fcr-0.1.1-c71bbfe6
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"fcr-0.1.1-b09a610c","version":"0.1.1","suite":"fcr"});
+V3.build=Object.freeze({"id":"fcr-0.1.1-c71bbfe6","version":"0.1.1","suite":"fcr"});
 
 // ---- src/core/base.js ----
 V3.base = (() => {
@@ -2362,6 +2362,7 @@ V3.fcrRiver = (() => {
       shell.setStatus('FILLED · REVIEW + NEXT','');
       telemetry.emit('river.severity.choice',{value:qty,source});
       render('Units impacted = '+qty+' ('+source+'). Review it, then click RIVER Next.');
+      armWatch('severity');
       return true;
     }
     async function drive(reason='RUN',gen=generation){
