@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const context={console,crypto,performance,DOMException,setTimeout,clearTimeout,setInterval,clearInterval,URL,location:{origin:'https://example.amazon.com',href:'https://example.amazon.com/',pathname:'/',hostname:'example.amazon.com'},globalThis:null};
-context.globalThis=context;context.window=context;
+context.V3={};context.globalThis=context;context.window=context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(root,'src','core.js'),'utf8'),context,{filename:'core.js'});
 const C=context.V3.core;
