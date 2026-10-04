@@ -13,13 +13,13 @@
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Hierarchy.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Hierarchy.user.js
-// @v3-build     hierarchy-0.1.1-d9f2db1b
+// @v3-build     hierarchy-0.1.1-46539448
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"hierarchy-0.1.1-d9f2db1b","version":"0.1.1","suite":"hierarchy"});
+V3.build=Object.freeze({"id":"hierarchy-0.1.1-46539448","version":"0.1.1","suite":"hierarchy"});
 
 // ---- src/core/base.js ----
 V3.base=(()=>{
@@ -272,8 +272,8 @@ V3.queue=(()=>{
 
 // ---- src/services/hierarchy.js ----
 V3.hierarchy=(()=>{
-  const WAREHOUSE='BWU2',DEST='BWU1',ORIGIN='https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
-  const API={validate:'/validateContainer',destination:'/validateDestination',summary:'/getTransshipmentBindingSummary',bind:'/forceBind',unbind:'/unbindContainer'};
+  const WAREHOUSE='BWU2',ORIGIN='https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
+  const API={validate:'/validateContainer',summary:'/getTransshipmentBindingSummary',unbind:'/unbindContainer'};
   async function post(path,body,options={}){
     const request={method:'POST',body:JSON.stringify(body),headers:{'content-type':'application/json'},timeout:options.timeout||15000,allowHttpError:options.allowHttpError===true};
     return location.hostname==='tx-b-hierarchy-nrt.nrt.proxy.amazon.com'
@@ -286,47 +286,123 @@ V3.hierarchy=(()=>{
     if(r.data.scannableId&&V3.base.lower(r.data.scannableId)!==V3.base.lower(code))throw new Error('Validation returned another container');
     return r.data;
   }
-  async function summary(id){const r=await post(API.summary,{warehouseId:WAREHOUSE,scannableId:V3.base.clean(id)});if(!Array.isArray(r.data?.transferBindingSummaryList))throw new Error('Unexpected binding summary');return r.data;}
+  async function summary(id){
+    const r=await post(API.summary,{warehouseId:WAREHOUSE,scannableId:V3.base.clean(id)});
+    if(!Array.isArray(r.data?.transferBindingSummaryList))throw new Error('Unexpected binding summary');
+    return r.data;
+  }
   async function unbind(id,employeeLogin,{telemetry}={}){
-    const code=V3.base.clean(id),login=V3.identity.normalize(employeeLogin);if(!V3.base.container(code))throw new Error('Container must be tsX/csX');if(!login)throw new Error('Authenticated employee unavailable');
+    const code=V3.base.clean(id),login=V3.identity.normalize(employeeLogin);
+    if(!V3.base.container(code))throw new Error('Container must be tsX/csX');
+    if(!login)throw new Error('Authenticated employee unavailable');
     await validate(code);await summary(code);
     const op=V3.operation.create({kind:'hierarchy-unbind',ref:code,telemetry});op.submitted();
-    let r;try{r=await post(API.unbind,{sourceWarehouseId:WAREHOUSE,scannableId:code,employeeLogin:login},{timeout:20000,allowHttpError:true});}
+    let r;
+    try{r=await post(API.unbind,{sourceWarehouseId:WAREHOUSE,scannableId:code,employeeLogin:login},{timeout:20000,allowHttpError:true});}
     catch(error){op.unknown({reason:'transport'});throw new V3.operation.UnknownError('Unbind submitted; confirmation lost',{cause:error});}
     if(r.status>=500){op.unknown({status:r.status});throw new V3.operation.UnknownError('Unbind HTTP '+r.status+'; verify before retry');}
     if(r.status<200||r.status>=300){op.rejected({status:r.status});throw new V3.operation.RejectedError('Unbind rejected HTTP '+r.status);}
     if(!V3.base.clean(r.data?.hostName)){op.unknown({reason:'unexpected-response'});throw new V3.operation.UnknownError('Unbind response ambiguous; verify container');}
     op.confirmed();return r.data;
   }
-  async function validateBindTemplate(template){
-    if(!template?.sourceWarehouseId||!template?.destinationWarehouseId)throw new Error('Bind template not learned');
-    const r=await post(API.destination,{destinationWarehouseId:template.destinationWarehouseId});
-    if(V3.base.upper(r.data)!==DEST)throw new Error('Saved Bind destination no longer validates as '+DEST);
-    return true;
-  }
-  async function bind(id,employeeLogin,template,{telemetry}={}){
-    const code=V3.base.clean(id),login=V3.identity.normalize(employeeLogin);if(!V3.base.container(code))throw new Error('Container must be tsX/csX');if(!login)throw new Error('Authenticated employee unavailable');
-    await validateBindTemplate(template);await validate(code);await summary(code);
-    const op=V3.operation.create({kind:'hierarchy-bind',ref:code,telemetry});op.submitted({destination:DEST});
-    let r;try{r=await post(API.bind,{sourceWarehouseId:template.sourceWarehouseId,destinationWarehouseId:template.destinationWarehouseId,scannableId:code,employeeLogin:login},{timeout:25000,allowHttpError:true});}
-    catch(error){op.unknown({reason:'transport'});throw new V3.operation.UnknownError('Bind submitted; confirmation lost',{cause:error});}
-    if(r.status>=500){op.unknown({status:r.status});throw new V3.operation.UnknownError('Bind HTTP '+r.status+'; verify before retry');}
-    if(r.status<200||r.status>=300){op.rejected({status:r.status});throw new V3.operation.RejectedError('Bind rejected HTTP '+r.status);}
-    if(!V3.base.clean(r.data?.hostName)){op.unknown({reason:'unexpected-response'});throw new V3.operation.UnknownError('Bind response ambiguous; verify container');}
-    op.confirmed();return r.data;
-  }
-  return Object.freeze({WAREHOUSE,DEST,ORIGIN,API,validate,summary,unbind,bind,validateBindTemplate});
+  return Object.freeze({WAREHOUSE,ORIGIN,API,validate,summary,unbind});
 })();
 
 // ---- src/services/hierarchy-native.js ----
 V3.hierarchyNative=(()=>{
-  const clean=V3.base.clean;
-  const upper=V3.base.upper;
-  const FACILITY=/^[A-Z0-9]{3,8}$/;
+  const clean=V3.base.clean,upper=V3.base.upper;
+  const FACILITY=/^[A-Z0-9]{3,8}$/,DESTINATION_PATH='/validateDestination';
+  let seq=0;
+  const records=[];
 
   const normalizeFacility=value=>{
     const fc=upper(clean(value));
     return FACILITY.test(fc)?fc:'';
+  };
+
+  const pathOf=value=>{
+    try{return new URL(String(value||''),location.href).pathname;}
+    catch{return'';}
+  };
+
+  const destinationTokenFromBody=body=>{
+    if(body==null)return'';
+    let value=body;
+    try{
+      if(typeof FormData!=='undefined'&&body instanceof FormData)value=Object.fromEntries(body.entries());
+      else if(body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
+      else if(typeof body==='string'){
+        try{value=JSON.parse(body);}
+        catch{try{value=Object.fromEntries(new URLSearchParams(body).entries());}catch{}}
+      }
+    }catch{}
+    return clean(value&&typeof value==='object'?value.destinationWarehouseId:'');
+  };
+
+  const responseFacility=raw=>{
+    let value=raw;
+    if(typeof raw==='string'){
+      try{value=JSON.parse(raw);}catch{}
+    }
+    if(typeof value==='string')return normalizeFacility(value);
+    if(value&&typeof value==='object'){
+      return normalizeFacility(value.warehouseId||value.destination||value.facility||value.fc||'');
+    }
+    return'';
+  };
+
+  const record=(token,facility,status)=>{
+    if(!token||!facility)return;
+    records.push({seq:++seq,token,facility,status:Number(status)||0,at:Date.now()});
+    if(records.length>20)records.splice(0,records.length-20);
+  };
+
+  const installDestinationTap=()=>{
+    const page=typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window;
+
+    try{
+      const XHR=page.XMLHttpRequest;
+      if(XHR?.prototype&&!XHR.prototype.__bwu2V3DestinationTap){
+        const nativeOpen=XHR.prototype.open,nativeSend=XHR.prototype.send;
+        XHR.prototype.open=function(method,url){
+          this.__bwu2V3DestinationTapInfo={path:pathOf(url)};
+          return nativeOpen.apply(this,arguments);
+        };
+        XHR.prototype.send=function(body){
+          const info=this.__bwu2V3DestinationTapInfo||{};
+          if(info.path!==DESTINATION_PATH)return nativeSend.apply(this,arguments);
+          const token=destinationTokenFromBody(body);
+          this.addEventListener('loadend',()=>{
+            let raw='';
+            try{
+              if(!this.responseType||this.responseType==='text')raw=this.responseText||'';
+              else if(this.responseType==='json')raw=JSON.stringify(this.response??null);
+            }catch{}
+            record(token,responseFacility(raw),this.status);
+          },{once:true});
+          return nativeSend.apply(this,arguments);
+        };
+        Object.defineProperty(XHR.prototype,'__bwu2V3DestinationTap',{value:true,configurable:true});
+      }
+    }catch{}
+
+    try{
+      const nativeFetch=page.fetch;
+      if(typeof nativeFetch==='function'&&!nativeFetch.__bwu2V3DestinationTap){
+        const wrapped=async function(input,init={}){
+          const url=typeof input==='string'||input instanceof URL?String(input):String(input?.url||'');
+          if(pathOf(url)!==DESTINATION_PATH)return nativeFetch.apply(this,arguments);
+          const token=destinationTokenFromBody(init?.body);
+          const response=await nativeFetch.apply(this,arguments);
+          let raw='';
+          try{raw=await response.clone().text();}catch{}
+          record(token,responseFacility(raw),response.status);
+          return response;
+        };
+        Object.defineProperty(wrapped,'__bwu2V3DestinationTap',{value:true});
+        page.fetch=wrapped;
+      }
+    }catch{}
   };
 
   const visible=element=>{
@@ -343,17 +419,10 @@ V3.hierarchyNative=(()=>{
       const direct=input.id?document.querySelector('label[for="'+CSS.escape(input.id)+'"]'):null;
       label=clean(direct?.textContent||input.closest('label')?.textContent||'');
     }catch{}
-    return clean([
-      label,
-      input.getAttribute('name'),
-      input.getAttribute('id'),
-      input.getAttribute('placeholder'),
-      input.getAttribute('aria-label')
-    ].filter(Boolean).join(' ')).toLowerCase();
+    return clean([label,input.getAttribute('name'),input.getAttribute('id'),input.getAttribute('placeholder'),input.getAttribute('aria-label')].filter(Boolean).join(' ')).toLowerCase();
   };
 
-  const nativeInputs=()=>[...document.querySelectorAll('input[type="text"],input:not([type]),textarea,[role="combobox"]')]
-    .filter(visible);
+  const nativeInputs=()=>[...document.querySelectorAll('input[type="text"],input:not([type]),textarea,[role="combobox"]')].filter(visible);
 
   const destinationInput=()=>{
     const rows=nativeInputs().map(input=>{
@@ -388,41 +457,30 @@ V3.hierarchyNative=(()=>{
     }catch{return false;}
   };
 
-  const keyEvent=(type,key)=>{
-    const event=new KeyboardEvent(type,{key,code:key==='Enter'?'Enter':'',bubbles:true,cancelable:true});
-    if(key==='Enter'){
+  const enter=async(target,life)=>{
+    for(const type of ['keydown','keypress','keyup']){
+      const event=new KeyboardEvent(type,{key:'Enter',code:'Enter',bubbles:true,cancelable:true});
       try{Object.defineProperty(event,'keyCode',{get:()=>13});}catch{}
       try{Object.defineProperty(event,'which',{get:()=>13});}catch{}
       if(type==='keypress')try{Object.defineProperty(event,'charCode',{get:()=>13});}catch{}
+      target.dispatchEvent(event);
     }
-    return event;
-  };
-
-  const enter=async(target,life)=>{
-    target.dispatchEvent(keyEvent('keydown','Enter'));
-    target.dispatchEvent(keyEvent('keypress','Enter'));
-    target.dispatchEvent(keyEvent('keyup','Enter'));
     await life.sleep(20);
   };
 
   const pageText=()=>clean(document.body?.innerText||document.body?.textContent||'');
-  const statusText=()=>[...document.querySelectorAll(
-    '[role="alert"],[role="status"],.alert,.error,.success,[class*="error"],[class*="Error"],[class*="success"],[class*="Success"]'
-  )].filter(visible).map(node=>clean(node.textContent)).filter(Boolean).join(' | ');
+  const statusText=()=>[...document.querySelectorAll('[role="alert"],[role="status"],.alert,.error,.success,[class*="error"],[class*="Error"],[class*="success"],[class*="Success"]')]
+    .filter(visible).map(node=>clean(node.textContent)).filter(Boolean).join(' | ');
 
   const errorSignal=()=>{
     const text=statusText();
-    if(!text)return'';
-    return /(?:error|invalid|failed|cannot|unable|not\s+found|not\s+valid|reject|wrong|unknown\s+(?:warehouse|facility|destination))/i.test(text)?text:'';
+    return text&&/(?:error|invalid|failed|cannot|unable|not\s+found|not\s+valid|reject|wrong|unknown\s+(?:warehouse|facility|destination))/i.test(text)?text:'';
   };
 
   const successSignal=(beforeText,container)=>{
-    const status=statusText();
-    const body=pageText();
-    const changed=body!==beforeText;
-    const success=/(?:success|successfully|\bbound\b|binding\s+(?:complete|completed)|container\s+bound)/i;
+    const status=statusText(),body=pageText(),success=/(?:success|successfully|\bbound\b|binding\s+(?:complete|completed)|container\s+bound)/i;
     if(success.test(status))return status;
-    if(changed&&success.test(body)){
+    if(body!==beforeText&&success.test(body)){
       const code=upper(container);
       if(!code||upper(body).includes(code)||/successfully|binding\s+(?:complete|completed)/i.test(body))return body.slice(0,1200);
     }
@@ -432,8 +490,7 @@ V3.hierarchyNative=(()=>{
   const waitFor=async(predicate,{life,timeout=10000,minMs=0,label='native page'}={})=>{
     const started=performance.now();
     while(performance.now()-started<timeout){
-      const elapsed=performance.now()-started;
-      const result=predicate(elapsed);
+      const elapsed=performance.now()-started,result=predicate(elapsed);
       if(elapsed>=minMs&&result)return result;
       await life.sleep(80);
     }
@@ -443,37 +500,30 @@ V3.hierarchyNative=(()=>{
   const validateDestination=async(destination,{life,telemetry}={})=>{
     const fc=normalizeFacility(destination);
     if(!fc)throw new Error('Enter destination FC, e.g. BWU1 or AVV2');
-    const input=destinationInput();
+    installDestinationTap();
+    const marker=seq,input=destinationInput();
     if(!input)throw new Error('Native destination field not found');
     if(!nativeSetter(input,fc))throw new Error('Could not enter destination FC');
     try{input.focus({preventScroll:true});}catch{}
-    const before=pageText();
     await enter(input,life);
     telemetry?.emit('native.destination.submit',{destination:fc});
 
-    await waitFor(()=>{
+    const proof=await waitFor(()=>{
       const error=errorSignal();if(error)throw new Error(error);
-      const container=containerInput();
-      const current=upper(input.value||input.textContent||'');
-      const body=upper(pageText());
-      return container&&visible(container)&&!container.disabled&&(current===fc||body.includes(fc));
-    },{life,timeout:10000,minMs:350,label:'Destination validation'});
+      return records.find(item=>item.seq>marker&&item.facility===fc&&item.status>=200&&item.status<300&&item.token);
+    },{life,timeout:10000,minMs:150,label:'Destination validation'});
 
-    const error=errorSignal();if(error)throw new Error(error);
     telemetry?.emit('native.destination.ready',{destination:fc});
-    return fc;
+    return Object.freeze({facility:fc,destinationWarehouseId:proof.token,validatedAt:Date.now()});
   };
 
   const settleValidationPass=async(container,beforeText,{life,telemetry}={})=>{
     let last='',stableSince=0;
     await waitFor(elapsed=>{
       const error=errorSignal();if(error)throw new Error(error);
-      const current=pageText();
-      const input=containerInput();
+      const current=pageText(),input=containerInput();
       if(current!==beforeText&&current!==last){last=current;stableSince=elapsed;}
-      const stable=current!==beforeText&&elapsed-stableSince>=350;
-      const ready=input&&visible(input)&&!input.disabled&&clean(input.value||'')!==container;
-      return elapsed>=700&&stable&&ready;
+      return elapsed>=700&&current!==beforeText&&elapsed-stableSince>=350&&input&&visible(input)&&!input.disabled&&clean(input.value||'')!==container;
     },{life,timeout:12000,minMs:700,label:'Container validation'});
     telemetry?.emit('native.bind.validated',{container:V3.telemetry.mask(container)});
   };
@@ -504,17 +554,17 @@ V3.hierarchyNative=(()=>{
     return before;
   };
 
-  const bind=async(container,destination,{life,telemetry}={})=>{
-    const code=clean(container);
+  const bind=async(container,context,{life,telemetry}={})=>{
+    const code=clean(container),fc=normalizeFacility(context?.facility);
     if(!V3.base.container(code))throw new Error('Container must be tsX/csX');
-    const fc=await validateDestination(destination,{life,telemetry});
+    if(!fc||!clean(context?.destinationWarehouseId))throw new Error('Destination must be validated before Bind');
 
-    const op=V3.operation.create({kind:'hierarchy-bind-native',ref:code,telemetry});
     telemetry?.emit('native.bind.pass1',{container:V3.telemetry.mask(code),destination:fc});
     const beforeValidation=await scan(code,{life});
     await settleValidationPass(code,beforeValidation,{life,telemetry});
 
     const error=errorSignal();if(error)throw new V3.operation.RejectedError(error);
+    const op=V3.operation.create({kind:'hierarchy-bind-native',ref:code,telemetry});
     op.submitted({destination:fc});
     telemetry?.emit('native.bind.pass2',{container:V3.telemetry.mask(code),destination:fc});
     const beforeBind=await scan(code,{life});
@@ -523,23 +573,17 @@ V3.hierarchyNative=(()=>{
       await settleBindPass(code,beforeBind,{life,telemetry});
       op.confirmed({destination:fc});
       return{container:code,destination:fc};
-    }catch(error){
-      if(error?.outcome==='rejected'||error instanceof V3.operation.RejectedError){
-        op.rejected({reason:String(error.message||error)});
-        throw error;
+    }catch(error2){
+      if(error2?.outcome==='rejected'||error2 instanceof V3.operation.RejectedError){
+        op.rejected({reason:String(error2.message||error2)});
+        throw error2;
       }
       op.unknown({reason:'native-confirmation-missing'});
-      throw error;
+      throw error2;
     }
   };
 
-  return Object.freeze({
-    normalizeFacility,
-    destinationInput,
-    containerInput,
-    validateDestination,
-    bind
-  });
+  return Object.freeze({normalizeFacility,destinationTokenFromBody,responseFacility,destinationInput,containerInput,validateDestination,bind});
 })();
 
 // ---- src/apps/hierarchy/index.js ----
