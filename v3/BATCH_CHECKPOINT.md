@@ -1,7 +1,7 @@
-# Rebuild checkpoint — batch 1
+# Rebuild checkpoint — batch 2 complete
 
 Branch: `v3-groundup`.
-Approved scope: Sideline + ISS Console only.
+Current approved scope: AFT Tools + ISS Console. Batch 1 history follows.
 Status: implementation and automated validation complete; live Amazon testing pending. STOP HERE until the user approves a further batch.
 
 ## Delivered versions
@@ -34,3 +34,15 @@ No live Amazon inventory mutation was submitted. Authentication, native deployed
 AFT Tools + Hierarchy. Review the actual native Edit/Move/FCSKU engine and Bind/Unbind contracts against V2, history and OBS. Ask for explicit approval before starting implementation.
 
 This is a scoped recovery batch, not a claim that every V3 script or all archived work has been fully reviewed or rebuilt.
+
+## Batch 2 — approved AFT Tools + ISS Console
+
+Both installers delivered at 0.2.2. Only these two generated installers differ from the publication parent (6b9a0d2); other twelve are byte-identical to that parent. Concurrent SIM changes on the remote branch were preserved. V2 remains untouched.
+
+Reproduced invalid calendar dates being rejected only after the native engine confirmed removal of existing expiry. The canonical AFT date engine now validates every date in the entire batch before any network request. Validated native payloads are reused during entry. If removal succeeds but replacement fails, the item is quarantined with a persistent AFT UNKNOWN barrier and requires review. Completed rows are excluded from remaining work on later failures; unsubmitted rows are retained.
+
+Full npm verification passed, including new date fixtures: invalid first/later rows cause zero requests/removals, leap-day success, replacement failure preserves attention, and earlier confirmed rows are excluded from a later failure. Existing ISS startup/Stop regressions also pass. No live Amazon mutations were performed; deployed markup and backend outcomes remain unproven.
+
+## Next checkpoint — approval required
+
+Proposed: Hierarchy only. Reproduced Bind falsely confirming a different container's success text. Review exact Bind identity proof and preserve Unbind contracts. Its current shared actions module is also bundled into FCResearch and MoveContainer: isolate Hierarchy's adapter before implementing so those installers remain unchanged. If that cannot be achieved without behaviour changes to other scripts, stop for revised approval. Do not start this batch automatically.

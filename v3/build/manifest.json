@@ -49,7 +49,7 @@
     {
       "id": "iss",
       "name": "V3 | BWU2 ISS Console",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": "Dedicated ISS Console for Edit, Move, Sideline and FCSKU.",
       "match": [
         "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*"
@@ -86,7 +86,7 @@
     {
       "id": "aft",
       "name": "V3 | BWU2 AFT Tools",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "description": "Native EditItems, MoveItems and FCSKU helper using one AFT engine.",
       "include": [
         "*://aft-qt-*.corp.amazon.com/app/edititems*",

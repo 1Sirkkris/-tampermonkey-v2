@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 AFT Tools
 // @name:en      V3 | BWU2 AFT Tools
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.2
 // @description  Native EditItems, MoveItems and FCSKU helper using one AFT engine.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -11,13 +11,13 @@
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js
-// @v3-build     aft-0.2.0-e65b5cea
+// @v3-build     aft-0.2.2-76591ead
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"aft-0.2.0-e65b5cea","version":"0.2.0"});
+V3.build=Object.freeze({"id":"aft-0.2.2-76591ead","version":"0.2.2"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -604,19 +604,30 @@ V3.aft=(()=>{
 
     async function runDate({rows,onProgress=()=>{}}={}){
       const list=(Array.isArray(rows)?rows:[]).filter(x=>C.clean(x?.location)&&C.clean(x?.asin)&&C.clean(x?.date));if(!list.length)throw new Error('No expiry rows');
+      // Validate the entire batch before opening a workflow or removing an existing expiry.
+      const payloads=list.map(row=>datePayload(row.date));
       const def=DEFINITIONS['edit:date'];let confirmed=0,remaining=[],wf=(await ensureMode('edit:date')).wf;
       for(let i=0;i<list.length;i++){
         const row=list[i];if(stopped()){remaining=list.slice(i);break;}
+        let expiryRemoved=false,rowConfirmed=false;
         try{
           if(i>0){wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}
           await input(def,wf,row.location,'Container',{timeout:120000});await input(def,wf,row.asin,'Item',{timeout:120000});
           let s=await snap(def,wf,classifyEdit);
-          if(s.state==='dateRemove'){const remove=C.operation({kind:'aft-date-remove',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:remove});await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
+          if(s.state==='dateRemove'){const remove=C.operation({kind:'aft-date-remove',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:remove});expiryRemoved=true;await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
           if(s.state!=='dateEntry')throw new Error('Expected expiry date entry, got '+s.state);
-          await input(def,wf,datePayload(row.date),'Expiry date',{timeout:120000});const before=await snap(def,wf,classifyEdit);if(before.state!=='dateConfirm'&&before.state!=='confirm')throw new Error('Expected expiry confirmation, got '+before.state);
-          const op=C.operation({kind:'aft-edit-date',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:op});confirmed++;onProgress({stage:'confirmed',confirmed,total:list.length,row});
+          await input(def,wf,payloads[i],'Expiry date',{timeout:120000});const before=await snap(def,wf,classifyEdit);if(before.state!=='dateConfirm'&&before.state!=='confirm')throw new Error('Expected expiry confirmation, got '+before.state);
+          const op=C.operation({kind:'aft-edit-date',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:op});confirmed++;rowConfirmed=true;onProgress({stage:'confirmed',confirmed,total:list.length,row});
           try{await end(def,wf);}catch{}
-        }catch(error){if(error?.outcome==='unknown'){error.aftPartial={kind:'edit-date',confirmed,total:list.length,uncertain:[row],remaining:list.slice(i+1)};throw error;}throw error;}
+        }catch(error){
+          // Removal is a separate committed mutation. A failed replacement requires review.
+          if(expiryRemoved&&!rowConfirmed&&error?.outcome!=='unknown'){
+            const review=C.operation({kind:'aft-date-replacement',ref:row.asin,scope:'aft',telemetry});review.submitted({reason:'existing-expiry-already-removed'});review.unknown({reason:'expiry-removed-replacement-incomplete'});
+            error=new C.UnknownError('Existing expiry removed; replacement not confirmed — verify item before retry',{cause:error});
+          }
+          const uncertain=error?.outcome==='unknown'&&!rowConfirmed;
+          error.aftPartial={kind:'edit-date',confirmed,total:list.length,uncertain:uncertain?[row]:[],remaining:list.slice(i+(uncertain||rowConfirmed?1:0))};throw error;
+        }
       }
       return{confirmed,total:list.length,remaining};
     }
