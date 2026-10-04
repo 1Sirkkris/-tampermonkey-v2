@@ -26,7 +26,8 @@ for(const file of [
   ['core','operation.js'],
   ['services','movecontainer.js'],
   ['services','aft.js'],
-  ['services','sideline.js']
+  ['services','sideline.js'],
+  ['services','hierarchy-native.js']
 ]){
   vm.runInContext(
     fs.readFileSync(path.join(root,'src',file[0],file[1]),'utf8'),
@@ -78,5 +79,10 @@ assert.equal(
   context.V3.sideline.hazmatRejected({success:false,message:'Hazmat restriction'}),
   true
 );
+
+assert.equal(context.V3.hierarchyNative.normalizeFacility('bwu1'),'BWU1');
+assert.equal(context.V3.hierarchyNative.normalizeFacility(' AVV2 '),'AVV2');
+assert.equal(context.V3.hierarchyNative.normalizeFacility('bad fc'),'');
+assert.equal(context.V3.hierarchyNative.normalizeFacility(''),'');
 
 console.log('PASS domain');
