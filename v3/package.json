@@ -1,0 +1,8 @@
+{
+  "name": "bwu2-v3-relaunch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/core.test.mjs"
+  }
+}

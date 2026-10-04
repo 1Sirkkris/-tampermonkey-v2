@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import {fileURLToPath} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url)),root=path.resolve(here,'..');
+const mem=new Map();
+const context={console,setTimeout,clearTimeout,setInterval,clearInterval,AbortController,DOMException,performance,crypto,localStorage:{getItem:k=>mem.get(k)??null,setItem:(k,v)=>mem.set(k,String(v)),removeItem:k=>mem.delete(k)}};
+context.V3={};vm.createContext(context);
+for(const file of ['base.js','telemetry.js','operation.js'])vm.runInContext(fs.readFileSync(path.join(root,'src/core',file),'utf8'),context,{filename:file});
+assert.equal(context.V3.base.container('tsXABC123'),true);
+assert.equal(context.V3.base.container('banana'),false);
+const tel={emit:()=>{}},op=context.V3.operation.create({kind:'move',ref:'tsXABC123',telemetry:tel});
+op.submitted();op.unknown({reason:'timeout'});
+assert.equal(op.data.outcome,'unknown');
+assert.throws(()=>op.confirmed(),/Illegal operation transition/);
+console.log('PASS core');
