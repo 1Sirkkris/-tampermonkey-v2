@@ -84,5 +84,15 @@ assert.equal(context.V3.hierarchyNative.normalizeFacility('bwu1'),'BWU1');
 assert.equal(context.V3.hierarchyNative.normalizeFacility(' AVV2 '),'AVV2');
 assert.equal(context.V3.hierarchyNative.normalizeFacility('bad fc'),'');
 assert.equal(context.V3.hierarchyNative.normalizeFacility(''),'');
+assert.equal(
+  context.V3.hierarchyNative.destinationTokenFromBody('{"destinationWarehouseId":"opaque-123"}'),
+  'opaque-123'
+);
+assert.equal(
+  context.V3.hierarchyNative.destinationTokenFromBody('destinationWarehouseId=opaque-456'),
+  'opaque-456'
+);
+assert.equal(context.V3.hierarchyNative.responseFacility('"BWU1"'),'BWU1');
+assert.equal(context.V3.hierarchyNative.responseFacility({warehouseId:'AVV2'}),'AVV2');
 
 console.log('PASS domain');
