@@ -7,32 +7,27 @@ V3.boot=()=>{
   const download=(name,text)=>{const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),0);};
   const merge=(oldRows,newRows)=>{const out=[...oldRows],used=new Set(out.map(x=>x.name));for(const row of newRows){let name=C.clean(row?.name),text=String(row?.text??'');if(!name||!text)continue;let n=name,i=2;while(used.has(n))n=name+' ('+(i++)+')';used.add(n);out.push({name:n,text});}return out;};
 
-  const ticketUrl=anchor=>{
-    if(!anchor?.href)return'';
+  const ticketLink=anchor=>{
+    if(!anchor?.href||!V3.native.visible(anchor))return null;
+    const shortId=C.clean(anchor.textContent);
+    if(!/^[PV]\d{7,14}$/i.test(shortId))return null;
     let url;
-    try{url=new URL(anchor.href,location.href);}catch{return'';}
-    if(url.origin!==location.origin)return'';
-    let path=url.pathname;
-    try{path=decodeURIComponent(path);}catch{}
-    if(!/^\/<ticket#[^>]+>(?:\/overview)?\/?$/i.test(path))return'';
+    try{url=new URL(anchor.href,location.href);}catch{return null;}
+    if(url.origin!==location.origin)return null;
     url.hash='';
-    return url.href;
+    return {shortId,url:url.href};
   };
 
   const ticketRow=anchor=>{
     const direct=anchor.closest('tr,[role="row"],li');
     if(direct&&V3.native.visible(direct))return direct;
-    let node=anchor.parentElement,best=null;
-    for(let depth=0;node&&depth<7;depth++,node=node.parentElement){
+    let node=anchor.parentElement;
+    for(let depth=0;node&&depth<6;depth++,node=node.parentElement){
       if(!V3.native.visible(node))continue;
       const rect=node.getBoundingClientRect();
-      if(rect.height<28||rect.height>240)continue;
-      const urls=new Set([...node.querySelectorAll('a[href]')].map(ticketUrl).filter(Boolean));
-      if(urls.size!==1)continue;
-      best=node;
-      if(rect.width>300)break;
+      if(rect.height>=28&&rect.height<=180&&rect.width>500)return node;
     }
-    return best;
+    return null;
   };
 
   const startTicketNavigator=()=>{
@@ -160,13 +155,12 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 5
 
       const found=[],seen=new Set();
       for(const anchor of document.querySelectorAll('a[href]')){
-        if(!V3.native.visible(anchor))continue;
-        const url=ticketUrl(anchor);
-        if(!url||seen.has(url))continue;
+        const ticket=ticketLink(anchor);
+        if(!ticket||seen.has(ticket.url))continue;
         const row=ticketRow(anchor);
         if(!row)continue;
-        seen.add(url);
-        found.push({url,row,anchor,gutter:null,button:null});
+        seen.add(ticket.url);
+        found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,gutter:null,button:null});
       }
 
       const currentRows=new Set(found.map(record=>record.row));
