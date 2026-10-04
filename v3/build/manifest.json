@@ -56,7 +56,7 @@
       "id": "aft",
       "name": "V3 | BWU2 AFT Suite",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 AFT EditItems, MoveItems and FCSKU workflows.",
       "include": [
         "*://aft-qt-*.corp.amazon.com/app/edititems*",
@@ -89,7 +89,7 @@
       "id": "hierarchy",
       "name": "V3 | BWU2 Hierarchy",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 canonical Bind/Unbind hierarchy queue.",
       "match": [
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
@@ -124,7 +124,7 @@
       "id": "moveapp",
       "name": "V3 | BWU2 MoveApp",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 direct sequential MoveContainer / Dropzone queue.",
       "include": [
         "/^https?:\\/\\/aft-moveapp-[^\\/.]+(?:\\.nrt)?\\.proxy\\.amazon\\.com\\/move-container(?:[\\/?#]|$)/"
@@ -157,7 +157,7 @@
       "id": "fnsku",
       "name": "V3 | BWU2 FNSKU Mapping",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 exact regional FNSKU to ASIN to JP/AU mapping lookup.",
       "match": [
         "https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*",
@@ -193,7 +193,7 @@
       "id": "poportal",
       "name": "V3 | BWU2 PO Portal",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 lightweight AU ISS PO Portal search and table view.",
       "include": [
         "/^https?:\\/\\/console\\.harmony\\.a2z\\.com\\/poportal(?:[\\/?#]|$)/"
@@ -246,7 +246,7 @@
       "id": "calm",
       "name": "V3 | BWU2 Calm Code",
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "V3 compact Calm Code role controls.",
       "match": [
         "https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
