@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | Sideline REBUILD TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.30
+// @version      0.0.31
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-end
@@ -23,7 +23,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.30-REBUILD';
+  const VERSION = '0.0.31-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -45,10 +45,7 @@
   const ISS_CONSOLE_WORKER = ISS_CONSOLE_HOST;
 
   function issControllerWindow() {
-    try {
-      if (window.opener && !window.opener.closed) return window.opener;
-    } catch {}
-    return window.parent;
+    return window;
   }
 
   const itemQty = item => Math.max(1, Number(item?.qty) || 1);

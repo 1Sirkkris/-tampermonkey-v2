@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.0
+// @version      0.2.1
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-start
@@ -13,7 +13,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const HASH = '#iss-console';
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
@@ -29,7 +29,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.30-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.31-REBUILD';
 
   if (document.documentElement) {
     document.documentElement.style.visibility = 'hidden';
