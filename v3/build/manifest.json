@@ -58,6 +58,7 @@
         "src/aft.js",
         "src/sideline.js",
         "src/workflow-ui.js",
+        "src/sideline-ui.js",
         "src/apps/iss.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -110,6 +111,7 @@
       "sources": [
         "src/core.js",
         "src/sideline.js",
+        "src/sideline-ui.js",
         "src/apps/sideline.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
