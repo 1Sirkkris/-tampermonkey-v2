@@ -37,6 +37,10 @@ for(const shared of ['src/services/aft.js','src/services/aft-workflows.js']){
 }
 assert.ok(byId.sideline.sources.includes('src/services/sideline.js'),'Native Sideline must use shared Sideline engine');
 assert.ok(byId.hierarchy.sources.includes('src/services/hierarchy-native.js'),'Hierarchy must include typed native Bind driver');
+const hierarchyNative=fs.readFileSync(path.join(root,'src/services/hierarchy-native.js'),'utf8');
+assert.ok(hierarchyNative.includes("DESTINATION_PATH='/validateDestination'"),'Bind capture must target validateDestination only');
+assert.ok(!/localStorage|sessionStorage|GM_setValue|GM\.setValue/.test(hierarchyNative),'Bind destination token must remain memory/session only');
+assert.ok(!/\/forceBind|\/unbindContainer/.test(hierarchyNative),'Native capture driver must not tap mutation endpoints');
 
 for(const entry of manifest.suites){
   assert.ok(entry.name.startsWith('V3 | '),entry.id+' missing V3 title prefix');
