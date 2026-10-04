@@ -189,8 +189,8 @@
     {
       "id": "hierarchy",
       "name": "V3 | BWU2 Hierarchy",
-      "version": "0.1.0",
-      "description": "Native Bind/Unbind hierarchy helper. Direct Bind token learning is intentionally disabled pending approval.",
+      "version": "0.1.1",
+      "description": "Native Hierarchy helper: typed-destination Bind queue plus direct Unbind queue.",
       "match": [
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*"
@@ -213,6 +213,7 @@
         "src/core/ui.js",
         "src/core/queue.js",
         "src/services/hierarchy.js",
+        "src/services/hierarchy-native.js",
         "src/apps/hierarchy/index.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-relaunch",
