@@ -49,7 +49,7 @@ It calls shared engines; it does not own separate backend implementations.
 - Edit Tools: AFT EditItems + FCSKU native routes
 - MoveItems: AFT MoveItems native route
 - Sideline: Poirot native route
-- Hierarchy: Bind + Unbind native routes
+- Hierarchy: Bind + Unbind native routes. Bind uses typed destination FC entry, native `/validateDestination`, and a memory-only opaque destination ID capture; mutation endpoints are not tapped.
 - MoveContainer: MoveApp native route
 
 ## Shared core
