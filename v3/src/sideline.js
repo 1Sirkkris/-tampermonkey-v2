@@ -117,7 +117,7 @@ V3.sideline=(()=>{
       try{response=await api(PATH.move,{method:'POST',body:payload,allowHttpError:true});}
       catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('MOVE OUTCOME UNKNOWN — '+C.clean(ref)+' — VERIFY BEFORE RETRY',{cause:error});}
       if(moveOk(response)){op.confirmed({reason:allowedOverage(response)?'overage':'success'});return response;}
-      const reason=moveReason(response);op.rejected({reason});const e=new C.RejectedError(reason);e.recoverable=damagedDestination(response)||/DESTINATION INCOMPATIBLE/i.test(reason);throw e;
+      const reason=moveReason(response);op.rejected({reason});const e=new C.RejectedError(reason);e.predicant=hasPredicant(response);e.recoverable=damagedDestination(response)||/DESTINATION INCOMPATIBLE/i.test(reason);throw e;
     };
     return Object.freeze({warehouse,source,close,preflight,hazmat,move,movePayload});
   }
