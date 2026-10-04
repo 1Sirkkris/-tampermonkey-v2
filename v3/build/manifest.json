@@ -282,6 +282,8 @@
         "src/core/transport.js",
         "src/core/ui.js",
         "src/services/fcr.js",
+        "src/components/river-capture.js",
+        "src/components/river-assistant.js",
         "src/apps/river/index.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-relaunch",
