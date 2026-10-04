@@ -1,5 +1,46 @@
-import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import{fileURLToPath}from'node:url';
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),manifest=JSON.parse(fs.readFileSync(path.join(root,'build','manifest.json'),'utf8')),check=process.argv.includes('--check');
-const meta=(k,v)=>'// @'+k.padEnd(13,' ')+v;
-function header(e,id){const a=['// ==UserScript==',meta('name',e.name),meta('name:en',e.name),meta('namespace',e.namespace),meta('version',e.version),meta('description',e.description)];for(const v of e.include||[])a.push(meta('include',v));for(const v of e.match||[])a.push(meta('match',v));for(const v of e.exclude||[])a.push(meta('exclude',v));a.push(meta('run-at',e.runAt||'document-body'));if(e.noframes)a.push('// @noframes');for(const v of e.grant||[])a.push(meta('grant',v));for(const v of e.connect||[])a.push(meta('connect',v));a.push(meta('updateURL',e.updateURL),meta('downloadURL',e.downloadURL),'// @v3-build     '+id,'// ==/UserScript==');return a.join('\n');}
-let failed=false;for(const e of manifest.suites){const parts=e.sources.map(rel=>'// ---- '+rel+' ----\n'+fs.readFileSync(path.join(root,rel),'utf8').trim()),joined=parts.join('\n\n'),hash=crypto.createHash('sha256').update(joined).digest('hex').slice(0,12),id=e.id+'-'+e.version+'-'+hash,body=header(e,id)+'\n\n(()=>{\n\'use strict\';\nconst V3=Object.create(null);\nV3.build=Object.freeze('+JSON.stringify({id:'__ID__',version:e.version,suite:e.id}).replace('"__ID__"','JSON.stringify(id)')+');\n})();';const runtime=header(e,id)+'\n\n(()=>{\n\'use strict\';\nconst V3=Object.create(null);\nV3.build=Object.freeze('+JSON.stringify({version:e.version,suite:e.id}).replace('{','{id:'+JSON.stringify(id)+',')+');\n\n'+joined+'\n\nif(typeof V3.boot!==\'function\')throw new Error(\'V3 boot missing\');\nV3.boot();\n})();\n';new Function(runtime);const out=path.join(root,'dist',e.output);if(check){const cur=fs.existsSync(out)?fs.readFileSync(out,'utf8'):'';if(cur!==runtime){console.error('STALE '+e.output);failed=true;}else console.log('PASS '+e.output);}else{fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,runtime);console.log('BUILD '+e.output+' '+id);}}if(failed)process.exit(1);
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const manifest=JSON.parse(fs.readFileSync(path.join(root,'build','manifest.json'),'utf8'));
+const check=process.argv.includes('--check');
+const meta=(key,value)=>'// @'+key.padEnd(13,' ')+value;
+const fnv=text=>{let hash=2166136261;for(let i=0;i<text.length;i++){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619);}return(hash>>>0).toString(16).padStart(8,'0');};
+
+function header(entry,buildId){
+  const out=['// ==UserScript==',meta('name',entry.name),meta('name:en',entry.name),meta('namespace',entry.namespace),meta('version',entry.version),meta('description',entry.description)];
+  for(const value of entry.include||[])out.push(meta('include',value));
+  for(const value of entry.match||[])out.push(meta('match',value));
+  for(const value of entry.exclude||[])out.push(meta('exclude',value));
+  out.push(meta('run-at',entry.runAt||'document-body'));
+  if(entry.noframes)out.push('// @noframes');
+  for(const value of entry.grant||[])out.push(meta('grant',value));
+  for(const value of entry.connect||[])out.push(meta('connect',value));
+  out.push(meta('updateURL',entry.updateURL),meta('downloadURL',entry.downloadURL),'// @v3-build     '+buildId,'// ==/UserScript==');
+  return out.join('\n');
+}
+
+function generate(entry){
+  const parts=entry.sources.map(rel=>{
+    const full=path.join(root,rel);
+    if(!fs.existsSync(full))throw new Error(entry.id+': missing '+rel);
+    return '// ---- '+rel+' ----\n'+fs.readFileSync(full,'utf8').trim();
+  });
+  const joined=parts.join('\n\n'),buildId=entry.id+'-'+entry.version+'-'+fnv(joined);
+  const body=header(entry,buildId)+'\n\n(()=>{\n\'use strict\';\nconst V3=Object.create(null);\nV3.build=Object.freeze('+JSON.stringify({id:buildId,version:entry.version,suite:entry.id})+');\n\n'+joined+'\n\nif(typeof V3.boot!==\'function\')throw new Error(\'V3 boot missing\');\nV3.boot();\n})();\n';
+  new Function(body);
+  return{body,buildId};
+}
+
+let failed=false;
+for(const entry of manifest.suites){
+  const {body,buildId}=generate(entry),output=path.join(root,'dist',entry.output);
+  if(check){
+    const current=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
+    if(current!==body){console.error('STALE '+entry.output);failed=true;}else console.log('PASS '+entry.output+' '+buildId);
+  }else{
+    fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,body);console.log('BUILD '+entry.output+' '+buildId);
+  }
+}
+if(failed)process.exit(1);
