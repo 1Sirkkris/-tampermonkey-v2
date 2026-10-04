@@ -4,5 +4,7 @@ V3.boot=()=>{
   const button=V3.ui.dockButton({id:'carton',label:'CARTON ON',title:'Toggle Carton autocomplete',onClick:async()=>{enabled=!enabled;button.textContent='CARTON '+(enabled?'ON':'OFF');await store.set('enabled',enabled);}});
   (async()=>{enabled=await store.get('enabled',true);button.textContent='CARTON '+(enabled?'ON':'OFF');})();
   const inspect=()=>{if(!enabled)return;const el=document.getElementById(BAR);if(!el)return;const barcode=V3.base.clean(el.textContent),count=Number(String(document.body?.innerText||'').match(COUNT)?.[1]||0);if(count<2){last='';return;}if(!barcode||!RE.test(barcode))return;const id=barcode+'|'+count;if(id===last)return;const btn=document.getElementById(BTN);if(!btn)return;['pointerdown','mousedown','mouseup','click'].forEach(type=>btn.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true})));last=id;telemetry.emit('complete',{barcode:V3.telemetry.mask(barcode),count});};
-  life.observe(document.body,inspect,{childList:true,subtree:true,characterData:true});inspect();
+  let inspectQueued=false;
+  const scheduleInspect=()=>{if(inspectQueued)return;inspectQueued=true;requestAnimationFrame(()=>{inspectQueued=false;inspect();});};
+  life.observe(document.body,scheduleInspect,{childList:true,subtree:true,characterData:true});inspect();
 };
