@@ -2,8 +2,8 @@
 // @name         V3 | BWU2 Hierarchy
 // @name:en      V3 | BWU2 Hierarchy
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-relaunch
-// @version      0.1.1
-// @description  Native Hierarchy helper: typed-destination Bind queue plus direct Unbind queue.
+// @version      0.1.2
+// @description  Native Hierarchy helper: typed-destination Bind queue with session-only destination validation capture plus direct Unbind queue.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
 // @run-at       document-body
@@ -13,13 +13,13 @@
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Hierarchy.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Hierarchy.user.js
-// @v3-build     hierarchy-0.1.1-62bc107e
+// @v3-build     hierarchy-0.1.2-2c366851
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"hierarchy-0.1.1-62bc107e","version":"0.1.1","suite":"hierarchy"});
+V3.build=Object.freeze({"id":"hierarchy-0.1.2-2c366851","version":"0.1.2","suite":"hierarchy"});
 
 // ---- src/core/base.js ----
 V3.base=(()=>{
@@ -330,10 +330,17 @@ V3.hierarchyNative=(()=>{
     let value=body;
     try{
       if(typeof FormData!=='undefined'&&body instanceof FormData)value=Object.fromEntries(body.entries());
-      else if(body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
+      else if(typeof URLSearchParams!=='undefined'&&body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
       else if(typeof body==='string'){
         try{value=JSON.parse(body);}
-        catch{try{value=Object.fromEntries(new URLSearchParams(body).entries());}catch{}}
+        catch{
+          const match=body.match(/(?:^|&)destinationWarehouseId=([^&]*)/);
+          if(match){
+            let decoded=match[1];
+            try{decoded=decodeURIComponent(decoded.replace(/\+/g,' '));}catch{}
+            value={destinationWarehouseId:decoded};
+          }
+        }
       }
     }catch{}
     return clean(value&&typeof value==='object'?value.destinationWarehouseId:'');
