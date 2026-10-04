@@ -34,6 +34,7 @@ V3 is a clean rewrite. V2 is the behavioural specification; prior V3 branches ar
 10. V3 | BWU2 Carton PrEditor
 11. V3 | BWU2 Calm Code
 12. V3 | BWU2 SIM Toolbar
-13. V3 | BWU2 OBS + Screenshot
+13. V3 | BWU2 OBS
+14. V3 | BWU2 Screenshot Mode
 
 Source modules are shared at build time. Every generated userscript is self-contained.
