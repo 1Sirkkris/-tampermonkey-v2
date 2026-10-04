@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const context={console,crypto,performance,DOMException,setTimeout,clearTimeout,setInterval,clearInterval,URL,URLSearchParams,location:{origin:'https://example.amazon.com',href:'https://example.amazon.com/',pathname:'/',hostname:'example.amazon.com'},globalThis:null};
-context.globalThis=context;context.window=context;
+context.V3={};context.globalThis=context;context.window=context;
 vm.createContext(context);
 for(const file of ['core.js','actions.js','aft.js','sideline.js']){
   vm.runInContext(fs.readFileSync(path.join(root,'src',file),'utf8'),context,{filename:file});
