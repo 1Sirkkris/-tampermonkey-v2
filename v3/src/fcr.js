@@ -12,7 +12,7 @@ V3.fcr=(()=>{
     const data={};
     for(const row of table.querySelectorAll('tr')){const th=row.querySelector('th'),td=row.querySelector('td');if(th&&td)data[C.lower(th.textContent)]=C.clean(td.querySelector('a')?.textContent||td.textContent);}
     const sortable=parseBool(data.sortable),out={asin:C.clean(data.asin),isbn:C.clean(data.isbn),fnsku:C.clean(data.fnsku),fcsku:C.clean(data.fcsku),title:C.clean(data.title),dimensions:C.clean(data.dimensions),weight:C.clean(data.weight),inventoryCost:C.clean(data['list price']||data.price||data['inventory cost']||''),sortable,sortableText:sortable==null?C.clean(data.sortable):String(sortable),suspicious:suspicious(data.dimensions)};
-    out.primary=out.asin||out.isbn;return out.primary||out.fnsku||out.fcsku?out:null;
+    out.img=C.clean(doc.querySelector('img')?.src||'');out.primary=out.asin||out.isbn;return out.primary||out.fnsku||out.fcsku?out:null;
   };
 
   const inventoryIndexes=table=>{
@@ -22,27 +22,27 @@ V3.fcr=(()=>{
   };
   const inventoryRows=doc=>{
     const table=doc.querySelector('#table-inventory');if(!table)throw new Error('Inventory table not returned');
-    const idx=inventoryIndexes(table),rows=[];
+    const idx=inventoryIndexes(table),rows=[];if(idx.qty<0||[idx.asin,idx.fnsku,idx.fcsku].every(index=>index<0))throw new Error('Inventory schema missing item / quantity columns');
     for(const tr of table.tBodies?.[0]?.rows||[]){
       const value=i=>i>=0?C.clean(tr.cells[i]?.textContent):'';
-      const row={container:value(idx.container),asin:value(idx.asin),fnsku:value(idx.fnsku),fcsku:value(idx.fcsku),lpn:value(idx.lpn),qty:Number(value(idx.qty).replace(/[^\d.-]/g,''))||0,disposition:value(idx.disposition),consumer:value(idx.consumer),consumerId:value(idx.consumerId),outerLocation:value(idx.outerLocation),outerLocationType:value(idx.outerLocationType),title:value(idx.title)};
-      if(row.container||row.asin||row.fnsku||row.fcsku)rows.push(row);
+      const row={container:value(idx.container),asin:value(idx.asin),fnsku:value(idx.fnsku),fcsku:value(idx.fcsku),lpn:value(idx.lpn),qty:Number(value(idx.qty).replace(/,/g,'')),disposition:value(idx.disposition),consumer:value(idx.consumer),consumerId:value(idx.consumerId),outerLocation:value(idx.outerLocation),outerLocationType:value(idx.outerLocationType),title:value(idx.title)};
+      if(row.container||row.asin||row.fnsku||row.fcsku){if(!value(idx.qty)||!Number.isSafeInteger(row.qty)||row.qty<0)throw new Error('Inventory row has invalid quantity');rows.push(row);}
     }
     return rows;
   };
-  const paginationToken=doc=>{const raw=C.clean(doc.querySelector('.pagination-token')?.textContent);return raw&&/^(?:\{|\[)/.test(raw)?raw:'';};
+  const paginationToken=doc=>{const raw=C.clean(doc.querySelector('.pagination-token')?.textContent);if(!raw)return '';try{const token=JSON.parse(raw);if(!token||typeof token!=='object')throw new Error();return raw;}catch{throw new Error('Inventory incomplete: malformed pagination token');}};
   const podOf=value=>C.clean(value).match(/\bP-\d-(?:[A-Z]\d{3}){2}\b/i)?.[0]||'';
   const floorFromHtml=raw=>{const doc=C.html(raw),cell=doc.querySelector('div.a-span6:nth-child(1) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)'),n=C.clean(cell?.textContent).split(',')[0].match(/\b(\d+)\b/)?.[1]||'';return n?'P'+n:'PX';};
 
   function create({life,telemetry}={}){
-    const inFlight=new Map(),floorCache=new Map(),pandashCache=new Map(),restrictionCache=new Map();
+    const inFlight=new Map(),floorCache=new Map();
     const post=async(endpoint,fields)=>{
       const params=new URLSearchParams();for(const [k,v] of Object.entries(fields||{}))params.set(k,String(v??''));
       const key=endpoint+'|'+params.toString();if(inFlight.has(key))return inFlight.get(key);
-      const work=(async()=>{let attempt=0;for(;;){try{return(await C.request(base()+'/'+endpoint,{method:'POST',body:params.toString(),headers:FORM_HEADERS,allowHtml:true,signal:life?.signal})).raw;}catch(error){if(!(error.status>=500&&error.status<600)||attempt>=2)throw error;await life.sleep([150,400][attempt++]||400);}}})();
+      const work=(async()=>{let attempt=0;for(;;){try{return(await C.request(base()+'/'+endpoint,{method:'POST',body:params.toString(),headers:FORM_HEADERS,allowHtml:true,signal:life?.signal})).raw;}catch(error){if(!(error.status>=500&&error.status<600)||attempt>=2)throw error;await C.sleep([150,400][attempt++]||400,life?.signal);}}})();
       inFlight.set(key,work);try{return await work;}finally{if(inFlight.get(key)===work)inFlight.delete(key);}
     };
-    const getProduct=async code=>product(await post('product',{s:C.clean(code)}));
+    const products=new Map();const getProduct=async code=>{const key=C.upper(code),cached=products.get(key);if(cached&&Date.now()-cached.at<300000)return cached.value;const value=product(await post('product',{s:C.clean(code)}));if(value){products.set(key,{value,at:Date.now()});if(products.size>300)products.delete(products.keys().next().value);}return value;};
 
     const fullInventory=async(code,{onPreview}={})=>{
       const started=performance.now(),first=await post('inventory',{s:C.clean(code)}),doc=C.html(first),table=doc.querySelector('#table-inventory');
@@ -54,22 +54,26 @@ V3.fcr=(()=>{
         if(seen.has(next))throw new Error('Inventory incomplete: repeated pagination token');
         if(pages>=200)throw new Error('Inventory incomplete: pagination safety limit');
         seen.add(next);
-        const moreDoc=C.html(await post('inventory-more',{token:next}));pages++;
+        const moreRaw=await post('inventory-more',{token:next}),moreDoc=C.html(moreRaw);pages++;
         const moreTable=moreDoc.querySelector('#table-inventory')||moreDoc.querySelector('table');
-        const rows=moreTable?[...moreTable.querySelectorAll('tbody tr')].filter(r=>!expected||r.cells.length>=expected):[];
+        const fragment=moreTable?moreDoc:C.html('<table><tbody>'+moreRaw+'</tbody></table>');
+        const candidates=[...fragment.querySelectorAll('tbody tr')];
+        const rows=candidates.filter(r=>!expected||r.cells.length===expected);
+        if(candidates.length!==rows.length)throw new Error('Inventory incomplete: malformed continuation rows');
         const following=paginationToken(moreDoc);
-        if(!rows.length&&following)throw new Error('Inventory incomplete: pagination returned no usable rows');
+        if(!rows.length)throw new Error('Inventory incomplete: pagination returned no usable rows');
         for(const row of rows)tbody.appendChild(doc.importNode(row,true));
         next=following;
       }
       const rows=inventoryRows(doc),totalQuantity=rows.reduce((sum,row)=>sum+(Number(row.qty)||0),0);
+      const headerTotal=Number(table.querySelector('#inventory-quantity')?.textContent?.match(/\(([\d,]+)\)/)?.[1]?.replace(/,/g,''));if(Number.isFinite(headerTotal)&&headerTotal!==totalQuantity)throw new Error('Inventory incomplete: quantity header does not match returned rows');
       telemetry?.emit('fcr.inventory',{search:C.mask(code),pages,rows:rows.length,complete:true,ms:Math.round(performance.now()-started)});
       return{rows,pages,complete:true,totalQuantity};
     };
 
     const floor=async pod=>{
       const key=C.upper(pod),cached=floorCache.get(key);if(cached&&Date.now()-cached.at<10*60*60*1000)return cached.floor;
-      const url=new URL(location.href);url.search='';url.hash='';url.pathname=url.pathname.replace(/\/$/,'')+'/container-hierarchy';url.searchParams.set('s',pod);
+      const url=new URL(location.href);url.search='';url.hash='';url.pathname='/'+encodeURIComponent(warehouse())+'/results/container-hierarchy';url.searchParams.set('s',pod);
       let last;
       for(let attempt=0;attempt<2;attempt++){
         try{
@@ -77,29 +81,17 @@ V3.fcr=(()=>{
           if(value!=='PX'){floorCache.set(key,{floor:value,at:Date.now()});return value;}
           last=new Error('Floor not resolved');
         }catch(error){last=error;}
-        if(attempt===0)await life.sleep(250);
+        if(attempt===0)await C.sleep(250,life?.signal);
       }
       telemetry?.emit('fcr.floor.error',{pod:C.mask(pod),message:C.clean(last?.message)});
       return'PX';
     };
 
-    const pandash=async asinValue=>{
-      const asin=C.upper(asinValue),fc=warehouse();if(!/^B[A-Z0-9]{9}$/.test(asin)||!fc)throw new Error('Pandash requires ASIN + warehouse');
-      const key=fc+'|'+asin,cached=pandashCache.get(key);if(cached&&Date.now()-cached.at<6*60*60*1000)return cached.value;
-      let restriction=restrictionCache.get(fc)||'';
-      if(!restriction){
-        const boot=await C.request('https://pandash.amazon.com/GridServlet?fc='+encodeURIComponent(fc),{timeout:8000});
-        restriction=C.clean(boot.data?.restriction||'default')||'default';restrictionCache.set(fc,restriction);
-      }
-      const body='language=default&source='+encodeURIComponent(restriction)+'-hazmat-FC&marketPlaces=AU&asins='+encodeURIComponent(asin)+'&rows=1&page=1&fc='+encodeURIComponent(fc);
-      const response=await C.request('https://pandash.amazon.com/GridServlet',{method:'POST',body,headers:{'Content-Type':'application/x-www-form-urlencoded'},timeout:8000}),row=Array.isArray(response.data?.rows)?response.data.rows.find(x=>C.upper(x?.asin)===asin):null;
-      if(!row)throw new Error('No exact Pandash result');
-      const value={asin,level:Number(row.level||0),message:C.clean(row.message),allowed:/can be processed/i.test(C.clean(row.message))};
-      pandashCache.set(key,{value,at:Date.now()});telemetry?.emit('fcr.pandash',{asin:C.mask(asin),level:value.level,allowed:value.allowed});return value;
-    };
+    const pandashService=V3.pandash.create({life});
+    const pandash=asin=>pandashService.lookup(asin,warehouse());
 
     return Object.freeze({post,product:getProduct,inventory:fullInventory,floor,pandash});
   }
 
-  return Object.freeze({create,warehouse,base,product,inventoryRows,paginationToken,podOf,floorFromHtml});
+  return Object.freeze({create,warehouse,base,product,inventoryIndexes,inventoryRows,paginationToken,podOf,floorFromHtml});
 })();

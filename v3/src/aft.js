@@ -32,19 +32,19 @@ V3.aft=(()=>{
   const extractWorkflow=(raw,def)=>{
     const source=String(raw||'').replace(/&quot;/gi,'"').replace(/&#34;/gi,'"').replace(/&#x22;/gi,'"').replace(/\\"/g,'"').replace(/&amp;/gi,'&');
     const anchor=new RegExp('"instructionId"\\s*:\\s*"'+def.instructionId+'"','i').exec(source);if(!anchor)return null;
-    const scope=source.slice(anchor.index,anchor.index+3000),grab=name=>scope.match(new RegExp('"'+name+'"\\s*:\\s*"([^"]+)"','i'))?.[1]||'';
+    const remaining=source.slice(anchor.index),next=remaining.slice(anchor[0].length).search(/"instructionId"/),scope=remaining.slice(0,Math.min(3000,next<0?remaining.length:anchor[0].length+next)),grab=name=>scope.match(new RegExp('"'+name+'"\\s*:\\s*"([^"]+)"','i'))?.[1]||'';
     const wf={instructionId:grab('instructionId'),tool:C.lower(grab('tool')),objectId:grab('objectId'),status:C.upper(grab('status')),selector:/<input\b[^>]*\bname\s*=\s*["']options["']/i.test(source)};
-    if(!wf.objectId||wf.instructionId!==def.instructionId)return null;if(wf.tool&&wf.tool!==def.tool)return null;return wf;
+    if(!wf.objectId||!wf.status||wf.instructionId!==def.instructionId)return null;if(wf.tool&&wf.tool!==def.tool)return null;return wf;
   };
   const mapState=value=>{const v=C.lower(value);if(v==='sellable'||v==='inventory')return'INVENTORY';if(v==='pending research'||v==='pending')return'PENDING_RESEARCH';if(v==='unsellable')return'UNSELLABLE';throw new Error('Unsupported inventory state '+value);};
   const mapDamage=value=>{const v=C.lower(value);if(v==='amazon damage'||v==='warehouse damage')return'AMAZON_DAMAGE';if(v==='defective')return'DEFECTIVE';if(v==='distributor damage')return'DISTRIBUTOR_DAMAGE';if(v==='expired')return'EXPIRED';throw new Error('Unsupported disposition '+value);};
-  const readMoveQuantity=raw=>{for(const re of [/(?:["']|&quot;)quantity(?:["']|&quot;)\s*[:=]\s*(?:["']|&quot;)?([0-9]{1,6})\b/i,/\bQuantity\b(?:<[^>]+>|\s|&nbsp;|&#160;|:|-){0,20}([0-9]{1,6})\b/i]){const qty=Number(String(raw||'').match(re)?.[1]);if(Number.isInteger(qty)&&qty>0)return{qty,verify:false};}return{qty:null,verify:/\bVerify item\b/i.test(String(raw||''))};};
+  const readMoveQuantity=raw=>{const view=snapshotView(raw),match=view.text.match(/\bQuantity\s*[:\-]?\s*(\d{1,6})\b/i),qty=Number(match?.[1]);return{qty:Number.isSafeInteger(qty)&&qty>0?qty:null,verify:/\bVerify item\b/i.test(view.headings+' '+view.text)};};
   const sourceChoices=doc=>{
     const out=[];for(const radio of doc?.querySelectorAll?.('input[type="radio"]')||[]){let label='';try{label=[...(radio.labels||[])].map(x=>x.textContent||'').join(' ');}catch{}if(!label)label=radio.closest('label')?.textContent||radio.parentElement?.textContent||'';label=C.clean(label);if(!/Quantity\s*:/i.test(label)||!/Owner\s*:/i.test(label))continue;let state='';if(/Pending Research|PENDING_RESEARCH/i.test(label))state='PENDING_RESEARCH';else if(/Unsellable|UNSELLABLE/i.test(label))state='UNSELLABLE';else if(/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label))state='SELLABLE';if(!state)continue;const qty=Number(label.match(/\bQuantity\s*:\s*(\d{1,7})\b/i)?.[1]);out.push({state,label,value:radio.value||'',qty:Number.isInteger(qty)?qty:null,disabled:Boolean(radio.disabled)});}return out;
   };
   const parseEach=text=>String(text||'').split(/\r?\n/).map(C.clean).filter(Boolean).map(line=>{const [location='',asin='',fnsku='']=line.split(/\s+/);return location&&asin?{location,asin,fnsku:fnsku||asin}:null;}).filter(Boolean);
   const parseItems=text=>{const seen=new Set(),out=[];for(const line of String(text||'').split(/\r?\n/)){const value=C.clean(line.split(/\s+/)[0]);if(!value)continue;const key=C.upper(value);if(seen.has(key))continue;seen.add(key);out.push(value);}return out;};
-  const datePayload=date=>{const m=String(date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)throw new Error('Invalid date '+date);return JSON.stringify({'year-input':m[1],'month-input':m[2],'day-input':m[3],'':''});};
+  const datePayload=date=>{const m=String(date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m||new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]))).toISOString().slice(0,10)!==date)throw new Error('Invalid date '+date);return JSON.stringify({'year-input':m[1],'month-input':m[2],'day-input':m[3],'':''});};
 
   function create({origin,life,telemetry,stopped=()=>false}={}){
     origin=String(origin||(/^aft-qt-/i.test(location.hostname)?location.origin:DEFAULT_ORIGIN)).replace(/\/$/,'');
@@ -64,7 +64,7 @@ V3.aft=(()=>{
         if(stopped()&&!ignoreStop)throw new Error('Stopped by user');
         try{last=await status(def,wf);}catch(error){if(op){op.unknown({reason:'status-transport'});throw new C.UnknownError(label+': confirmation lost',{cause:error});}throw error;}
         polls++;if(wanted.has(last)){telemetry?.emit('aft.status',{label,state:last,polls,ms:Math.round(performance.now()-started)});return last;}
-        if(last==='ERRORED'){if(op)op.rejected({reason:'backend-errored'});throw new C.RejectedError(label+': backend ERRORED');}
+        if(last==='ERRORED'){if(op){op.unknown({reason:'backend-errored'});throw new C.UnknownError(label+': backend ERRORED after submission — verify resulting inventory');}throw new C.RejectedError(label+': backend ERRORED');}
         if(!['READY','PROCESSING','COMPLETE'].includes(last)){if(op){op.unknown({reason:'unexpected-status',state:last});throw new C.UnknownError(label+': unexpected status '+last);}throw new Error(label+': status '+last);}
         await life.sleep(pollMs??Math.min(300,60+polls*35));
       }
@@ -77,8 +77,18 @@ V3.aft=(()=>{
       let r;
       try{r=await post('/action',{...ids(def,wf),action:actionName,input},{timeout,allowHttpError:Boolean(op)});}
       catch(error){if(op){op.unknown({reason:'action-transport'});throw new C.UnknownError(label+': submission confirmation lost',{cause:error});}throw error;}
-      if(op&&r.httpError){if(r.status>=500){op.unknown({status:r.status});throw new C.UnknownError(label+': HTTP '+r.status+' outcome unknown');}op.rejected({status:r.status});throw new C.RejectedError(label+': rejected HTTP '+r.status);}
-      return waitStatus(def,wf,complete?['COMPLETE']:['READY'],{timeout,pollMs,operation:op,label,ignoreStop});
+      if(op&&r.httpError){if(r.status>=500||r.status===408){op.unknown({status:r.status});throw new C.UnknownError(label+': HTTP '+r.status+' outcome unknown');}op.rejected({status:r.status});throw new C.RejectedError(label+': rejected HTTP '+r.status);}
+      const settled=await waitStatus(def,wf,complete?['COMPLETE']:['READY'],{timeout,pollMs,operation:op,label,ignoreStop:ignoreStop||Boolean(op)});
+      if(op){
+        try{
+          const after=await page(def,def.tool==='fcskuflip'?classifyFcsku:classifyEdit);
+          if(after.objectId!==wf.objectId)throw new Error('Workflow changed during confirmation');
+          const proved=op.kind==='aft-date-remove'?['success','dateEntry','item'].includes(after.state):def.tool==='moveitems'?/input item|scan item|enter item/i.test(after.text)&&!/verify item|work is errored/i.test(after.text):['success','item'].includes(after.state);
+          if(!proved)throw new Error('Application did not prove the mutation result');
+          op.confirmed({state:after.state});return after;
+        }catch(error){op.unknown({reason:'application-confirmation-missing'});throw new C.UnknownError(label+': result not proven — verify before retry',{cause:error});}
+      }
+      return settled;
     };
     const input=(def,wf,value,label,opts)=>action(def,wf,'Input',value,label,opts);
     const confirm=(def,wf,opts)=>action(def,wf,'Confirm','Confirm','Confirm',opts);
@@ -102,19 +112,6 @@ V3.aft=(()=>{
       await input(def,wf,state,'Target state');
       if(state==='UNSELLABLE')await input(def,wf,mapDamage(damage),'Target disposition');
     };
-    const confirmUntilDone=async(def,wf)=>{
-      for(let round=0;round<4;round++){
-        const before=await snap(def,wf,classifyEdit);
-        if(before.state==='success'||before.state==='item')return before;
-        if(before.state!=='confirm')throw new Error('Expected confirmation, got '+before.state);
-        const op=C.operation({kind:'aft-edit',ref:wf.objectId,telemetry});
-        await confirm(def,wf,{timeout:180000,operation:op});
-        const after=await snap(def,wf,classifyEdit);
-        if(after.state!=='confirm')return after;
-      }
-      throw new Error('Too many confirmation rounds');
-    };
-
     async function runMove({source,destination,items,mode='all',qty=1,onProgress=()=>{}}={}){
       source=C.clean(source);destination=C.clean(destination);items=parseItems(Array.isArray(items)?items.join('\n'):items);
       if(!C.container(source)||!C.container(destination)||C.lower(source)===C.lower(destination))throw new Error('Valid different source/destination containers required');
@@ -136,16 +133,16 @@ V3.aft=(()=>{
           onProgress({stage:'destination',barcode,current:i+1,total:items.length,confirmed});
           try{await input(def,wf,destination,'Destination '+(i+1),{operation:op});}
           catch(error){
-            error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:error?.outcome==='unknown'?[barcode]:[],remaining:items.slice(i+1),source,destination};
+            error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:error?.outcome==='unknown'?[barcode]:[],remaining:items.slice(i+(error?.outcome==='unknown'?1:0)),source,destination};
             throw error;
           }
-          confirmed++;
+          confirmed++;onProgress({stage:'confirmed',barcode,current:i+1,total:items.length,confirmed});
         }
         onProgress({stage:'finish',confirmed,total:items.length});await done(def,wf);
         try{await end(def,wf);}catch(error){const e=new C.UnknownError('Items confirmed moved, but AFT finalization was not confirmed',{cause:error});e.aftPartial={kind:'move-finalize',confirmed,total:items.length,uncertain:[],remaining:[]};throw e;}
         return{confirmed,total:items.length};
       }catch(error){
-        try{await end(def,wf);}catch{}
+        if(error?.outcome!=='unknown')try{await end(def,wf);}catch{}
         if(!error.aftPartial)error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:[],remaining:items.slice(confirmed),source,destination};
         throw error;
       }
@@ -153,24 +150,22 @@ V3.aft=(()=>{
 
     async function runEditEach({items,destState='Pending Research',destDamage='Defective',onProgress=()=>{}}={}){
       const rows=Array.isArray(items)?items:parseEach(items);if(!rows.length)throw new Error('EACH needs: TOTE ASIN [FNSKU]');
-      const desired=mapState(destState),{def}=await ensureMode('edit:each');let wf=await ensureReady(def),confirmed=0,currentLocation='';
+      const desired=mapState(destState),{def}=await ensureMode('edit:each');let wf=await ensureReady(def),confirmed=0,currentLocation='',needsFresh=false;
       try{
         for(let i=0;i<rows.length;i++){
-          if(stopped())throw new Error('Stopped by user');const row=rows[i];
+          if(stopped())throw new Error('Stopped by user');const row=rows[i];if(needsFresh){await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);currentLocation='';needsFresh=false;}
           if(C.lower(row.location)!==C.lower(currentLocation)){if(currentLocation){try{await end(def,wf);}catch{}wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}onProgress({stage:'location',current:i+1,total:rows.length,row});await input(def,wf,row.location,'Location');currentLocation=row.location;}
           onProgress({stage:'item',current:i+1,total:rows.length,row});await input(def,wf,row.fnsku||row.asin,'Item');
           const afterItem=await snap(def,wf,classifyEdit);if(afterItem.state==='sourceState')throw new Error('EditItems could not infer source state; stopped before mutation');if(afterItem.state!=='newState')throw new Error('After item expected newState, got '+afterItem.state);
           await applyTarget(def,wf,desired,destDamage);
           const before=await snap(def,wf,classifyEdit);if(before.state!=='confirm')throw new Error('Expected confirm, got '+before.state);
           const op=C.operation({kind:'aft-edit-each',ref:row.fnsku||row.asin,telemetry});
-          await confirm(def,wf,{timeout:180000,operation:op});
-          const result=await snap(def,wf,classifyEdit);
-          if(result.state==='success')await done(def,wf);else if(result.state!=='item')throw new Error('Unexpected post-confirm state '+result.state);
-          confirmed++;onProgress({stage:'confirmed',confirmed,total:rows.length,row});
+          const result=await confirm(def,wf,{timeout:180000,operation:op});
+          confirmed++;if(result.state==='success'){await done(def,wf);needsFresh=true;}onProgress({stage:'confirmed',confirmed,total:rows.length,row});
         }
         try{await end(def,wf);}catch{}
         return{confirmed,total:rows.length};
-      }catch(error){try{await end(def,wf);}catch{}error.aftPartial={kind:'edit-each',confirmed,total:rows.length,uncertain:error?.outcome==='unknown'?[rows[confirmed]]:[],remaining:rows.slice(confirmed+(error?.outcome==='unknown'?1:0))};throw error;}
+      }catch(error){if(error?.outcome!=='unknown')try{await end(def,wf);}catch{}error.aftPartial={kind:'edit-each',confirmed,total:rows.length,uncertain:error?.outcome==='unknown'?[rows[confirmed]]:[],remaining:rows.slice(confirmed+(error?.outcome==='unknown'?1:0))};throw error;}
     }
 
     async function runEditSku({items,sourceState='Sellable',sourceDamage='Defective',destState='Pending Research',destDamage='Defective',onProgress=()=>{}}={}){
@@ -179,7 +174,7 @@ V3.aft=(()=>{
       const def=DEFINITIONS['edit:sku'];let flipped=0,zero=0;const failed=[];
       await ensureMode('edit:sku');
       for(let index=0;index<list.length;index++){
-        const sku=list[index];let attempts=0,skuFlipped=false;
+        const sku=list[index];let attempts=0,lastQty=Infinity;
         try{
           while(attempts++<50){
             if(stopped())throw new Error('Stopped by user');
@@ -190,22 +185,23 @@ V3.aft=(()=>{
             onProgress({stage:'quantity',sku,qty,current:index+1,total:list.length,attempt:attempts,inventory:Object.fromEntries(sourceChoices(sourcePage.doc).map(x=>[x.state,x.qty]))});
             if(qty===0){zero++;try{await end(def,wf);}catch{}break;}
             if(!Number.isInteger(qty))throw new Error('Could not read '+sourceState+' quantity');
+            if(qty>=lastQty)throw new Error('No inventory progress after confirmed change — stopped before another edit');
+            lastQty=qty;
             await input(def,wf,choice.value||from,'Source state',{timeout:120000});
             if(from==='UNSELLABLE')await input(def,wf,mapDamage(sourceDamage),'Source disposition',{timeout:120000});
             const afterSource=await snap(def,wf,classifyEdit);if(afterSource.state!=='newState')throw new Error('Expected newState after source selection, got '+afterSource.state);
             await applyTarget(def,wf,to,destDamage);
             const before=await snap(def,wf,classifyEdit);if(before.state!=='confirm')throw new Error('Expected confirm, got '+before.state);
-            const op=C.operation({kind:'aft-edit-sku',ref:sku,telemetry});await confirm(def,wf,{timeout:180000,operation:op});
-            let result=await snap(def,wf,classifyEdit);
-            if(result.state==='confirm')result=await confirmUntilDone(def,wf);
-            if(result.state!=='success'&&result.state!=='item')throw new Error('Expected success after confirm, got '+result.state);
+            const op=C.operation({kind:'aft-edit-sku',ref:sku,telemetry});const result=await confirm(def,wf,{timeout:180000,operation:op});
+            flipped++;
             if(result.state==='success')await done(def,wf);
             try{await end(def,wf);}catch{}
-            flipped++;skuFlipped=true;onProgress({stage:'confirmed',sku,current:index+1,total:list.length,attempt:attempts});
+            onProgress({stage:'confirmed',sku,current:index+1,total:list.length,attempt:attempts});
           }
           if(attempts>50)throw new Error('Stopped after 50 SKU attempts');
         }catch(error){
           if(error?.outcome==='unknown'){error.aftPartial={kind:'edit-sku',confirmed:flipped,total:list.length,uncertain:[sku],remaining:list.slice(index+1),failed};throw error;}
+          if(stopped()){error.aftPartial={kind:'edit-sku',confirmed:flipped,total:list.length,uncertain:[],remaining:list.slice(index),failed};throw error;}
           failed.push({sku,message:C.clean(error.message||error)});onProgress({stage:'failed',sku,current:index+1,total:list.length,message:C.clean(error.message||error)});
           try{const current=await workflow(def);await end(def,current);}catch{}
         }
@@ -216,40 +212,41 @@ V3.aft=(()=>{
     async function runFcsku({oldCode,newCode,locations,onProgress=()=>{}}={}){
       oldCode=C.clean(oldCode);newCode=C.clean(newCode);const list=parseItems(Array.isArray(locations)?locations.join('\n'):locations);
       if(!oldCode||!newCode||!list.length)throw new Error('Need OLD + NEW FCSKU and at least one location');
-      const def=DEFINITIONS['edit:fcsku'];let confirmed=0,failed=[];
+      const def=DEFINITIONS['edit:fcsku'];let confirmed=0,failed=[],remaining=[];
       let wf=(await ensureMode('edit:fcsku')).wf;
       for(let i=0;i<list.length;i++){
-        const location=list[i];if(stopped())break;
+        const location=list[i];if(stopped()){remaining=list.slice(i);break;}
         try{
           if(i>0){wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}
           onProgress({stage:'container',current:i+1,total:list.length,location});await input(def,wf,location,'Container');
           await input(def,wf,oldCode,'Old FCSKU');await input(def,wf,newCode,'New FCSKU');
-          const op=C.operation({kind:'aft-fcsku',ref:location,telemetry});await confirm(def,wf,{operation:op,timeout:120000});await end(def,wf);confirmed++;
+          const op=C.operation({kind:'aft-fcsku',ref:location,telemetry});await confirm(def,wf,{operation:op,timeout:120000});confirmed++;try{await end(def,wf);}catch(error){error.aftPartial={kind:'fcsku-finalize',confirmed,total:list.length,uncertain:[],remaining:list.slice(i+1),failed};throw error;}
         }catch(error){
           if(error?.outcome==='unknown'){error.aftPartial={kind:'fcsku',confirmed,total:list.length,uncertain:[location],remaining:list.slice(i+1),failed};throw error;}
+          if(error.aftPartial)throw error;
           failed.push({location,message:C.clean(error.message||error)});try{await end(def,wf);}catch{}
         }
       }
-      return{confirmed,total:list.length,failed};
+      return{confirmed,total:list.length,failed,remaining};
     }
 
     async function runDate({rows,onProgress=()=>{}}={}){
       const list=(Array.isArray(rows)?rows:[]).filter(x=>C.clean(x?.location)&&C.clean(x?.asin)&&C.clean(x?.date));if(!list.length)throw new Error('No expiry rows');
-      const def=DEFINITIONS['edit:date'];let confirmed=0,wf=(await ensureMode('edit:date')).wf;
+      const def=DEFINITIONS['edit:date'];let confirmed=0,remaining=[],wf=(await ensureMode('edit:date')).wf;
       for(let i=0;i<list.length;i++){
-        const row=list[i];if(stopped())break;
+        const row=list[i];if(stopped()){remaining=list.slice(i);break;}
         try{
           if(i>0){wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}
           await input(def,wf,row.location,'Container',{timeout:120000});await input(def,wf,row.asin,'Item',{timeout:120000});
           let s=await snap(def,wf,classifyEdit);
-          if(s.state==='dateRemove'){await confirm(def,wf,{timeout:180000});await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
+          if(s.state==='dateRemove'){const remove=C.operation({kind:'aft-date-remove',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:remove});await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
           if(s.state!=='dateEntry')throw new Error('Expected expiry date entry, got '+s.state);
           await input(def,wf,datePayload(row.date),'Expiry date',{timeout:120000});const before=await snap(def,wf,classifyEdit);if(before.state!=='dateConfirm'&&before.state!=='confirm')throw new Error('Expected expiry confirmation, got '+before.state);
           const op=C.operation({kind:'aft-edit-date',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:op});confirmed++;onProgress({stage:'confirmed',confirmed,total:list.length,row});
           try{await end(def,wf);}catch{}
         }catch(error){if(error?.outcome==='unknown'){error.aftPartial={kind:'edit-date',confirmed,total:list.length,uncertain:[row],remaining:list.slice(i+1)};throw error;}throw error;}
       }
-      return{confirmed,total:list.length};
+      return{confirmed,total:list.length,remaining};
     }
 
     return Object.freeze({origin,route,page,workflow,status,waitStatus,action,input,confirm,done,end,ensureReady,ensureMode,runMove,runEditEach,runEditSku,runFcsku,runDate});

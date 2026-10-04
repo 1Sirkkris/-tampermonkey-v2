@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 Screenshot Mode
 // @name:en      V3 | BWU2 Screenshot Mode
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.1.0
+// @version      0.2.0
 // @description  Ctrl+Q hides/shows V3 userscript UI for clean screenshots.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      *://aft-qt-*.corp.amazon.com/*
@@ -20,21 +20,21 @@
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Screenshot_Mode.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Screenshot_Mode.user.js
-// @v3-build     screenshot-0.1.0-e75c0598
+// @v3-build     screenshot-0.2.0-3140b068
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"screenshot-0.1.0-e75c0598","version":"0.1.0"});
+V3.build=Object.freeze({"id":"screenshot-0.2.0-3140b068","version":"0.2.0"});
 
 // ---- src/apps/screenshot.js ----
-(()=>{
+V3.boot=()=>{
   const ATTR='data-bwu2-v3-screenshot',STYLE='bwu2-v3-screenshot-style';
   const install=()=>{if(document.getElementById(STYLE))return;const s=document.createElement('style');s.id=STYLE;s.textContent='html['+ATTR+'="1"] [data-bwu2-ui]{display:none !important;}';(document.head||document.documentElement).appendChild(s);};
   const toggle=()=>{install();const root=document.documentElement,on=root.getAttribute(ATTR)==='1';root.setAttribute(ATTR,on?'0':'1');};
   window.addEventListener('keydown',event=>{if(event.key.toLowerCase()!=='q'||!event.ctrlKey||event.shiftKey||event.altKey||event.metaKey)return;event.preventDefault();event.stopPropagation();toggle();},true);
-})();
+};
 
 if(typeof V3.boot!=='function')throw new Error('V3 boot missing');
 V3.boot();

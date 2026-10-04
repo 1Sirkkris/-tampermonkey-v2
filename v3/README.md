@@ -1,40 +1,34 @@
-# BWU2 Tampermonkey V3 — Ground-up rebuild
+# Tampermonkey V3 — test fleet 0.2.0
 
-Branch: `v3-groundup`
+Branch: `v3-groundup`. V2 `main` is the behavioural reference and remains separate.
 
-V3 is a clean rewrite. V2 is the behavioural specification; prior V3 branches are evidence only.
+Disable the V2 and old V3 fleet before enabling these installers. Install all 14, including the native workers and OBS. Each installer is self-contained; there are no runtime library dependencies. Refresh the relevant Amazon tabs after installation and sign in on their native pages.
 
-## Non-negotiables
+| Tool | One-click install |
+|---|---|
+| FCResearch | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FCResearch.user.js) |
+| ISS Console | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_ISS_Console.user.js) |
+| AFT Tools | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js) |
+| Sideline | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Sideline.user.js) |
+| Hierarchy | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Hierarchy.user.js) |
+| MoveContainer | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_MoveContainer.user.js) |
+| RIVER Assistant | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_RIVER_Assistant.user.js) |
+| FNSKU Mapping | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FNSKU_Mapping.user.js) |
+| PO Portal | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_PO_Portal.user.js) |
+| Carton PrEditor | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Carton_PrEditor.user.js) |
+| Calm Code | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Calm_Code.user.js) |
+| SIM Toolbar | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js) |
+| OBS | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_OBS.user.js) |
+| Screenshot Mode | [Install 0.2.0](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Screenshot_Mode.user.js) |
 
-- Preserve familiar V2 user workflows unless a user-facing change is explicitly approved.
-- Native pages stay native when that is simpler.
-- FCResearch is a toolbox, not the home of every workflow.
-- ISS Console owns Edit / Move / Sideline / FCSKU as a dedicated console.
-- Native AFT, Sideline, Hierarchy and MoveContainer remain usable directly.
-- Shared behaviour has one canonical engine.
-- Submitted mutations finish CONFIRMED, REJECTED or UNKNOWN.
-- UNKNOWN never auto-retries.
-- Identity must come from authenticated evidence, never free text.
-- Safety-relevant FCR inventory must be complete or fail.
-- Idle scripts do nearly nothing.
-- OBS is operation-level and sanitized; no giant network sniffer.
-- No runtime @require and no V2 compatibility layer.
+Structural and mocked domain/DOM validation has passed. **Actual Amazon workflow behaviour is unproven until user testing or logs establish it.**
 
-## Installed scripts
+Start with small controlled cases: native AFT EACH/Move, ISS handoff, Sideline Lazy/Queue and clear-source, typed-destination Bind, native/contextual Unbind and MoveContainer. A lost confirmation must halt with UNKNOWN and require verification. Do not interpret UNKNOWN as a rejected action.
 
-1. V3 | BWU2 FCResearch
-2. V3 | BWU2 ISS Console
-3. V3 | BWU2 AFT Tools
-4. V3 | BWU2 Sideline
-5. V3 | BWU2 Hierarchy
-6. V3 | BWU2 MoveContainer
-7. V3 | BWU2 RIVER Assistant
-8. V3 | BWU2 FNSKU Mapping
-9. V3 | BWU2 PO Portal
-10. V3 | BWU2 Carton PrEditor
-11. V3 | BWU2 Calm Code
-12. V3 | BWU2 SIM Toolbar
-13. V3 | BWU2 OBS
-14. V3 | BWU2 Screenshot Mode
+FCR keeps Tote Audit, Bin Check, Pandash, inline Move/Unbind, exact printing/copy, size/MADCAT indicators and hover information. ISS remains on Poirot. Calm shortcuts remain inline on their native page. OBS exports via the Tampermonkey menu; Screenshot Mode uses Ctrl+Q.
 
-Source modules are shared at build time. Every generated userscript is self-contained.
+MADCAT uses the native Measurement application's response bodies, without copying auth tokens. If native embedding/authentication is unavailable or history is incomplete, the badge stays AUTH/RETRY instead of claiming NO. Open native Measurement from the badge, then retry.
+
+Build and verify: `npm ci --ignore-scripts && npm run build && npm run verify` inside `v3`.
+
+See [architecture](ARCHITECTURE.md), [audit map](AUDIT_MAP.md) and [validation](VALIDATION.md).

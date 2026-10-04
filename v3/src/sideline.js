@@ -28,8 +28,11 @@ V3.sideline=(()=>{
   };
   const resolveItem=(response,barcode)=>{
     const type=C.clean(response?.['@type']),overage=allowedOverage(response);
-    if(!response||type==='InvalidBarcodeResponse'||(response.success===false&&!overage))return{ok:false,invalid:type==='InvalidBarcodeResponse',type:type||'Unknown'};
-    const records=(Array.isArray(response.items)?response.items:[]).filter(x=>x?.skuDetail),item=records[0]||null,sku=item?.skuDetail;
+    if(!response||type==='RequestMultipleBarcodesResponse'||type==='InvalidBarcodeResponse'||(response.success===false&&!overage))return{ok:false,invalid:type==='InvalidBarcodeResponse',type:type||'Unknown'};
+    const records=(Array.isArray(response.items)?response.items:[]).filter(x=>x?.skuDetail);
+    const identities=new Set(records.map(x=>[x.skuDetail.asin,x.skuDetail.fnSku,x.skuDetail.fcSku].map(C.upper).join('|')));
+    if(identities.size>1)return{ok:false,invalid:false,type:'RequestMultipleBarcodesResponse'};
+    const item=records[0]||null,sku=item?.skuDetail;
     if(!item||!sku)return{ok:false,invalid:false,type:type||'Unknown'};
     return{ok:true,type,barcode,item,records,sku,asin:C.clean(sku.asin),fnsku:C.clean(sku.fnSku),fcsku:C.clean(sku.fcSku),dateType:C.clean(sku.datelotDetail?.expirationPromptType),dateDetail:sku.datelotDetail||{},hazmat:sku.hazmat===true,permissionLevel:C.upper(sku.itemDropzoneRecommendation?.permissionLevel),overage};
   };
@@ -50,16 +53,15 @@ V3.sideline=(()=>{
     const p=problems(response);return p.length?p.join(', '):C.clean(response?.['@type']).replace(/Response$/,'')||'MOVE REJECTED';
   };
   const maxDay=(year,month)=>new Date(year,month,0).getDate();
-  const validDate=(day,month,year)=>{const d=Number(day),m=Number(month),y=Number(year);if(!Number.isInteger(d)||!Number.isInteger(m)||!Number.isInteger(y)||y<2020||m<1||m>12||d<1||d>maxDay(y,m))return null;return new Date(y,m-1,d).getTime();};
-  const pao900=productionMs=>productionMs+900*24*60*60*1000;
+  const validDate=(day,month,year)=>{const d=Number(day),m=Number(month),y=Number(year);if(!Number.isInteger(d)||!Number.isInteger(m)||!Number.isInteger(y)||y<1900||y>2200||m<1||m>12||d<1||d>maxDay(y,m))return null;return new Date(y,m-1,d).getTime();};
 
   function create({life,telemetry}={}){
-    let warehousePromise=null,restriction='',preflightInflight=new Map(),hazmatCache=new Map();
-    const api=async(path,{method='GET',body,signal,allowHttpError=false}={})=>{
+    let warehousePromise=null,preflightInflight=new Map();
+    const api=async(path,{method='GET',body,signal,allowHttpError=false,fullResponse=false}={})=>{
       const r=await C.request(ORIGIN+path,{method,body:body==null?undefined:JSON.stringify(body),headers:body==null?{}:{'Content-Type':'application/json'},timeout:15000,allowHttpError,signal:signal||life?.signal});
-      return r.data;
+      return fullResponse?r:r.data;
     };
-    const warehouse=async()=>{if(!warehousePromise)warehousePromise=(async()=>{try{const p=await api(PATH.bootstrap+'?tool='+encodeURIComponent(TOOL));const info=p?.warehouseInfo;return C.upper((typeof info==='string'?info:'')||info?.warehouseId||info?.id||info?.warehouse||info?.fc||info?.code||p?.warehouseId||'');}catch{return'';}})();return warehousePromise;};
+    const warehouse=async()=>{if(!warehousePromise)warehousePromise=(async()=>{try{const p=await api(PATH.bootstrap+'?tool='+encodeURIComponent(TOOL));const info=p?.warehouseInfo;return C.upper((typeof info==='string'?info:'')||info?.warehouseId||info?.id||info?.warehouse||info?.fc||info?.code||p?.warehouseId||'');}catch(error){warehousePromise=null;throw error;}})();return warehousePromise;};
     const source=async container=>{
       const code=C.clean(container);if(!C.container(code))throw new Error('Invalid source container');
       const payload=await api(PATH.source,{method:'POST',body:scanSourcePayload(code)});
@@ -70,26 +72,15 @@ V3.sideline=(()=>{
     const close=async(container,empty=false)=>{
       const code=C.clean(container);if(!C.container(code))throw new Error('Invalid container');
       const op=C.operation({kind:'sideline-close',ref:code,telemetry});op.submitted();
-      let payload;try{payload=await api(PATH.close,{method:'POST',body:closePayload(code,empty)});}catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('CLOSE OUTCOME UNKNOWN — '+code+' — VERIFY BEFORE RETRY',{cause:error});}
-      if(C.clean(payload?.['@type'])!=='CloseContainerResponse'||payload?.success!==true){op.rejected({reason:moveReason(payload)});throw new C.RejectedError(C.clean(payload?.message||payload?.description||payload?.['@type']||'CLOSE REJECTED'));}
+      let response;try{response=await api(PATH.close,{method:'POST',body:closePayload(code,empty),allowHttpError:true,fullResponse:true});}catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('CLOSE OUTCOME UNKNOWN — '+code+' — VERIFY BEFORE RETRY',{cause:error});}
+      const payload=response.data;
+      if(response.status>=500||response.status===408||!payload||typeof payload!=='object'){op.unknown({reason:'ambiguous-response'});throw new C.UnknownError('CLOSE OUTCOME UNKNOWN — verify '+code);}
+      if(C.clean(payload?.['@type'])!=='CloseContainerResponse'||payload?.success!==true){if(payload.success!==false){op.unknown({reason:'unexpected-response'});throw new C.UnknownError('CLOSE response ambiguous — verify '+code);}op.rejected({reason:moveReason(payload)});throw new C.RejectedError(C.clean(payload?.message||payload?.description||payload?.['@type']||'CLOSE REJECTED'));}
       op.confirmed();return payload;
     };
-    const rawItem=(sourceContainer,barcode,signal)=>api(PATH.item,{method:'POST',body:scanItemPayload(sourceContainer,barcode),signal,allowHttpError:true});
-    const hazmat=async asinValue=>{
-      const asin=C.upper(asinValue),fc=await warehouse();if(!/^B[A-Z0-9]{9}$/.test(asin)||!fc)throw new Error('HAZMAT LOOKUP CONTEXT MISSING');
-      const key=fc+'|'+asin,cached=hazmatCache.get(key);if(cached&&Date.now()-cached.at<6*60*60*1000)return cached.value;
-      if(!restriction){const b=await C.request('https://pandash.amazon.com/GridServlet?fc='+encodeURIComponent(fc),{timeout:8000});restriction=C.clean(b.data?.restriction||'default')||'default';}
-      let last;
-      for(let attempt=0;attempt<2;attempt++){
-        try{
-          const form='language=default&source='+encodeURIComponent(restriction)+'-hazmat-FC&marketPlaces=AU&asins='+encodeURIComponent(asin)+'&rows=1&page=1&fc='+encodeURIComponent(fc);
-          const r=await C.request('https://pandash.amazon.com/GridServlet',{method:'POST',body:form,headers:{'Content-Type':'application/x-www-form-urlencoded'},timeout:8000}),row=Array.isArray(r.data?.rows)?r.data.rows.find(x=>C.upper(x?.asin)===asin):null;
-          if(!row)throw new Error('NO PANDASH RESULT');
-          const value={asin,level:Number(row.level||0),message:C.clean(row.message),allowed:/can be processed/i.test(C.clean(row.message))};hazmatCache.set(key,{value,at:Date.now()});return value;
-        }catch(error){last=error;if(attempt===0)await life.sleep(150);}
-      }
-      throw last||new Error('HAZMAT LOOKUP FAILED');
-    };
+    const rawItem=(sourceContainer,barcode,signal)=>api(PATH.item,{method:'POST',body:scanItemPayload(sourceContainer,barcode),signal});
+    const pandashService=V3.pandash.create({life});
+    const hazmat=async asin=>pandashService.lookup(asin,await warehouse());
     const classify=async(response,barcode)=>{
       let result=baseClassify(response,barcode);
       if(result.kind==='red'||!result.ctx?.hazmat)return result;
@@ -110,17 +101,22 @@ V3.sideline=(()=>{
       return{itemExternalId:null,sourceContainerScannableId:sourceContainer,destinationContainerScannableId:destination,scannableId:C.clean(item.scannableId||ctx.barcode),quantity:String(Math.max(1,Number(qty)||1)),itemDetails:records.map(record=>{const s=record.skuDetail||sku;return{fcsku:C.clean(s.fcSku),quantity:Number.isFinite(Number(record.quantity))?Number(record.quantity):0,consumerType:record.consumer??null,disposition:record.disposition??null,referenceId:record.referenceId??null,fnsku:C.clean(s.fnSku)};}),foundProblems:[null,null,null],scannedSourceContainerAsDestination:false,datelotDetail:sku.datelotDetail||null,userEnteredExpirationDate:expirationMs??null,mlcCaptureDetail:{mlcClass:sku.mlcDetail?.mlcClass??'UNKNOWN',userEnteredLotCode:null,mlcMissing:sku.mlcDetail?.mlcMissing??false,mlcNotEnteredReason:null,mlcCaptureMethod:null},itemMovedToISS:false,candidatePurchaseOrders:[],packHierarchyDetail:null,itemAndonContext:null,processPath:sourceMeta?.processPath??'UNDETERMINED',requestId:requestId(),tool:TOOL};
     };
     const move=async({sourceContainer,destination,sourceMeta,preflightResult,qty=1,expirationMs=null})=>{
+      if(!C.container(sourceContainer)||!C.container(destination)||C.upper(sourceContainer)===C.upper(destination))throw new Error('Valid different containers required');
+      if(!Number.isSafeInteger(Number(qty))||Number(qty)<1)throw new Error('Whole positive quantity required');
       const ctx=preflightResult?.result?.ctx||preflightResult?.ctx;if(!ctx?.ok)throw new Error('Item was not safely preflighted');
       const payload=movePayload(sourceContainer,destination,sourceMeta,ctx,qty,expirationMs),ref=ctx.barcode||ctx.fnsku||ctx.asin;
       const op=C.operation({kind:'sideline-move',ref,telemetry});op.submitted({qty:Number(qty)||1});
       let response;
-      try{response=await api(PATH.move,{method:'POST',body:payload,allowHttpError:true});}
+      try{response=await api(PATH.move,{method:'POST',body:payload,allowHttpError:true,fullResponse:true});}
       catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('MOVE OUTCOME UNKNOWN — '+C.clean(ref)+' — VERIFY BEFORE RETRY',{cause:error});}
-      if(moveOk(response)){op.confirmed({reason:allowedOverage(response)?'overage':'success'});return response;}
-      const reason=moveReason(response);op.rejected({reason});const e=new C.RejectedError(reason);e.predicant=hasPredicant(response);e.recoverable=damagedDestination(response)||/DESTINATION INCOMPATIBLE/i.test(reason);throw e;
+      const result=response.data;
+      if(response.status>=500||response.status===408||!result||typeof result!=='object'){op.unknown({reason:'ambiguous-response'});throw new C.UnknownError('MOVE OUTCOME UNKNOWN — '+C.clean(ref)+' — VERIFY BEFORE RETRY');}
+      if(!response.httpError&&moveOk(result)){op.confirmed({reason:allowedOverage(result)?'overage':'success'});return result;}
+      if(result.success!==false&&result.filterResult?.compatible!==false&&!hasPredicant(result)&&!hazmatRejected(result)){op.unknown({reason:'unrecognized-response'});throw new C.UnknownError('MOVE response ambiguous — verify '+C.clean(ref));}
+      const reason=moveReason(result);op.rejected({reason});const e=new C.RejectedError(reason);e.predicant=hasPredicant(result);e.recoverable=damagedDestination(result)||/DESTINATION INCOMPATIBLE/i.test(reason);throw e;
     };
     return Object.freeze({warehouse,source,close,preflight,hazmat,move,movePayload});
   }
 
-  return Object.freeze({ORIGIN,PATH,scanSourcePayload,scanItemPayload,closePayload,resolveItem,baseClassify,allowedOverage,hazmatRejected,damagedDestination,hasPredicant,moveOk,moveReason,validDate,pao900,create});
+  return Object.freeze({ORIGIN,PATH,scanSourcePayload,scanItemPayload,closePayload,resolveItem,baseClassify,allowedOverage,hazmatRejected,damagedDestination,hasPredicant,moveOk,moveReason,validDate,create});
 })();

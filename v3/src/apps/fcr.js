@@ -1,30 +1,16 @@
 V3.boot=()=>{
   const C=V3.core,life=C.lifecycle('fcr'),telemetry=C.telemetry('fcr',V3.build.version),fcr=V3.fcr.create({life,telemetry});
+  if(location.origin===V3.measurement.SITE){V3.measurement.native({life});return;}
+  if(window.parent!==window)return;
+  if(!document.body){life.on(document,'DOMContentLoaded',()=>{life.dispose();V3.boot();},{once:true});return;}
   const current=()=>C.clean(new URL(location.href).searchParams.get('s')||'');
   const print=async(code,title='')=>{
     const value=C.clean(code);if(!value)throw new Error('Barcode required');
     const hex=v=>Array.from(new TextEncoder().encode(String(v??''))).map(b=>b.toString(16).padStart(2,'0')).join('');
-    return C.request('http://localhost:5965/printer?action=print&type=barcode&data='+hex(value)+'&text='+hex(value)+'&quantity=1&desc='+hex(C.clean(title))+'&seq='+Date.now(),{timeout:5000});
+    return C.request('http://localhost:5965/printer?action=print&type=barcode&data='+hex(value)+'&text='+hex(value)+'&quantity=1&desc='+hex(C.clean(title))+'&seq='+Date.now(),{timeout:5000,allowHtml:true});
   };
 
   const currentContainer=()=>C.container(current())?current():'';
-
-  // Cheap native-table conflict marking only: no background network.
-  const decorateInventory=table=>{
-    if(!table||table.dataset.v3Conflict==='1')return;
-    table.dataset.v3Conflict='1';
-    const heads=[...table.querySelectorAll('thead th')].map(x=>C.lower(String(x.textContent||'').replace(/\(\d+\)/g,'')));
-    const idx=name=>heads.findIndex(x=>x===name),ci=idx('container'),fi=idx('fnsku'),xi=idx('fcsku');
-    if(ci<0||fi<0||xi<0)return;
-    const groups=new Map();
-    for(const row of table.tBodies?.[0]?.rows||[]){const key=C.upper(row.cells[ci]?.textContent)+'|'+C.upper(row.cells[fi]?.textContent),fc=C.upper(row.cells[xi]?.textContent);if(!key||!fc)continue;if(!groups.has(key))groups.set(key,new Set());groups.get(key).add(fc);}
-    for(const row of table.tBodies?.[0]?.rows||[]){const key=C.upper(row.cells[ci]?.textContent)+'|'+C.upper(row.cells[fi]?.textContent);if((groups.get(key)?.size||0)>1){row.style.outline='3px solid #8b1d1d';row.style.outlineOffset='-3px';row.title='V3: same Container + FNSKU has multiple FCSKUs';}}
-  };
-  const findAndDecorate=()=>{
-    const table=document.querySelector('#table-inventory');if(table)decorateInventory(table);
-  };
-  requestAnimationFrame(findAndDecorate);
-  const initialObserver=life.observe(document.body,()=>{const table=document.querySelector('#table-inventory');if(table){decorateInventory(table);initialObserver?.disconnect();}},{childList:true,subtree:true});
 
   function itemPanel(){
     const panel=C.panel({id:'fcr-item',title:'V3 · FCR Item',width:560,life});let mounted=false;
@@ -39,7 +25,7 @@ V3.boot=()=>{
       const match=(product,raw)=>{const keys=[raw,product?.asin,product?.isbn,product?.fnsku,product?.fcsku].map(C.upper).filter(Boolean),seen=new Set(),out=[];for(const key of keys)for(const row of state.lookup.get(key)||[]){const id=[row.container,row.asin,row.fnsku,row.fcsku,row.disposition].join('|');if(!seen.has(id)){seen.add(id);out.push(row);}}return out;};
       const paint=()=>{const total=state.rows.reduce((s,r)=>s+Number(r.qty||0),0),scanned=state.rows.reduce((s,r)=>s+Number(r._scan||0),0);q('[data-summary]').textContent=(state.container||'NO CONTAINER')+' · '+scanned+'/'+total+' units';q('[data-msg]').textContent=state.message;q('[data-scans]').innerHTML=[...state.scans.values()].reverse().map(r=>'<div class="v3-list-row"><button class="v3-btn" data-print="'+C.esc(r.raw)+'">'+C.esc(r.raw)+(r.count>1?' ×'+r.count:'')+'</button> · <b class="'+(r.state==='found'?'v3-ok':r.state==='missing'?'v3-bad':'v3-warn')+'">'+r.state.toUpperCase()+'</b></div>').join('')||'<div class="v3-note">No scans.</div>';q('[data-system]').innerHTML=state.rows.map(r=>'<div class="v3-list-row"><b>'+C.esc(r.fnsku||r.fcsku||r.asin||'—')+'</b> · '+Number(r._scan||0)+'/'+Number(r.qty||0)+' · '+C.esc(r.title||r.asin||'')+'</div>').join('')||'<div class="v3-note">No inventory loaded.</div>';for(const b of q('[data-scans]').querySelectorAll('[data-print]'))b.onclick=async()=>{const rec=state.scans.get(C.upper(b.dataset.print));try{await print(rec.raw,rec.product?.title||'');state.message='Printed '+rec.raw;}catch(e){state.message='Print failed: '+e.message;}paint();};};
       const load=async code=>{const seq=++state.seq;state.container=code;state.loading=true;state.rows=[];state.lookup=new Map();state.pending=[];state.scans.clear();state.message='Loading full inventory…';paint();try{const result=await fcr.inventory(code,{onPreview:p=>{if(seq===state.seq){state.message='Loading inventory page '+p.pages+'…';paint();}}});if(seq!==state.seq)return;state.rows=result.rows;state.lookup=lookup(result.rows);state.loading=false;state.message='Ready';const queued=state.pending.splice(0);paint();for(const v of queued)await handle(v);}catch(e){if(seq===state.seq){state.loading=false;state.message='Inventory failed: '+e.message;paint();}}};
-      const handle=async value=>{const raw=C.clean(value);if(!raw)return;if(!state.container){if(!C.container(raw)){state.message='SCAN SOURCE CONTAINER FIRST';paint();return;}return load(raw);}if(C.container(raw)&&C.upper(raw)!==C.upper(state.container))return load(raw);if(state.loading){state.pending.push(raw);state.message='Queued '+state.pending.length+' scan(s)';paint();return;}const key=C.upper(raw),old=state.scans.get(key);if(old){old.count++;allocate(old.matches);state.message=raw+' ×'+old.count;paint();return;}const rec={raw,count:1,state:'checking',matches:[],product:null};state.scans.set(key,rec);paint();try{try{rec.product=await fcr.product(raw);}catch{}rec.matches=match(rec.product,raw);rec.state=rec.matches.length?'found':'missing';if(rec.matches.length)allocate(rec.matches);state.message=rec.matches.length?'IN '+state.container:'NOT IN '+state.container;telemetry.emit('tote.scan',{code:C.mask(raw),found:Boolean(rec.matches.length)});}catch(e){rec.state='error';state.message=e.message;}paint();};
+      const handle=async value=>{const raw=C.clean(value);if(!raw)return;if(!state.container){if(!C.container(raw)){state.message='SCAN SOURCE CONTAINER FIRST';paint();return;}return load(raw);}if(C.container(raw)&&C.upper(raw)!==C.upper(state.container))return load(raw);if(state.loading){state.pending.push(raw);state.message='Queued '+state.pending.length+' scan(s)';paint();return;}const key=C.upper(raw),old=state.scans.get(key);if(old){old.count++;allocate(old.matches);state.message=raw+' ×'+old.count;paint();return;}const seq=state.seq;const rec={raw,count:1,state:'checking',matches:[],product:null};state.scans.set(key,rec);paint();try{try{rec.product=await fcr.product(raw);}catch(error){if(!state.lookup.has(key))throw error;}if(seq!==state.seq)return;rec.matches=match(rec.product,raw);rec.state=rec.matches.length?'found':'missing';if(rec.matches.length)allocate(rec.matches);state.message=rec.matches.length?'IN '+state.container:'NOT IN '+state.container;telemetry.emit('tote.scan',{code:C.mask(raw),found:Boolean(rec.matches.length)});}catch(e){if(seq!==state.seq)return;rec.state='error';state.message=e.message;}paint();};
       scan.onkeydown=async e=>{if(e.key!=='Enter')return;e.preventDefault();const v=scan.value;scan.value='';await handle(v);scan.focus({preventScroll:true});};q('[data-reset]').onclick=()=>{state.seq++;Object.assign(state,{container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),message:'Scan source container'});paint();scan.focus();};paint();}panel.open();}};
   }
 
@@ -59,15 +45,25 @@ V3.boot=()=>{
     return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">ASIN<input data-asin></label><button class="v3-btn primary" data-run>CHECK</button><div class="v3-note" data-msg></div></section>';panel.set(root);const input=root.querySelector('[data-asin]'),msg=root.querySelector('[data-msg]');input.value=/^B[A-Z0-9]{9}$/i.test(current())?current():'';root.querySelector('[data-run]').onclick=async()=>{try{let asin=C.upper(input.value);if(!asin){const p=await fcr.product(current());asin=C.upper(p?.asin);input.value=asin;}const x=await fcr.pandash(asin);msg.className='v3-note '+(x.allowed?'v3-ok':'v3-bad');msg.textContent='L'+x.level+' · '+x.message;}catch(e){msg.className='v3-note v3-bad';msg.textContent=e.message;}};}panel.open();}};
   }
 
-  function movePanel(){
-    const panel=C.panel({id:'fcr-move',title:'V3 · MoveContainer',width:560,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">Container<input data-container></label><div class="v3-grid"><label class="v3-field">Floor<select data-floor>'+V3.actions.FLOORS.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Destination<select data-drop></select></label></div><div class="v3-row"><button class="v3-btn primary" data-run>MOVE</button></div><div class="v3-note" data-msg></div></section>';panel.set(root);const container=root.querySelector('[data-container]'),floor=root.querySelector('[data-floor]'),drop=root.querySelector('[data-drop]'),msg=root.querySelector('[data-msg]');container.value=currentContainer();floor.value='P2';const drops=()=>{drop.innerHTML='<option value="PRIME">PRIME</option>'+V3.actions.dropChoices(floor.value).map(x=>'<option value="'+C.esc(x.key)+'">'+C.esc(x.label)+'</option>').join('');};floor.onchange=drops;drops();root.querySelector('[data-run]').onclick=async()=>{try{msg.className='v3-note v3-warn';msg.textContent='MOVING…';const dest=V3.actions.destination(floor.value,drop.value);await V3.actions.moveContainer(container.value,dest,{telemetry});msg.className='v3-note v3-ok';msg.textContent='MOVED → '+dest;}catch(e){msg.className='v3-note '+(e.outcome==='unknown'?'v3-bad':'v3-warn');msg.textContent=(e.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+e.message;}};}panel.open();}};
+  function actionPanel({family,id,title,path,origin,button,fields,prepare}) {
+    const panel=C.panel({id,title,width:560,life});let mounted=false,external=null,runContext=null;
+    const worker=V3.bridge.client({origin,path,family,life,onEvent:detail=>window.dispatchEvent(new CustomEvent('bwu2-v3:event',{detail}))});
+    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');
+      root.innerHTML='<section class="v3-section"><label class="v3-field">Container<input data-container></label>'+fields+'<div class="v3-row"><button class="v3-btn primary" data-run>'+button+'</button><button class="v3-btn danger" data-verify hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-msg></div></section>';
+      panel.set(root);const input=root.querySelector('[data-container]'),run=root.querySelector('[data-run]'),verify=root.querySelector('[data-verify]'),msg=root.querySelector('[data-msg]');input.value=currentContainer();
+      const key='bwu2.v3.form.fcr.'+family;let busy=false,blocked=localStorage.getItem(key)||'';
+      const paint=()=>{run.disabled=busy||Boolean(blocked);verify.hidden=!blocked;for(const field of root.querySelectorAll('input,select'))field.disabled=busy;};
+      const payload=prepare?.(root)||(()=>({container:input.value}));
+      run.onclick=async()=>{if(busy||blocked)return;let sent=false;busy=true;paint();try{const data=external||payload();external=null;if(!C.container(data.container))throw new Error('Valid container required');
+        localStorage.setItem(key,'Unfinished '+button+' · verify '+data.container);sent=true;msg.textContent=button+'…';await worker.run('run',data);msg.textContent=button+' CONFIRMED';localStorage.removeItem(key);
+      }catch(error){if(error.outcome==='unknown'){blocked=error.message;localStorage.setItem(key,blocked);}else if(sent)localStorage.removeItem(key);msg.textContent=error.message;}finally{busy=false;paint();}};
+      verify.onclick=async()=>{if(busy)return;try{await worker.run('resolve');blocked='';localStorage.removeItem(key);msg.textContent='Attention cleared';paint();}catch(error){msg.textContent=error.message;}};
+      runContext=async data=>{if(busy||blocked)return;external=data;await run.onclick();};msg.textContent=blocked?'VERIFY PREVIOUS ACTION · '+blocked:'Ready';paint();}panel.open();},async runContext(data){this.open();await runContext(data);}};
   }
-
-  function unbindPanel(){
-    const panel=C.panel({id:'fcr-unbind',title:'V3 · Unbind',width:480,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">Container<input data-container></label><button class="v3-btn primary" data-run>UNBIND</button><div class="v3-note" data-msg></div></section>';panel.set(root);const input=root.querySelector('[data-container]'),msg=root.querySelector('[data-msg]');input.value=currentContainer();root.querySelector('[data-run]').onclick=async()=>{try{const login=C.identity({pageWindow:typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window}).login;if(!login)throw new Error('Authenticated employee identity unavailable');msg.className='v3-note v3-warn';msg.textContent='UNBINDING…';await V3.actions.unbind(input.value,login,{telemetry});msg.className='v3-note v3-ok';msg.textContent='UNBOUND';}catch(e){msg.className='v3-note '+(e.outcome==='unknown'?'v3-bad':'v3-warn');msg.textContent=(e.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+e.message;}};}panel.open();}};
-  }
+  function movePanel(){return actionPanel({family:'movecontainer',id:'fcr-move',title:'V3 · MoveContainer',path:'/move-container',origin:V3.actions.MOVE_ORIGIN,button:'MOVE',
+    fields:'<div class="v3-grid"><label class="v3-field">Floor<select data-floor>'+V3.actions.FLOORS.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Destination<select data-drop></select></label></div>',
+    prepare:root=>{const floor=root.querySelector('[data-floor]'),drop=root.querySelector('[data-drop]');floor.value='P2';const fill=()=>{drop.innerHTML='<option value="PRIME">PRIME</option>'+V3.actions.dropChoices(floor.value).map(x=>'<option value="'+C.esc(x.key)+'">'+C.esc(x.label)+'</option>').join('');};floor.onchange=fill;fill();return()=>({container:root.querySelector('[data-container]').value,destination:V3.actions.destination(floor.value,drop.value)});}});}
+  function unbindPanel(){return actionPanel({family:'hierarchy',id:'fcr-unbind',title:'V3 · Unbind',path:'/unbindHierarchy',origin:V3.actions.HIERARCHY_ORIGIN,button:'UNBIND',fields:''});}
 
   const tools=[
     ['fcr-item','ITEM','Product / exact print',itemPanel()],
@@ -77,6 +73,7 @@ V3.boot=()=>{
     ['fcr-move','MOVE','MoveContainer',movePanel()],
     ['fcr-unbind','UNBIND','Unbind',unbindPanel()]
   ];
+  V3.fcrNative.mount({life,telemetry,fcr,print,move:tools.find(row=>row[0]==='fcr-move')[3],unbind:tools.find(row=>row[0]==='fcr-unbind')[3]});
   for(const [id,label,title,tool] of tools)C.dockButton({id,label,title,onClick:tool.open});
   C.dockButton({id:'fcr-iss',label:'ISS',title:'Open standalone V3 ISS Console',onClick:()=>{const url='https://aft-poirot-website-nrt.nrt.proxy.amazon.com/#iss-console';if(typeof GM_openInTab==='function')GM_openInTab(url,{active:true,insert:true});else window.open(url,'_blank','noopener');}});
 };

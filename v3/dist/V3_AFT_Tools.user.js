@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 AFT Tools
 // @name:en      V3 | BWU2 AFT Tools
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.1.0
+// @version      0.2.0
 // @description  Native EditItems, MoveItems and FCSKU helper using one AFT engine.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -11,13 +11,13 @@
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js
-// @v3-build     aft-0.1.0-311c8761
+// @v3-build     aft-0.2.0-e65b5cea
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"aft-0.1.0-311c8761","version":"0.1.0"});
+V3.build=Object.freeze({"id":"aft-0.2.0-e65b5cea","version":"0.2.0"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -26,7 +26,6 @@ V3.core=(()=>{
   const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
   const container=v=>/^(?:ts|cs)x[0-9a-z_-]+$/i.test(clean(v));
   const lines=(v,{dedupe=true}={})=>{const out=[],seen=new Set();for(const raw of String(v??'').split(/[\r\n,]+/)){const x=clean(raw.split(/\s+/)[0]);if(!x)continue;const k=upper(x);if(dedupe&&seen.has(k))continue;seen.add(k);out.push(x);}return out;};
-  const clamp=(v,min,max)=>Math.max(min,Math.min(max,Number(v)||0));
   const id=prefix=>String(prefix||'v3')+'-'+(globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
   const sleep=(ms,signal)=>new Promise((resolve,reject)=>{if(signal?.aborted)return reject(new DOMException('Aborted','AbortError'));const t=setTimeout(done,Math.max(0,Number(ms)||0));function abort(){clearTimeout(t);reject(new DOMException('Aborted','AbortError'));}function done(){signal?.removeEventListener('abort',abort);resolve();}signal?.addEventListener('abort',abort,{once:true});});
   const html=raw=>new DOMParser().parseFromString(String(raw??''),'text/html');
@@ -36,90 +35,43 @@ V3.core=(()=>{
     const own=fn=>{if(typeof fn==='function')disposers.add(fn);return fn;};
     const on=(target,type,fn,options={})=>{if(dead||!target?.addEventListener)return()=>{};const o=typeof options==='boolean'?{capture:options,signal:controller.signal}:{...options,signal:controller.signal};target.addEventListener(type,fn,o);return()=>target.removeEventListener(type,fn,o);};
     const observe=(target,fn,options)=>{if(dead||!target||typeof MutationObserver==='undefined')return null;const observer=new MutationObserver(fn);observer.observe(target,options);own(()=>observer.disconnect());return observer;};
-    const timeout=(fn,ms)=>{if(dead)return 0;const t=setTimeout(()=>{if(!dead)fn();},Math.max(0,Number(ms)||0));own(()=>clearTimeout(t));return t;};
-    const interval=(fn,ms)=>{if(dead)return 0;const t=setInterval(()=>{if(!dead)fn();},Math.max(250,Number(ms)||0));own(()=>clearInterval(t));return t;};
+    const timeout=(fn,ms)=>{if(dead)return 0;const cancel=()=>clearTimeout(t);const t=setTimeout(()=>{disposers.delete(cancel);if(!dead)fn();},Math.max(0,Number(ms)||0));own(cancel);return t;};
     const dispose=()=>{if(dead)return;dead=true;controller.abort();for(const fn of [...disposers])try{fn();}catch{}disposers.clear();};
-    return Object.freeze({name,signal:controller.signal,own,on,observe,timeout,interval,sleep:ms=>sleep(ms,controller.signal),dispose,get disposed(){return dead;}});
+    if(typeof window.addEventListener==='function')on(window,'pagehide',dispose,{once:true});
+    return Object.freeze({name,signal:controller.signal,own,on,observe,timeout,sleep:ms=>sleep(ms,controller.signal),dispose,get disposed(){return dead;}});
   }
 
-  const gmGet=async(k,d)=>{try{if(typeof GM==='object'&&GM?.getValue)return await GM.getValue(k,d);if(typeof GM_getValue==='function')return GM_getValue(k,d);}catch{}return d;};
-  const gmSet=async(k,v)=>{try{if(typeof GM==='object'&&GM?.setValue)return await GM.setValue(k,v);if(typeof GM_setValue==='function')return GM_setValue(k,v);}catch{}};
+  const gmGet=async(k,d)=>{if(typeof GM==='object'&&GM?.getValue)return await GM.getValue(k,d);if(typeof GM_getValue==='function')return GM_getValue(k,d);throw new Error('Userscript storage unavailable');};
+  const gmSet=async(k,v)=>{if(typeof GM==='object'&&GM?.setValue)return await GM.setValue(k,v);if(typeof GM_setValue==='function')return GM_setValue(k,v);throw new Error('Userscript storage unavailable');};
   function store(namespace,version=1){
     const prefix='bwu2.v3.'+namespace+'.v'+version+'.';
     return Object.freeze({get:(k,d)=>gmGet(prefix+k,d),set:(k,v)=>gmSet(prefix+k,v),key:k=>prefix+k});
   }
 
   const mask=value=>{const s=clean(value);if(!s)return'';let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return'#'+(h>>>0).toString(16).padStart(8,'0');};
-  const sanitize=value=>{
+  const sanitize=(value,depth=0)=>{
+    if(depth>6)return '[depth limit]';
     if(value==null||typeof value==='boolean'||typeof value==='number')return value;
-    if(typeof value==='string')return value.length>280?value.slice(0,280)+'…':value;
-    if(Array.isArray(value))return value.slice(0,20).map(sanitize);
-    if(typeof value==='object'){const out={};for(const [k,v] of Object.entries(value)){if(/cookie|authorization|csrf|token|password|secret|header/i.test(k))continue;out[k]=sanitize(v);}return out;}
+    if(typeof value==='string')return value.replace(/(?:Bearer\s+)[^\s]+|(?:token|csrf|password|cookie|authorization)[=:]\s*[^\s&]+/gi,'[redacted]').slice(0,280);
+    if(Array.isArray(value))return value.slice(0,20).map(item=>sanitize(item,depth+1));
+    if(typeof value==='object'){const out={};for(const [k,v] of Object.entries(value)){if(/cookie|authorization|csrf|token|password|secret|header/i.test(k))continue;out[k]=sanitize(v,depth+1);}return out;}
     return String(value);
   };
   function telemetry(tool,version){
     const emit=(event,data={})=>{try{window.dispatchEvent(new CustomEvent('bwu2-v3:event',{detail:{ts:Date.now(),tool,version,event,href:location.origin+location.pathname,data:sanitize(data)}}));}catch{}};
-    return Object.freeze({emit,mask});
+    return Object.freeze({tool,emit,mask});
   }
 
   class UnknownError extends Error{constructor(message,details={}){super(message);this.name='UnknownError';this.outcome='unknown';Object.assign(this,details);}}
   class RejectedError extends Error{constructor(message,details={}){super(message);this.name='RejectedError';this.outcome='rejected';Object.assign(this,details);}}
-  function operation({kind,ref,telemetry:obs}={}){
-    let state='PREPARED',terminal=false;const opId=id('op');
-    const move=(next,data={})=>{if(terminal)throw new Error('Operation already terminal: '+state);const allowed={PREPARED:['SUBMITTED','REJECTED'],SUBMITTED:['CONFIRMED','REJECTED','UNKNOWN']}[state]||[];if(!allowed.includes(next))throw new Error('Illegal operation transition '+state+' -> '+next);state=next;terminal=['CONFIRMED','REJECTED','UNKNOWN'].includes(next);obs?.emit('operation',{id:opId,kind,ref:mask(ref),state,...data});return state;};
-    return Object.freeze({id:opId,get state(){return state;},submitted:d=>move('SUBMITTED',d),confirmed:d=>move('CONFIRMED',d),rejected:d=>move('REJECTED',d),unknown:d=>move('UNKNOWN',d)});
-  }
-
-  function queue({name,life,validate=container}={}){
-    const s=store('queue.'+name,1),owner=id('tab'),lockKey='bwu2.v3.queue.lock.'+name;let loaded=false,state={running:false,current:'',phase:'idle',message:'Ready',items:[]};
-    const save=()=>s.set('state',state);
-    const load=async()=>{if(loaded)return state;const raw=await s.get('state',null);if(raw&&Array.isArray(raw.items))state={...state,...raw,items:raw.items.filter(x=>validate(x?.id)).map(x=>({...x}))};for(const item of state.items){if(item.status==='active'||item.id===state.current){item.status='attention';item.error='Previous session ended during active work — verify before retry';}}state.running=false;state.current='';state.phase='idle';loaded=true;await save();return state;};
-    const lock=()=>{try{return JSON.parse(localStorage.getItem(lockKey)||'null');}catch{return null;}};
-    const acquire=()=>{const now=Date.now(),old=lock();if(old&&old.owner!==owner&&Number(old.expires)>now)return false;const next={owner,nonce:id('lock'),expires:now+9000};localStorage.setItem(lockKey,JSON.stringify(next));const check=lock();return check?.owner===owner&&check?.nonce===next.nonce;};
-    const renew=()=>{const x=lock();if(x?.owner===owner)localStorage.setItem(lockKey,JSON.stringify({...x,expires:Date.now()+9000}));};
-    const release=()=>{const x=lock();if(x?.owner===owner)localStorage.removeItem(lockKey);};
-    life?.interval(()=>{if(state.running)renew();},3000);life?.own(release);
-    const add=async values=>{await load();const seen=new Set(state.items.map(x=>upper(x.id)));for(const raw of values){const v=clean(raw),k=upper(v);if(!validate(v)||seen.has(k))continue;seen.add(k);state.items.push({id:v,status:'queued',error:'',phase:''});}await save();return state.items;};
-    const set=async patch=>{Object.assign(state,patch);await save();};
-    const item=async(target,patch)=>{Object.assign(target,patch);await save();};
-    const next=()=>state.items.find(x=>x.status==='queued')||null;
-    const clearDone=async()=>{state.items=state.items.filter(x=>x.status!=='done');await save();};
-    return Object.freeze({owner,load,save,add,set,item,next,acquire,release,clearDone,get state(){return state;}});
-  }
-
-  const authLike=(status,contentType,finalUrl,raw)=>{const htmlish=/text\/html|application\/xhtml/i.test(contentType||'')||/^\s*(?:<!doctype\s+html|<html\b)/i.test(raw||'');const auth=[401,403,419].includes(Number(status))||/(?:login|signin|midway|sso|auth)/i.test(finalUrl||'')||(htmlish&&/\b(?:sign\s*in|log\s*in|authentication|midway|single\s+sign[- ]?on)\b/i.test(raw||''));return{html:htmlish,auth};};
-  const parseData=raw=>{try{return raw?JSON.parse(raw):null;}catch{return raw;}};
-  const classify=(result,options={})=>{const flags=authLike(result.status,result.contentType,result.finalUrl,result.raw);if(flags.auth||(flags.html&&options.allowHtml!==true))throw Object.assign(new Error('Authentication/HTML response instead of expected API response'),{status:result.status,flags});if((result.status<200||result.status>=300)&&options.allowHttpError!==true)throw Object.assign(new Error('HTTP '+result.status),{status:result.status,body:parseData(result.raw)});return{...result,data:parseData(result.raw),flags,httpError:result.status<200||result.status>=300};};
-  async function request(url,options={}){
-    const same=new URL(url,location.href).origin===location.origin;
-    if(same){
-      const response=await fetch(url,{method:options.method||'GET',body:options.body,headers:options.headers||{},credentials:'same-origin',cache:'no-store',redirect:'follow',signal:options.signal});
-      const raw=await response.text();return classify({status:response.status,raw,finalUrl:response.url||url,contentType:response.headers.get('content-type')||'',response},options);
-    }
-    const gm=typeof GM==='object'&&typeof GM.xmlHttpRequest==='function'?GM.xmlHttpRequest:null;
-    if(gm){
-      const response=await gm({method:options.method||'GET',url,data:options.body,headers:options.headers||{},timeout:options.timeout||15000,redirect:'follow'});
-      const raw=String(response.responseText??'');const ct=String(response.responseHeaders||'').match(/content-type:\s*([^\r\n]+)/i)?.[1]||'';
-      return classify({status:response.status,raw,finalUrl:response.finalUrl||url,contentType:ct,response},options);
-    }
-    if(typeof GM_xmlhttpRequest!=='function')throw new Error('Cross-origin request unavailable');
-    return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:options.method||'GET',url,data:options.body,headers:options.headers||{},timeout:options.timeout||15000,onload:r=>{try{resolve(classify({status:r.status,raw:String(r.responseText||''),finalUrl:r.finalUrl||url,contentType:String(r.responseHeaders||'').match(/content-type:\s*([^\r\n]+)/i)?.[1]||'',response:r},options));}catch(e){reject(e);}},ontimeout:()=>reject(new Error('Request timeout')),onerror:()=>reject(new Error('Network error')),onabort:()=>reject(new DOMException('Aborted','AbortError'))}));
-  }
+  const operation=options=>V3.state.operation(options);
+  const queue=options=>V3.state.queue(options);
+  const request=(url,options)=>V3.transport.request(url,options);
+  const authLike=(...args)=>V3.transport.authLike(...args);
 
   const LOGIN=/^[a-z][a-z0-9-]{2,31}$/i,RESERVED=/^(?:login|logout|signin|signout|username|employee|alias|user|account|profile|settings|help|admin)$/i;
   const normLogin=value=>{const v=clean(value);return LOGIN.test(v)&&!RESERVED.test(v)?v:'';};
-  const identity=({pageWindow=window}={})=>{
-    const candidates=[];
-    const add=(v,source,score)=>{const login=normLogin(v);if(login)candidates.push({login,source,score});};
-    try{
-      const objects=[pageWindow?.identity,pageWindow?.user,pageWindow?.currentUser,pageWindow?.bootstrapData?.user,pageWindow?.application?.user];
-      for(const obj of objects){if(!obj||typeof obj!=='object')continue;for(const k of ['login','alias','employeeLogin','userId','username'])add(obj[k],k,100);}
-    }catch{}
-    for(const selector of ['[data-login]','[data-employee-login]','[data-user-login]','[aria-label*="signed in" i]']){
-      for(const el of document.querySelectorAll(selector)){if(el.matches('input,textarea,[contenteditable="true"]'))continue;add(el.getAttribute('data-login')||el.getAttribute('data-employee-login')||el.getAttribute('data-user-login')||el.textContent,selector,70);}
-    }
-    candidates.sort((a,b)=>b.score-a.score);return candidates[0]||{login:'',source:'none',score:0};
-  };
+  const identity=options=>V3.identity.resolve(options);
 
   const STYLE_ID='bwu2-v3-core-style';
   const ensureStyle=()=>{if(document.getElementById(STYLE_ID)||!document.head)return;const s=document.createElement('style');s.id=STYLE_ID;s.dataset.bwu2Ui='1';s.textContent=`
@@ -127,7 +79,7 @@ V3.core=(()=>{
 [data-bwu2-v3-dock] button,.v3-btn{border:1px solid #526174;border-radius:8px;background:#202936;color:#f4f7fb;padding:7px 10px;font:700 12px Arial;cursor:pointer}
 [data-bwu2-v3-dock] button:hover,.v3-btn:hover{background:#2d394a}.v3-btn.primary{background:#284f75;border-color:#7ca6d3}.v3-btn.danger{background:#643532;border-color:#d98a82}
 .v3-panel{position:fixed;right:12px;top:12px;z-index:2147482999;width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 70px);display:flex;flex-direction:column;background:#111720;color:#eef3f8;border:1px solid #526174;border-radius:12px;box-shadow:0 16px 45px rgba(0,0,0,.45);font:13px/1.35 Arial,sans-serif}
-.v3-panel[hidden]{display:none}.v3-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #334154}.v3-head b{font-size:15px}.v3-head .spacer{flex:1}.v3-body{min-height:0;overflow:auto;padding:11px}
+.v3-panel[hidden]{display:none}.v3-expiry{position:fixed;inset:0;z-index:2147483647;background:#0008;display:grid;place-items:start center;padding:24px}.v3-expiry-card{width:min(850px,95vw);max-height:90vh;overflow:auto;background:#111720;color:#fff;border:2px solid #77879b;border-radius:12px;padding:14px;font:13px Arial}.v3-date-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:12px 0}.v3-date-grid section>div{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}.v3-date-grid .v3-btn{padding:8px 3px}.v3-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #334154}.v3-head b{font-size:15px}.v3-head .spacer{flex:1}.v3-body{min-height:0;overflow:auto;padding:11px}
 .v3-section{padding:10px;margin-bottom:9px;border:1px solid #334154;border-radius:9px;background:#18202b}.v3-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.v3-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.v3-field{display:block;font-weight:700;margin-bottom:8px}.v3-field input,.v3-field textarea,.v3-field select,.v3-input{box-sizing:border-box;width:100%;margin-top:4px;padding:7px 8px;border-radius:7px;border:1px solid #53647a;background:#0d131b;color:#fff;font:13px Arial}.v3-field textarea{min-height:80px;resize:vertical}.v3-note{color:#aebbc9}.v3-ok{color:#70d6a0}.v3-warn{color:#ffd166}.v3-bad{color:#ff827a}.v3-list-row{padding:6px 0;border-bottom:1px solid #2d3948}.v3-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.v3-tabs .active{background:#284f75;border-color:#7ca6d3}
 @media(max-width:650px){.v3-panel{right:6px;top:6px;width:calc(100vw - 12px);max-height:calc(100vh - 58px)}}
 `;document.head.appendChild(s);};
@@ -135,25 +87,286 @@ V3.core=(()=>{
   const closeAll=except=>{for(const [id,p] of panels)if(id!==except)p.hidden=true;};
   function panel({id,title,width=560,life}={}){
     ensureStyle();let el=document.querySelector('[data-bwu2-v3-panel="'+CSS.escape(id)+'"]');
-    if(!el){el=document.createElement('section');el.className='v3-panel';el.hidden=true;el.dataset.bwu2V3Panel=id;el.dataset.bwu2Ui='1';el.style.width='min('+width+'px,calc(100vw - 24px))';el.innerHTML='<div class="v3-head"><b>'+esc(title)+'</b><span class="spacer"></span><button class="v3-btn" data-close>×</button></div><div class="v3-body"></div>';document.body.appendChild(el);el.querySelector('[data-close]').onclick=()=>{el.hidden=true;};}
+    if(!el){el=document.createElement('section');el.className='v3-panel';el.hidden=true;el.dataset.bwu2V3Panel=id;el.dataset.bwu2Ui='1';el.style.width='min('+width+'px,calc(100vw - 24px))';el.innerHTML='<div class="v3-head"><b>'+esc(title)+' · '+esc(V3.build.version)+'</b><span class="spacer"></span><button class="v3-btn" data-close>×</button></div><div class="v3-body"></div>';document.body.appendChild(el);el.querySelector('[data-close]').onclick=()=>{el.hidden=true;};}
     panels.set(id,el);life?.own(()=>{panels.delete(id);el.remove();});
     const body=el.querySelector('.v3-body');
     return Object.freeze({el,body,open(){closeAll(id);el.hidden=false;},close(){el.hidden=true;},set(node){body.replaceChildren(node);}});
   }
   function dockButton({id,label,title,onClick}={}){
     ensureStyle();let dock=document.querySelector('[data-bwu2-v3-dock]');if(!dock){dock=document.createElement('div');dock.dataset.bwu2V3Dock='1';dock.dataset.bwu2Ui='1';document.body.appendChild(dock);}
-    let b=dock.querySelector('[data-v3-button="'+CSS.escape(id)+'"]');if(!b){b=document.createElement('button');b.dataset.v3Button=id;dock.appendChild(b);}b.textContent=label;b.title=title||label;b.onclick=onClick;return b;
+    let b=dock.querySelector('[data-v3-button="'+CSS.escape(id)+'"]');if(!b){b=document.createElement('button');b.dataset.v3Button=id;dock.appendChild(b);}b.textContent=label;b.title=(title||label)+' · '+V3.build.version;b.onclick=onClick;return b;
   }
 
-  function barcodeInput(input,onScan,{life,delay=80}={}){
-    let timer=0,last='';
-    const fire=()=>{timer=0;const v=clean(input.value);if(!v||v===last)return;last=v;onScan(v);};
-    const schedule=()=>{if(timer)clearTimeout(timer);timer=life?.timeout?life.timeout(fire,delay):setTimeout(fire,delay);};
-    life?.on(input,'input',schedule);life?.on(input,'keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(timer)clearTimeout(timer);timer=0;const v=clean(input.value);if(v){last=v;onScan(v);}}});
-    return()=>{if(timer)clearTimeout(timer);};
+  return Object.freeze({clean,upper,lower,esc,container,lines,id,sleep,html,lifecycle,store,telemetry,mask,sanitize,operation,UnknownError,RejectedError,queue,request,authLike,normLogin,identity,panel,dockButton});
+})();
+
+// ---- src/state.js ----
+V3.state = (() => {
+  const C = V3.core;
+  const read = (key, initial) => {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return initial;
+    try { return JSON.parse(raw); }
+    catch { throw new Error('Saved workflow data is unreadable — kept for inspection'); }
+  };
+  const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+  const keyFor = name => 'bwu2.v3.state.' + name;
+  const attention = name => read(keyFor('mutation.' + name), null);
+  const assertClear = name => {
+    const pending = attention(name);
+    if (pending) throw new C.UnknownError('VERIFY PREVIOUS ' + pending.kind + ' · ' + pending.ref, {pending});
+  };
+
+  // Browser-owned locks have no lease to expire in a throttled/background tab.
+  async function acquire(name) {
+    if (!navigator.locks) throw new Error('Open this tool over HTTPS for safe workflow ownership');
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    let accept, reject;
+    const acquired = new Promise((resolve, fail) => { accept = resolve; reject = fail; });
+    const completed=navigator.locks.request('bwu2.v3.' + name, {ifAvailable: true}, async lock => {
+      if (!lock) { reject(new Error('Workflow active in another tab')); return; }
+      accept(async()=>{release();await completed;});
+      await held;
+    }).catch(reject);
+    return acquired;
+  }
+  async function exclusive(name, work) {
+    const release = await acquire(name);
+    try { return await work(); } finally { await release(); }
+  }
+  const resolveAttention = name => exclusive(name, () => {
+    localStorage.removeItem(keyFor('mutation.' + name));
+  });
+
+  function operation({kind, ref, scope, telemetry} = {}) {
+    const name = scope || telemetry?.tool || kind;
+    const key = keyFor('mutation.' + name), id = C.id('op');
+    let state = 'PREPARED';
+    const transition = (next, data = {}) => {
+      const allowed = {PREPARED: ['SUBMITTED', 'REJECTED'], SUBMITTED: ['CONFIRMED', 'REJECTED', 'UNKNOWN']};
+      if (!(allowed[state] || []).includes(next)) throw new Error('Illegal or terminal operation transition ' + state + ' -> ' + next);
+      if (next === 'SUBMITTED') {
+        assertClear(name);
+        // Persist before sending, so reload cannot turn an in-flight action into retryable work.
+        write(key, {id, kind, ref: C.clean(ref), state: next, at: Date.now()});
+      } else if (state === 'SUBMITTED') {
+        const saved = read(key, null);
+        if (saved?.id !== id) throw new C.UnknownError('Mutation ownership changed — verify before retry');
+        if (next === 'UNKNOWN') write(key, {...saved, state: next});
+        else localStorage.removeItem(key);
+      }
+      state = next;
+      telemetry?.emit('operation', {id, kind, ref: C.mask(ref), state, ...data});
+      return state;
+    };
+    return Object.freeze({id, kind, scope: name, get state() { return state; },
+      submitted: data => transition('SUBMITTED', data), confirmed: data => transition('CONFIRMED', data),
+      rejected: data => transition('REJECTED', data), unknown: data => transition('UNKNOWN', data)});
   }
 
-  return Object.freeze({clean,upper,lower,esc,container,lines,clamp,id,sleep,html,lifecycle,store,telemetry,mask,operation,UnknownError,RejectedError,queue,request,authLike,normLogin,identity,panel,dockButton,barcodeInput});
+  function queue({name, life, validate = C.container} = {}) {
+    const key = keyFor('queue.' + name);
+    let release = null, loaded = false;
+    let state = {running: false, current: '', phase: 'idle', message: 'Ready', items: []};
+    const save = async () => write(key, state);
+    const load = async () => {
+      if (loaded) return state;
+      const saved = read(key, null);
+      if (saved) {
+        if (!Array.isArray(saved.items)) throw new Error('Saved queue is unreadable — kept for inspection');
+        if(saved.items.some(row=>!validate(row?.id)||!['queued','active','attention','rejected','done'].includes(row.status)))throw new Error('Saved queue contains invalid rows — kept for inspection');
+        state = {...state, ...saved, items: saved.items};
+        for (const row of state.items) if (row.status === 'active' || row.id === state.current) {
+          row.status = 'attention'; row.error = 'Previous session ended during work — verify before retry';
+        }
+      }
+      state.running = false; state.current = ''; state.phase = 'idle'; loaded = true;
+      return state;
+    };
+    const acquireQueue = async () => {
+      if (release) return true;
+      try{release=await acquire('queue.'+name);loaded=false;await load();return true;}catch(error){const held=release;release=null;await held?.();if(/active in another tab/.test(error.message))return false;throw error;}
+    };
+    const releaseQueue = async () => {const held=release;release=null;await held?.();};
+    life?.own(releaseQueue);
+    const edit = work => exclusive('queue.' + name, async () => {
+      // Never overwrite another tab's queue with a stale in-memory copy.
+      const latest = read(key, null);
+      if (latest) { state = {...latest, running: false}; for(const row of state.items) if(row.status==='active'||row.id===state.current){row.status='attention';row.error='Previous session ended during work — verify before retry';} state.current=''; }
+      await work(); await save();
+    });
+    const add = async values => { await load(); await edit(() => {
+      const used = new Set(state.items.map(row => C.upper(row.id)));
+      for (const value of values) { const id = C.clean(value), k = C.upper(id);
+        if (validate(id) && !used.has(k)) { used.add(k); state.items.push({id, status: 'queued', phase: '', error: ''}); }
+      }
+    }); return state.items; };
+    const set = async patch => { Object.assign(state, patch); await save(); };
+    const item = async (row, patch) => { Object.assign(row, patch); await save(); };
+    const resolve = async () => {
+      if (state.running) throw new Error('Pause before resolving attention');
+      await edit(() => { for (const row of state.items) if (row.status === 'attention' || row.status === 'rejected') {
+        row.status = 'queued'; row.error = ''; row.phase = '';
+      } });
+    };
+    return Object.freeze({load, save, add, set, item, resolve,
+      next: () => state.items.find(row => row.status === 'queued') || null,
+      acquire: acquireQueue, release: releaseQueue,
+      clearDone: () => edit(() => { state.items = state.items.filter(row => row.status !== 'done'); }),
+      get state() { return state; }});
+  }
+  return Object.freeze({read, write, keyFor, attention, assertClear, acquire, exclusive, resolveAttention, operation, queue});
+})();
+
+// ---- src/transport.js ----
+V3.transport = (() => {
+  const C = V3.core;
+  function authLike(status, contentType, finalUrl, raw) {
+    const html = /text\/html|application\/xhtml/i.test(contentType || '') || /^\s*(?:<!doctype\s+html|<html\b)/i.test(raw || '');
+    let redirected = false;
+    try { const url = new URL(finalUrl, location.href);
+      redirected = /(?:^|\.)(?:midway|sso|signin|login)\./i.test(url.hostname) || /\/(?:login|signin|sign-in|authenticate)(?:\/|$)/i.test(url.pathname);
+    } catch {}
+    const auth = [401, 403, 419].includes(Number(status)) || redirected ||
+      (html && /(?:midway|single\s+sign[- ]?on|authentication required|sign\s*in to|log\s*in to)/i.test(raw || ''));
+    return {html, auth};
+  }
+  function classify(result, options) {
+    const flags = authLike(result.status, result.contentType, result.finalUrl, result.raw);
+    let data; try { data = result.raw ? JSON.parse(result.raw) : null; } catch { data = result.raw; }
+    if (flags.auth || (flags.html && !options.allowHtml)) throw Object.assign(new Error('Authentication/HTML response instead of expected API response'), {status: result.status, flags, responseReceived: true});
+    const httpError = result.status < 200 || result.status >= 300;
+    if (httpError && !options.allowHttpError) throw Object.assign(new Error('HTTP ' + result.status), {status: result.status, body: data, responseReceived: true});
+    return {...result, data, flags, httpError};
+  }
+  async function request(url, options = {}) {
+    const target = new URL(url, location.href).href;
+    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const timeout = options.timeout ?? 15000;
+    if (new URL(target).origin === location.origin) {
+      const controller = new AbortController();
+      const cancel = () => controller.abort(options.signal?.reason);
+      options.signal?.addEventListener('abort', cancel, {once: true});
+      const timer = setTimeout(() => controller.abort(new Error('Request timeout')), timeout);
+      try {
+        const response = await fetch(target, {method: options.method || 'GET', body: options.body,
+          headers: options.headers || {}, credentials: 'same-origin', cache: 'no-store', redirect: 'follow', signal: controller.signal});
+        const raw = await response.text();
+        return classify({status: response.status, raw, finalUrl: response.url || target,
+          contentType: response.headers.get('content-type') || ''}, options);
+      } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); }
+    }
+    const gm = typeof GM === 'object' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) :
+      typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null;
+    if (!gm) throw new Error('Cross-origin request unavailable');
+    return new Promise((resolve, reject) => {
+      let handle, done = false;
+      const finish = (error, value) => {
+        if (done) return; done = true; options.signal?.removeEventListener('abort', cancel);
+        if (error) reject(error); else resolve(value);
+      };
+      const cancel = () => { handle?.abort?.(); finish(new DOMException('Aborted', 'AbortError')); };
+      options.signal?.addEventListener('abort', cancel, {once: true});
+      try { handle = gm({method: options.method || 'GET', url: target, data: options.body,
+        headers: options.headers || {}, timeout, redirect: 'follow',
+        onload: response => { try { finish(null, classify({status: response.status, raw: String(response.responseText ?? ''),
+          finalUrl: response.finalUrl || target, contentType: String(response.responseHeaders || '').match(/content-type:\s*([^\r\n]+)/i)?.[1] || ''}, options)); }
+          catch (error) { finish(error); } },
+        ontimeout: () => finish(new Error('Request timeout')), onerror: () => finish(new Error('Network error')),
+        onabort: () => finish(new DOMException('Aborted', 'AbortError'))});
+        handle?.catch?.(error => finish(error));
+      } catch (error) { finish(error); }
+    });
+  }
+  return Object.freeze({request, authLike});
+})();
+
+// ---- src/identity.js ----
+V3.identity = (() => {
+  const C = V3.core;
+  const FIELDS = ['employeeLogin', 'userLogin', 'username', 'login', 'alias', 'autoId', 'autoID'];
+  const MUTABLE = 'input,textarea,[contenteditable="true"],[data-bwu2-ui]';
+  function resolve({pageWindow = typeof unsafeWindow === 'object' ? unsafeWindow : window, doc = document} = {}) {
+    const candidates = [];
+    const add = (value, source, score) => { const login = C.normLogin(value);
+      if (login) candidates.push({login: login.toLowerCase(), source, score}); };
+    for (const field of FIELDS) add(pageWindow?.[field], 'global:' + field, 100);
+    for (const name of ['user', 'currentUser', 'employee', 'identity', 'bootstrapData', '__INITIAL_STATE__']) {
+      const value = pageWindow?.[name];
+      if (typeof value === 'string') add(value, 'global:' + name, 100);
+      else for (const object of [value, value?.user, value?.employee, value?.identity]) {
+        if (!object || typeof object !== 'object') continue;
+        for (const field of FIELDS) add(object[field], 'global:' + name + '.' + field, 100);
+      }
+    }
+    for (const selector of ['.app-user-name', '[data-test-id="user-name"]', '.nav-user', '.user-name',
+      '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
+      'meta[name="employeeLogin"]', 'meta[name="username"]', 'meta[name="autoid"]']) {
+      for (const element of doc.querySelectorAll(selector)) {
+        if (element.closest(MUTABLE)) continue;
+        if (element.tagName !== 'META') { const rect = element.getBoundingClientRect();
+          const style = pageWindow.getComputedStyle(element);
+          if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden') continue; }
+        add(element.dataset?.employeeLogin || element.dataset?.userLogin || element.dataset?.username ||
+          element.dataset?.autoid || element.content || element.textContent, 'dom:' + selector, 80);
+      }
+    }
+    for (const row of doc.querySelectorAll('.aui-nav-row')) {
+      if (row.closest(MUTABLE)) continue;
+      const match = C.clean(row.textContent).match(/\bSearch\s+([a-z][a-z0-9-]{2,31})\s*(?:$|Logout|Sign out)/i);
+      add(match?.[1], 'dom:authenticated-navigation', 70);
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    if (!best || candidates.some(row => row.score === best.score && row.login !== best.login)) return {login: '', source: best ? 'conflicting-authenticated-identities' : 'none', score: 0};
+    return best;
+  }
+  return Object.freeze({resolve});
+})();
+
+// ---- src/native.js ----
+V3.native = (() => {
+  const C = V3.core;
+  const visible = element => {
+    if (!element?.isConnected || element.closest('[data-bwu2-ui]') || element.hidden) return false;
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  };
+  const root = () => document.querySelector('#root,#app,#application,main') || document.body;
+  const inputs = () => [...document.querySelectorAll('input,textarea,select')].filter(visible);
+  const descriptor = input => C.lower([input.name,input.id,input.placeholder,input.getAttribute('aria-label'),
+    [...(input.labels || [])].map(label => label.textContent).join(' ')].filter(Boolean).join(' '));
+  const findInput = (wanted, forbidden) => inputs().map(input => ({input, score: (wanted.test(descriptor(input)) ? 1 : 0) - (forbidden?.test(descriptor(input)) ? 2 : 0)}))
+    .filter(row => row.score > 0).sort((a,b) => b.score-a.score)[0]?.input || null;
+  function setValue(input, value) {
+    if (!input || input.disabled || input.readOnly) throw new Error('Native input unavailable');
+    let proto=input, setter;
+    while ((proto=Object.getPrototypeOf(proto))&&!setter) setter=Object.getOwnPropertyDescriptor(proto,'value')?.set;
+    if (setter) setter.call(input,String(value)); else input.value=String(value);
+    input.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
+    input.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
+    return input;
+  }
+  const enter = input => { for (const type of ['keydown','keypress','keyup']) {
+    const event=new KeyboardEvent(type,{key:'Enter',code:'Enter',bubbles:true,cancelable:true});
+    Object.defineProperty(event,'keyCode',{get:()=>13});Object.defineProperty(event,'which',{get:()=>13});input.dispatchEvent(event);
+  } };
+  const text = () => C.clean([...root().querySelectorAll('h1,h2,h3,h4,label,legend,[role="heading"],[role="alert"],[role="status"]')].filter(visible).map(element=>element.textContent).join(' '));
+  const status = () => [...document.querySelectorAll('[role="alert"],[role="status"],.alert,.error,.success')].filter(visible).map(element=>C.clean(element.textContent)).join(' | ');
+  function waitFor(predicate,{life,signal=life?.signal,timeout=10000,target=root(),events=[]}={}) {
+    return new Promise((resolve,reject)=>{
+      let observer,timer,finished=false;
+      const finish=(error,value)=>{if(finished)return;finished=true;observer?.disconnect();clearTimeout(timer);signal?.removeEventListener('abort',abort);for(const event of events)window.removeEventListener(event,check);if(error)reject(error);else resolve(value);};
+      const check=()=>{try{const value=predicate();if(value)finish(null,value);}catch(error){finish(error);}};
+      const abort=()=>finish(new DOMException('Aborted','AbortError'));
+      if(signal?.aborted)return abort();
+      observer=new MutationObserver(check);observer.observe(target,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','hidden','aria-hidden','value']});
+      timer=setTimeout(()=>finish(new Error('Native page did not confirm the action')),timeout);
+      signal?.addEventListener('abort',abort,{once:true});for(const event of events)window.addEventListener(event,check);check();
+    });
+  }
+  return Object.freeze({visible,root,inputs,descriptor,findInput,setValue,enter,text,status,waitFor});
 })();
 
 // ---- src/aft.js ----
@@ -191,19 +404,19 @@ V3.aft=(()=>{
   const extractWorkflow=(raw,def)=>{
     const source=String(raw||'').replace(/&quot;/gi,'"').replace(/&#34;/gi,'"').replace(/&#x22;/gi,'"').replace(/\\"/g,'"').replace(/&amp;/gi,'&');
     const anchor=new RegExp('"instructionId"\\s*:\\s*"'+def.instructionId+'"','i').exec(source);if(!anchor)return null;
-    const scope=source.slice(anchor.index,anchor.index+3000),grab=name=>scope.match(new RegExp('"'+name+'"\\s*:\\s*"([^"]+)"','i'))?.[1]||'';
+    const remaining=source.slice(anchor.index),next=remaining.slice(anchor[0].length).search(/"instructionId"/),scope=remaining.slice(0,Math.min(3000,next<0?remaining.length:anchor[0].length+next)),grab=name=>scope.match(new RegExp('"'+name+'"\\s*:\\s*"([^"]+)"','i'))?.[1]||'';
     const wf={instructionId:grab('instructionId'),tool:C.lower(grab('tool')),objectId:grab('objectId'),status:C.upper(grab('status')),selector:/<input\b[^>]*\bname\s*=\s*["']options["']/i.test(source)};
-    if(!wf.objectId||wf.instructionId!==def.instructionId)return null;if(wf.tool&&wf.tool!==def.tool)return null;return wf;
+    if(!wf.objectId||!wf.status||wf.instructionId!==def.instructionId)return null;if(wf.tool&&wf.tool!==def.tool)return null;return wf;
   };
   const mapState=value=>{const v=C.lower(value);if(v==='sellable'||v==='inventory')return'INVENTORY';if(v==='pending research'||v==='pending')return'PENDING_RESEARCH';if(v==='unsellable')return'UNSELLABLE';throw new Error('Unsupported inventory state '+value);};
   const mapDamage=value=>{const v=C.lower(value);if(v==='amazon damage'||v==='warehouse damage')return'AMAZON_DAMAGE';if(v==='defective')return'DEFECTIVE';if(v==='distributor damage')return'DISTRIBUTOR_DAMAGE';if(v==='expired')return'EXPIRED';throw new Error('Unsupported disposition '+value);};
-  const readMoveQuantity=raw=>{for(const re of [/(?:["']|&quot;)quantity(?:["']|&quot;)\s*[:=]\s*(?:["']|&quot;)?([0-9]{1,6})\b/i,/\bQuantity\b(?:<[^>]+>|\s|&nbsp;|&#160;|:|-){0,20}([0-9]{1,6})\b/i]){const qty=Number(String(raw||'').match(re)?.[1]);if(Number.isInteger(qty)&&qty>0)return{qty,verify:false};}return{qty:null,verify:/\bVerify item\b/i.test(String(raw||''))};};
+  const readMoveQuantity=raw=>{const view=snapshotView(raw),match=view.text.match(/\bQuantity\s*[:\-]?\s*(\d{1,6})\b/i),qty=Number(match?.[1]);return{qty:Number.isSafeInteger(qty)&&qty>0?qty:null,verify:/\bVerify item\b/i.test(view.headings+' '+view.text)};};
   const sourceChoices=doc=>{
     const out=[];for(const radio of doc?.querySelectorAll?.('input[type="radio"]')||[]){let label='';try{label=[...(radio.labels||[])].map(x=>x.textContent||'').join(' ');}catch{}if(!label)label=radio.closest('label')?.textContent||radio.parentElement?.textContent||'';label=C.clean(label);if(!/Quantity\s*:/i.test(label)||!/Owner\s*:/i.test(label))continue;let state='';if(/Pending Research|PENDING_RESEARCH/i.test(label))state='PENDING_RESEARCH';else if(/Unsellable|UNSELLABLE/i.test(label))state='UNSELLABLE';else if(/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label))state='SELLABLE';if(!state)continue;const qty=Number(label.match(/\bQuantity\s*:\s*(\d{1,7})\b/i)?.[1]);out.push({state,label,value:radio.value||'',qty:Number.isInteger(qty)?qty:null,disabled:Boolean(radio.disabled)});}return out;
   };
   const parseEach=text=>String(text||'').split(/\r?\n/).map(C.clean).filter(Boolean).map(line=>{const [location='',asin='',fnsku='']=line.split(/\s+/);return location&&asin?{location,asin,fnsku:fnsku||asin}:null;}).filter(Boolean);
   const parseItems=text=>{const seen=new Set(),out=[];for(const line of String(text||'').split(/\r?\n/)){const value=C.clean(line.split(/\s+/)[0]);if(!value)continue;const key=C.upper(value);if(seen.has(key))continue;seen.add(key);out.push(value);}return out;};
-  const datePayload=date=>{const m=String(date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)throw new Error('Invalid date '+date);return JSON.stringify({'year-input':m[1],'month-input':m[2],'day-input':m[3],'':''});};
+  const datePayload=date=>{const m=String(date||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m||new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]))).toISOString().slice(0,10)!==date)throw new Error('Invalid date '+date);return JSON.stringify({'year-input':m[1],'month-input':m[2],'day-input':m[3],'':''});};
 
   function create({origin,life,telemetry,stopped=()=>false}={}){
     origin=String(origin||(/^aft-qt-/i.test(location.hostname)?location.origin:DEFAULT_ORIGIN)).replace(/\/$/,'');
@@ -223,7 +436,7 @@ V3.aft=(()=>{
         if(stopped()&&!ignoreStop)throw new Error('Stopped by user');
         try{last=await status(def,wf);}catch(error){if(op){op.unknown({reason:'status-transport'});throw new C.UnknownError(label+': confirmation lost',{cause:error});}throw error;}
         polls++;if(wanted.has(last)){telemetry?.emit('aft.status',{label,state:last,polls,ms:Math.round(performance.now()-started)});return last;}
-        if(last==='ERRORED'){if(op)op.rejected({reason:'backend-errored'});throw new C.RejectedError(label+': backend ERRORED');}
+        if(last==='ERRORED'){if(op){op.unknown({reason:'backend-errored'});throw new C.UnknownError(label+': backend ERRORED after submission — verify resulting inventory');}throw new C.RejectedError(label+': backend ERRORED');}
         if(!['READY','PROCESSING','COMPLETE'].includes(last)){if(op){op.unknown({reason:'unexpected-status',state:last});throw new C.UnknownError(label+': unexpected status '+last);}throw new Error(label+': status '+last);}
         await life.sleep(pollMs??Math.min(300,60+polls*35));
       }
@@ -236,8 +449,18 @@ V3.aft=(()=>{
       let r;
       try{r=await post('/action',{...ids(def,wf),action:actionName,input},{timeout,allowHttpError:Boolean(op)});}
       catch(error){if(op){op.unknown({reason:'action-transport'});throw new C.UnknownError(label+': submission confirmation lost',{cause:error});}throw error;}
-      if(op&&r.httpError){if(r.status>=500){op.unknown({status:r.status});throw new C.UnknownError(label+': HTTP '+r.status+' outcome unknown');}op.rejected({status:r.status});throw new C.RejectedError(label+': rejected HTTP '+r.status);}
-      return waitStatus(def,wf,complete?['COMPLETE']:['READY'],{timeout,pollMs,operation:op,label,ignoreStop});
+      if(op&&r.httpError){if(r.status>=500||r.status===408){op.unknown({status:r.status});throw new C.UnknownError(label+': HTTP '+r.status+' outcome unknown');}op.rejected({status:r.status});throw new C.RejectedError(label+': rejected HTTP '+r.status);}
+      const settled=await waitStatus(def,wf,complete?['COMPLETE']:['READY'],{timeout,pollMs,operation:op,label,ignoreStop:ignoreStop||Boolean(op)});
+      if(op){
+        try{
+          const after=await page(def,def.tool==='fcskuflip'?classifyFcsku:classifyEdit);
+          if(after.objectId!==wf.objectId)throw new Error('Workflow changed during confirmation');
+          const proved=op.kind==='aft-date-remove'?['success','dateEntry','item'].includes(after.state):def.tool==='moveitems'?/input item|scan item|enter item/i.test(after.text)&&!/verify item|work is errored/i.test(after.text):['success','item'].includes(after.state);
+          if(!proved)throw new Error('Application did not prove the mutation result');
+          op.confirmed({state:after.state});return after;
+        }catch(error){op.unknown({reason:'application-confirmation-missing'});throw new C.UnknownError(label+': result not proven — verify before retry',{cause:error});}
+      }
+      return settled;
     };
     const input=(def,wf,value,label,opts)=>action(def,wf,'Input',value,label,opts);
     const confirm=(def,wf,opts)=>action(def,wf,'Confirm','Confirm','Confirm',opts);
@@ -261,19 +484,6 @@ V3.aft=(()=>{
       await input(def,wf,state,'Target state');
       if(state==='UNSELLABLE')await input(def,wf,mapDamage(damage),'Target disposition');
     };
-    const confirmUntilDone=async(def,wf)=>{
-      for(let round=0;round<4;round++){
-        const before=await snap(def,wf,classifyEdit);
-        if(before.state==='success'||before.state==='item')return before;
-        if(before.state!=='confirm')throw new Error('Expected confirmation, got '+before.state);
-        const op=C.operation({kind:'aft-edit',ref:wf.objectId,telemetry});
-        await confirm(def,wf,{timeout:180000,operation:op});
-        const after=await snap(def,wf,classifyEdit);
-        if(after.state!=='confirm')return after;
-      }
-      throw new Error('Too many confirmation rounds');
-    };
-
     async function runMove({source,destination,items,mode='all',qty=1,onProgress=()=>{}}={}){
       source=C.clean(source);destination=C.clean(destination);items=parseItems(Array.isArray(items)?items.join('\n'):items);
       if(!C.container(source)||!C.container(destination)||C.lower(source)===C.lower(destination))throw new Error('Valid different source/destination containers required');
@@ -295,16 +505,16 @@ V3.aft=(()=>{
           onProgress({stage:'destination',barcode,current:i+1,total:items.length,confirmed});
           try{await input(def,wf,destination,'Destination '+(i+1),{operation:op});}
           catch(error){
-            error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:error?.outcome==='unknown'?[barcode]:[],remaining:items.slice(i+1),source,destination};
+            error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:error?.outcome==='unknown'?[barcode]:[],remaining:items.slice(i+(error?.outcome==='unknown'?1:0)),source,destination};
             throw error;
           }
-          confirmed++;
+          confirmed++;onProgress({stage:'confirmed',barcode,current:i+1,total:items.length,confirmed});
         }
         onProgress({stage:'finish',confirmed,total:items.length});await done(def,wf);
         try{await end(def,wf);}catch(error){const e=new C.UnknownError('Items confirmed moved, but AFT finalization was not confirmed',{cause:error});e.aftPartial={kind:'move-finalize',confirmed,total:items.length,uncertain:[],remaining:[]};throw e;}
         return{confirmed,total:items.length};
       }catch(error){
-        try{await end(def,wf);}catch{}
+        if(error?.outcome!=='unknown')try{await end(def,wf);}catch{}
         if(!error.aftPartial)error.aftPartial={kind:'move',confirmed,total:items.length,uncertain:[],remaining:items.slice(confirmed),source,destination};
         throw error;
       }
@@ -312,24 +522,22 @@ V3.aft=(()=>{
 
     async function runEditEach({items,destState='Pending Research',destDamage='Defective',onProgress=()=>{}}={}){
       const rows=Array.isArray(items)?items:parseEach(items);if(!rows.length)throw new Error('EACH needs: TOTE ASIN [FNSKU]');
-      const desired=mapState(destState),{def}=await ensureMode('edit:each');let wf=await ensureReady(def),confirmed=0,currentLocation='';
+      const desired=mapState(destState),{def}=await ensureMode('edit:each');let wf=await ensureReady(def),confirmed=0,currentLocation='',needsFresh=false;
       try{
         for(let i=0;i<rows.length;i++){
-          if(stopped())throw new Error('Stopped by user');const row=rows[i];
+          if(stopped())throw new Error('Stopped by user');const row=rows[i];if(needsFresh){await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);currentLocation='';needsFresh=false;}
           if(C.lower(row.location)!==C.lower(currentLocation)){if(currentLocation){try{await end(def,wf);}catch{}wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}onProgress({stage:'location',current:i+1,total:rows.length,row});await input(def,wf,row.location,'Location');currentLocation=row.location;}
           onProgress({stage:'item',current:i+1,total:rows.length,row});await input(def,wf,row.fnsku||row.asin,'Item');
           const afterItem=await snap(def,wf,classifyEdit);if(afterItem.state==='sourceState')throw new Error('EditItems could not infer source state; stopped before mutation');if(afterItem.state!=='newState')throw new Error('After item expected newState, got '+afterItem.state);
           await applyTarget(def,wf,desired,destDamage);
           const before=await snap(def,wf,classifyEdit);if(before.state!=='confirm')throw new Error('Expected confirm, got '+before.state);
           const op=C.operation({kind:'aft-edit-each',ref:row.fnsku||row.asin,telemetry});
-          await confirm(def,wf,{timeout:180000,operation:op});
-          const result=await snap(def,wf,classifyEdit);
-          if(result.state==='success')await done(def,wf);else if(result.state!=='item')throw new Error('Unexpected post-confirm state '+result.state);
-          confirmed++;onProgress({stage:'confirmed',confirmed,total:rows.length,row});
+          const result=await confirm(def,wf,{timeout:180000,operation:op});
+          confirmed++;if(result.state==='success'){await done(def,wf);needsFresh=true;}onProgress({stage:'confirmed',confirmed,total:rows.length,row});
         }
         try{await end(def,wf);}catch{}
         return{confirmed,total:rows.length};
-      }catch(error){try{await end(def,wf);}catch{}error.aftPartial={kind:'edit-each',confirmed,total:rows.length,uncertain:error?.outcome==='unknown'?[rows[confirmed]]:[],remaining:rows.slice(confirmed+(error?.outcome==='unknown'?1:0))};throw error;}
+      }catch(error){if(error?.outcome!=='unknown')try{await end(def,wf);}catch{}error.aftPartial={kind:'edit-each',confirmed,total:rows.length,uncertain:error?.outcome==='unknown'?[rows[confirmed]]:[],remaining:rows.slice(confirmed+(error?.outcome==='unknown'?1:0))};throw error;}
     }
 
     async function runEditSku({items,sourceState='Sellable',sourceDamage='Defective',destState='Pending Research',destDamage='Defective',onProgress=()=>{}}={}){
@@ -338,7 +546,7 @@ V3.aft=(()=>{
       const def=DEFINITIONS['edit:sku'];let flipped=0,zero=0;const failed=[];
       await ensureMode('edit:sku');
       for(let index=0;index<list.length;index++){
-        const sku=list[index];let attempts=0,skuFlipped=false;
+        const sku=list[index];let attempts=0,lastQty=Infinity;
         try{
           while(attempts++<50){
             if(stopped())throw new Error('Stopped by user');
@@ -349,22 +557,23 @@ V3.aft=(()=>{
             onProgress({stage:'quantity',sku,qty,current:index+1,total:list.length,attempt:attempts,inventory:Object.fromEntries(sourceChoices(sourcePage.doc).map(x=>[x.state,x.qty]))});
             if(qty===0){zero++;try{await end(def,wf);}catch{}break;}
             if(!Number.isInteger(qty))throw new Error('Could not read '+sourceState+' quantity');
+            if(qty>=lastQty)throw new Error('No inventory progress after confirmed change — stopped before another edit');
+            lastQty=qty;
             await input(def,wf,choice.value||from,'Source state',{timeout:120000});
             if(from==='UNSELLABLE')await input(def,wf,mapDamage(sourceDamage),'Source disposition',{timeout:120000});
             const afterSource=await snap(def,wf,classifyEdit);if(afterSource.state!=='newState')throw new Error('Expected newState after source selection, got '+afterSource.state);
             await applyTarget(def,wf,to,destDamage);
             const before=await snap(def,wf,classifyEdit);if(before.state!=='confirm')throw new Error('Expected confirm, got '+before.state);
-            const op=C.operation({kind:'aft-edit-sku',ref:sku,telemetry});await confirm(def,wf,{timeout:180000,operation:op});
-            let result=await snap(def,wf,classifyEdit);
-            if(result.state==='confirm')result=await confirmUntilDone(def,wf);
-            if(result.state!=='success'&&result.state!=='item')throw new Error('Expected success after confirm, got '+result.state);
+            const op=C.operation({kind:'aft-edit-sku',ref:sku,telemetry});const result=await confirm(def,wf,{timeout:180000,operation:op});
+            flipped++;
             if(result.state==='success')await done(def,wf);
             try{await end(def,wf);}catch{}
-            flipped++;skuFlipped=true;onProgress({stage:'confirmed',sku,current:index+1,total:list.length,attempt:attempts});
+            onProgress({stage:'confirmed',sku,current:index+1,total:list.length,attempt:attempts});
           }
           if(attempts>50)throw new Error('Stopped after 50 SKU attempts');
         }catch(error){
           if(error?.outcome==='unknown'){error.aftPartial={kind:'edit-sku',confirmed:flipped,total:list.length,uncertain:[sku],remaining:list.slice(index+1),failed};throw error;}
+          if(stopped()){error.aftPartial={kind:'edit-sku',confirmed:flipped,total:list.length,uncertain:[],remaining:list.slice(index),failed};throw error;}
           failed.push({sku,message:C.clean(error.message||error)});onProgress({stage:'failed',sku,current:index+1,total:list.length,message:C.clean(error.message||error)});
           try{const current=await workflow(def);await end(def,current);}catch{}
         }
@@ -375,40 +584,41 @@ V3.aft=(()=>{
     async function runFcsku({oldCode,newCode,locations,onProgress=()=>{}}={}){
       oldCode=C.clean(oldCode);newCode=C.clean(newCode);const list=parseItems(Array.isArray(locations)?locations.join('\n'):locations);
       if(!oldCode||!newCode||!list.length)throw new Error('Need OLD + NEW FCSKU and at least one location');
-      const def=DEFINITIONS['edit:fcsku'];let confirmed=0,failed=[];
+      const def=DEFINITIONS['edit:fcsku'];let confirmed=0,failed=[],remaining=[];
       let wf=(await ensureMode('edit:fcsku')).wf;
       for(let i=0;i<list.length;i++){
-        const location=list[i];if(stopped())break;
+        const location=list[i];if(stopped()){remaining=list.slice(i);break;}
         try{
           if(i>0){wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}
           onProgress({stage:'container',current:i+1,total:list.length,location});await input(def,wf,location,'Container');
           await input(def,wf,oldCode,'Old FCSKU');await input(def,wf,newCode,'New FCSKU');
-          const op=C.operation({kind:'aft-fcsku',ref:location,telemetry});await confirm(def,wf,{operation:op,timeout:120000});await end(def,wf);confirmed++;
+          const op=C.operation({kind:'aft-fcsku',ref:location,telemetry});await confirm(def,wf,{operation:op,timeout:120000});confirmed++;try{await end(def,wf);}catch(error){error.aftPartial={kind:'fcsku-finalize',confirmed,total:list.length,uncertain:[],remaining:list.slice(i+1),failed};throw error;}
         }catch(error){
           if(error?.outcome==='unknown'){error.aftPartial={kind:'fcsku',confirmed,total:list.length,uncertain:[location],remaining:list.slice(i+1),failed};throw error;}
+          if(error.aftPartial)throw error;
           failed.push({location,message:C.clean(error.message||error)});try{await end(def,wf);}catch{}
         }
       }
-      return{confirmed,total:list.length,failed};
+      return{confirmed,total:list.length,failed,remaining};
     }
 
     async function runDate({rows,onProgress=()=>{}}={}){
       const list=(Array.isArray(rows)?rows:[]).filter(x=>C.clean(x?.location)&&C.clean(x?.asin)&&C.clean(x?.date));if(!list.length)throw new Error('No expiry rows');
-      const def=DEFINITIONS['edit:date'];let confirmed=0,wf=(await ensureMode('edit:date')).wf;
+      const def=DEFINITIONS['edit:date'];let confirmed=0,remaining=[],wf=(await ensureMode('edit:date')).wf;
       for(let i=0;i<list.length;i++){
-        const row=list[i];if(stopped())break;
+        const row=list[i];if(stopped()){remaining=list.slice(i);break;}
         try{
           if(i>0){wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);}
           await input(def,wf,row.location,'Container',{timeout:120000});await input(def,wf,row.asin,'Item',{timeout:120000});
           let s=await snap(def,wf,classifyEdit);
-          if(s.state==='dateRemove'){await confirm(def,wf,{timeout:180000});await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
+          if(s.state==='dateRemove'){const remove=C.operation({kind:'aft-date-remove',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:remove});await end(def,wf);wf=await fresh(def,wf.objectId);wf=await ensureReady(def,wf);await input(def,wf,row.location,'Container restart',{timeout:120000});await input(def,wf,row.asin,'Item restart',{timeout:120000});s=await snap(def,wf,classifyEdit);}
           if(s.state!=='dateEntry')throw new Error('Expected expiry date entry, got '+s.state);
           await input(def,wf,datePayload(row.date),'Expiry date',{timeout:120000});const before=await snap(def,wf,classifyEdit);if(before.state!=='dateConfirm'&&before.state!=='confirm')throw new Error('Expected expiry confirmation, got '+before.state);
           const op=C.operation({kind:'aft-edit-date',ref:row.asin,telemetry});await confirm(def,wf,{timeout:180000,operation:op});confirmed++;onProgress({stage:'confirmed',confirmed,total:list.length,row});
           try{await end(def,wf);}catch{}
         }catch(error){if(error?.outcome==='unknown'){error.aftPartial={kind:'edit-date',confirmed,total:list.length,uncertain:[row],remaining:list.slice(i+1)};throw error;}throw error;}
       }
-      return{confirmed,total:list.length};
+      return{confirmed,total:list.length,remaining};
     }
 
     return Object.freeze({origin,route,page,workflow,status,waitStatus,action,input,confirm,done,end,ensureReady,ensureMode,runMove,runEditEach,runEditSku,runFcsku,runDate});
@@ -418,128 +628,210 @@ V3.aft=(()=>{
 })();
 
 // ---- src/workflow-ui.js ----
-V3.workflowUI=(()=>{
-  const C=V3.core;
-  const memory=(key,initial='')=>{const full='bwu2.v3.form.'+key;let value='';try{value=localStorage.getItem(full)??initial;}catch{value=initial;}return{get:()=>value,set:v=>{value=String(v??'');try{localStorage.setItem(full,value);}catch{}}};};
-
-  function mountMove(root,{run,stop,prefix='move'}={}){
-    let busy=false,attention=false,mode='all';
-    const source=memory(prefix+'.source'),dest=memory(prefix+'.dest'),items=memory(prefix+'.items'),qty=memory(prefix+'.qty','1');
-    root.innerHTML='<section class="v3-section"><div class="v3-tabs"><button class="v3-btn active" data-mode="all">ALL</button><button class="v3-btn" data-mode="each">EACH = 1</button><button class="v3-btn" data-mode="qty">QTY</button></div><div class="v3-grid"><label class="v3-field">Source<input data-source></label><label class="v3-field">Destination<input data-dest></label></div><label class="v3-field" data-qty-wrap hidden>Quantity<input type="number" min="1" data-qty></label><label class="v3-field">Items<textarea data-items></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section><section class="v3-section"><div data-progress></div></section>';
-    const q=s=>root.querySelector(s),status=(m,kind='')=>{q('[data-status]').className='v3-note '+(kind?'v3-'+kind:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea,[data-mode]'))el.disabled=v;};
-    q('[data-source]').value=source.get();q('[data-dest]').value=dest.get();q('[data-items]').value=items.get();q('[data-qty]').value=qty.get();
-    q('[data-source]').oninput=e=>source.set(e.target.value);q('[data-dest]').oninput=e=>dest.set(e.target.value);q('[data-items]').oninput=e=>items.set(e.target.value);q('[data-qty]').oninput=e=>qty.set(e.target.value);
-    const paintMode=()=>{for(const b of root.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);q('[data-qty-wrap]').hidden=mode!=='qty';};
-    for(const b of root.querySelectorAll('[data-mode]'))b.onclick=()=>{if(!busy){mode=b.dataset.mode;paintMode();}};paintMode();
-    const progress=p=>{status(p.stage==='confirmed'?(p.confirmed+'/'+p.total+' confirmed'):(p.current?(p.current+'/'+p.total+' · '+p.stage+(p.barcode?' · '+p.barcode:'')):p.stage),'warn');q('[data-progress]').textContent=p.confirmed!=null?'Confirmed: '+p.confirmed+(p.total!=null?' / '+p.total:''):'';};
-    q('[data-run]').onclick=async()=>{if(busy||attention)return;setBusy(true);status('Starting…','warn');try{const result=await run({source:source.get(),destination:dest.get(),items:items.get(),mode,qty:Number(qty.get()),onProgress:progress});status('DONE ✓ '+(result.confirmed??result.done??0)+'/'+(result.total??''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY BEFORE RETRY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested — finishing current action','warn');};
-    q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};
-    return{dispose(){stop?.();}};
+V3.workflowUI = (() => {
+  const C = V3.core;
+  const formKey = key => 'bwu2.v3.form.' + key;
+  const read = (key, fallback = '') => localStorage.getItem(formKey(key)) ?? fallback;
+  const write = (key, value) => localStorage.setItem(formKey(key), String(value ?? ''));
+  const buttonRow = '<div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div><div data-progress></div>';
+  const field = (label, key, type = 'input', extra = '') => '<label class="v3-field">' + label + '<' + type + ' data-field="' + key + '" ' + extra + '></' + type + '></label>';
+  const select = (label, key, values) => field(label, key, 'select').replace('</select>', values.map(value => '<option>' + C.esc(value) + '</option>').join('') + '</select>');
+  const modes = values => '<div class="v3-tabs">' + values.map(([key, label]) => '<button class="v3-btn" data-mode="' + key + '">' + label + '</button>').join('') + '</div>';
+  function mount(root, {prefix, html, defaults, defaultMode, run, stop, resolveAttention, paintMode, quantity} = {}) {
+    let busy = false, disposed = false, mode = read(prefix + '.mode', defaultMode || '');
+    let attention = read('aft.attention', '') || read(prefix + '.running', '');let runInfo=null;try{runInfo=JSON.parse(read(prefix+'.journal','null'));}catch{attention='Saved progress unreadable — verify previous work';}
+    root.innerHTML = '<section class="v3-section">' + html + buttonRow + '</section>';
+    const q = selector => root.querySelector(selector), values = {};
+    for (const element of root.querySelectorAll('[data-field]')) {
+      const key = element.dataset.field; element.value = read(prefix + '.' + key, defaults?.[key] || '');
+      values[key] = element;
+      element.addEventListener(element.tagName === 'SELECT' ? 'change' : 'input', () => write(prefix + '.' + key, element.value));
+    }
+    const status = (message, kind = '') => { if (disposed) return; q('[data-status]').className = 'v3-note ' + (kind ? 'v3-' + kind : ''); q('[data-status]').textContent = message; };
+    const controls = () => {
+      for (const element of root.querySelectorAll('input,textarea,select,[data-mode]')) element.disabled = busy;
+      q('[data-run]').disabled = busy || Boolean(attention); q('[data-stop]').disabled = !busy;
+      q('[data-attn]').hidden = !attention;
+    };
+    const paint = () => { for (const button of root.querySelectorAll('[data-mode]')) button.classList.toggle('active', button.dataset.mode === mode); paintMode?.(root, mode); };
+    for (const button of root.querySelectorAll('[data-mode]')) button.onclick = () => { if (busy) return; mode = button.dataset.mode; write(prefix + '.mode', mode); paint(); };
+    const progress = info => {
+      write(prefix+'.journal',JSON.stringify({info,items:(values.items||values.locations||values.rows)?.value||''}));
+      if (disposed) return;
+      status((info.current ? info.current + '/' + info.total + ' · ' : '') + info.stage + (info.sku || info.barcode ? ' · ' + (info.sku || info.barcode) : ''), 'warn');
+      q('[data-progress]').textContent = info.confirmed != null ? 'Confirmed: ' + info.confirmed + (info.total != null ? ' / ' + info.total : '') : '';
+      quantity?.(root, info);
+    };
+    const replaceItems = rows => {
+      const element = values.items || values.locations || values.rows;
+      if (!element) return;
+      element.value = rows.map(row => typeof row === 'string' ? row : [row.location, row.asin, row.fnsku || row.date].filter(Boolean).join(' ')).join('\n');
+      write(prefix + '.' + element.dataset.field, element.value);
+    };
+    q('[data-run]').onclick = async () => {
+      if (busy || attention || disposed) return;
+      busy = true; write(prefix + '.running', 'Previous run ended without confirmation'); controls(); status('Starting…', 'warn');
+      try {
+        const input = Object.fromEntries(Object.entries(values).map(([key, element]) => [key, element.value]));
+        const result = await run({...input, mode, onProgress: progress});
+        const failed = result.failed || [];
+        replaceItems([...(result.remaining||[]),...failed.map(row=>row.sku||row.location).filter(Boolean)]);
+        status((result.stopped||result.remaining?.length ? 'STOPPED · ' : 'DONE ✓ ') + (result.confirmed ?? result.flipped ?? 0) +
+          (result.total != null ? '/' + result.total : '') + (result.zero ? ' · ' + result.zero + ' zero' : '') +
+          (failed.length ? ' · ' + failed.length + ' rejected' : ''), failed.length || result.stopped ? 'warn' : 'ok');
+      } catch (error) {
+        if(error.aftPartial?.remaining)replaceItems(error.aftPartial.remaining);else if(error.outcome==='unknown'){const input=values.items||values.locations||values.rows;if(input){write(prefix+'.uncertain',input.value);replaceItems([]);}}
+        if (error.outcome === 'unknown') { attention = C.clean(error.message || error); write('aft.attention', attention); }
+        status((attention ? 'OUTCOME UNKNOWN — VERIFY BEFORE RETRY · ' : 'STOPPED · ') + C.clean(error.message || error), attention ? 'bad' : 'warn');
+      } finally { busy = false; localStorage.removeItem(formKey(prefix + '.running'));localStorage.removeItem(formKey(prefix+'.journal')); controls(); }
+    };
+    q('[data-stop]').onclick = () => { stop?.(); status('Stop requested — finishing current action', 'warn'); };
+    q('[data-attn]').onclick = async () => {
+      if (busy) return;
+      try { await resolveAttention?.(); attention = ''; localStorage.removeItem(formKey('aft.attention')); localStorage.removeItem(formKey(prefix + '.running'));localStorage.removeItem(formKey(prefix+'.journal')); controls(); status('Attention cleared'); }
+      catch (error) { status(error.message, 'bad'); }
+    };
+    if(attention&&runInfo){const lines=String(runInfo.items||'').split(/\r?\n/).filter(Boolean),skip=Number(runInfo.info?.current||runInfo.info?.confirmed||0);write(prefix+'.uncertain',lines.slice(0,skip).join('\n'));replaceItems(lines.slice(skip));}
+    paint(); controls(); if (attention) status('VERIFY PREVIOUS RUN · ' + attention, 'bad');
+    return Object.freeze({get isBusy() { return busy; }, dispose() { disposed = true; stop?.(); }});
   }
-
-  function mountEdit(root,{runEach,runSku,stop,prefix='edit'}={}){
-    let busy=false,attention=false,mode='sku';
-    const items=memory(prefix+'.items'),from=memory(prefix+'.from','Sellable'),fromDamage=memory(prefix+'.fromDamage','Defective'),to=memory(prefix+'.to','Pending Research'),toDamage=memory(prefix+'.toDamage','Defective');
-    const states=['Sellable','Pending Research','Unsellable'],damages=['Defective','Amazon Damage','Distributor Damage','Expired'];
-    root.innerHTML='<section class="v3-section"><div class="v3-tabs"><button class="v3-btn" data-mode="each">EACH</button><button class="v3-btn active" data-mode="sku">SKU</button></div><div data-source-wrap><div class="v3-grid"><label class="v3-field">Source state<select data-from>'+states.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Source disposition<select data-from-damage>'+damages.map(x=>'<option>'+x+'</option>').join('')+'</select></label></div></div><div class="v3-grid"><label class="v3-field">Target state<select data-to>'+states.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Target disposition<select data-to-damage>'+damages.map(x=>'<option>'+x+'</option>').join('')+'</select></label></div><label class="v3-field"><span data-items-label>SKU / ASIN / FNSKU / FCSKU</span><textarea data-items></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section><section class="v3-section"><div data-qty></div><div data-progress></div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea,select,[data-mode]'))el.disabled=v;};
-    q('[data-items]').value=items.get();q('[data-from]').value=from.get();q('[data-from-damage]').value=fromDamage.get();q('[data-to]').value=to.get();q('[data-to-damage]').value=toDamage.get();
-    q('[data-items]').oninput=e=>items.set(e.target.value);q('[data-from]').onchange=e=>from.set(e.target.value);q('[data-from-damage]').onchange=e=>fromDamage.set(e.target.value);q('[data-to]').onchange=e=>to.set(e.target.value);q('[data-to-damage]').onchange=e=>toDamage.set(e.target.value);
-    const paintMode=()=>{for(const b of root.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);q('[data-source-wrap]').hidden=mode==='each';q('[data-items-label]').textContent=mode==='each'?'TOTE  ASIN  [FNSKU] — one row per item':'SKU / ASIN / FNSKU / FCSKU — one per line';};
-    for(const b of root.querySelectorAll('[data-mode]'))b.onclick=()=>{if(!busy){mode=b.dataset.mode;paintMode();}};paintMode();
-    const progress=p=>{status(p.current?(p.current+'/'+p.total+' · '+p.stage+(p.sku?' · '+p.sku:'')):p.stage,'warn');if(p.inventory){const s=p.inventory.SELLABLE??'—',pr=p.inventory.PENDING_RESEARCH??'—',u=p.inventory.UNSELLABLE??'—';q('[data-qty]').innerHTML='<b>Qty:</b> S '+s+' · P '+pr+' · U '+u;}q('[data-progress]').textContent=p.confirmed!=null?'Confirmed: '+p.confirmed+(p.total!=null?' / '+p.total:''):'';};
-    q('[data-run]').onclick=async()=>{if(busy||attention)return;setBusy(true);status('Starting…','warn');try{const common={items:items.get(),destState:to.get(),destDamage:toDamage.get(),onProgress:progress};const result=mode==='each'?await runEach(common):await runSku({...common,sourceState:from.get(),sourceDamage:fromDamage.get()});const done=result.confirmed??result.flipped??0;status('DONE ✓ '+done+(result.zero?' · '+result.zero+' zero':'')+(result.failed?.length?' · '+result.failed.length+' failed':''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY BEFORE RETRY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested — finishing current action','warn');};
-    q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};
-    return{dispose(){stop?.();}};
+  function mountMove(root, {run, stop, resolveAttention, prefix = 'move'} = {}) {
+    return mount(root, {prefix, stop, resolveAttention, defaultMode: 'all', defaults: {qty: '1'},
+      html: modes([['all','ALL'],['each','EACH = 1'],['qty','QTY']]) +
+        '<div data-qty-wrap hidden>' + field('Quantity', 'qty', 'input', 'type="number" min="1"') + '</div>' +
+        field('Source','source') + field('Destination','destination') + field('Items','items','textarea'),
+      paintMode: (node, mode) => { node.querySelector('[data-qty-wrap]').hidden = mode !== 'qty'; },
+      run: input => run({...input, qty: Number(input.qty)})});
   }
-
-  function mountFcsku(root,{run,stop,prefix='fcsku'}={}){
-    let busy=false,attention=false;const old=memory(prefix+'.old'),neu=memory(prefix+'.new'),locations=memory(prefix+'.locations');
-    root.innerHTML='<section class="v3-section"><label class="v3-field">OLD FCSKU<input data-old></label><label class="v3-field">NEW FCSKU<input data-new></label><label class="v3-field">Locations / Containers<textarea data-locations></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea'))el.disabled=v;};q('[data-old]').value=old.get();q('[data-new]').value=neu.get();q('[data-locations]').value=locations.get();q('[data-old]').oninput=e=>old.set(e.target.value);q('[data-new]').oninput=e=>neu.set(e.target.value);q('[data-locations]').oninput=e=>locations.set(e.target.value);
-    q('[data-run]').onclick=async()=>{setBusy(true);try{const result=await run({oldCode:old.get(),newCode:neu.get(),locations:locations.get(),onProgress:p=>status((p.current||'')+'/'+(p.total||'')+' · '+p.stage+(p.location?' · '+p.location:''),'warn')});status('DONE ✓ '+(result.confirmed??0)+'/'+(result.total??''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested','warn');};q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};return{dispose(){stop?.();}};
+  function mountEdit(root, {runEach, runSku, stop, resolveAttention, prefix = 'edit'} = {}) {
+    const states = ['Sellable','Pending Research','Unsellable'], dispositions = ['Defective','Amazon Damage','Distributor Damage','Expired'];
+    return mount(root, {prefix, stop, resolveAttention, defaultMode: 'sku',
+      defaults: {sourceState: 'Sellable', sourceDamage: 'Defective', destState: 'Pending Research', destDamage: 'Defective'},
+      html: modes([['each','EACH'],['sku','SKU']]) + '<div data-source-wrap>' +
+        select('Source state','sourceState',states) + select('Source disposition','sourceDamage',dispositions) + '</div>' +
+        select('Target state','destState',states) + select('Target disposition','destDamage',dispositions) +
+        field('<span data-items-label>Items</span>','items','textarea') + '<div data-qty></div>',
+      paintMode: (node, mode) => { node.querySelector('[data-source-wrap]').hidden = mode === 'each';
+        node.querySelector('[data-items-label]').textContent = mode === 'each' ? 'TOTE  ASIN  [FNSKU] — one row per item' : 'SKU / ASIN / FNSKU / FCSKU — one per line'; },
+      quantity: (node, info) => { if (info.inventory) node.querySelector('[data-qty]').textContent = 'Qty: S ' + (info.inventory.SELLABLE ?? '—') + ' · P ' + (info.inventory.PENDING_RESEARCH ?? '—') + ' · U ' + (info.inventory.UNSELLABLE ?? '—'); },
+      run: input => input.mode === 'each' ? runEach(input) : runSku(input)});
   }
+  const mountFcsku = (root, {run, stop, resolveAttention, prefix = 'fcsku'} = {}) => mount(root, {prefix, run, stop, resolveAttention,
+    html: field('OLD FCSKU','oldCode') + field('NEW FCSKU','newCode') + field('Locations / Containers','locations','textarea')});
+  const mountDate = (root, {run, stop, resolveAttention, prefix = 'date'} = {}) => mount(root, {prefix, stop, resolveAttention,
+    html: field('LOCATION  ASIN  YYYY-MM-DD','rows','textarea'), run: input => run({...input, rows: input.rows.split(/\r?\n/).map(C.clean).filter(Boolean).map(line => {
+      const [location, asin, date] = line.split(/\s+/); return {location, asin, date}; })})});
+  return Object.freeze({mountMove, mountEdit, mountFcsku, mountDate});
+})();
 
-  function mountDate(root,{run,stop,prefix='date'}={}){
-    let busy=false,attention=false;const rows=memory(prefix+'.rows');
-    root.innerHTML='<section class="v3-section"><label class="v3-field">LOCATION  ASIN  YYYY-MM-DD<textarea data-rows></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;q('[data-rows]').disabled=v;};q('[data-rows]').value=rows.get();q('[data-rows]').oninput=e=>rows.set(e.target.value);
-    q('[data-run]').onclick=async()=>{const parsed=String(rows.get()).split(/\r?\n/).map(C.clean).filter(Boolean).map(line=>{const parts=line.split(/\s+/);return{location:parts[0],asin:parts[1],date:parts[2]};});setBusy(true);try{const result=await run({rows:parsed,onProgress:p=>status((p.confirmed||0)+'/'+p.total+' confirmed','warn')});status('DONE ✓ '+result.confirmed+'/'+result.total,'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>stop?.();q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};return{dispose(){stop?.();}};
+// ---- src/bridge.js ----
+V3.bridge = (() => {
+  const C = V3.core, PROTOCOL = 'bwu2.v3.bridge';
+  function client({origin, path, family, life, onEvent} = {}) {
+    let frame, ready = false, waiting = null;
+    const pending = new Map();
+    const post = message => frame.contentWindow.postMessage({protocol: PROTOCOL, family, ...message}, origin);
+    const ensureReady = () => {
+      if (ready) return Promise.resolve();
+      if (waiting) return waiting.promise;
+      let resolve, reject;
+      const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+      const timer = setTimeout(() => { waiting = null; reject(new Error(family + ' worker not ready — open its native page and sign in')); }, 20000);
+      waiting = {promise, reject:()=>{clearTimeout(timer);reject(new Error('Worker startup cancelled'));},resolve: () => { clearTimeout(timer); waiting = null; resolve(); }};
+      if (!frame?.isConnected) {
+        frame = document.createElement('iframe'); frame.hidden = true; frame.tabIndex = -1;
+        frame.setAttribute('aria-hidden', 'true'); frame.src = origin + path + '#v3-' + family + '-worker';
+        life.on(frame, 'load', () => { ready = false; post({type: 'ping'}); });
+        document.body.appendChild(frame);
+      } else post({type: 'ping'});
+      return promise;
+    };
+    const arm = (id, job) => { clearTimeout(job.timer); job.timer = setTimeout(() => {
+      pending.delete(id); job.reject(new C.UnknownError(family + ' worker confirmation lost — verify before retry', {aftPartial: job.partial}));
+    }, 210000); };
+    life.on(window, 'message', event => {
+      if (event.origin !== origin || event.source !== frame?.contentWindow) return;
+      const msg = event.data; if (msg?.protocol !== PROTOCOL || msg.family !== family) return;
+      if (msg.type === 'ready') { ready = true; waiting?.resolve(); return; }
+      if (msg.type === 'event') { onEvent?.(msg.detail); return; }
+      const job = pending.get(msg.id); if (!job) return;
+      if (msg.type === 'progress') { arm(msg.id, job); job.partial = msg.progress; job.onProgress?.(msg.progress); return; }
+      if (msg.type !== 'result') return;
+      pending.delete(msg.id); clearTimeout(job.timer);
+      if (msg.ok) job.resolve(msg.data);
+      else { const Type = msg.outcome === 'unknown' ? C.UnknownError : msg.outcome === 'rejected' ? C.RejectedError : Error;
+        const error = new Type(msg.error || family + ' worker failed'); error.aftPartial = msg.partial; job.reject(error); }
+    });
+    life.own(() => {waiting?.reject();waiting=null; for (const job of pending.values()) {
+      clearTimeout(job.timer); job.reject(new C.UnknownError('Worker page closed — verify active workflow'));
+    } pending.clear(); frame?.remove(); });
+    return Object.freeze({async run(command, input = {}) {
+      const {onProgress, ...payload} = input;
+      const clone = structuredClone(payload); await ensureReady(); const id = C.id('rpc');
+      return new Promise((resolve, reject) => { const job = {resolve, reject, onProgress, partial: null}; pending.set(id, job); arm(id, job);
+        try { post({type: 'run', id, command, payload: clone}); }
+        catch (error) { pending.delete(id); clearTimeout(job.timer); reject(error); }
+      });
+    }, stop() { if (ready) post({type: 'stop'}); }});
   }
-
-  return Object.freeze({mountMove,mountEdit,mountFcsku,mountDate});
+  function server({family, life, commands, stop, allowed} = {}) {
+    let busy = false, parentOrigin = '';
+    const send = (source, origin, message) => source.postMessage({protocol: PROTOCOL, family, ...message}, origin);
+    life.on(window, 'message', async event => {
+      if (event.source !== window.parent || !allowed(event.origin)) return;
+      const msg = event.data; if (msg?.protocol !== PROTOCOL || msg.family !== family) return;
+      if (msg.type === 'ping') { parentOrigin = event.origin; send(event.source, event.origin, {type: 'ready'}); return; }
+      if (msg.type === 'stop') { stop?.(); return; }
+      if (msg.type !== 'run' || !msg.id) return;
+      const answer = result => send(event.source, event.origin, {type: 'result', id: msg.id, ...result});
+      if (busy) { answer({ok: false, error: 'Worker busy'}); return; }
+      const run = commands[msg.command]; if (!run) { answer({ok: false, error: 'Unsupported command'}); return; }
+      busy = true;
+      try { const data = await run({...msg.payload, onProgress: progress => send(event.source, event.origin, {type: 'progress', id: msg.id, progress})}); answer({ok: true, data}); }
+      catch (error) { answer({ok: false, error: C.clean(error.message || error), outcome: error.outcome || '', partial: error.aftPartial || null}); }
+      finally { busy = false; }
+    });
+    life.on(window, 'bwu2-v3:event', event => { if (parentOrigin) send(window.parent, parentOrigin, {type: 'event', detail: event.detail}); });
+  }
+  const isFCR=origin=>{try{return ['fcresearch-fe.aka.amazon.com','qi-fcresearch-fe.corp.amazon.com','qi-fcresearch-jp.corp.amazon.com','qifcr.fe.aftx.amazonoperations.app'].includes(new URL(origin).hostname);}catch{return false;}};
+  return Object.freeze({client, server,isFCR});
 })();
 
 // ---- src/apps/aft.js ----
-V3.boot=()=>{
-  const C=V3.core,life=C.lifecycle('aft'),telemetry=C.telemetry('aft',V3.build.version);
-  let stopFlag=false,busy=false,pulseTimer=0,currentUi=null;
-  const engine=V3.aft.create({life,telemetry,stopped:()=>stopFlag});
-  const WORKER=location.hash==='#v3-iss-worker'&&window.parent!==window;
-  const PARENT='https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
-
-  const runFresh=fn=>async payload=>{stopFlag=false;return fn(payload);};
-  const direct={
-    move:runFresh(p=>engine.runMove(p)),
-    editEach:runFresh(p=>engine.runEditEach(p)),
-    editSku:runFresh(p=>engine.runEditSku(p)),
-    fcsku:runFresh(p=>engine.runFcsku(p)),
-    date:runFresh(p=>engine.runDate(p)),
-    stop(){stopFlag=true;}
-  };
-
-  if(WORKER){
-    const send=(type,payload={})=>{try{window.parent.postMessage({type,worker:'aft',version:V3.build.version,...payload},PARENT);}catch{}};
-    const pulseStart=()=>{pulseStop();pulseTimer=setInterval(()=>{if(busy)send('V3_AFT_PROGRESS',{pulse:true,message:'working'});},12000);};
-    const pulseStop=()=>{if(pulseTimer){clearInterval(pulseTimer);pulseTimer=0;}};
-    life.own(pulseStop);
-    life.on(window,'message',async event=>{
-      if(event.origin!==PARENT||event.source!==window.parent)return;
-      const msg=event.data;if(msg?.type!=='V3_AFT_RPC'||!msg.id)return;
-      if(msg.command==='ping'){send('V3_AFT_RESULT',{id:msg.id,ok:true,data:{ready:true}});return;}
-      if(msg.command==='stop'){stopFlag=true;send('V3_AFT_RESULT',{id:msg.id,ok:true,data:{stopped:true}});return;}
-      if(busy){send('V3_AFT_RESULT',{id:msg.id,ok:false,error:'AFT worker busy'});return;}
-      busy=true;stopFlag=false;pulseStart();
-      const progress=p=>send('V3_AFT_PROGRESS',{id:msg.id,area:String(msg.command||'').split('.')[0],progress:p});
-      try{
-        let data;
-        if(msg.command==='move.run')data=await engine.runMove({...msg.payload,onProgress:progress});
-        else if(msg.command==='edit.each')data=await engine.runEditEach({...msg.payload,onProgress:progress});
-        else if(msg.command==='edit.sku')data=await engine.runEditSku({...msg.payload,onProgress:progress});
-        else if(msg.command==='fcsku.run')data=await engine.runFcsku({...msg.payload,onProgress:progress});
-        else if(msg.command==='date.run')data=await engine.runDate({...msg.payload,onProgress:progress});
-        else throw new Error('Unknown AFT worker command');
-        send('V3_AFT_RESULT',{id:msg.id,ok:true,data});
-      }catch(error){
-        send('V3_AFT_RESULT',{id:msg.id,ok:false,error:C.clean(error.message||error),outcome:error?.outcome||'',partial:error?.aftPartial||null});
-      }finally{busy=false;pulseStop();}
-    });
-    send('V3_AFT_READY',{ready:true});
+V3.boot = () => {
+  const C = V3.core, life = C.lifecycle('aft'), telemetry = C.telemetry('aft', V3.build.version);
+  let stopFlag = false, active = null, mounted = false;
+  const engine = V3.aft.create({life, telemetry, stopped: () => stopFlag});
+  const run = fn => input => V3.state.exclusive('aft', async () => {
+    V3.state.assertClear('aft'); stopFlag = false; return fn(input);
+  });
+  const commands = {'move.run': run(input => engine.runMove(input)), 'edit.each': run(input => engine.runEditEach(input)),
+    'edit.sku': run(input => engine.runEditSku(input)), 'fcsku.run': run(input => engine.runFcsku(input)),
+    'date.run': run(input => engine.runDate(input)), resolve: () => V3.state.resolveAttention('aft')};
+  const stop = () => { stopFlag = true; };
+  if (location.hash === '#v3-aft-worker' && window.parent !== window) {
+    V3.bridge.server({family: 'aft', life, commands, stop,
+      allowed: origin => origin === 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com'});
     return;
   }
-
-  const panel=C.panel({id:'aft-tools',title:'V3 · AFT Tools',width:620,life});
-  let mounted=false,sub='edit';
-  const mount=()=>{
-    if(!mounted)mounted=true;
-    const root=document.createElement('div');
-    const route=location.pathname.toLowerCase();
-    if(route.includes('/app/moveitems')){
-      V3.workflowUI.mountMove(root,{run:direct.move,stop:direct.stop,prefix:'aft.move'});
-    }else if(route.includes('/app/fcskuflip')){
-      V3.workflowUI.mountFcsku(root,{run:direct.fcsku,stop:direct.stop,prefix:'aft.fcsku'});
-    }else{
-      root.innerHTML='<div class="v3-tabs"><button class="v3-btn" data-sub="edit">EDIT</button><button class="v3-btn" data-sub="date">DATE</button></div><div data-work></div>';
-      const work=root.querySelector('[data-work]'),paint=()=>{for(const b of root.querySelectorAll('[data-sub]'))b.classList.toggle('active',b.dataset.sub===sub);work.replaceChildren();if(sub==='date')V3.workflowUI.mountDate(work,{run:direct.date,stop:direct.stop,prefix:'aft.date'});else V3.workflowUI.mountEdit(work,{runEach:direct.editEach,runSku:direct.editSku,stop:direct.stop,prefix:'aft.edit'});};
-      for(const b of root.querySelectorAll('[data-sub]'))b.onclick=()=>{direct.stop();sub=b.dataset.sub;paint();};paint();
+  const panel = C.panel({id: 'aft-tools', title: 'V3 · AFT Tools', width: 620, life});
+  const options = {stop, resolveAttention: commands.resolve};
+  const mount = () => {
+    if (mounted) return; mounted = true; const root = document.createElement('div');
+    if (location.pathname.includes('/app/moveitems')) active = V3.workflowUI.mountMove(root, {...options, prefix: 'aft.move', run: commands['move.run']});
+    else if (location.pathname.includes('/app/fcskuflip')) active = V3.workflowUI.mountFcsku(root, {...options, prefix: 'aft.fcsku', run: commands['fcsku.run']});
+    else {
+      root.innerHTML = '<div class="v3-tabs"><button class="v3-btn" data-edit>EDIT</button><button class="v3-btn" data-date>DATE</button></div><div data-work></div>';
+      const work = root.querySelector('[data-work]');
+      const paint = date => { if (active?.isBusy) return; active?.dispose?.();
+        active = date ? V3.workflowUI.mountDate(work, {...options, prefix: 'aft.date', run: commands['date.run']}) :
+          V3.workflowUI.mountEdit(work, {...options, prefix: 'aft.edit', runEach: commands['edit.each'], runSku: commands['edit.sku']}); };
+      root.querySelector('[data-edit]').onclick = () => paint(false); root.querySelector('[data-date]').onclick = () => paint(true); paint(false);
     }
     panel.set(root);
   };
-  C.dockButton({id:'aft-tools',label:'AFT',title:'V3 AFT Tools',onClick:()=>{mount();panel.open();}});
+  life.own(() => active?.dispose?.());
+  C.dockButton({id: 'aft-tools', label: 'AFT', title: 'V3 AFT Tools', onClick: () => { mount(); panel.open(); }});
 };
 
 if(typeof V3.boot!=='function')throw new Error('V3 boot missing');

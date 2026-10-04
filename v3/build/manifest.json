@@ -3,13 +3,14 @@
     {
       "id": "fcr",
       "name": "V3 | BWU2 FCResearch",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "FCResearch-native BWU2 tools: Tote Audit, Bin Check, Pandash, MoveContainer, Unbind and exact print.",
       "include": [
         "/^https?:\\/\\/.*fcresearch.*\\//",
-        "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
+        "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//",
+        "/^https:\\/\\/jp\\.item-measurement\\.aft\\.a2z\\.com\\//"
       ],
-      "runAt": "document-body",
+      "runAt": "document-start",
       "grant": [
         "GM_xmlhttpRequest",
         "GM_getValue",
@@ -22,24 +23,33 @@
         "pandash.amazon.com",
         "aft-moveapp-nrt-nrt.nrt.proxy.amazon.com",
         "tx-b-hierarchy-nrt.nrt.proxy.amazon.com",
-        "localhost"
+        "localhost",
+        "aft-poirot-website-nrt.nrt.proxy.amazon.com"
       ],
       "output": "V3_FCResearch.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
+        "src/pandash.js",
         "src/fcr.js",
         "src/actions.js",
+        "src/bridge.js",
+        "src/measurement.js",
+        "src/fcr-native.js",
         "src/apps/fcr.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
-      "noframes": true,
+      "noframes": false,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FCResearch.user.js",
       "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FCResearch.user.js"
     },
     {
       "id": "iss",
       "name": "V3 | BWU2 ISS Console",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Dedicated ISS Console for Edit, Move, Sideline and FCSKU.",
       "match": [
         "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*"
@@ -55,10 +65,18 @@
       "output": "V3_ISS_Console.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
+        "src/pandash.js",
         "src/aft.js",
         "src/sideline.js",
         "src/workflow-ui.js",
         "src/sideline-ui.js",
+        "src/queue-ui.js",
+        "src/sideline-native.js",
+        "src/bridge.js",
         "src/apps/iss.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -69,7 +87,7 @@
     {
       "id": "aft",
       "name": "V3 | BWU2 AFT Tools",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native EditItems, MoveItems and FCSKU helper using one AFT engine.",
       "include": [
         "*://aft-qt-*.corp.amazon.com/app/edititems*",
@@ -83,8 +101,13 @@
       "output": "V3_AFT_Tools.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/aft.js",
         "src/workflow-ui.js",
+        "src/bridge.js",
         "src/apps/aft.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -95,7 +118,7 @@
     {
       "id": "sideline",
       "name": "V3 | BWU2 Sideline",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native Poirot Sideline helper using the same engine as ISS Console.",
       "match": [
         "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*"
@@ -110,8 +133,15 @@
       "output": "V3_Sideline.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
+        "src/pandash.js",
         "src/sideline.js",
         "src/sideline-ui.js",
+        "src/queue-ui.js",
+        "src/sideline-native.js",
         "src/apps/sideline.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -122,7 +152,7 @@
     {
       "id": "hierarchy",
       "name": "V3 | BWU2 Hierarchy",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native Bind/Unbind queues with typed Bind destination validation.",
       "match": [
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
@@ -137,18 +167,24 @@
       "output": "V3_Hierarchy.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/actions.js",
+        "src/bridge.js",
+        "src/queue-ui.js",
         "src/apps/hierarchy.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
-      "noframes": true,
+      "noframes": false,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Hierarchy.user.js",
       "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Hierarchy.user.js"
     },
     {
       "id": "movecontainer",
       "name": "V3 | BWU2 MoveContainer",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native MoveContainer floor/dropzone helper and sequential queue.",
       "include": [
         "/^https?:\\/\\/aft-moveapp-[^\\/.]+(?:\\.nrt)?\\.proxy\\.amazon\\.com\\/move-container(?:[\\/?#]|$)/"
@@ -165,18 +201,24 @@
       "output": "V3_MoveContainer.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/actions.js",
+        "src/bridge.js",
+        "src/queue-ui.js",
         "src/apps/movecontainer.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
-      "noframes": true,
+      "noframes": false,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_MoveContainer.user.js",
       "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_MoveContainer.user.js"
     },
     {
       "id": "river",
       "name": "V3 | BWU2 RIVER Assistant",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "FCResearch capture plus cancellable native RIVER assistant.",
       "include": [
         "/^https?:\\/\\/.*fcresearch.*\\//",
@@ -194,6 +236,11 @@
       "output": "V3_RIVER_Assistant.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
+        "src/pandash.js",
         "src/fcr.js",
         "src/apps/river.js"
       ],
@@ -205,7 +252,7 @@
     {
       "id": "fnsku",
       "name": "V3 | BWU2 FNSKU Mapping",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Exact regional FNSKU/ASIN mapping helper.",
       "match": [
         "https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*",
@@ -225,6 +272,10 @@
       "output": "V3_FNSKU_Mapping.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/fnsku.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -235,7 +286,7 @@
     {
       "id": "poportal",
       "name": "V3 | BWU2 PO Portal",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native PO Portal AU ISS helper.",
       "include": [
         "/^https?:\\/\\/console\\.harmony\\.a2z\\.com\\/poportal(?:[\\/?#]|$)/"
@@ -247,6 +298,10 @@
       "output": "V3_PO_Portal.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/poportal.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -257,7 +312,7 @@
     {
       "id": "carton",
       "name": "V3 | BWU2 Carton PrEditor",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Carton PrEditor auto-complete after barcode and count readiness.",
       "match": [
         "https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*"
@@ -270,6 +325,10 @@
       "output": "V3_Carton_PrEditor.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/carton.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -280,7 +339,7 @@
     {
       "id": "calm",
       "name": "V3 | BWU2 Calm Code",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Native Calm Code role shortcuts.",
       "match": [
         "https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
@@ -297,6 +356,10 @@
       "output": "V3_Calm_Code.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/calm.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -307,7 +370,7 @@
     {
       "id": "sim",
       "name": "V3 | BWU2 SIM Toolbar",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "SIM Markdown toolbar, snippets and attachment image helpers.",
       "match": [
         "https://t.corp.amazon.com/*"
@@ -320,6 +383,10 @@
       "output": "V3_SIM_Toolbar.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/sim.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -330,7 +397,7 @@
     {
       "id": "obs",
       "name": "V3 | BWU2 OBS",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Sanitized operation-level telemetry collector and export.",
       "include": [
         "/^https?:\\/\\/aft-poirot-website-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
@@ -349,11 +416,17 @@
       "grant": [
         "GM_getValue",
         "GM_setValue",
-        "GM_registerMenuCommand"
+        "GM_registerMenuCommand",
+        "GM_listValues",
+        "GM_deleteValue"
       ],
       "output": "V3_OBS.user.js",
       "sources": [
         "src/core.js",
+        "src/state.js",
+        "src/transport.js",
+        "src/identity.js",
+        "src/native.js",
         "src/apps/obs.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -364,7 +437,7 @@
     {
       "id": "screenshot",
       "name": "V3 | BWU2 Screenshot Mode",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Ctrl+Q hides/shows V3 userscript UI for clean screenshots.",
       "include": [
         "/^https?:\\/\\/aft-poirot-website-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",

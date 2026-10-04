@@ -1,66 +1,35 @@
-V3.boot=()=>{
-  const C=V3.core,life=C.lifecycle('aft'),telemetry=C.telemetry('aft',V3.build.version);
-  let stopFlag=false,busy=false,pulseTimer=0,currentUi=null;
-  const engine=V3.aft.create({life,telemetry,stopped:()=>stopFlag});
-  const WORKER=location.hash==='#v3-iss-worker'&&window.parent!==window;
-  const PARENT='https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
-
-  const runFresh=fn=>async payload=>{stopFlag=false;return fn(payload);};
-  const direct={
-    move:runFresh(p=>engine.runMove(p)),
-    editEach:runFresh(p=>engine.runEditEach(p)),
-    editSku:runFresh(p=>engine.runEditSku(p)),
-    fcsku:runFresh(p=>engine.runFcsku(p)),
-    date:runFresh(p=>engine.runDate(p)),
-    stop(){stopFlag=true;}
-  };
-
-  if(WORKER){
-    const send=(type,payload={})=>{try{window.parent.postMessage({type,worker:'aft',version:V3.build.version,...payload},PARENT);}catch{}};
-    const pulseStart=()=>{pulseStop();pulseTimer=setInterval(()=>{if(busy)send('V3_AFT_PROGRESS',{pulse:true,message:'working'});},12000);};
-    const pulseStop=()=>{if(pulseTimer){clearInterval(pulseTimer);pulseTimer=0;}};
-    life.own(pulseStop);
-    life.on(window,'message',async event=>{
-      if(event.origin!==PARENT||event.source!==window.parent)return;
-      const msg=event.data;if(msg?.type!=='V3_AFT_RPC'||!msg.id)return;
-      if(msg.command==='ping'){send('V3_AFT_RESULT',{id:msg.id,ok:true,data:{ready:true}});return;}
-      if(msg.command==='stop'){stopFlag=true;send('V3_AFT_RESULT',{id:msg.id,ok:true,data:{stopped:true}});return;}
-      if(busy){send('V3_AFT_RESULT',{id:msg.id,ok:false,error:'AFT worker busy'});return;}
-      busy=true;stopFlag=false;pulseStart();
-      const progress=p=>send('V3_AFT_PROGRESS',{id:msg.id,area:String(msg.command||'').split('.')[0],progress:p});
-      try{
-        let data;
-        if(msg.command==='move.run')data=await engine.runMove({...msg.payload,onProgress:progress});
-        else if(msg.command==='edit.each')data=await engine.runEditEach({...msg.payload,onProgress:progress});
-        else if(msg.command==='edit.sku')data=await engine.runEditSku({...msg.payload,onProgress:progress});
-        else if(msg.command==='fcsku.run')data=await engine.runFcsku({...msg.payload,onProgress:progress});
-        else if(msg.command==='date.run')data=await engine.runDate({...msg.payload,onProgress:progress});
-        else throw new Error('Unknown AFT worker command');
-        send('V3_AFT_RESULT',{id:msg.id,ok:true,data});
-      }catch(error){
-        send('V3_AFT_RESULT',{id:msg.id,ok:false,error:C.clean(error.message||error),outcome:error?.outcome||'',partial:error?.aftPartial||null});
-      }finally{busy=false;pulseStop();}
-    });
-    send('V3_AFT_READY',{ready:true});
+V3.boot = () => {
+  const C = V3.core, life = C.lifecycle('aft'), telemetry = C.telemetry('aft', V3.build.version);
+  let stopFlag = false, active = null, mounted = false;
+  const engine = V3.aft.create({life, telemetry, stopped: () => stopFlag});
+  const run = fn => input => V3.state.exclusive('aft', async () => {
+    V3.state.assertClear('aft'); stopFlag = false; return fn(input);
+  });
+  const commands = {'move.run': run(input => engine.runMove(input)), 'edit.each': run(input => engine.runEditEach(input)),
+    'edit.sku': run(input => engine.runEditSku(input)), 'fcsku.run': run(input => engine.runFcsku(input)),
+    'date.run': run(input => engine.runDate(input)), resolve: () => V3.state.resolveAttention('aft')};
+  const stop = () => { stopFlag = true; };
+  if (location.hash === '#v3-aft-worker' && window.parent !== window) {
+    V3.bridge.server({family: 'aft', life, commands, stop,
+      allowed: origin => origin === 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com'});
     return;
   }
-
-  const panel=C.panel({id:'aft-tools',title:'V3 · AFT Tools',width:620,life});
-  let mounted=false,sub='edit';
-  const mount=()=>{
-    if(!mounted)mounted=true;
-    const root=document.createElement('div');
-    const route=location.pathname.toLowerCase();
-    if(route.includes('/app/moveitems')){
-      V3.workflowUI.mountMove(root,{run:direct.move,stop:direct.stop,prefix:'aft.move'});
-    }else if(route.includes('/app/fcskuflip')){
-      V3.workflowUI.mountFcsku(root,{run:direct.fcsku,stop:direct.stop,prefix:'aft.fcsku'});
-    }else{
-      root.innerHTML='<div class="v3-tabs"><button class="v3-btn" data-sub="edit">EDIT</button><button class="v3-btn" data-sub="date">DATE</button></div><div data-work></div>';
-      const work=root.querySelector('[data-work]'),paint=()=>{for(const b of root.querySelectorAll('[data-sub]'))b.classList.toggle('active',b.dataset.sub===sub);work.replaceChildren();if(sub==='date')V3.workflowUI.mountDate(work,{run:direct.date,stop:direct.stop,prefix:'aft.date'});else V3.workflowUI.mountEdit(work,{runEach:direct.editEach,runSku:direct.editSku,stop:direct.stop,prefix:'aft.edit'});};
-      for(const b of root.querySelectorAll('[data-sub]'))b.onclick=()=>{direct.stop();sub=b.dataset.sub;paint();};paint();
+  const panel = C.panel({id: 'aft-tools', title: 'V3 · AFT Tools', width: 620, life});
+  const options = {stop, resolveAttention: commands.resolve};
+  const mount = () => {
+    if (mounted) return; mounted = true; const root = document.createElement('div');
+    if (location.pathname.includes('/app/moveitems')) active = V3.workflowUI.mountMove(root, {...options, prefix: 'aft.move', run: commands['move.run']});
+    else if (location.pathname.includes('/app/fcskuflip')) active = V3.workflowUI.mountFcsku(root, {...options, prefix: 'aft.fcsku', run: commands['fcsku.run']});
+    else {
+      root.innerHTML = '<div class="v3-tabs"><button class="v3-btn" data-edit>EDIT</button><button class="v3-btn" data-date>DATE</button></div><div data-work></div>';
+      const work = root.querySelector('[data-work]');
+      const paint = date => { if (active?.isBusy) return; active?.dispose?.();
+        active = date ? V3.workflowUI.mountDate(work, {...options, prefix: 'aft.date', run: commands['date.run']}) :
+          V3.workflowUI.mountEdit(work, {...options, prefix: 'aft.edit', runEach: commands['edit.each'], runSku: commands['edit.sku']}); };
+      root.querySelector('[data-edit]').onclick = () => paint(false); root.querySelector('[data-date]').onclick = () => paint(true); paint(false);
     }
     panel.set(root);
   };
-  C.dockButton({id:'aft-tools',label:'AFT',title:'V3 AFT Tools',onClick:()=>{mount();panel.open();}});
+  life.own(() => active?.dispose?.());
+  C.dockButton({id: 'aft-tools', label: 'AFT', title: 'V3 AFT Tools', onClick: () => { mount(); panel.open(); }});
 };

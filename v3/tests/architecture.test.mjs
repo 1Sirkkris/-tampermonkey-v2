@@ -34,4 +34,9 @@ assert.ok(!actions.includes("forceBind"),'Ground-up Bind must not directly call 
 
 assert.notEqual(byId.obs.output,byId.screenshot.output,'OBS and Screenshot must remain independent');
 
+const core=fs.readFileSync(path.join(root,'src/core.js'),'utf8'),bridge=fs.readFileSync(path.join(root,'src/bridge.js'),'utf8');
+assert.ok(!/setInterval/.test(core+bridge),'Core/bridge must have no idle heartbeat/lease timer');
+assert.ok(!/confirmUntilDone/.test(fs.readFileSync(path.join(root,'src/aft.js'),'utf8')),'No blind repeated AFT confirmations');
+const measurement=fs.readFileSync(path.join(root,'src/measurement.js'),'utf8');assert.ok(!/options\.headers|input\.headers|document\.cookie|localStorage|sessionStorage/.test(measurement),'Measurement bridge must not capture authentication material');
+for(const id of ['aft','hierarchy','movecontainer'])assert.equal(byId[id].noframes,false,id+' native worker installation must run in its iframe');
 console.log('PASS architecture');

@@ -1,55 +1,95 @@
-V3.workflowUI=(()=>{
-  const C=V3.core;
-  const memory=(key,initial='')=>{const full='bwu2.v3.form.'+key;let value='';try{value=localStorage.getItem(full)??initial;}catch{value=initial;}return{get:()=>value,set:v=>{value=String(v??'');try{localStorage.setItem(full,value);}catch{}}};};
-
-  function mountMove(root,{run,stop,prefix='move'}={}){
-    let busy=false,attention=false,mode='all';
-    const source=memory(prefix+'.source'),dest=memory(prefix+'.dest'),items=memory(prefix+'.items'),qty=memory(prefix+'.qty','1');
-    root.innerHTML='<section class="v3-section"><div class="v3-tabs"><button class="v3-btn active" data-mode="all">ALL</button><button class="v3-btn" data-mode="each">EACH = 1</button><button class="v3-btn" data-mode="qty">QTY</button></div><div class="v3-grid"><label class="v3-field">Source<input data-source></label><label class="v3-field">Destination<input data-dest></label></div><label class="v3-field" data-qty-wrap hidden>Quantity<input type="number" min="1" data-qty></label><label class="v3-field">Items<textarea data-items></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section><section class="v3-section"><div data-progress></div></section>';
-    const q=s=>root.querySelector(s),status=(m,kind='')=>{q('[data-status]').className='v3-note '+(kind?'v3-'+kind:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea,[data-mode]'))el.disabled=v;};
-    q('[data-source]').value=source.get();q('[data-dest]').value=dest.get();q('[data-items]').value=items.get();q('[data-qty]').value=qty.get();
-    q('[data-source]').oninput=e=>source.set(e.target.value);q('[data-dest]').oninput=e=>dest.set(e.target.value);q('[data-items]').oninput=e=>items.set(e.target.value);q('[data-qty]').oninput=e=>qty.set(e.target.value);
-    const paintMode=()=>{for(const b of root.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);q('[data-qty-wrap]').hidden=mode!=='qty';};
-    for(const b of root.querySelectorAll('[data-mode]'))b.onclick=()=>{if(!busy){mode=b.dataset.mode;paintMode();}};paintMode();
-    const progress=p=>{status(p.stage==='confirmed'?(p.confirmed+'/'+p.total+' confirmed'):(p.current?(p.current+'/'+p.total+' · '+p.stage+(p.barcode?' · '+p.barcode:'')):p.stage),'warn');q('[data-progress]').textContent=p.confirmed!=null?'Confirmed: '+p.confirmed+(p.total!=null?' / '+p.total:''):'';};
-    q('[data-run]').onclick=async()=>{if(busy||attention)return;setBusy(true);status('Starting…','warn');try{const result=await run({source:source.get(),destination:dest.get(),items:items.get(),mode,qty:Number(qty.get()),onProgress:progress});status('DONE ✓ '+(result.confirmed??result.done??0)+'/'+(result.total??''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY BEFORE RETRY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested — finishing current action','warn');};
-    q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};
-    return{dispose(){stop?.();}};
+V3.workflowUI = (() => {
+  const C = V3.core;
+  const formKey = key => 'bwu2.v3.form.' + key;
+  const read = (key, fallback = '') => localStorage.getItem(formKey(key)) ?? fallback;
+  const write = (key, value) => localStorage.setItem(formKey(key), String(value ?? ''));
+  const buttonRow = '<div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div><div data-progress></div>';
+  const field = (label, key, type = 'input', extra = '') => '<label class="v3-field">' + label + '<' + type + ' data-field="' + key + '" ' + extra + '></' + type + '></label>';
+  const select = (label, key, values) => field(label, key, 'select').replace('</select>', values.map(value => '<option>' + C.esc(value) + '</option>').join('') + '</select>');
+  const modes = values => '<div class="v3-tabs">' + values.map(([key, label]) => '<button class="v3-btn" data-mode="' + key + '">' + label + '</button>').join('') + '</div>';
+  function mount(root, {prefix, html, defaults, defaultMode, run, stop, resolveAttention, paintMode, quantity} = {}) {
+    let busy = false, disposed = false, mode = read(prefix + '.mode', defaultMode || '');
+    let attention = read('aft.attention', '') || read(prefix + '.running', '');let runInfo=null;try{runInfo=JSON.parse(read(prefix+'.journal','null'));}catch{attention='Saved progress unreadable — verify previous work';}
+    root.innerHTML = '<section class="v3-section">' + html + buttonRow + '</section>';
+    const q = selector => root.querySelector(selector), values = {};
+    for (const element of root.querySelectorAll('[data-field]')) {
+      const key = element.dataset.field; element.value = read(prefix + '.' + key, defaults?.[key] || '');
+      values[key] = element;
+      element.addEventListener(element.tagName === 'SELECT' ? 'change' : 'input', () => write(prefix + '.' + key, element.value));
+    }
+    const status = (message, kind = '') => { if (disposed) return; q('[data-status]').className = 'v3-note ' + (kind ? 'v3-' + kind : ''); q('[data-status]').textContent = message; };
+    const controls = () => {
+      for (const element of root.querySelectorAll('input,textarea,select,[data-mode]')) element.disabled = busy;
+      q('[data-run]').disabled = busy || Boolean(attention); q('[data-stop]').disabled = !busy;
+      q('[data-attn]').hidden = !attention;
+    };
+    const paint = () => { for (const button of root.querySelectorAll('[data-mode]')) button.classList.toggle('active', button.dataset.mode === mode); paintMode?.(root, mode); };
+    for (const button of root.querySelectorAll('[data-mode]')) button.onclick = () => { if (busy) return; mode = button.dataset.mode; write(prefix + '.mode', mode); paint(); };
+    const progress = info => {
+      write(prefix+'.journal',JSON.stringify({info,items:(values.items||values.locations||values.rows)?.value||''}));
+      if (disposed) return;
+      status((info.current ? info.current + '/' + info.total + ' · ' : '') + info.stage + (info.sku || info.barcode ? ' · ' + (info.sku || info.barcode) : ''), 'warn');
+      q('[data-progress]').textContent = info.confirmed != null ? 'Confirmed: ' + info.confirmed + (info.total != null ? ' / ' + info.total : '') : '';
+      quantity?.(root, info);
+    };
+    const replaceItems = rows => {
+      const element = values.items || values.locations || values.rows;
+      if (!element) return;
+      element.value = rows.map(row => typeof row === 'string' ? row : [row.location, row.asin, row.fnsku || row.date].filter(Boolean).join(' ')).join('\n');
+      write(prefix + '.' + element.dataset.field, element.value);
+    };
+    q('[data-run]').onclick = async () => {
+      if (busy || attention || disposed) return;
+      busy = true; write(prefix + '.running', 'Previous run ended without confirmation'); controls(); status('Starting…', 'warn');
+      try {
+        const input = Object.fromEntries(Object.entries(values).map(([key, element]) => [key, element.value]));
+        const result = await run({...input, mode, onProgress: progress});
+        const failed = result.failed || [];
+        replaceItems([...(result.remaining||[]),...failed.map(row=>row.sku||row.location).filter(Boolean)]);
+        status((result.stopped||result.remaining?.length ? 'STOPPED · ' : 'DONE ✓ ') + (result.confirmed ?? result.flipped ?? 0) +
+          (result.total != null ? '/' + result.total : '') + (result.zero ? ' · ' + result.zero + ' zero' : '') +
+          (failed.length ? ' · ' + failed.length + ' rejected' : ''), failed.length || result.stopped ? 'warn' : 'ok');
+      } catch (error) {
+        if(error.aftPartial?.remaining)replaceItems(error.aftPartial.remaining);else if(error.outcome==='unknown'){const input=values.items||values.locations||values.rows;if(input){write(prefix+'.uncertain',input.value);replaceItems([]);}}
+        if (error.outcome === 'unknown') { attention = C.clean(error.message || error); write('aft.attention', attention); }
+        status((attention ? 'OUTCOME UNKNOWN — VERIFY BEFORE RETRY · ' : 'STOPPED · ') + C.clean(error.message || error), attention ? 'bad' : 'warn');
+      } finally { busy = false; localStorage.removeItem(formKey(prefix + '.running'));localStorage.removeItem(formKey(prefix+'.journal')); controls(); }
+    };
+    q('[data-stop]').onclick = () => { stop?.(); status('Stop requested — finishing current action', 'warn'); };
+    q('[data-attn]').onclick = async () => {
+      if (busy) return;
+      try { await resolveAttention?.(); attention = ''; localStorage.removeItem(formKey('aft.attention')); localStorage.removeItem(formKey(prefix + '.running'));localStorage.removeItem(formKey(prefix+'.journal')); controls(); status('Attention cleared'); }
+      catch (error) { status(error.message, 'bad'); }
+    };
+    if(attention&&runInfo){const lines=String(runInfo.items||'').split(/\r?\n/).filter(Boolean),skip=Number(runInfo.info?.current||runInfo.info?.confirmed||0);write(prefix+'.uncertain',lines.slice(0,skip).join('\n'));replaceItems(lines.slice(skip));}
+    paint(); controls(); if (attention) status('VERIFY PREVIOUS RUN · ' + attention, 'bad');
+    return Object.freeze({get isBusy() { return busy; }, dispose() { disposed = true; stop?.(); }});
   }
-
-  function mountEdit(root,{runEach,runSku,stop,prefix='edit'}={}){
-    let busy=false,attention=false,mode='sku';
-    const items=memory(prefix+'.items'),from=memory(prefix+'.from','Sellable'),fromDamage=memory(prefix+'.fromDamage','Defective'),to=memory(prefix+'.to','Pending Research'),toDamage=memory(prefix+'.toDamage','Defective');
-    const states=['Sellable','Pending Research','Unsellable'],damages=['Defective','Amazon Damage','Distributor Damage','Expired'];
-    root.innerHTML='<section class="v3-section"><div class="v3-tabs"><button class="v3-btn" data-mode="each">EACH</button><button class="v3-btn active" data-mode="sku">SKU</button></div><div data-source-wrap><div class="v3-grid"><label class="v3-field">Source state<select data-from>'+states.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Source disposition<select data-from-damage>'+damages.map(x=>'<option>'+x+'</option>').join('')+'</select></label></div></div><div class="v3-grid"><label class="v3-field">Target state<select data-to>'+states.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="v3-field">Target disposition<select data-to-damage>'+damages.map(x=>'<option>'+x+'</option>').join('')+'</select></label></div><label class="v3-field"><span data-items-label>SKU / ASIN / FNSKU / FCSKU</span><textarea data-items></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section><section class="v3-section"><div data-qty></div><div data-progress></div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea,select,[data-mode]'))el.disabled=v;};
-    q('[data-items]').value=items.get();q('[data-from]').value=from.get();q('[data-from-damage]').value=fromDamage.get();q('[data-to]').value=to.get();q('[data-to-damage]').value=toDamage.get();
-    q('[data-items]').oninput=e=>items.set(e.target.value);q('[data-from]').onchange=e=>from.set(e.target.value);q('[data-from-damage]').onchange=e=>fromDamage.set(e.target.value);q('[data-to]').onchange=e=>to.set(e.target.value);q('[data-to-damage]').onchange=e=>toDamage.set(e.target.value);
-    const paintMode=()=>{for(const b of root.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);q('[data-source-wrap]').hidden=mode==='each';q('[data-items-label]').textContent=mode==='each'?'TOTE  ASIN  [FNSKU] — one row per item':'SKU / ASIN / FNSKU / FCSKU — one per line';};
-    for(const b of root.querySelectorAll('[data-mode]'))b.onclick=()=>{if(!busy){mode=b.dataset.mode;paintMode();}};paintMode();
-    const progress=p=>{status(p.current?(p.current+'/'+p.total+' · '+p.stage+(p.sku?' · '+p.sku:'')):p.stage,'warn');if(p.inventory){const s=p.inventory.SELLABLE??'—',pr=p.inventory.PENDING_RESEARCH??'—',u=p.inventory.UNSELLABLE??'—';q('[data-qty]').innerHTML='<b>Qty:</b> S '+s+' · P '+pr+' · U '+u;}q('[data-progress]').textContent=p.confirmed!=null?'Confirmed: '+p.confirmed+(p.total!=null?' / '+p.total:''):'';};
-    q('[data-run]').onclick=async()=>{if(busy||attention)return;setBusy(true);status('Starting…','warn');try{const common={items:items.get(),destState:to.get(),destDamage:toDamage.get(),onProgress:progress};const result=mode==='each'?await runEach(common):await runSku({...common,sourceState:from.get(),sourceDamage:fromDamage.get()});const done=result.confirmed??result.flipped??0;status('DONE ✓ '+done+(result.zero?' · '+result.zero+' zero':'')+(result.failed?.length?' · '+result.failed.length+' failed':''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY BEFORE RETRY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested — finishing current action','warn');};
-    q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};
-    return{dispose(){stop?.();}};
+  function mountMove(root, {run, stop, resolveAttention, prefix = 'move'} = {}) {
+    return mount(root, {prefix, stop, resolveAttention, defaultMode: 'all', defaults: {qty: '1'},
+      html: modes([['all','ALL'],['each','EACH = 1'],['qty','QTY']]) +
+        '<div data-qty-wrap hidden>' + field('Quantity', 'qty', 'input', 'type="number" min="1"') + '</div>' +
+        field('Source','source') + field('Destination','destination') + field('Items','items','textarea'),
+      paintMode: (node, mode) => { node.querySelector('[data-qty-wrap]').hidden = mode !== 'qty'; },
+      run: input => run({...input, qty: Number(input.qty)})});
   }
-
-  function mountFcsku(root,{run,stop,prefix='fcsku'}={}){
-    let busy=false,attention=false;const old=memory(prefix+'.old'),neu=memory(prefix+'.new'),locations=memory(prefix+'.locations');
-    root.innerHTML='<section class="v3-section"><label class="v3-field">OLD FCSKU<input data-old></label><label class="v3-field">NEW FCSKU<input data-new></label><label class="v3-field">Locations / Containers<textarea data-locations></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;for(const el of root.querySelectorAll('input,textarea'))el.disabled=v;};q('[data-old]').value=old.get();q('[data-new]').value=neu.get();q('[data-locations]').value=locations.get();q('[data-old]').oninput=e=>old.set(e.target.value);q('[data-new]').oninput=e=>neu.set(e.target.value);q('[data-locations]').oninput=e=>locations.set(e.target.value);
-    q('[data-run]').onclick=async()=>{setBusy(true);try{const result=await run({oldCode:old.get(),newCode:neu.get(),locations:locations.get(),onProgress:p=>status((p.current||'')+'/'+(p.total||'')+' · '+p.stage+(p.location?' · '+p.location:''),'warn')});status('DONE ✓ '+(result.confirmed??0)+'/'+(result.total??''),'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>{stop?.();status('Stop requested','warn');};q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};return{dispose(){stop?.();}};
+  function mountEdit(root, {runEach, runSku, stop, resolveAttention, prefix = 'edit'} = {}) {
+    const states = ['Sellable','Pending Research','Unsellable'], dispositions = ['Defective','Amazon Damage','Distributor Damage','Expired'];
+    return mount(root, {prefix, stop, resolveAttention, defaultMode: 'sku',
+      defaults: {sourceState: 'Sellable', sourceDamage: 'Defective', destState: 'Pending Research', destDamage: 'Defective'},
+      html: modes([['each','EACH'],['sku','SKU']]) + '<div data-source-wrap>' +
+        select('Source state','sourceState',states) + select('Source disposition','sourceDamage',dispositions) + '</div>' +
+        select('Target state','destState',states) + select('Target disposition','destDamage',dispositions) +
+        field('<span data-items-label>Items</span>','items','textarea') + '<div data-qty></div>',
+      paintMode: (node, mode) => { node.querySelector('[data-source-wrap]').hidden = mode === 'each';
+        node.querySelector('[data-items-label]').textContent = mode === 'each' ? 'TOTE  ASIN  [FNSKU] — one row per item' : 'SKU / ASIN / FNSKU / FCSKU — one per line'; },
+      quantity: (node, info) => { if (info.inventory) node.querySelector('[data-qty]').textContent = 'Qty: S ' + (info.inventory.SELLABLE ?? '—') + ' · P ' + (info.inventory.PENDING_RESEARCH ?? '—') + ' · U ' + (info.inventory.UNSELLABLE ?? '—'); },
+      run: input => input.mode === 'each' ? runEach(input) : runSku(input)});
   }
-
-  function mountDate(root,{run,stop,prefix='date'}={}){
-    let busy=false,attention=false;const rows=memory(prefix+'.rows');
-    root.innerHTML='<section class="v3-section"><label class="v3-field">LOCATION  ASIN  YYYY-MM-DD<textarea data-rows></textarea></label><div class="v3-row"><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-stop disabled>STOP AFTER CURRENT</button><button class="v3-btn danger" data-attn hidden>I VERIFIED IT · CLEAR ATTENTION</button></div><div class="v3-note" data-status>Ready</div></section>';
-    const q=s=>root.querySelector(s),status=(m,k='')=>{q('[data-status]').className='v3-note '+(k?'v3-'+k:'');q('[data-status]').textContent=m;},setBusy=v=>{busy=v;q('[data-run]').disabled=v||attention;q('[data-stop]').disabled=!v;q('[data-rows]').disabled=v;};q('[data-rows]').value=rows.get();q('[data-rows]').oninput=e=>rows.set(e.target.value);
-    q('[data-run]').onclick=async()=>{const parsed=String(rows.get()).split(/\r?\n/).map(C.clean).filter(Boolean).map(line=>{const parts=line.split(/\s+/);return{location:parts[0],asin:parts[1],date:parts[2]};});setBusy(true);try{const result=await run({rows:parsed,onProgress:p=>status((p.confirmed||0)+'/'+p.total+' confirmed','warn')});status('DONE ✓ '+result.confirmed+'/'+result.total,'ok');}catch(error){if(error?.outcome==='unknown'){attention=true;q('[data-attn]').hidden=false;status('OUTCOME UNKNOWN — VERIFY · '+C.clean(error.message||error),'bad');}else status('STOPPED · '+C.clean(error.message||error),'bad');}finally{setBusy(false);}};
-    q('[data-stop]').onclick=()=>stop?.();q('[data-attn]').onclick=()=>{attention=false;q('[data-attn]').hidden=true;q('[data-run]').disabled=false;status('Attention cleared');};return{dispose(){stop?.();}};
-  }
-
-  return Object.freeze({mountMove,mountEdit,mountFcsku,mountDate});
+  const mountFcsku = (root, {run, stop, resolveAttention, prefix = 'fcsku'} = {}) => mount(root, {prefix, run, stop, resolveAttention,
+    html: field('OLD FCSKU','oldCode') + field('NEW FCSKU','newCode') + field('Locations / Containers','locations','textarea')});
+  const mountDate = (root, {run, stop, resolveAttention, prefix = 'date'} = {}) => mount(root, {prefix, stop, resolveAttention,
+    html: field('LOCATION  ASIN  YYYY-MM-DD','rows','textarea'), run: input => run({...input, rows: input.rows.split(/\r?\n/).map(C.clean).filter(Boolean).map(line => {
+      const [location, asin, date] = line.split(/\s+/); return {location, asin, date}; })})});
+  return Object.freeze({mountMove, mountEdit, mountFcsku, mountDate});
 })();

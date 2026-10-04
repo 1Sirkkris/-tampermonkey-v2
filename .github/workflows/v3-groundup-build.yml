@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install verification dependencies
+        working-directory: v3
+        run: npm ci --ignore-scripts
+
       - name: Build V3
         working-directory: v3
         run: npm run build
