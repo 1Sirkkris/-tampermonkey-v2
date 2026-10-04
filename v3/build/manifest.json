@@ -40,6 +40,11 @@
         "src/services/movecontainer.js",
         "src/services/hierarchy.js",
         "src/services/bincheck.js",
+        "src/components/fcr-tote.js",
+        "src/components/fcr-bin.js",
+        "src/components/fcr-pandash.js",
+        "src/components/fcr-move.js",
+        "src/components/fcr-unbind.js",
         "src/apps/fcr/index.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-relaunch",
