@@ -13,19 +13,20 @@
 // @grant        GM_setValue
 // @grant        GM_setClipboard
 // @grant        unsafeWindow
+// @grant        GM_openInTab
 // @connect      pandash.amazon.com
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      localhost
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_FCResearch_Toolkit.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_FCResearch_Toolkit.user.js
-// @v3-build     fcr-0.1.0-e6fb0c6f
+// @v3-build     fcr-0.1.0-8ff91864
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"fcr-0.1.0-e6fb0c6f","version":"0.1.0","suite":"fcr"});
+V3.build=Object.freeze({"id":"fcr-0.1.0-8ff91864","version":"0.1.0","suite":"fcr"});
 
 // ---- src/core/base.js ----
 V3.base=(()=>{
@@ -452,65 +453,347 @@ V3.bincheck=(()=>{
   return Object.freeze({create});
 })();
 
+// ---- src/components/fcr-tote.js ----
+V3.fcrTote=(()=>{
+  function create({life,telemetry,client}={}){
+    const panel=V3.ui.panel({id:'bwu2-v3-tote-panel',title:'V3 · Tote Audit',width:700,life});
+    let mounted=false;
+    const open=()=>{mount();panel.open();};
+
+    function mount(){
+      if(mounted)return;mounted=true;
+      const state={container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),seq:0,message:'Scan source container'};
+      const root=document.createElement('div');
+      root.innerHTML='<section class="section"><div class="note" data-summary>Scan tsX/csX to begin.</div><label class="field" style="margin-top:8px">Scanner<input data-scan autocomplete="off"></label><div class="row"><button class="btn" data-reset>NEW TOTE</button></div><div class="note" data-msg style="margin-top:8px"></div></section><section class="section"><b>Physical scans</b><div data-scans style="margin-top:7px"></div></section><section class="section"><b>System inventory</b><div data-system style="margin-top:7px"></div></section>';
+      panel.set(root);
+      const q=s=>root.querySelector(s),scan=q('[data-scan]');
+
+      const buildLookup=rows=>{
+        const map=new Map();
+        for(const row of rows){
+          row._scan=0;
+          for(const value of [row.asin,row.fnsku,row.fcsku]){
+            const key=V3.base.upper(value);if(!key)continue;
+            if(!map.has(key))map.set(key,[]);
+            map.get(key).push(row);
+          }
+        }
+        return map;
+      };
+      const allocate=(rows,count=1)=>{
+        let remaining=count;
+        for(const row of rows){
+          if(remaining<=0)break;
+          const available=Math.max(0,Number(row.qty||0)-Number(row._scan||0));
+          const add=Math.min(available,remaining);
+          row._scan+=add;remaining-=add;
+        }
+      };
+      const matches=(product,raw)=>{
+        const strict=/^(?:X0|ZZ)[A-Z0-9]{8}$/i.test(raw);
+        const keys=(strict?[raw]:[raw,product?.asin,product?.isbn,product?.fnsku,product?.fcsku]).map(V3.base.upper).filter(Boolean);
+        const out=[],seen=new Set();
+        for(const key of keys){
+          for(const row of state.lookup.get(key)||[]){
+            const id=[row.container,row.asin,row.fnsku,row.fcsku,row.disposition].join('|');
+            if(seen.has(id))continue;
+            seen.add(id);out.push(row);
+          }
+        }
+        return out;
+      };
+
+      const paint=()=>{
+        const total=state.rows.reduce((sum,row)=>sum+Number(row.qty||0),0);
+        const scanned=state.rows.reduce((sum,row)=>sum+Number(row._scan||0),0);
+        q('[data-summary]').textContent=(state.container||'NO CONTAINER')+' · '+scanned+'/'+total+' units';
+        q('[data-msg]').textContent=state.message;
+        q('[data-scans]').innerHTML=[...state.scans.values()].reverse().map(rec=>
+          '<div style="padding:6px;border-bottom:1px solid #39475b"><button class="btn" data-print="'+V3.base.esc(rec.raw)+'">'+V3.base.esc(rec.raw)+(rec.count>1?' ×'+rec.count:'')+'</button> · <span class="'+(rec.state==='found'?'ok':rec.state==='missing'?'bad':'warn')+'">'+rec.state.toUpperCase()+'</span></div>'
+        ).join('')||'<div class="note">No scans.</div>';
+        q('[data-system]').innerHTML=state.rows.map(row=>
+          '<div style="padding:5px;border-bottom:1px solid #39475b"><b>'+V3.base.esc(row.fnsku||row.fcsku||row.asin||'—')+'</b> · '+Number(row._scan||0)+'/'+Number(row.qty||0)+' · '+V3.base.esc(row.title||row.asin||'')+'</div>'
+        ).join('')||'<div class="note">No inventory loaded.</div>';
+        for(const button of q('[data-scans]').querySelectorAll('[data-print]')){
+          button.onclick=async()=>{
+            const rec=state.scans.get(V3.base.upper(button.dataset.print));
+            try{await V3.print.barcode(rec.raw,{description:rec.product?.title||'',telemetry});state.message='Printed '+rec.raw;}
+            catch(error){state.message='Print failed: '+error.message;}
+            paint();
+          };
+        }
+      };
+
+      const load=async code=>{
+        const seq=++state.seq;
+        state.container=code;state.loading=true;state.rows=[];state.lookup=new Map();state.pending=[];state.scans.clear();state.message='Loading full inventory…';paint();
+        try{
+          const result=await client.inventory(code,{allowPartial:false,onPreview:preview=>{if(seq===state.seq){state.message='Loading inventory page '+preview.pages;paint();}}});
+          if(seq!==state.seq)return;
+          state.rows=result.rows;state.lookup=buildLookup(result.rows);state.loading=false;state.message='Ready';
+          const queued=state.pending.splice(0);paint();
+          for(const value of queued)await handle(value);
+        }catch(error){
+          if(seq===state.seq){state.loading=false;state.message='Inventory failed: '+error.message;paint();}
+        }
+      };
+
+      const handle=async value=>{
+        const raw=V3.base.clean(value);if(!raw)return;
+        if(!state.container){
+          if(!V3.base.container(raw)){state.message='SCAN SOURCE CONTAINER FIRST';paint();return;}
+          return load(raw);
+        }
+        if(V3.base.container(raw)&&V3.base.upper(raw)!==V3.base.upper(state.container))return load(raw);
+        if(state.loading){state.pending.push(raw);state.message='Queued '+state.pending.length+' scan(s)';paint();return;}
+
+        const key=V3.base.upper(raw),existing=state.scans.get(key);
+        if(existing){existing.count++;allocate(existing.matches);state.message=raw+' ×'+existing.count;paint();return;}
+
+        const rec={raw,count:1,state:'checking',matches:[],product:null};
+        state.scans.set(key,rec);paint();
+        try{
+          let product=null;try{product=await client.product(raw);}catch{}
+          rec.product=product;rec.matches=matches(product,raw);rec.state=rec.matches.length?'found':'missing';
+          if(rec.matches.length)allocate(rec.matches);
+          state.message=rec.matches.length?'IN '+state.container:'NOT IN '+state.container;
+          telemetry?.emit('tote.scan',{code:V3.telemetry.mask(raw),found:Boolean(rec.matches.length)});
+        }catch(error){rec.state='error';state.message=error.message;}
+        paint();
+      };
+
+      scan.onkeydown=async event=>{
+        if(event.key!=='Enter')return;
+        event.preventDefault();
+        const value=scan.value;scan.value='';
+        await handle(value);
+        scan.focus({preventScroll:true});
+      };
+      q('[data-reset]').onclick=()=>{
+        state.seq++;
+        Object.assign(state,{container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),message:'Scan source container'});
+        paint();scan.focus();
+      };
+      paint();
+    }
+
+    return Object.freeze({open});
+  }
+  return Object.freeze({create});
+})();
+
+// ---- src/components/fcr-bin.js ----
+V3.fcrBin=(()=>{
+  function create({life,telemetry,client,bin,current}={}){
+    const panel=V3.ui.panel({id:'bwu2-v3-bin-panel',title:'V3 · Bin Check',width:760,life});
+    const state={rows:[],floors:new Map(),filter:new Set(['P2','P3','P4']),message:''};
+    let mounted=false;
+
+    const open=()=>{mount();panel.open();};
+
+    function mount(){
+      if(mounted)return;mounted=true;
+      const root=document.createElement('div');
+      root.innerHTML='<section class="section"><div class="row"><button class="btn primary" data-snapshot>LOAD FULL INVENTORY</button><button class="btn" data-copy>COPY VISIBLE TSV</button><button class="btn" data-f="P2">P2</button><button class="btn" data-f="P3">P3</button><button class="btn" data-f="P4">P4</button></div><div class="note" data-msg style="margin-top:8px">No inventory loaded.</div></section><section class="section"><div data-list></div></section>';
+      panel.set(root);
+      const q=s=>root.querySelector(s);
+
+      const conflictKeys=()=>{
+        const groups=new Map();
+        for(const row of state.rows){
+          const key=V3.base.upper(row.container)+'|'+V3.base.upper(row.fnsku);
+          if(!groups.has(key))groups.set(key,new Set());
+          if(row.fcsku)groups.get(key).add(V3.base.upper(row.fcsku));
+        }
+        return new Set([...groups].filter(([,values])=>values.size>1).map(([key])=>key));
+      };
+      const visibleRows=()=>state.rows.filter(row=>{
+        const pod=bin.podOf(row.container),floor=pod?state.floors.get(pod)||'PX':'PX';
+        return !/^P[234]$/.test(floor)||state.filter.has(floor);
+      });
+
+      const paint=()=>{
+        q('[data-msg]').textContent=state.message||state.rows.length+' row(s)';
+        for(const button of root.querySelectorAll('[data-f]'))button.classList.toggle('primary',state.filter.has(button.dataset.f));
+        const conflicts=conflictKeys();
+        q('[data-list]').innerHTML=visibleRows().map(row=>{
+          const pod=bin.podOf(row.container),floor=pod?state.floors.get(pod)||'…':'—';
+          const conflict=conflicts.has(V3.base.upper(row.container)+'|'+V3.base.upper(row.fnsku));
+          return '<div style="padding:7px;border-bottom:1px solid #39475b;'+(conflict?'border-left:5px solid #ff7068;padding-left:8px':'')+'"><span class="note">'+V3.base.esc(floor)+'</span> · <button class="btn" data-print="'+V3.base.esc(row.container)+'">'+V3.base.esc(row.container||'—')+'</button> · <button class="btn" data-print="'+V3.base.esc(row.fnsku)+'">'+V3.base.esc(row.fnsku||'—')+'</button> · '+V3.base.esc(row.fcsku||'—')+' · Q'+Number(row.qty||0)+'</div>';
+        }).join('')||'<div class="note">No matching rows.</div>';
+        for(const button of q('[data-list]').querySelectorAll('[data-print]')){
+          button.onclick=async event=>{
+            if(!event.altKey)return;
+            try{await V3.print.barcode(button.dataset.print,{telemetry});state.message='Printed '+button.dataset.print;}
+            catch(error){state.message='Print failed: '+error.message;}
+            paint();
+          };
+        }
+      };
+
+      q('[data-snapshot]').onclick=async()=>{
+        try{
+          const search=current();if(!search)throw new Error('Search something in FCResearch first');
+          state.message='Loading full inventory…';paint();
+          const inventory=await client.inventory(search,{allowPartial:false});
+          state.rows=inventory.rows;state.floors.clear();state.message='Resolving floors…';paint();
+          const pods=[...new Set(state.rows.map(row=>bin.podOf(row.container)).filter(Boolean))];
+          let cursor=0;
+          const worker=async()=>{while(cursor<pods.length){const pod=pods[cursor++];state.floors.set(pod,await bin.floor(pod));paint();}};
+          await Promise.all(Array.from({length:Math.min(8,pods.length)},worker));
+          state.message='Ready · Alt-click container/FNSKU to print';paint();
+          telemetry?.emit('bin.ready',{rows:state.rows.length,pods:pods.length});
+        }catch(error){state.message='Bin Check failed: '+error.message;paint();}
+      };
+      for(const button of root.querySelectorAll('[data-f]'))button.onclick=()=>{state.filter.has(button.dataset.f)?state.filter.delete(button.dataset.f):state.filter.add(button.dataset.f);paint();};
+      q('[data-copy]').onclick=()=>{
+        const rows=visibleRows();
+        const text=['Floor\tContainer\tASIN\tFNSKU\tFCSKU\tQty',...rows.map(row=>{
+          const pod=bin.podOf(row.container),floor=pod?state.floors.get(pod)||'PX':'';
+          return[floor,row.container,row.asin,row.fnsku,row.fcsku,row.qty].join('\t');
+        })].join('\n');
+        if(typeof GM_setClipboard==='function')GM_setClipboard(text,'text');else navigator.clipboard?.writeText(text);
+        state.message='Copied '+rows.length+' visible row(s)';paint();
+      };
+      paint();
+    }
+
+    return Object.freeze({open});
+  }
+  return Object.freeze({create});
+})();
+
+// ---- src/components/fcr-pandash.js ----
+V3.fcrPandash=(()=>{
+  function create({life,client,pandash,current}={}){
+    const panel=V3.ui.panel({id:'bwu2-v3-pandash-panel',title:'V3 · Pandash',width:500,life});
+    let mounted=false;
+    const open=()=>{mount();panel.open();};
+
+    function mount(){
+      if(mounted)return;mounted=true;
+      const root=document.createElement('div');
+      root.innerHTML='<section class="section"><label class="field">ASIN<input data-asin></label><button class="btn primary" data-run>CHECK</button><div class="note" data-result style="margin-top:9px"></div></section>';
+      panel.set(root);
+      const input=root.querySelector('[data-asin]'),result=root.querySelector('[data-result]');
+      input.value=/^B[A-Z0-9]{9}$/i.test(current())?current():'';
+      root.querySelector('[data-run]').onclick=async()=>{
+        try{
+          let asin=V3.base.upper(input.value);
+          if(!asin){
+            const product=await client.product(current());
+            asin=V3.base.upper(product?.asin);input.value=asin;
+          }
+          if(!/^B[A-Z0-9]{9}$/.test(asin))throw new Error('Valid ASIN required');
+          const check=await pandash.check(asin);
+          result.className='note '+(check.allowed?'ok':'bad');
+          result.textContent='L'+check.level+' · '+check.message;
+        }catch(error){result.className='note bad';result.textContent=error.message;}
+      };
+    }
+
+    return Object.freeze({open});
+  }
+  return Object.freeze({create});
+})();
+
+// ---- src/components/fcr-move.js ----
+V3.fcrMove=(()=>{
+  function create({life,telemetry,current}={}){
+    const panel=V3.ui.panel({id:'bwu2-v3-fcr-move-panel',title:'V3 · MoveContainer',width:500,life});
+    let mounted=false;
+    const open=()=>{mount();panel.open();};
+
+    function mount(){
+      if(mounted)return;mounted=true;
+      const root=document.createElement('div');
+      root.innerHTML='<section class="section"><label class="field">Container<input data-container></label><div class="grid"><label class="field">Floor<select data-floor>'+V3.moveContainer.FLOORS.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="field">Drop<select data-drop></select></label></div><button class="btn primary" data-run>MOVE</button><div class="note" data-msg style="margin-top:8px"></div></section>';
+      panel.set(root);
+      const container=root.querySelector('[data-container]'),floor=root.querySelector('[data-floor]'),drop=root.querySelector('[data-drop]'),message=root.querySelector('[data-msg]');
+      container.value=V3.base.container(current())?current():'';
+      floor.value='P2';
+      const paintDrops=()=>{drop.innerHTML=V3.moveContainer.choices(floor.value).map(([name])=>'<option>'+V3.base.esc(name)+'</option>').join('');};
+      floor.onchange=paintDrops;paintDrops();
+      root.querySelector('[data-run]').onclick=async()=>{
+        try{
+          message.className='note warn';message.textContent='MOVING…';
+          await V3.moveContainer.move(container.value,V3.moveContainer.destination(floor.value,drop.value),{telemetry});
+          message.className='note ok';message.textContent='MOVED';
+        }catch(error){
+          message.className='note '+(error?.outcome==='unknown'?'bad':'warn');
+          message.textContent=(error?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+error.message;
+        }
+      };
+    }
+
+    return Object.freeze({open});
+  }
+  return Object.freeze({create});
+})();
+
+// ---- src/components/fcr-unbind.js ----
+V3.fcrUnbind=(()=>{
+  function create({life,telemetry,current}={}){
+    const panel=V3.ui.panel({id:'bwu2-v3-fcr-unbind-panel',title:'V3 · Unbind',width:500,life});
+    let mounted=false;
+    const open=()=>{mount();panel.open();};
+
+    function mount(){
+      if(mounted)return;mounted=true;
+      const root=document.createElement('div');
+      root.innerHTML='<section class="section"><label class="field">Container<input data-container></label><button class="btn primary" data-run>UNBIND</button><div class="note" data-msg style="margin-top:8px"></div></section>';
+      panel.set(root);
+      const container=root.querySelector('[data-container]'),message=root.querySelector('[data-msg]');
+      container.value=V3.base.container(current())?current():'';
+      root.querySelector('[data-run]').onclick=async()=>{
+        try{
+          const pageWindow=typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window;
+          const login=V3.identity.resolve({pageWindow}).login;
+          if(!login)throw new Error('Authenticated employee identity unavailable');
+          message.className='note warn';message.textContent='UNBINDING…';
+          await V3.hierarchy.unbind(container.value,login,{telemetry});
+          message.className='note ok';message.textContent='UNBOUND';
+        }catch(error){
+          message.className='note '+(error?.outcome==='unknown'?'bad':'warn');
+          message.textContent=(error?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+error.message;
+        }
+      };
+    }
+
+    return Object.freeze({open});
+  }
+  return Object.freeze({create});
+})();
+
 // ---- src/apps/fcr/index.js ----
 V3.boot=()=>{
-  const life=V3.lifecycle.create('fcr-toolkit'),telemetry=V3.telemetry.create('fcr',V3.build.version),client=V3.fcr.create({telemetry,life}),bin=V3.bincheck.create({telemetry,life}),pandash=V3.pandash.create({telemetry,warehouse:()=>V3.fcr.warehouse()||'BWU2'});
+  const life=V3.lifecycle.create('fcr-toolkit');
+  const telemetry=V3.telemetry.create('fcr',V3.build.version);
+  const client=V3.fcr.create({telemetry,life});
+  const bin=V3.bincheck.create({telemetry,life});
+  const pandash=V3.pandash.create({telemetry,warehouse:()=>V3.fcr.warehouse()||'BWU2'});
   const current=()=>V3.base.clean(new URLSearchParams(location.search).get('s'));
 
-  function totePanel(){
-    const panel=V3.ui.panel({id:'bwu2-v3-tote-panel',title:'V3 · Tote Audit',width:700,life});let mounted=false;
-    const mount=()=>{
-      if(mounted)return;mounted=true;
-      const state={container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),seq:0,message:'Scan container'};
-      const root=document.createElement('div');root.innerHTML='<section class="section"><div class="note" data-summary>Scan tsX/csX to begin.</div><label class="field" style="margin-top:8px">Scanner<input data-scan autocomplete="off"></label><div class="row"><button class="btn" data-reset>NEW TOTE</button></div><div class="note" data-msg style="margin-top:8px"></div></section><section class="section"><b>Physical scans</b><div data-scans style="margin-top:7px"></div></section><section class="section"><b>System inventory</b><div data-system style="margin-top:7px"></div></section>';panel.set(root);
-      const q=s=>root.querySelector(s),scan=q('[data-scan]');
-      const build=rows=>{const map=new Map();for(const row of rows){row._scan=0;for(const code of [row.asin,row.fnsku,row.fcsku]){const key=V3.base.upper(code);if(!key)continue;if(!map.has(key))map.set(key,[]);map.get(key).push(row);}}return map;};
-      const allocate=(rows,count=1)=>{let remain=count;for(const row of rows){if(remain<=0)break;const avail=Math.max(0,Number(row.qty||0)-Number(row._scan||0)),add=Math.min(avail,remain);row._scan+=add;remain-=add;}};
-      const match=(product,raw)=>{const strict=/^(?:X0|ZZ)[A-Z0-9]{8}$/i.test(raw),keys=(strict?[raw]:[raw,product?.asin,product?.isbn,product?.fnsku,product?.fcsku]).map(V3.base.upper).filter(Boolean),out=[],seen=new Set();for(const key of keys)for(const row of state.lookup.get(key)||[]){const id=[row.container,row.asin,row.fnsku,row.fcsku,row.disposition].join('|');if(!seen.has(id)){seen.add(id);out.push(row);}}return out;};
-      const paint=()=>{const total=state.rows.reduce((s,r)=>s+Number(r.qty||0),0),done=state.rows.reduce((s,r)=>s+Number(r._scan||0),0);q('[data-summary]').textContent=(state.container||'NO CONTAINER')+' · '+done+'/'+total+' units';q('[data-msg]').textContent=state.message;q('[data-scans]').innerHTML=[...state.scans.values()].reverse().map(r=>'<div style="padding:6px;border-bottom:1px solid #39475b"><button class="btn" data-print="'+V3.base.esc(r.raw)+'">'+V3.base.esc(r.raw)+(r.count>1?' ×'+r.count:'')+'</button> · <span class="'+(r.state==='found'?'ok':r.state==='missing'?'bad':'warn')+'">'+r.state.toUpperCase()+'</span></div>').join('')||'<div class="note">No scans.</div>';q('[data-system]').innerHTML=state.rows.map(r=>'<div style="padding:5px;border-bottom:1px solid #39475b"><b>'+V3.base.esc(r.fnsku||r.fcsku||r.asin||'—')+'</b> · '+Number(r._scan||0)+'/'+Number(r.qty||0)+' · '+V3.base.esc(r.title||r.asin||'')+'</div>').join('')||'<div class="note">No inventory loaded.</div>';for(const b of q('[data-scans]').querySelectorAll('[data-print]'))b.onclick=async()=>{const rec=state.scans.get(V3.base.upper(b.dataset.print));try{await V3.print.barcode(rec.raw,{description:rec.product?.title||'',telemetry});state.message='Printed '+rec.raw;}catch(e){state.message='Print failed: '+e.message;}paint();};};
-      const load=async code=>{const seq=++state.seq;state.container=code;state.loading=true;state.rows=[];state.lookup=new Map();state.pending=[];state.scans.clear();state.message='Loading full inventory…';paint();try{const result=await client.inventory(code,{allowPartial:false,onPreview:p=>{if(seq===state.seq){state.message='Loading inventory page '+p.pages;paint();}}});if(seq!==state.seq)return;state.rows=result.rows;state.lookup=build(result.rows);state.loading=false;state.message='Ready';const queued=state.pending.splice(0);paint();for(const value of queued)await handle(value);}catch(e){if(seq===state.seq){state.loading=false;state.message='Inventory failed: '+e.message;paint();}}};
-      const handle=async value=>{const raw=V3.base.clean(value);if(!raw)return;if(!state.container||V3.base.container(raw)&&V3.base.upper(raw)!==V3.base.upper(state.container))return load(raw);if(state.loading){state.pending.push(raw);state.message='Queued '+state.pending.length+' scan(s)';return paint();}const key=V3.base.upper(raw),existing=state.scans.get(key);if(existing){existing.count++;allocate(existing.matches);state.message=raw+' ×'+existing.count;return paint();}const rec={raw,count:1,state:'checking',matches:[],product:null};state.scans.set(key,rec);paint();try{let product=null;try{product=await client.product(raw);}catch{}const matches=match(product,raw);Object.assign(rec,{product,matches,state:matches.length?'found':'missing'});if(matches.length)allocate(matches);state.message=matches.length?'IN '+state.container:'NOT IN '+state.container;}catch(e){rec.state='error';state.message=e.message;}paint();};
-      scan.onkeydown=async e=>{if(e.key!=='Enter')return;e.preventDefault();const value=scan.value;scan.value='';await handle(value);scan.focus({preventScroll:true});};
-      q('[data-reset]').onclick=()=>{state.seq++;Object.assign(state,{container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),message:'Scan container'});paint();scan.focus();};paint();
-    };
-    return{open(){mount();panel.open();}};
-  }
+  const tools=[
+    ['fcr-tote','TOTE','Tote Audit',V3.fcrTote.create({life,telemetry,client})],
+    ['fcr-bin','BIN','Bin Check',V3.fcrBin.create({life,telemetry,client,bin,current})],
+    ['fcr-pandash','PANDASH','Pandash',V3.fcrPandash.create({life,client,pandash,current})],
+    ['fcr-move','MOVE CONTAINER','MoveContainer',V3.fcrMove.create({life,telemetry,current})],
+    ['fcr-unbind','UNBIND','Unbind container',V3.fcrUnbind.create({life,telemetry,current})]
+  ];
 
-  function binPanel(){
-    const panel=V3.ui.panel({id:'bwu2-v3-bin-panel',title:'V3 · Bin Check',width:760,life});let mounted=false,state={rows:[],floors:new Map(),filter:new Set(['P2','P3','P4']),message:''};
-    const mount=()=>{
-      if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML='<section class="section"><div class="row"><button class="btn primary" data-snapshot>SNAPSHOT CURRENT FCR</button><button class="btn" data-copy>COPY VISIBLE TSV</button><button class="btn" data-f="P2">P2</button><button class="btn" data-f="P3">P3</button><button class="btn" data-f="P4">P4</button></div><div class="note" data-msg style="margin-top:8px">No snapshot yet.</div></section><section class="section"><div data-list></div></section>';panel.set(root);const q=s=>root.querySelector(s);
-      const conflictKeys=()=>{const groups=new Map();for(const r of state.rows){const key=V3.base.upper(r.container)+'|'+V3.base.upper(r.fnsku);if(!groups.has(key))groups.set(key,new Set());if(r.fcsku)groups.get(key).add(V3.base.upper(r.fcsku));}return new Set([...groups].filter(([,v])=>v.size>1).map(([k])=>k));};
-      const visible=()=>state.rows.filter(r=>{const pod=bin.podOf(r.container),floor=pod?state.floors.get(pod)||'PX':'PX';return !/^P[234]$/.test(floor)||state.filter.has(floor);});
-      const paint=()=>{q('[data-msg]').textContent=state.message||state.rows.length+' row(s)';for(const b of q('[data-snapshot]').parentElement.querySelectorAll('[data-f]')){b.classList.toggle('primary',state.filter.has(b.dataset.f));}const conflicts=conflictKeys();q('[data-list]').innerHTML=visible().map(r=>{const pod=bin.podOf(r.container),floor=pod?state.floors.get(pod)||'…':'—',conflict=conflicts.has(V3.base.upper(r.container)+'|'+V3.base.upper(r.fnsku));return'<div style="padding:7px;border-bottom:1px solid #39475b;'+(conflict?'border-left:5px solid #ff7068;padding-left:8px':'')+'"><span class="note">'+V3.base.esc(floor)+'</span> · <button class="btn" data-print="'+V3.base.esc(r.container)+'">'+V3.base.esc(r.container||'—')+'</button> · <button class="btn" data-print="'+V3.base.esc(r.fnsku)+'">'+V3.base.esc(r.fnsku||'—')+'</button> · '+V3.base.esc(r.fcsku||'—')+' · Q'+Number(r.qty||0)+'</div>';}).join('')||'<div class="note">No matching rows.</div>';for(const btn of q('[data-list]').querySelectorAll('[data-print]'))btn.onclick=async e=>{if(!e.altKey)return;try{await V3.print.barcode(btn.dataset.print,{telemetry});state.message='Printed '+btn.dataset.print;}catch(err){state.message='Print failed: '+err.message;}paint();};};
-      q('[data-snapshot]').onclick=async()=>{try{state.rows=V3.fcr.parseInventory(document);state.floors.clear();state.message='Resolving floors…';paint();const pods=[...new Set(state.rows.map(r=>bin.podOf(r.container)).filter(Boolean))];let cursor=0;const worker=async()=>{while(cursor<pods.length){const pod=pods[cursor++];state.floors.set(pod,await bin.floor(pod));paint();}};await Promise.all(Array.from({length:Math.min(8,pods.length)},worker));state.message='Snapshot ready · Alt-click container/FNSKU to print';paint();}catch(e){state.message='Snapshot failed: '+e.message;paint();}};
-      for(const b of root.querySelectorAll('[data-f]'))b.onclick=()=>{state.filter.has(b.dataset.f)?state.filter.delete(b.dataset.f):state.filter.add(b.dataset.f);paint();};
-      q('[data-copy]').onclick=()=>{const rows=visible(),text=['Floor\tContainer\tASIN\tFNSKU\tFCSKU\tQty',...rows.map(r=>{const pod=bin.podOf(r.container),floor=pod?state.floors.get(pod)||'PX':'';return[floor,r.container,r.asin,r.fnsku,r.fcsku,r.qty].join('\t');})].join('\n');if(typeof GM_setClipboard==='function')GM_setClipboard(text,'text');else navigator.clipboard?.writeText(text);state.message='Copied '+rows.length+' visible row(s)';paint();};paint();
-    };
-    return{open(){mount();panel.open();}};
-  }
+  for(const [id,label,title,tool] of tools)V3.ui.dockButton({id,label,title,onClick:tool.open});
 
-  function pandashPanel(){
-    const panel=V3.ui.panel({id:'bwu2-v3-pandash-panel',title:'V3 · Pandash',width:500,life});let mounted=false;
-    const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML='<section class="section"><label class="field">ASIN<input data-asin></label><button class="btn primary" data-run>CHECK</button><div class="note" data-result style="margin-top:9px"></div></section>';panel.set(root);const input=root.querySelector('[data-asin]'),result=root.querySelector('[data-result]');input.value=/^B[A-Z0-9]{9}$/i.test(current())?current():'';root.querySelector('[data-run]').onclick=async()=>{try{let asin=V3.base.upper(input.value);if(!asin){const p=await client.product(current());asin=V3.base.upper(p?.asin);input.value=asin;}const r=await pandash.check(asin);result.className='note '+(r.allowed?'ok':'bad');result.textContent='L'+r.level+' · '+r.message;}catch(e){result.className='note bad';result.textContent=e.message;}};};return{open(){mount();panel.open();}};
-  }
-
-  function movePanel(){
-    const panel=V3.ui.panel({id:'bwu2-v3-fcr-move-panel',title:'V3 · MoveContainer',width:500,life});let mounted=false;
-    const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML='<section class="section"><label class="field">Container<input data-container></label><div class="grid"><label class="field">Floor<select data-floor>'+V3.moveContainer.FLOORS.map(x=>'<option>'+x+'</option>').join('')+'</select></label><label class="field">Drop<select data-drop></select></label></div><button class="btn primary" data-run>MOVE</button><div class="note" data-msg style="margin-top:8px"></div></section>';panel.set(root);const c=root.querySelector('[data-container]'),f=root.querySelector('[data-floor]'),d=root.querySelector('[data-drop]'),m=root.querySelector('[data-msg]');c.value=V3.base.container(current())?current():'';f.value='P2';const drops=()=>{d.innerHTML=V3.moveContainer.choices(f.value).map(([n])=>'<option>'+V3.base.esc(n)+'</option>').join('');};f.onchange=drops;drops();root.querySelector('[data-run]').onclick=async()=>{try{m.className='note warn';m.textContent='MOVING…';await V3.moveContainer.move(c.value,V3.moveContainer.destination(f.value,d.value),{telemetry});m.className='note ok';m.textContent='MOVED';}catch(e){m.className='note '+(e?.outcome==='unknown'?'bad':'warn');m.textContent=(e?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+e.message;}};};return{open(){mount();panel.open();}};
-  }
-
-  function unbindPanel(){
-    const panel=V3.ui.panel({id:'bwu2-v3-fcr-unbind-panel',title:'V3 · Unbind',width:500,life});let mounted=false;
-    const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML='<section class="section"><label class="field">Container<input data-container></label><button class="btn primary" data-run>UNBIND</button><div class="note" data-msg style="margin-top:8px"></div></section>';panel.set(root);const c=root.querySelector('[data-container]'),m=root.querySelector('[data-msg]');c.value=V3.base.container(current())?current():'';root.querySelector('[data-run]').onclick=async()=>{try{const login=V3.identity.resolve({pageWindow:typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window}).login;if(!login)throw new Error('Authenticated employee identity unavailable');m.className='note warn';m.textContent='UNBINDING…';await V3.hierarchy.unbind(c.value,login,{telemetry});m.className='note ok';m.textContent='UNBOUND';}catch(e){m.className='note '+(e?.outcome==='unknown'?'bad':'warn');m.textContent=(e?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+e.message;}};};return{open(){mount();panel.open();}};
-  }
-
-  const tote=totePanel(),bins=binPanel(),pan=pandashPanel(),move=movePanel(),unbind=unbindPanel();
-  V3.ui.dockButton({id:'fcr-tote',label:'TOTE',title:'Tote Audit',onClick:tote.open});
-  V3.ui.dockButton({id:'fcr-bin',label:'BIN',title:'Bin Check',onClick:bins.open});
-  V3.ui.dockButton({id:'fcr-pandash',label:'PANDASH',title:'Pandash',onClick:pan.open});
-  V3.ui.dockButton({id:'fcr-move',label:'MOVE CONTAINER',title:'MoveContainer',onClick:move.open});
-  V3.ui.dockButton({id:'fcr-unbind',label:'UNBIND',title:'Unbind container',onClick:unbind.open});
+  V3.ui.dockButton({
+    id:'fcr-iss',
+    label:'ISS',
+    title:'Open standalone V3 ISS Console',
+    onClick:()=>{
+      const url='https://aft-poirot-website-nrt.nrt.proxy.amazon.com/#iss-console';
+      if(typeof GM_openInTab==='function')GM_openInTab(url,{active:true,insert:true});
+      else window.open(url,'_blank','noopener');
+    }
+  });
 };
 
 if(typeof V3.boot!=='function')throw new Error('V3 boot missing');

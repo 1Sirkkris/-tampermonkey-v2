@@ -12,13 +12,13 @@
 // @connect      pandash.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Sideline.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_Sideline.user.js
-// @v3-build     sideline-0.1.0-aa7f1935
+// @v3-build     sideline-0.1.0-42284125
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sideline-0.1.0-aa7f1935","version":"0.1.0","suite":"sideline"});
+V3.build=Object.freeze({"id":"sideline-0.1.0-42284125","version":"0.1.0","suite":"sideline"});
 
 // ---- src/core/base.js ----
 V3.base=(()=>{
@@ -249,7 +249,8 @@ V3.sideline=(()=>{
 
 // ---- src/components/sideline-ui.js ----
 V3.sidelineUi=(()=>{
-  function mount(root,{engine,title='Sideline'}={}){
+  function mount(root,{engine,title='Sideline',life}={}){
+    const sleep=ms=>life?.sleep?life.sleep(ms):new Promise(resolve=>setTimeout(resolve,ms));
     const state={source:'',destination:'',items:'',lookups:new Map(),queue:[],active:0,generation:0,running:false,paused:false,stop:false,clearSource:true,delay:true,expiry:null,dates:new Map(),aside:new Map(),attention:'',done:false};
     root.innerHTML='<section class="section"><b>'+V3.base.esc(title)+'</b><div class="grid" style="margin-top:9px"><label class="field">Source<input data-source></label><label class="field">Destination<input data-dest></label></div><label class="field">Item barcodes<textarea data-items></textarea></label><div class="row"><span class="ok" data-good>0 GOOD</span><span class="warn" data-date>0 DATE</span><span class="bad" data-aside>0 ASIDE</span><span class="note" data-check>0 CHECKING</span></div><div class="row" style="margin-top:9px"><button class="btn" data-clear>CLEAR SOURCE: ON</button><button class="btn" data-delay>DELAY: ON</button><button class="btn" data-pause hidden>PAUSE</button></div><div class="row" style="margin-top:9px"><button class="btn primary" data-run>RUN</button><button class="btn danger" data-stop>STOP AFTER CURRENT</button></div><div class="note" data-msg style="margin-top:8px"></div><div class="bad" data-attention style="margin-top:8px"></div></section><section class="section"><b>Preflight</b><div data-list style="margin-top:8px"></div></section>';
     const q=s=>root.querySelector(s),source=q('[data-source]'),dest=q('[data-dest]'),items=q('[data-items]'),list=q('[data-list]'),msg=q('[data-msg]'),attention=q('[data-attention]');
@@ -259,7 +260,7 @@ V3.sidelineUi=(()=>{
     const status=(text,tone='')=>{msg.className='note '+tone;msg.textContent=text;};
     const schedule=()=>{if(state.running||!V3.base.container(state.source))return;for(const item of parsed()){const k=key(item.code);if(state.lookups.has(k))continue;const e={key:k,code:item.code,generation:state.generation,state:'queued',result:null,error:''};state.lookups.set(k,e);state.queue.push(e);}pump();paint();};
     const pump=()=>{while(!state.running&&state.active<5&&state.queue.length){const e=state.queue.shift();if(!e||e.generation!==state.generation)continue;state.active++;e.state='checking';paint();engine.preflight(state.source,e.code).then(result=>{if(e.generation!==state.generation)return;e.result=result;e.state=result.kind;if(result.kind==='red')state.aside.set(V3.base.upper(e.code),result.reason);if(result.kind==='retry')e.error=result.reason;}).catch(error=>{if(e.generation===state.generation){e.state='retry';e.error=String(error.message||error);}}).finally(()=>{state.active--;pump();paint();});}};
-    const settle=async()=>{schedule();const start=Date.now();while(state.active||state.queue.length){if(Date.now()-start>30000)throw new Error('Preflight did not settle');await new Promise(r=>setTimeout(r,60));}for(const item of parsed()){const e=state.lookups.get(key(item.code));if(!e||['queued','checking','retry'].includes(e.state))throw new Error(e?.error||'Preflight incomplete: '+item.code);if(e.state==='yellow'&&!state.dates.has(V3.base.upper(item.code)))throw new Error('Date required: '+item.code);}return parsed();};
+    const settle=async()=>{schedule();const start=Date.now();while(state.active||state.queue.length){if(Date.now()-start>30000)throw new Error('Preflight did not settle');await sleep(60);}for(const item of parsed()){const e=state.lookups.get(key(item.code));if(!e||['queued','checking','retry'].includes(e.state))throw new Error(e?.error||'Preflight incomplete: '+item.code);if(e.state==='yellow'&&!state.dates.has(V3.base.upper(item.code)))throw new Error('Date required: '+item.code);}return parsed();};
     const paint=()=>{
       let good=0,date=0,aside=0,checking=0;const rows=[];
       for(const item of parsed()){const e=state.lookups.get(key(item.code)),st=e?.state||'checking';if(st==='green')good+=item.qty;else if(st==='yellow')date+=item.qty;else if(st==='red')aside+=item.qty;else checking+=item.qty;
@@ -282,7 +283,7 @@ V3.sidelineUi=(()=>{
     q('[data-run]').onclick=async()=>{
       if(state.running)return;if(state.done)reset();state.stop=false;
       try{if(!V3.base.container(state.source)||!V3.base.container(state.destination))throw new Error('Source and destination must be tsX/csX');if(V3.base.upper(state.source)===V3.base.upper(state.destination))throw new Error('Source and destination cannot match');const all=await settle(),movable=all.filter(x=>!state.aside.has(V3.base.upper(x.code)));if(!movable.length)throw new Error('Nothing moveable');state.running=true;q('[data-pause]').hidden=false;status('Validating source','warn');const meta=await engine.validateSource(state.source);let moved=0,failed=0;
-        for(let i=0;i<movable.length;i++){if(state.stop)throw new Error('Stopped before next item');while(state.paused&&!state.stop)await new Promise(r=>setTimeout(r,80));if(i>0&&state.delay)await new Promise(r=>setTimeout(r,2000+Math.floor(Math.random()*6001)));const item=movable[i],e=state.lookups.get(key(item.code)),chosen=state.dates.get(V3.base.upper(item.code));status((i+1)+'/'+movable.length+' '+item.code+' ×'+item.qty,'warn');try{await engine.move({source:state.source,destination:state.destination,sourceMeta:meta,preflightResult:e.result,qty:item.qty,expirationMs:chosen?.finalExpirationMs??null});moved+=item.qty;}catch(error){if(error?.outcome==='unknown'){state.attention='OUTCOME UNKNOWN — VERIFY '+item.code+' BEFORE RETRY';throw error;}failed+=item.qty;state.aside.set(V3.base.upper(item.code),String(error.message||error));}}
+        for(let i=0;i<movable.length;i++){if(state.stop)throw new Error('Stopped before next item');while(state.paused&&!state.stop)await sleep(80);if(i>0&&state.delay)await sleep(2000+Math.floor(Math.random()*6001));const item=movable[i],e=state.lookups.get(key(item.code)),chosen=state.dates.get(V3.base.upper(item.code));status((i+1)+'/'+movable.length+' '+item.code+' ×'+item.qty,'warn');try{await engine.move({source:state.source,destination:state.destination,sourceMeta:meta,preflightResult:e.result,qty:item.qty,expirationMs:chosen?.finalExpirationMs??null});moved+=item.qty;}catch(error){if(error?.outcome==='unknown'){state.attention='OUTCOME UNKNOWN — VERIFY '+item.code+' BEFORE RETRY';throw error;}failed+=item.qty;state.aside.set(V3.base.upper(item.code),String(error.message||error));}}
         if(state.clearSource&&failed===0&&state.aside.size===0)await engine.close(state.source,true);state.done=true;status('COMPLETE · moved '+moved+(failed?' · failed '+failed:''),failed?'warn':'ok');
       }catch(error){status((error?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+String(error.message||error),error?.outcome==='unknown'?'bad':'warn');}
       finally{state.running=false;state.paused=false;q('[data-pause]').hidden=true;paint();}
@@ -297,7 +298,7 @@ V3.boot=()=>{
   if(location.hash==='#iss-console')return;
   const life=V3.lifecycle.create('sideline-native'),telemetry=V3.telemetry.create('sideline',V3.build.version);let ui=null;
   const panel=V3.ui.panel({id:'bwu2-v3-sideline-panel',title:'V3 · Sideline',width:680,life});
-  const mount=()=>{if(ui)return;const pandash=V3.pandash.create({telemetry,warehouse:'BWU2'}),engine=V3.sideline.create({telemetry,pandash});ui=V3.sidelineUi.mount(panel.body,{engine,title:'Sideline'});};
+  const mount=()=>{if(ui)return;const pandash=V3.pandash.create({telemetry,warehouse:'BWU2'}),engine=V3.sideline.create({telemetry,pandash});ui=V3.sidelineUi.mount(panel.body,{engine,title:'Sideline',life});};
   V3.ui.dockButton({id:'sideline',label:'SIDELINE',title:'V3 Sideline',onClick:()=>{mount();panel.open();}});
   V3.ui.dockButton({id:'iss-console',label:'ISS',title:'Open V3 ISS Console',onClick:()=>{location.hash='#iss-console';location.reload();}});
 };
