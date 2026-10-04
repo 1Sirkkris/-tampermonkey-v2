@@ -1,0 +1,8 @@
+V3.boot=()=>{
+  const life=V3.lifecycle.create('carton'),telemetry=V3.telemetry.create('carton',V3.build.version),store=V3.storage.create('carton',1);let enabled=true,last='';
+  const BAR='input-page-barcode-container-tertiary-text',BTN='input-page-button-container-button',RE=/(csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})/i,COUNT=/Barcodes scanned:\s*(\d+)/i;
+  const button=V3.ui.dockButton({id:'carton',label:'CARTON ON',title:'Toggle Carton autocomplete',onClick:async()=>{enabled=!enabled;button.textContent='CARTON '+(enabled?'ON':'OFF');await store.set('enabled',enabled);}});
+  (async()=>{enabled=await store.get('enabled',true);button.textContent='CARTON '+(enabled?'ON':'OFF');})();
+  const inspect=()=>{if(!enabled)return;const el=document.getElementById(BAR);if(!el)return;const barcode=V3.base.clean(el.textContent),count=Number(String(document.body?.innerText||'').match(COUNT)?.[1]||0);if(count<2){last='';return;}if(!barcode||!RE.test(barcode))return;const id=barcode+'|'+count;if(id===last)return;const btn=document.getElementById(BTN);if(!btn)return;['pointerdown','mousedown','mouseup','click'].forEach(type=>btn.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true})));last=id;telemetry.emit('complete',{barcode:V3.telemetry.mask(barcode),count});};
+  life.observe(document.body,inspect,{childList:true,subtree:true,characterData:true});inspect();
+};
