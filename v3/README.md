@@ -12,6 +12,8 @@ V3 is rebuilt around native-page ownership and shared engines.
 - No runtime `@require`.
 - Native Amazon pages remain native unless a dedicated console is genuinely better.
 - FCResearch is a light toolbox, not the home of every workflow.
+- ISS Console is an independently installed app hosted on Poirot at `#iss-console`; FCResearch must never `@require` or bundle it.
+- Sideline inside ISS Console runs locally on Poirot. Do not resurrect a hidden FCResearch Sideline worker.
 - ISS Console owns fast repeated ISS workflows: Edit, Move, Sideline and FCSKU.
 - Native Edit/Move/Sideline/Hierarchy/MoveContainer pages remain usable with their own V3 helpers.
 - One mutation engine per backend. Multiple UIs call the same engine.

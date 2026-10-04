@@ -31,7 +31,7 @@ Passive dock buttons only. No automatic full inventory/product fan-out.
 
 ## ISS Console
 
-Dedicated console launched from FCResearch.
+Dedicated standalone console hosted on Poirot at `#iss-console`. FCResearch never bundles or owns it; other tools may only navigate to it.
 
 - EditItems / SKU / EACH
 - MoveItems / ALL / QTY / EACH=1
@@ -39,6 +39,10 @@ Dedicated console launched from FCResearch.
 - FCSKU Flip
 
 It calls shared engines; it does not own separate backend implementations.
+
+- Sideline runs locally on the Poirot host. No hidden FCResearch worker/page.
+- Edit/Move/FCSKU call the shared AFT engine without making FCResearch the console host.
+- V3 ISS updates independently from the FCResearch Toolkit.
 
 ## Native-page apps
 
