@@ -51,10 +51,6 @@
       "name": "V3 | BWU2 ISS Console",
       "version": "0.1.0",
       "description": "ISS Console for Edit, Move, Sideline and FCSKU using shared V3 engines.",
-      "include": [
-        "/^https?:\\/\\/.*fcresearch.*\\//",
-        "/^https?:\\/\\/qifcr\\.fe\\.aftx\\.amazonoperations\\.app\\//"
-      ],
       "runAt": "document-body",
       "grant": [
         "GM_xmlhttpRequest"
@@ -84,7 +80,10 @@
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-relaunch",
       "noframes": true,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_ISS_Console.user.js",
-      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_ISS_Console.user.js"
+      "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-relaunch/v3/dist/V3_ISS_Console.user.js",
+      "match": [
+        "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*"
+      ]
     },
     {
       "id": "edit",
