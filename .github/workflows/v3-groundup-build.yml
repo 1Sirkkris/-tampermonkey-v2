@@ -40,7 +40,7 @@ jobs:
         if: github.actor != 'github-actions[bot]'
         shell: bash
         run: |
-          if git diff --quiet -- v3/dist; then
+          if [ -z "$(git status --porcelain -- v3/dist)" ]; then
             echo "dist already current"
             exit 0
           fi
