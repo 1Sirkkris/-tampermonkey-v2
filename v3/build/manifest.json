@@ -370,15 +370,16 @@
     {
       "id": "sim",
       "name": "V3 | BWU2 SIM Toolbar",
-      "version": "0.2.0",
-      "description": "SIM Markdown toolbar, snippets and attachment image helpers.",
+      "version": "0.2.1",
+      "description": "SIM Markdown toolbar, snippets, attachments and read-only ticket row navigation.",
       "match": [
         "https://t.corp.amazon.com/*"
       ],
       "runAt": "document-body",
       "grant": [
         "GM_getValue",
-        "GM_setValue"
+        "GM_setValue",
+        "GM_openInTab"
       ],
       "output": "V3_SIM_Toolbar.user.js",
       "sources": [
