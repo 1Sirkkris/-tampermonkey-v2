@@ -31,7 +31,7 @@ assert.equal(aft.mapDamage('Defective'),'DEFECTIVE');
 const sideline=context.V3.sideline;
 const overage={'@type':'ItemNotInContainerResponse',success:false,message:'Item not in source container',items:[{quantity:0,skuDetail:{asin:'B012345678',fnSku:'X000000000',fcSku:'FC123',hazmat:false,datelotDetail:{},itemDropzoneRecommendation:{permissionLevel:'ALLOW'}}}]};
 assert.equal(sideline.allowedOverage(overage),true);
-assert.notEqual(sideline.classify(overage,'X000000000').kind,'red');
-assert.equal(sideline.classify({'@type':'InvalidBarcodeResponse',success:false},'BAD').kind,'red');
+assert.notEqual(sideline.baseClassify(overage,'X000000000').kind,'red');
+assert.equal(sideline.baseClassify({'@type':'InvalidBarcodeResponse',success:false},'BAD').kind,'red');
 
 console.log('PASS domain');
