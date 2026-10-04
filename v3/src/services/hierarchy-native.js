@@ -4,7 +4,7 @@ V3.hierarchyNative=(()=>{
   const FACILITY=/^[A-Z0-9]{3,8}$/;
 
   const normalizeFacility=value=>{
-    const fc=upper(value).replace(/[^A-Z0-9]/g,'');
+    const fc=upper(clean(value));
     return FACILITY.test(fc)?fc:'';
   };
 
