@@ -63,3 +63,8 @@ Terminal states cannot transition. A lost response after SUBMITTED is UNKNOWN, n
 - FCR full inventory is on-demand
 - stable lookups may be cached with bounded TTL
 - panels mount lazily
+
+## Small independent utilities
+
+- OBS owns telemetry collection/export only.
+- Screenshot Mode owns Ctrl+Q UI hiding only. It stays separate because it does not share OBS state or workflow ownership.
