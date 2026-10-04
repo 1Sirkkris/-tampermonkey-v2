@@ -1,8 +1,8 @@
 V3.editUi=(()=>{
   const states=selected=>['Sellable','Pending Research','Unsellable'].map(v=>'<option'+(v===selected?' selected':'')+'>'+v+'</option>').join('');
   const damage=selected=>['Amazon Damage','Defective','Distributor Damage','Expired'].map(v=>'<option'+(v===selected?' selected':'')+'>'+v+'</option>').join('');
-  function mount(root,{workflows,title='Edit Tools',initial='sku'}={}){
-    let mode=initial,busy=false,stop=false;const history=[];
+  function mount(root,{workflows,control={stop:false},title='Edit Tools',initial='sku'}={}){
+    let mode=initial,busy=false;const history=[];
     const shell=document.createElement('div');root.replaceChildren(shell);
     const render=()=>{
       shell.innerHTML='<section class="section"><b>'+V3.base.esc(title)+'</b><div class="row" style="margin-top:8px"><button class="btn'+(mode==='each'?' primary':'')+'" data-mode="each">EACH</button><button class="btn'+(mode==='sku'?' primary':'')+'" data-mode="sku">SKU</button><button class="btn'+(mode==='fcsku'?' primary':'')+'" data-mode="fcsku">FCSKU</button></div></section><div data-work></div>';
@@ -19,7 +19,7 @@ V3.editUi=(()=>{
     const wire=work=>{
       const run=work.querySelector('[data-run]'),stopBtn=work.querySelector('[data-stop]'),msg=work.querySelector('[data-msg]'),status=(text,tone='')=>{msg.className='note '+tone;msg.textContent=text;};
       run.onclick=async()=>{
-        if(busy)return;busy=true;stop=false;run.disabled=true;status('RUNNING','warn');
+        if(busy)return;busy=true;control.stop=false;run.disabled=true;status('RUNNING','warn');
         try{
           if(mode==='each'){const rows=String(work.querySelector('[data-rows]').value||'').split(/\r?\n/).map(V3.base.clean).filter(Boolean).map(line=>{const [location='',asin='',fnsku='']=line.split(/\s+/);return{location,asin,fnsku:fnsku||asin};});await workflows.editEach({rows,desiredState:work.querySelector('[data-target]').value,desiredDamage:work.querySelector('[data-damage]').value});}
           if(mode==='sku')await workflows.editSku({sku:work.querySelector('[data-sku]').value,currentState:work.querySelector('[data-current]').value,currentDamage:work.querySelector('[data-current-damage]').value,desiredState:work.querySelector('[data-desired]').value,desiredDamage:work.querySelector('[data-desired-damage]').value});
@@ -28,10 +28,10 @@ V3.editUi=(()=>{
         }catch(error){status((error?.outcome==='unknown'?'OUTCOME UNKNOWN — VERIFY · ':'')+String(error?.message||error),error?.outcome==='unknown'?'bad':'warn');}
         finally{busy=false;run.disabled=false;}
       };
-      stopBtn.onclick=()=>{stop=true;status('STOP REQUESTED','warn');};
+      stopBtn.onclick=()=>{control.stop=true;status('STOP REQUESTED','warn');};
     };
     render();
-    return Object.freeze({stopped:()=>stop,onQuantity:addQty,dispose:()=>{stop=true;}});
+    return Object.freeze({stopped:()=>control.stop,onQuantity:addQty,dispose:()=>{control.stop=true;}});
   }
   return Object.freeze({mount});
 })();
