@@ -1,8 +1,11 @@
 V3.hierarchy=(()=>{
-  const WAREHOUSE='BWU2',DEST='BWU1';
+  const WAREHOUSE='BWU2',DEST='BWU1',ORIGIN='https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
   const API={validate:'/validateContainer',destination:'/validateDestination',summary:'/getTransshipmentBindingSummary',bind:'/forceBind',unbind:'/unbindContainer'};
   async function post(path,body,options={}){
-    return V3.transport.page(path,{method:'POST',body:JSON.stringify(body),headers:{'content-type':'application/json'},timeout:options.timeout||15000,allowHttpError:options.allowHttpError===true});
+    const request={method:'POST',body:JSON.stringify(body),headers:{'content-type':'application/json'},timeout:options.timeout||15000,allowHttpError:options.allowHttpError===true};
+    return location.hostname==='tx-b-hierarchy-nrt.nrt.proxy.amazon.com'
+      ? V3.transport.page(path,request)
+      : V3.transport.gm(ORIGIN+path,request);
   }
   async function validate(id){
     const code=V3.base.clean(id),r=await post(API.validate,{warehouseId:WAREHOUSE,scannableId:code});
@@ -39,5 +42,5 @@ V3.hierarchy=(()=>{
     if(!V3.base.clean(r.data?.hostName)){op.unknown({reason:'unexpected-response'});throw new V3.operation.UnknownError('Bind response ambiguous; verify container');}
     op.confirmed();return r.data;
   }
-  return Object.freeze({WAREHOUSE,DEST,API,validate,summary,unbind,bind,validateBindTemplate});
+  return Object.freeze({WAREHOUSE,DEST,ORIGIN,API,validate,summary,unbind,bind,validateBindTemplate});
 })();
