@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.81
+// @version      0.1.82
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.81';
+  const VERSION = '0.1.82';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -248,10 +248,29 @@
     return work;
   }
 
-  async function recoverInventoryInline(endpoint) {
-    if (!nativeSectionMode()) return;
-    usage(`inventory.rescue.inline.${endpoint}`);
-    await loadNativeSection('inventory', { force: true, reason: `native-${endpoint}-5xx` });
+  function showInventoryRetry(endpoint) {
+    if (!nativeSectionMode() || document.getElementById('fcrm-inventory-retry')) return;
+    const mount = document.body || document.documentElement;
+    if (!mount) return;
+
+    const button = markUi(document.createElement('button'));
+    button.id = 'fcrm-inventory-retry';
+    button.type = 'button';
+    button.textContent = 'Retry Inventory';
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Retrying…';
+      usage(`inventory.rescue.manual.${endpoint}`);
+      const ok = await loadNativeSection('inventory', { force: true, reason: `manual-${endpoint}-5xx` });
+      if (ok) button.remove();
+      else {
+        button.disabled = false;
+        button.textContent = 'Retry Inventory';
+      }
+    });
+    mount.appendChild(button);
+    usage(`inventory.rescue.offered.${endpoint}`);
   }
 
   function installNativeSectionBlocker() {
@@ -282,9 +301,7 @@
       }
       if (info && (info.endpoint === 'inventory' || info.endpoint === 'inventory-more')) {
         this.addEventListener('loadend', () => {
-          if (this.status >= 500 && this.status < 600) {
-            void recoverInventoryInline(info.endpoint);
-          }
+          if (this.status >= 500 && this.status < 600) showInventoryRetry(info.endpoint);
         }, { once: true });
       }
       return originalSend.apply(this, arguments);
@@ -398,6 +415,8 @@
     style.id = 'fcrm-clean-style';
     style.textContent = `
       [${UI_ATTR}], [${UI_ATTR}] * { box-sizing:border-box; }
+      #fcrm-inventory-retry { position:fixed; right:12px; bottom:12px; z-index:2147483646; padding:6px 9px; border:1px solid #92400e; border-radius:5px; background:#f59e0b; color:#111827; cursor:pointer; font:800 11px Arial,sans-serif; box-shadow:0 2px 8px rgba(0,0,0,.18); }
+      #fcrm-inventory-retry:disabled { opacity:.65; cursor:wait; }
       td.poch__unfilled { background:rgba(255,193,7,.28)!important; box-shadow:inset 0 0 0 2px rgba(255,180,0,.50); font-weight:600; }
       td.poch__cancelled { background:rgba(220,53,69,.24)!important; box-shadow:inset 0 0 0 2px rgba(220,53,69,.45); font-weight:600; }
       td.poch__band { background:rgba(255,0,0,.14)!important; box-shadow:inset 0 0 0 1px rgba(255,0,0,.22); color:#5a0000; }
