@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.19
+// @version      0.3.20
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -22,7 +22,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.19';
+  const VERSION = '0.3.20';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -433,6 +433,25 @@
     capture.observer?.disconnect();
     cancelCoreCapture();
     const payload = payloadFromState(capture);
+    const available = Object.entries(payload.fieldStates).filter(([, value]) => value === 'available').map(([key]) => key);
+    if (!available.length) {
+      GM_setValue(KEY, null);
+      capture.payload = null;
+      const detail = 'RIVER capture failed: no usable FCResearch data.';
+      renderCaptureState(capture.badge, capture.state, false, detail);
+      capture.badge.dataset.riverCaptureState = 'error';
+      const indicator = indicatorFor(capture.badge);
+      indicator.textContent = 'RIVER CAPTURE FAILED';
+      indicator.title = detail;
+      emit('capture.rejected', {
+        reason: 'all-fields-unavailable',
+        elapsedMs: Math.round(performance.now() - capture.started),
+        domPasses: capture.domPasses,
+        fallbackRequests: capture.fallbackRequests
+      });
+      return;
+    }
+
     GM_setValue(KEY, payload);
     capture.payload = payload;
     const unavailable = Object.entries(payload.fieldStates).filter(([, value]) => value === 'unavailable').map(([key]) => key);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.45
+// @version      0.9.46
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -22,7 +22,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.45';
+  const VERSION = '0.9.46';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -1765,6 +1765,7 @@
       let session = await this.acquireSkuObject();
       let attempt = 0;
       let initialQty = null;
+      let lastQty = null;
       let didFlip = false;
       let recoveries = 0;
 
@@ -1831,6 +1832,21 @@
           }
           const qty = this.readEditQty(sourcePage, currentLabel);
           if (qty != null && initialQty == null) initialQty = qty;
+          if (Number.isInteger(qty)) {
+            if (Number.isInteger(lastQty) && qty < lastQty) {
+              didFlip = true;
+              recoveries = 0;
+              traceAft('AFT_SKU_PROGRESS', {
+                sku: meta.sku,
+                attempt,
+                currentState,
+                previousQty: lastQty,
+                qty,
+                moved: lastQty - qty
+              });
+            }
+            lastQty = qty;
+          }
           traceAft('AFT_SKU_QTY', {
             sku: meta.sku,
             attempt,
@@ -3173,6 +3189,7 @@
           <button class="fcsku-stop" data-stop disabled>STOP AFTER CURRENT ITEM</button>
           <button class="fcsku-clear" data-clear>CLEAR</button>
           <textarea class="fcsku-log" data-steps readonly></textarea>
+          <textarea class="fcsku-log" data-failed readonly hidden></textarea>
         </div>`;
       document.body.appendChild(panel);
       this.panel = panel;
@@ -3200,14 +3217,23 @@
       };
     },
 
-    clearForm() {
+    clearForm(clearFailures = true) {
       if (!this.panel) return;
       $('[data-old]', this.panel).value = '';
       $('[data-new]', this.panel).value = '';
       $('[data-locations]', this.panel).value = '';
       for (const key of [this.keys.old, this.keys.neu, this.keys.locations]) localStorage.removeItem(key);
       this.tracker?.clear();
+      if (clearFailures) this.showFailures([]);
       if (this.metricsEl) this.metricsEl.textContent = '0/0 done | last — | avg —';
+    },
+
+    showFailures(failed = []) {
+      const el = this.panel ? $('[data-failed]', this.panel) : null;
+      if (!el) return;
+      const containers = failed.map(item => norm(item?.container || item)).filter(Boolean);
+      el.value = containers.join('\n');
+      el.hidden = containers.length === 0;
     },
 
     fetchState(label) { return FcApi.page(label, text => this.classify(text)); },
@@ -3261,7 +3287,13 @@
       this.tracker?.begin(container, `${oldCode} → ${newCode}`, ['Container', 'OLD', 'NEW', 'Confirm', 'End']);
       const step = async (name, fn) => {
         this.tracker?.active(name); this.status(`${index}/${total} ${name}`);
-        await fn(); this.tracker?.done(name);
+        try {
+          await fn();
+          this.tracker?.done(name);
+        } catch (error) {
+          this.tracker?.error(name);
+          throw error;
+        }
       };
       await step('Container', () => FcApi.input(workflowId, container, 'Container'));
       await step('OLD', () => FcApi.input(workflowId, oldCode, 'Old'));
@@ -3278,39 +3310,73 @@
       let objectId = initial.objectId;
       let done = 0;
       let lastMs = 0;
+      const failed = [];
 
+      this.showFailures([]);
       this.metrics(0, locations.length, started);
 
       for (let i = 0; i < locations.length; i++) {
         if (this.stopRequested) break;
 
+        const container = locations[i];
         const needNext = i < locations.length - 1;
-        const result = await this.runOne(
-          objectId,
-          locations[i],
-          oldCode,
-          newCode,
-          i + 1,
-          locations.length,
-          needNext
-        );
 
-        objectId = result.nextObjectId;
-        lastMs = result.ms;
-        done++;
-        this.metrics(done, locations.length, started, lastMs);
+        try {
+          const result = await this.runOne(
+            objectId,
+            container,
+            oldCode,
+            newCode,
+            i + 1,
+            locations.length,
+            needNext
+          );
+
+          objectId = result.nextObjectId;
+          lastMs = result.ms;
+          done++;
+          this.metrics(done, locations.length, started, lastMs);
+        } catch (error) {
+          if (this.stopRequested) break;
+
+          failed.push({ container, message: String(error?.message || error) });
+          this.showFailures(failed);
+          this.status(`${i + 1}/${locations.length} REVIEW • restarting`);
+
+          try { await FcApi.end(objectId); } catch {}
+
+          if (needNext) {
+            try {
+              const next = await this.acquireNextObject(objectId);
+              objectId = next.objectId;
+            } catch (recoveryError) {
+              recoveryError.fcskuPartial = {
+                done,
+                total: locations.length,
+                failed: [...failed],
+                remaining: locations.slice(i + 1)
+              };
+              throw recoveryError;
+            }
+          }
+        }
 
         if (this.stopRequested) break;
       }
 
+      this.showFailures(failed);
+
       if (this.stopRequested) {
-        this.status(`Stopped safely after ${done}/${locations.length}`);
-        return;
+        this.status(`Stopped safely after ${done}/${locations.length} • ${failed.length} review`);
+        return { done, failed };
       }
 
       const elapsed = performance.now() - started;
-      this.clearForm();
-      this.status(`DONE ✓ ${done} flips | avg ${(elapsed / done / 1000).toFixed(2)}s`);
+      const avg = done ? `${(elapsed / done / 1000).toFixed(2)}s` : '—';
+      this.clearForm(false);
+      this.showFailures(failed);
+      this.status(`DONE ✓ ${done}/${locations.length} • ${failed.length} review • avg ${avg}`);
+      return { done, failed };
     },
 
     async startQueue() {

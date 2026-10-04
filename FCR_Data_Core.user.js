@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.40
+// @version      0.2.41
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.40';
+  const VERSION = '0.2.41';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
@@ -67,6 +67,7 @@
   const MEASUREMENT_BRIDGE_WAIT_MS = 6500;
   const MEASUREMENT_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
   const MADCAT_NO_TTL_MS = 5 * 60 * 1000;
+  const MEASUREMENT_BAD_REQUEST_TTL_MS = 5 * 60 * 1000;
   const MADCAT_CACHE_PRUNE_MS = 10 * 60 * 1000;
   const MADCAT_TIME_ZONE = 'Australia/Sydney';
   const MEASUREMENT_MAX_PAGES = 10;
@@ -1419,7 +1420,7 @@
     });
   }
 
-  async function fallbackMadcatToInventoryHistory(identifier, force = false, reason = 'measurement-auth') {
+  async function fallbackMadcatToInventoryHistory(identifier, force = false, reason = 'measurement-auth', authRequired = true) {
     stats.madcatHistoryFallback++;
     recordUsage('madcat.fallback.inventory-history');
     const result = await fetchHistory(identifier, force);
@@ -1433,7 +1434,7 @@
       windowDays: null,
       fallback: 'inventory-history',
       fallbackReason: reason,
-      authRequired: true,
+      authRequired,
       historyRows: Number(history.rows) || 0
     };
   }
@@ -1481,6 +1482,7 @@
   }
 
   const madcatStoragePrefix = `${CACHE_PREFIX}madcat30:`;
+  const measurementFailurePrefix = `${CACHE_PREFIX}measurement-failure:`;
   let madcatLastPrune = 0;
 
   function pruneMadcatCache(now = Date.now()) {
@@ -1502,6 +1504,30 @@
 
   function madcatCacheKey(identifierType, identifier) {
     return `${madcatStoragePrefix}${upper(identifierType)}:${upper(identifier)}`;
+  }
+
+  function measurementFailureKey(identifierType, identifier) {
+    return `${measurementFailurePrefix}${upper(identifierType)}:${upper(identifier)}`;
+  }
+
+  function readMeasurementFailure(identifierType, identifier) {
+    const key = measurementFailureKey(identifierType, identifier);
+    let entry = null;
+    try { entry = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch {}
+    if (!entry || Number(entry.expiresAt) <= Date.now()) {
+      try { sessionStorage.removeItem(key); } catch {}
+      return null;
+    }
+    return entry;
+  }
+
+  function writeMeasurementFailure(identifierType, identifier, reason) {
+    const entry = {
+      reason: clean(reason) || 'measurement-http-400',
+      expiresAt: Date.now() + MEASUREMENT_BAD_REQUEST_TTL_MS
+    };
+    try { sessionStorage.setItem(measurementFailureKey(identifierType, identifier), JSON.stringify(entry)); } catch {}
+    return entry;
   }
 
   function readMadcatCache(identifierType, identifier) {
@@ -1553,6 +1579,12 @@
         recordUsage(`madcat.cache.${cached.madcat ? 'yes' : 'no'}`);
         return cached;
       }
+
+      const blocked = readMeasurementFailure(identifierType, identifier);
+      if (blocked) {
+        recordUsage('madcat.measurement.400.blocked');
+        return fallbackMadcatToInventoryHistory(identifier, false, blocked.reason, false);
+      }
     }
 
     let auth = readMeasurementAuth();
@@ -1577,6 +1609,11 @@
         if (/measurement login required/i.test(message)) {
           stats.madcatAuthRequired++;
           return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-token-expired');
+        }
+        if (/measurement http 400/i.test(message)) {
+          writeMeasurementFailure(identifierType, identifier, 'measurement-http-400');
+          recordUsage('madcat.measurement.400.cached');
+          return fallbackMadcatToInventoryHistory(identifier, force, 'measurement-http-400', false);
         }
         throw error;
       }
@@ -1665,6 +1702,11 @@
       if (/measurement login required/i.test(message)) {
         stats.madcatAuthRequired++;
         return await fallbackMadcatToInventoryHistory(identifier, force, 'measurement-token-expired');
+      }
+      if (/measurement http 400/i.test(message)) {
+        writeMeasurementFailure(identifierType, identifier, 'measurement-http-400');
+        recordUsage('madcat.measurement.400.cached');
+        return await fallbackMadcatToInventoryHistory(identifier, force, 'measurement-http-400', false);
       }
       throw error;
     } finally {
