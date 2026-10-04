@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | Sideline + ISS Restructure 1.0
 // @namespace    https://github.com/1Sirkkris
-// @version      1.0.0
+// @version      1.0.1
 // @description  Clean V2 rebuild: Tote Queue + Lazy Sideline + QTY + ISS Console, one Sideline core.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const AFT_WORKER_URL = AFT_ORIGIN + '/app/edititems?experience=Desktop#iss-console-worker';
@@ -1025,26 +1025,19 @@
         rect.height > 0;
     }
 
-    function text() {
-      const selectors = 'h1,h2,h3,h4,label,legend,[role="heading"],button';
-      return $$(selectors)
-        .filter(visible)
-        .slice(0, 140)
-        .map(el => clean(el.innerText || el.textContent || el.value))
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+    function hasExactText(pattern) {
+      return $('h1,h2,h3,h4,label,legend,span,div,p,strong,b,button,[role="heading"]')
+        .some(el => visible(el) && pattern.test(norm(el.innerText || el.textContent || el.value || '')));
     }
 
     function step() {
-      const value = text();
-      if (value.includes('enter quantity')) return 'QTY';
-      if (value.includes('verify item')) return 'VERIFY';
-      if (value.includes('production date')) return 'PRODUCTION';
-      if (value.includes('expiration date') || value.includes('expiry date')) return 'EXPIRY';
-      if (value.includes('scan destination container')) return 'DEST';
-      if (value.includes('scan source container')) return 'SOURCE';
-      if (value.includes('scan item')) return 'ITEM';
+      if (hasExactText(/^enter quantity$/)) return 'QTY';
+      if (hasExactText(/^verify item$/)) return 'VERIFY';
+      if (hasExactText(/^enter production date(?: displayed on item)?$/)) return 'PRODUCTION';
+      if (hasExactText(/^enter (?:expiry|expiration) date(?: displayed on item)?$/)) return 'EXPIRY';
+      if (hasExactText(/^scan destination container$/)) return 'DEST';
+      if (hasExactText(/^scan source container$/)) return 'SOURCE';
+      if (hasExactText(/^scan item$/)) return 'ITEM';
       return 'OTHER';
     }
 
@@ -1073,6 +1066,57 @@
       const direct = $('#confirm-button');
       if (direct && visible(direct)) return direct;
       return button(/^(confirm|item match|continue|submit|enter)\b/);
+    }
+
+    function modalChoice(pattern) {
+      const selectors = 'button,[role="button"],input[type="button"],input[type="submit"],alchemy-button,mdw-button';
+      const roots = [document];
+      for (let index = 0; index < roots.length; index++) {
+        const root = roots[index];
+        for (const element of root.querySelectorAll?.('*') || []) {
+          if (element.shadowRoot) roots.push(element.shadowRoot);
+        }
+      }
+
+      const dialogs = [
+        $('#modal-root'),
+        ...$('[role="dialog"],dialog,.modal,.Dialog,.dialog,.ReactModal__Content,[aria-modal="true"]')
+      ].filter(Boolean);
+
+      const scopes = dialogs.length ? dialogs : roots;
+      for (const scope of scopes) {
+        const localRoots = [scope];
+        for (let index = 0; index < localRoots.length; index++) {
+          const root = localRoots[index];
+          for (const element of root.querySelectorAll?.('*') || []) {
+            if (element.shadowRoot) localRoots.push(element.shadowRoot);
+          }
+          const hit = $(selectors, root).find(element => {
+            if (!visible(element)) return false;
+            const label = norm([
+              element.innerText,
+              element.textContent,
+              element.value,
+              element.getAttribute?.('aria-label'),
+              element.getAttribute?.('title'),
+              element.shadowRoot?.textContent
+            ].filter(Boolean).join(' '));
+            return pattern.test(label);
+          });
+          if (hit) return hit;
+        }
+      }
+
+      if (dialogs.length) {
+        for (const root of roots) {
+          const hit = $(selectors, root).find(element =>
+            visible(element) &&
+            pattern.test(norm(element.innerText || element.textContent || element.value || element.shadowRoot?.textContent || ''))
+          );
+          if (hit) return hit;
+        }
+      }
+      return null;
     }
 
     function setValue(inputElement, value) {
@@ -1224,10 +1268,15 @@
     }
 
     async function clearCurrent() {
-      const change = button(/^change container\b/);
+      const change = ($('#change-container-button') && visible($('#change-container-button')))
+        ? $('#change-container-button')
+        : button(/^change container\b/);
       if (!change) throw new Error('No open container');
       change.click();
-      const yes = await waitFor(() => button(/^(yes|yes close|yes, close|empty|empty container)\b/), 5000);
+      const yes = await waitFor(
+        () => modalChoice(/^(yes|yes close|yes, close|empty|empty container)\b/),
+        5000
+      );
       if (!yes) throw new Error('Clear confirmation not found');
       yes.click();
     }
@@ -1837,7 +1886,6 @@
 
       if (cancelled(run)) return snapshot();
 
-      state.running = false;
       state.paused = false;
       state.attention = '';
 
@@ -1849,7 +1897,9 @@
         emit();
         try {
           await Api.closeContainer(state.source, true);
+          if (run !== runSeq) return snapshot();
         } catch (error) {
+          state.running = false;
           state.error = clean(error?.message || error);
           state.note = 'moves complete — source clear not confirmed';
           emit();
@@ -1857,6 +1907,7 @@
         }
       }
 
+      state.running = false;
       state.note = cleanRun
         ? 'complete'
         : 'complete — source left open';
@@ -2437,6 +2488,7 @@
           result.metrics.moved === result.metrics.total
         ) {
           const note = result.note;
+          LazyEngine.reset();
           resetWorkflowUi();
           refs.lazyStatus.textContent = 'IDLE · ' + note;
           refs.lazyStatus.dataset.kind = 'ok';
