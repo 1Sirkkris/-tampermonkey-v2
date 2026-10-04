@@ -1,0 +1,16 @@
+V3.boot=()=>{
+  const C=V3.core,life=C.lifecycle('poportal'),telemetry=C.telemetry('poportal',V3.build.version);
+  if(/^\/poportal\/?$/i.test(location.pathname)){location.replace('/poportal/fe'+location.search+location.hash);return;}
+  const CONDITIONS=['Complete','CompletelyConfirmed','PartiallyConfirmed','Submitted','Reserved','Confirmed'];
+  const KEEP=/^(po id|status|fc|ordered|shipped|first recv|last recv|exp|rec|disc)/i;
+  const panel=C.panel({id:'poportal',title:'V3 · PO Portal',width:560,life});let mounted=false,full=false,queued=false;
+  const apply=()=>{for(const table of document.querySelectorAll('table')){const head=[...table.rows].find(r=>[...r.cells].some(c=>/^po id\b/i.test(C.clean(c.textContent)))&&[...r.cells].some(c=>/^status\b/i.test(C.clean(c.textContent))));if(!head)continue;const keep=[...head.cells].map(c=>KEEP.test(C.clean(c.textContent)));for(const row of table.rows)if(row.cells.length===head.cells.length)[...row.cells].forEach((c,i)=>c.style.display=full||keep[i]?'':'none');}};
+  const schedule=()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;apply();});};
+  const mount=()=>{if(mounted)return;mounted=true;const p=new URLSearchParams(location.search),today=new Date(),start=new Date(today);start.setMonth(start.getMonth()-6);const fmt=d=>d.toISOString().slice(0,10),root=document.createElement('div');
+    root.innerHTML='<section class="v3-section"><label class="v3-field">ASIN / FNSKU<input data-code value="'+C.esc(p.get('asin')||'')+'"></label><div class="v3-grid"><label class="v3-field">Start<input data-start type="date" value="'+C.esc(p.get('startDate')||fmt(start))+'"></label><label class="v3-field">End<input data-end type="date" value="'+C.esc(p.get('endDate')||fmt(today))+'"></label></div><div class="v3-row"><button class="v3-btn primary" data-search>SEARCH</button><button class="v3-btn" data-view>LITE / FULL</button></div></section>';panel.set(root);
+    root.querySelector('[data-search]').onclick=()=>{const code=C.upper(root.querySelector('[data-code]').value),s=root.querySelector('[data-start]').value,e=root.querySelector('[data-end]').value;if(!code)return;const u=new URL('/poportal/fe',location.origin);u.searchParams.set('asin',code);u.searchParams.set('startDate',s);u.searchParams.set('endDate',e);u.searchParams.set('countries','AU');u.searchParams.set('distributorChecks',CONDITIONS.join(','));u.searchParams.set('removeZeroFilter','false');telemetry.emit('search',{code:C.mask(code)});location.assign(u.href);};
+    root.querySelector('[data-view]').onclick=()=>{full=!full;apply();};
+  };
+  life.observe(document.body,schedule,{childList:true,subtree:true});apply();
+  C.dockButton({id:'poportal',label:'PO LITE',title:'V3 PO Portal',onClick:()=>{mount();panel.open();}});
+};
