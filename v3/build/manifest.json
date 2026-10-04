@@ -189,8 +189,8 @@
     {
       "id": "hierarchy",
       "name": "V3 | BWU2 Hierarchy",
-      "version": "0.1.1",
-      "description": "Native Hierarchy helper: typed-destination Bind queue plus direct Unbind queue.",
+      "version": "0.1.2",
+      "description": "Native Hierarchy helper: typed-destination Bind queue with session-only destination validation capture plus direct Unbind queue.",
       "match": [
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*"
