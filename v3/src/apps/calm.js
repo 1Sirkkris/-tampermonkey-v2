@@ -1,0 +1,8 @@
+V3.boot=()=>{
+  const C=V3.core,life=C.lifecycle('calm'),telemetry=C.telemetry('calm',V3.build.version),panel=C.panel({id:'calm',title:'V3 · Calm Code',width:480,life});
+  const groups=[['ISS',[['IBPS','IBPS'],['RECON','RECON'],['PSBL','PSBL'],['ICVR','ICVR'],['LPSWEEP','LPSWEEP']]],['Damages',[['ICQADMP','ICQADMP'],['DAMAGES','DAMAGES']]],['Etc',[['HRACCOM','HRACCOM'],['IB Lead/PA','LRSR'],['Non-sort','FCPRJ'],['MSTOP','MSTOP']]]];let mounted=false;
+  const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML=groups.map(([g,roles])=>'<section class="v3-section"><b>'+C.esc(g)+'</b><div class="v3-row" style="margin-top:8px">'+roles.map(([n,code])=>'<button class="v3-btn" data-code="'+C.esc(code)+'">'+C.esc(n)+'</button>').join('')+'</div></section>').join('');panel.set(root);
+    for(const b of root.querySelectorAll('[data-code]'))b.onclick=()=>{const input=document.getElementById('calmCode')||document.querySelector('input[name="calmCode"]'),form=input?.form||document.forms[0];if(!input||!form)return;input.value=b.dataset.code;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));telemetry.emit('submit',{code:b.dataset.code});form.requestSubmit?form.requestSubmit():form.submit();};
+  };
+  C.dockButton({id:'calm',label:'CALM',title:'V3 Calm Code',onClick:()=>{mount();panel.open();}});
+};
