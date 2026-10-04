@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | Sideline + ISS Restructure 1.0
 // @namespace    https://github.com/1Sirkkris
-// @version      1.0.1
+// @version      1.0.2
 // @description  Clean V2 rebuild: Tote Queue + Lazy Sideline + QTY + ISS Console, one Sideline core.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
   const AFT_WORKER_URL = AFT_ORIGIN + '/app/edititems?experience=Desktop#iss-console-worker';
@@ -2055,6 +2055,9 @@
       }
 
       if (message.type === 'ISS_CONSOLE_PROGRESS') {
+        for (const [key, job] of pending) {
+          if (!job.timedOut && job.command !== 'stop') armTimeout(key, job);
+        }
         try { progress(message); } catch {}
         return;
       }
@@ -2065,6 +2068,23 @@
       if (!job) return;
       pending.delete(key);
       clearTimeout(job.timer);
+
+      if (job.timedOut) {
+        const area = job.command.startsWith('edit.') ? 'edit'
+          : job.command.startsWith('move.') ? 'move'
+          : 'worker';
+        try {
+          progress({
+            area,
+            message: message.ok
+              ? 'Late AFT result received — VERIFY FINAL STATE before another run'
+              : 'Late AFT failure received — VERIFY FINAL STATE',
+            error: !message.ok,
+            late: true
+          });
+        } catch {}
+        return;
+      }
 
       if (message.ok) {
         job.resolve(message.data);
@@ -2103,27 +2123,57 @@
       });
     }
 
-    async function call(command, payload = {}, timeout = 600000) {
+    function armTimeout(key, job) {
+      clearTimeout(job.timer);
+      job.timer = setTimeout(() => {
+        if (job.timedOut || !pending.has(key)) return;
+        job.timedOut = true;
+        const error = new Error(
+          job.command + ' timed out — AFT outcome UNKNOWN; wait for late result or VERIFY STATE before retry'
+        );
+        error.timeout = true;
+        job.reject(error);
+      }, job.timeout);
+    }
+
+    async function call(command, payload = {}, timeout = 12 * 60 * 1000) {
       if (!frame) mount();
       if (!await waitReady()) throw new Error('AFT worker not ready');
 
+      const unresolved = [...pending.values()].find(job => job.timedOut && job.command !== 'stop');
+      if (unresolved && command !== 'stop') {
+        throw new Error(
+          'Previous ' + unresolved.command +
+          ' outcome is UNKNOWN — wait for its late result or VERIFY STATE before another run'
+        );
+      }
+
       const key = id();
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(key);
-          const error = new Error(command + ' timed out — VERIFY STATE BEFORE RETRY');
-          error.timeout = true;
-          reject(error);
-        }, timeout);
-
-        pending.set(key, { resolve, reject, timer, command });
-        frame.contentWindow.postMessage({
-          type: 'ISS_CONSOLE_RPC',
-          worker: 'aft',
-          id: key,
+        const job = {
+          resolve,
+          reject,
+          timer: 0,
           command,
-          payload
-        }, AFT_ORIGIN);
+          timeout,
+          timedOut: false
+        };
+        pending.set(key, job);
+        armTimeout(key, job);
+
+        try {
+          frame.contentWindow.postMessage({
+            type: 'ISS_CONSOLE_RPC',
+            worker: 'aft',
+            id: key,
+            command,
+            payload
+          }, AFT_ORIGIN);
+        } catch (error) {
+          clearTimeout(job.timer);
+          pending.delete(key);
+          reject(error);
+        }
       });
     }
 
