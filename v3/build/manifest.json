@@ -15,7 +15,8 @@
         "GM_getValue",
         "GM_setValue",
         "GM_setClipboard",
-        "unsafeWindow"
+        "unsafeWindow",
+        "GM_openInTab"
       ],
       "connect": [
         "pandash.amazon.com",
