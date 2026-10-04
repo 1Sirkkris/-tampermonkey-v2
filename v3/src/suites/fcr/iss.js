@@ -180,7 +180,7 @@ V3.fcrIss = (() => {
 
     function render(){
       const root=document.createElement('div');
-      root.innerHTML='<section class="v3-section"><div class="v3-row" style="flex-wrap:wrap">'+
+      root.innerHTML='<section class="v3-section"><h3>ISS Console</h3><div class="v3-note" style="margin-bottom:8px">Sideline · MoveItems · EditItems · FCSKU Flip</div><div class="v3-row" style="flex-wrap:wrap">'+
         [['sideline','SIDELINE'],['move','MOVE'],['edit','EDIT'],['fcsku','FCSKU']].map(([id,label])=>
           '<button class="v3-btn'+(id===tab?' primary':'')+'" data-iss-tab="'+id+'">'+label+'</button>'
         ).join('')+'</div></section><div data-module></div>';
