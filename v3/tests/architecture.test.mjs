@@ -36,6 +36,7 @@ for(const shared of ['src/services/aft.js','src/services/aft-workflows.js']){
   assert.ok(byId.move.sources.includes(shared),'Move must use shared '+shared);
 }
 assert.ok(byId.sideline.sources.includes('src/services/sideline.js'),'Native Sideline must use shared Sideline engine');
+assert.ok(byId.hierarchy.sources.includes('src/services/hierarchy-native.js'),'Hierarchy must include typed native Bind driver');
 
 for(const entry of manifest.suites){
   assert.ok(entry.name.startsWith('V3 | '),entry.id+' missing V3 title prefix');
