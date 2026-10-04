@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 SIM Toolbar
 // @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.2
+// @version      0.2.3
 // @description  SIM Markdown toolbar, snippets, attachments and read-only ticket row navigation.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.2-55312a10
+// @v3-build     sim-0.2.3-7b29752a
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.2-55312a10","version":"0.2.2"});
+V3.build=Object.freeze({"id":"sim-0.2.3-7b29752a","version":"0.2.3"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -414,16 +414,19 @@ V3.boot=()=>{
     style.dataset.bwu2Ui='1';
     style.dataset.v3SimNav='1';
     style.textContent=`
-[data-v3-sim-nav-gutter]{box-sizing:border-box;width:58px;min-width:58px;padding:3px 5px!important;vertical-align:middle;text-align:center}
-div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 58px;align-items:center;justify-content:center}
-.v3-sim-nav-pick{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:46px;height:28px;padding:2px 5px;border:1px solid #8795a5;border-radius:6px;background:#fff;color:#26384b;font:800 11px/1 Arial;cursor:pointer;user-select:none}
-.v3-sim-nav-pick:hover{background:#eef3f8}.v3-sim-nav-pick[data-selected="1"]{background:#284f75;color:#fff;border-color:#7ca6d3}
-.v3-sim-nav-box{display:inline-grid;place-items:center;width:14px;height:14px;border:2px solid currentColor;border-radius:3px;font-size:10px;line-height:1}
-.v3-sim-nav-pick[data-selected="0"] .v3-sim-nav-box{color:transparent}
-[data-v3-sim-nav-selected="1"]{box-shadow:inset 3px 0 #4f7da7}
-#v3-sim-nav-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147482998;display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid #526174;border-radius:10px;background:#111720;color:#eef3f8;box-shadow:0 8px 24px #0006;font:800 12px Arial,sans-serif}
+[data-v3-sim-nav-gutter]{box-sizing:border-box;width:36px;min-width:36px;padding:2px!important;vertical-align:middle;text-align:center}
+div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 36px;align-items:center;justify-content:center}
+.v3-sim-nav-pick{display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;padding:0;border:1px solid #aeb8c4;border-radius:5px;background:#fff;color:#34465a;font:800 11px/1 Arial;cursor:pointer;user-select:none}
+.v3-sim-nav-pick:hover{background:#f3f6f8;border-color:#7e8d9e}
+.v3-sim-nav-pick[data-selected="1"]{background:#2f5f88;color:#fff;border-color:#2f5f88}
+.v3-sim-nav-pick[data-selected="1"] [data-number]::before{content:"✓ ";font-size:9px}
+[data-v3-sim-nav-selected="1"]{background:rgba(47,95,136,.045)!important}
+#v3-sim-nav-bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147482998;display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px solid #b7c1cc;border-radius:7px;background:#fff;color:#27384b;box-shadow:0 3px 10px #0002;font:800 11px Arial,sans-serif}
 #v3-sim-nav-bar[hidden]{display:none!important}
-#v3-sim-nav-bar strong{min-width:82px;text-align:center}
+#v3-sim-nav-bar strong{min-width:70px;padding:0 4px;text-align:center;white-space:nowrap}
+#v3-sim-nav-bar .v3-btn{height:28px;padding:4px 9px;border:1px solid #9da9b6;border-radius:5px;background:#fff;color:#27384b;font:800 11px Arial;box-shadow:none}
+#v3-sim-nav-bar .v3-btn:hover{background:#f3f6f8}
+#v3-sim-nav-bar .v3-btn.primary{background:#2f5f88;color:#fff;border-color:#2f5f88}
 `;
     document.head.appendChild(style);
     life.own(()=>style.remove());
@@ -492,7 +495,7 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 5
         button.type='button';
         button.className='v3-sim-nav-pick';
         button.dataset.v3SimNav='1';
-        button.innerHTML='<span class="v3-sim-nav-box">✓</span><span data-number></span>';
+        button.innerHTML='<span data-number></span>';
         button.addEventListener('pointerdown',event=>{
           if(event.button!==0)return;
           event.preventDefault();
