@@ -16,6 +16,7 @@ V3 is rebuilt around native-page ownership and shared engines.
 - Sideline inside ISS Console runs locally on Poirot. Do not resurrect a hidden FCResearch Sideline worker.
 - ISS Console owns fast repeated ISS workflows: Edit, Move, Sideline and FCSKU.
 - Native Edit/Move/Sideline/Hierarchy/MoveContainer pages remain usable with their own V3 helpers.
+- Standalone Bind takes a typed destination FC (for example BWU1 / AVV2), validates it through the native page, and keeps the captured opaque destination ID in memory only for that run.
 - One mutation engine per backend. Multiple UIs call the same engine.
 - A submitted mutation may only finish CONFIRMED, REJECTED or UNKNOWN.
 - UNKNOWN never auto-retries.
