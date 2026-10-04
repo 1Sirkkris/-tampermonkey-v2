@@ -1,6 +1,6 @@
 V3.boot=()=>{
   const life=V3.lifecycle.create('obs'),store=V3.storage.create('obs',1),MAX=1200;let events=[],timer=0,hidden=false;
-  const load=async()=>{events=await store.get('events',[]);if(!Array.isArray(events))events=[];};
+  const load=async()=>{const pending=events.slice(),saved=await store.get('events',[]);events=Array.isArray(saved)?saved:[];events.push(...pending);if(events.length>MAX)events.splice(0,events.length-MAX);};
   const flush=async()=>{timer=0;if(events.length>MAX)events.splice(0,events.length-MAX);await store.set('events',events);};
   const schedule=()=>{if(timer)return;timer=setTimeout(flush,750);};
   life.on(window,V3.telemetry.EVENT,event=>{try{const data=JSON.parse(String(event.detail||''));if(!data?.t||!data?.app)return;events.push(data);schedule();}catch{}});
