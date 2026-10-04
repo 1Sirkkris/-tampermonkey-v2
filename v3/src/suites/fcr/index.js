@@ -13,7 +13,7 @@ V3.boot = () => {
   const tabs=[
     {id:'fcr',label:'FCR'},
     {id:'tote',label:'TOTE'},
-    {id:'iss',label:'ISS'},
+    {id:'iss',label:'ISS CONSOLE'},
     {id:'river',label:'RIVER'},
     {id:'obs',label:'OBS'}
   ];
@@ -23,7 +23,7 @@ V3.boot = () => {
   const shell=V3.ui.createShell({
     id:'bwu2-v3-fcr',
     title:'BWU2 V3 FCResearch',
-    subtitle:'FCR · Tote · ISS · RIVER',
+    subtitle:'FCR · Tote · ISS Console · RIVER',
     version:VERSION,
     life,
     tabs,
