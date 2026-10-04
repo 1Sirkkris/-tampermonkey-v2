@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.43
+// @version      0.2.0
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
-// @include      /^https?:\/\/.*fcresearch.*\//
-// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
+// @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-start
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/ISS_Console.user.js
@@ -14,19 +13,15 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.43';
+  const VERSION = '0.2.0';
   const HASH = '#iss-console';
-  if (location.hash !== HASH) return;
+  const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
+  const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
+  if (location.origin !== SIDELINE_ORIGIN || window.top !== window.self || location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
   window.__bwu2IssConsole = true;
 
-  const AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
-  const SIDELINE_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const AFT_WORKER_URL = AFT_ORIGIN + '/app/edititems?experience=Desktop#iss-console-worker';
-  // Firefox/Poirot does not reliably stay inside a cross-origin hidden iframe.
-  // Run the installed Sideline REBUILD engine in a same-origin hidden FCR iframe;
-  // that worker talks to Poirot through GM_xmlhttpRequest.
-  const SIDELINE_WORKER_URL = location.origin + location.pathname + location.search + '#iss-console-sideline-worker';
   const STORE_PREFIX = 'issConsole.v1.';
   const DEFAULT_TIMEOUT = 20000;
   const LONG_TIMEOUT = 12 * 60 * 1000;
@@ -34,9 +29,8 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.29-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.30-REBUILD';
 
-  try { window.stop(); } catch {}
   if (document.documentElement) {
     document.documentElement.style.visibility = 'hidden';
     document.documentElement.dataset.issConsole = '1';
@@ -85,8 +79,9 @@
   }
 
   function warehouseId() {
-    const match = location.pathname.match(/^\/([^/]+)\/results(?:\/|$)/i);
-    return upper(match?.[1] || 'BWU2');
+    const params = new URLSearchParams(location.search);
+    const requested = upper(params.get('warehouse') || params.get('site') || '');
+    return /^[A-Z]{3}\d$/.test(requested) ? requested : 'BWU2';
   }
 
   const workers = {
@@ -103,13 +98,17 @@
       restartPromise: null
     },
     sideline: {
-      origin: location.origin,
-      url: SIDELINE_WORKER_URL,
+      origin: SIDELINE_ORIGIN,
+      url: '',
       frame: null,
-      local: false,
+      local: true,
       ready: false,
       version: '',
-      pending: new Map()
+      pending: new Map(),
+      lastSeenAt: 0,
+      lastHealthyAt: 0,
+      healthPromise: null,
+      restartPromise: null
     }
   };
 
@@ -828,7 +827,7 @@
       '    <div class="iss-worker-status">',
       '      <span class="iss-worker"><i data-worker-dot="aft"></i><span data-worker-label="aft">AFT CONNECTING</span></span>',
       '      <span class="iss-worker"><i data-worker-dot="sideline"></i><span data-worker-label="sideline">SIDELINE CONNECTING · v' + esc(SIDELINE_EXPECTED_VERSION) + '</span></span>',
-      '      <button type="button" class="iss-exit" data-exit>FCResearch</button>',
+      '      <button type="button" class="iss-exit" data-exit>SIDELINE</button>',
       '    </div>',
       '  </header>',
       '  <div class="iss-accent"></div>',

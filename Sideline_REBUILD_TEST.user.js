@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name         V2 | Sideline REBUILD TEST
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.29
+// @version      0.0.30
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
-// @include      /^https?:\/\/.*fcresearch.*\//
-// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @connect      pandash.amazon.com
@@ -19,14 +17,13 @@
   'use strict';
 
   const IS_POIROT = location.hostname === 'aft-poirot-website-nrt.nrt.proxy.amazon.com';
-  const IS_FCR = /fcresearch/i.test(location.hostname) || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
-  const ISS_LOCAL_FCR_WORKER = IS_FCR && location.hash === '#iss-console-sideline-worker';
-  if (!IS_POIROT && !ISS_LOCAL_FCR_WORKER) return;
+  const ISS_CONSOLE_HOST = IS_POIROT && location.hash === '#iss-console';
+  if (!IS_POIROT) return;
 
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.29-REBUILD';
+  const VERSION = '0.0.30-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -45,10 +42,7 @@
   const API_MOVE_ITEMS = '/api/move-items';
   const API_BOOTSTRAP = '/api/get-bootstrap-data';
   const HAZMAT_MARKETPLACE = 'AU';
-  const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
-  const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
-  const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
-  const ISS_CONSOLE_WORKER = ISS_LOCAL_FCR_WORKER || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
+  const ISS_CONSOLE_WORKER = ISS_CONSOLE_HOST;
 
   function issControllerWindow() {
     try {
@@ -91,70 +85,7 @@
   }
 
   function sidelineFetch(path, options = {}) {
-    if (!ISS_LOCAL_FCR_WORKER) return fetch(path, options);
-
-    const url = /^https?:\/\//i.test(String(path || ''))
-      ? String(path)
-      : POIROT_ORIGIN + String(path || '');
-    const method = String(options.method || 'GET').toUpperCase();
-    const headers = options.headers || {};
-    const body = options.body == null ? undefined : String(options.body);
-
-    return new Promise((resolve,reject) => {
-      if (options.signal?.aborted) {
-        reject(makeAbortError('Run cancelled'));
-        return;
-      }
-
-      let settled = false;
-      let request = null;
-      const cleanup = () => {
-        try { options.signal?.removeEventListener('abort', abort); } catch {}
-      };
-      const abort = () => {
-        if (settled) return;
-        settled = true;
-        try { request?.abort?.(); } catch {}
-        cleanup();
-        reject(makeAbortError('Run cancelled'));
-      };
-
-      request = GM_xmlhttpRequest({
-        method,
-        url,
-        headers,
-        data:body,
-        anonymous:false,
-        timeout:15000,
-        onload:response => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          const raw = String(response.responseText || '');
-          resolve({
-            ok:response.status >= 200 && response.status < 300,
-            status:response.status,
-            url:response.finalUrl || url,
-            text:async () => raw,
-            json:async () => raw ? JSON.parse(raw) : null
-          });
-        },
-        onerror:error => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
-        },
-        ontimeout:() => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error('Poirot request timed out'));
-        }
-      });
-
-      try { options.signal?.addEventListener('abort', abort, {once:true}); } catch {}
-    });
+    return fetch(path, options);
   }
 
   async function warehouseId() {
@@ -973,6 +904,19 @@
       dockButtons.push(b);
       dock.appendChild(b);
     }
+    const iss = document.createElement('button');
+    iss.textContent = 'ISS';
+    iss.title = 'Open ISS Console';
+    iss.onclick = () => {
+      if (q.running || lazy.running || lazy.activeRun || shared.owner) {
+        iss.textContent = 'BUSY';
+        setTimeout(() => { iss.textContent = 'ISS'; }, 900);
+        return;
+      }
+      location.hash = '#iss-console';
+      location.reload();
+    };
+    dock.appendChild(iss);
     document.body.appendChild(dock);
   }
 
@@ -4446,7 +4390,7 @@
     window.addEventListener('message', async event => {
       const message = event.data;
       const sourceOk = event.source === issControllerWindow();
-      const originOk = /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
+      const originOk = event.origin === POIROT_ORIGIN;
       if (!sourceOk || !originOk || message?.type !== 'ISS_CONSOLE_RPC' || message?.worker !== 'sideline') return;
 
       const id = String(message.id || '');
