@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 ISS Console
 // @name:en      V3 | BWU2 ISS Console
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.1
 // @description  Dedicated ISS Console for Edit, Move, Sideline and FCSKU.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @run-at       document-body
@@ -12,13 +12,13 @@
 // @connect      pandash.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_ISS_Console.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_ISS_Console.user.js
-// @v3-build     iss-0.2.0-60d373d1
+// @v3-build     iss-0.2.1-4ac21fea
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"iss-0.2.0-60d373d1","version":"0.2.0"});
+V3.build=Object.freeze({"id":"iss-0.2.1-4ac21fea","version":"0.2.1"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -893,7 +893,7 @@ V3.sidelineUI = (() => {
   const today = () => { const date = new Date(); date.setHours(0,0,0,0); return date; };
   const pao900 = () => { const date = today(); date.setDate(date.getDate()+900); return date.getTime(); };
   const dateKey = ctx => [C.upper(ctx?.fnsku || ctx?.asin || ctx?.barcode),ctx?.dateType,ctx?.dateDetail?.shelfLife || 0].join('|');
-  function pickDate({ctx, life, signal = life?.signal} = {}) {
+  function pickDate({ctx, life, signal = life?.signal, requireShelfLife = true} = {}) {
     if (activeDate) return Promise.resolve(null);
     return new Promise(resolve => {
       const production = ctx?.dateType === 'PRODUCTION_DATE', currentYear = today().getFullYear();
@@ -922,16 +922,18 @@ V3.sidelineUI = (() => {
           '<button class="v3-btn primary" data-use '+(!selection.year?'disabled':'')+'>USE DATE</button><button class="v3-btn" data-cancel>CANCEL</button></div>';
         for (const button of card.querySelectorAll('[data-part]')) button.onclick=()=>{
           selection[button.dataset.part]=Number(button.dataset.value); if(button.dataset.part!=='year')selection.year=0;
-          if(button.dataset.part==='month')selection.day=1; render();
+          if(button.dataset.part==='month')selection.day=1;
+          if(button.dataset.part==='year')useDate();else render();
         };
         card.querySelector('[data-cancel]').onclick=cancel;
         card.querySelector('[data-pao]')?.addEventListener('click',()=>{const ms=pao900();close({enteredMs:ms,finalExpirationMs:ms});});
-        card.querySelector('[data-use]').onclick=()=>{
+        card.querySelector('[data-use]').onclick=useDate;
+      };
+      const useDate=()=>{
           const enteredMs=V3.sideline.validDate(selection.day,selection.month,selection.year);if(!allowed(enteredMs))return;
           const shelfLife=Number(ctx?.dateDetail?.shelfLife);
-          if(production&&(!Number.isFinite(shelfLife)||shelfLife<=0))return;
-          close({enteredMs,finalExpirationMs:production?enteredMs+shelfLife:enteredMs});
-        };
+          if(production&&requireShelfLife&&(!Number.isFinite(shelfLife)||shelfLife<=0))return;
+          close({enteredMs,finalExpirationMs:production?(Number.isFinite(shelfLife)&&shelfLife>0?enteredMs+shelfLife:null):enteredMs});
       };
       render(); if(signal?.aborted)cancel();
     });
@@ -966,7 +968,7 @@ V3.sidelineUI = (() => {
     const resetLookups=()=>{generation++;controller.abort();controller=new AbortController();lookup.clear();inflight.clear();dates.clear();};
     const preflight=async()=>{
       const src=C.clean(source.value),list=parseItems(items.value,src,dest.value),run=generation;if(!C.container(src))return;
-      let cursor=0;const worker=async()=>{while(cursor<list.length&&run===generation&&!controller.signal.aborted){
+      let cursor=0;const worker=async()=>{while(cursor<list.length&&run===generation&&!controller.signal.aborted&&!stop){
         const row=list[cursor++],code=C.upper(row.code);if(lookup.has(code))continue;
         if(inflight.has(code)){await inflight.get(code);continue;}
         const request=(async()=>{try{const rec=await engine.preflight(src,row.code,{signal:controller.signal});if(run===generation)lookup.set(code,rec);}
@@ -982,18 +984,18 @@ V3.sidelineUI = (() => {
     const wait=message=>new Promise(resolve=>{paused=true;waiter=resolve;status(message,'warn');paint();});
     q('[data-resume]').onclick=()=>{if(!paused)return;paused=false;const resolve=waiter;waiter=null;resolve?.();paint();};
     q('[data-pause]').onclick=()=>{if(running){paused=true;status('Pause requested — finishing current action','warn');paint();}};
-    const requestStop=()=>{stop=true;paused=false;waiter?.();waiter=null;activeDate?.close();status('Stop requested — finishing current action','warn');paint();};
-    q('[data-stop]').onclick=requestStop;
+    const requestStop=()=>{stop=true;controller.abort();paused=false;waiter?.();waiter=null;activeDate?.close();status('Stop requested — finishing current action','warn');paint();};
+    q('[data-stop]').onclick=()=>{if(running)requestStop();else q('[data-reset]').click();};
     q('[data-reset]').onclick=()=>{if(running||attention)return;resetLookups();source.value=dest.value=items.value='';save();rows=[];status('Ready');paint();};
     q('[data-attn]').onclick=async()=>{try{await V3.state.resolveAttention('sideline');attention='';localStorage.removeItem(key+'attention');status('Attention cleared');paint();}catch(error){status(error.message,'bad');}};
     q('[data-run]').onclick=async()=>{
       if(running||attention)return;
-      running=true;stop=false;rows=parseItems(items.value,source.value,dest.value);paint();
+      if(controller.signal.aborted)resetLookups();running=true;stop=false;rows=parseItems(items.value,source.value,dest.value);paint();
       const journal=()=>localStorage.setItem(key+'run',JSON.stringify({source:source.value,dest:dest.value,rows}));
       try{await V3.state.exclusive('sideline',async()=>{
         V3.state.assertClear('sideline');
         if(!C.container(source.value)||!C.container(dest.value)||C.upper(source.value)===C.upper(dest.value))throw new Error('Valid different source/destination containers required');
-        if(!rows.length)throw new Error('No items');journal();status('Preflight…','warn');await preflight();
+        if(!rows.length)throw new Error('No items');journal();status('Preflight…','warn');await preflight();if(stop){status('STOPPED · no move sent','warn');return;}
         if(rows.some(row=>!lookup.has(C.upper(row.code))||lookup.get(C.upper(row.code)).result.kind==='retry'))throw new Error('PREFLIGHT FAILED — no moves sent');
         const sourceMeta=await engine.source(source.value);let establishedExpiry=null;
         for(const row of rows){if(stop)break;const rec=lookup.get(C.upper(row.code));row.status=rec.result.kind;
@@ -1044,64 +1046,11 @@ V3.sidelineUI = (() => {
   return Object.freeze({parseItems,pickDate,mount});
 })();
 
-// ---- src/queue-ui.js ----
-V3.queueUI = (() => {
-  const C = V3.core;
-  function mount(root,{name,scope,life,fields='',prepare=async()=>null,action,onSettings=()=>{},values=()=>({})}={}) {
-    const queue=C.queue({name,life});let busy=false,paused=false,context=null;
-    root.innerHTML='<section class="v3-section">'+fields+'<label class="v3-field">Containers<textarea data-input placeholder="tsX...\ncsX..."></textarea></label>'+
-      '<div class="v3-row"><button class="v3-btn" data-add>ADD</button><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-pause>PAUSE</button><button class="v3-btn" data-done>CLEAR DONE</button><button class="v3-btn danger" data-verify hidden>I VERIFIED IT · RETRY ATTENTION</button></div><div class="v3-note" data-msg></div></section><section class="v3-section"><div data-list></div></section>';
-    const q=selector=>root.querySelector(selector),draftKey='bwu2.v3.form.'+name+'.draft';
-    q('[data-input]').value=localStorage.getItem(draftKey)||'';q('[data-input]').oninput=()=>localStorage.setItem(draftKey,q('[data-input]').value);
-    const message=(value,kind='')=>{q('[data-msg]').textContent=value;q('[data-msg]').className='v3-note '+(kind?'v3-'+kind:'');};
-    const paint=()=>{
-      q('[data-list]').innerHTML=queue.state.items.map(row=>'<div class="v3-list-row"><b>'+C.esc(row.id)+'</b> · '+C.esc(row.status.toUpperCase())+(row.error?' · <span class="v3-bad">'+C.esc(row.error)+'</span>':'')+'</div>').join('')||'<div class="v3-note">Queue empty.</div>';
-      q('[data-run]').disabled=busy;q('[data-verify]').hidden=!queue.state.items.some(row=>['attention','rejected'].includes(row.status))&&!V3.state.attention(scope);
-      for(const element of root.querySelectorAll('[data-setting]'))element.disabled=busy;
-    };
-    for(const element of root.querySelectorAll('[data-setting]'))element.onchange=()=>onSettings(root);
-    const add=async()=>{if(busy)throw new Error('Pause before adding containers');await queue.add(C.lines(q('[data-input]').value));q('[data-input]').value='';localStorage.removeItem(draftKey);paint();};
-    q('[data-add]').onclick=()=>void add().catch(error=>message(error.message,'bad'));
-    q('[data-run]').onclick=async()=>{
-      if(busy)return;
-      busy=true;paused=false;let owns=false;paint();
-      try{
-        if(!await queue.acquire())throw new Error('Queue active in another tab');
-        owns=true;
-        if(queue.state.items.some(row=>row.status==='attention'))throw new C.UnknownError('Verify ATTENTION rows before RUN');
-        V3.state.assertClear(scope);
-        if(!queue.next())throw new Error('Add containers first');
-        context=await prepare(values());if(paused)return;
-        await queue.set({running:true,message:'Running'});
-        for(let row=queue.next();row&&!paused;row=queue.next()){
-          await queue.item(row,{status:'active',error:'',phase:'validating'});await queue.set({current:row.id,phase:'validating'});message('Processing '+row.id,'warn');paint();
-          try{await action(row.id,context,()=>!paused);await queue.item(row,{status:'done',phase:'done'});message('DONE '+row.id,'ok');}
-          catch(error){const cancelled=error.outcome==='cancelled',unknown=error.outcome==='unknown';
-            await queue.item(row,{status:cancelled?'queued':unknown?'attention':'rejected',phase:'',error:cancelled?'':C.clean(error.message)});
-            if(unknown||cancelled){paused=true;message(error.message,unknown?'bad':'warn');}
-            else message('REJECTED '+row.id+' · '+error.message,'warn');
-          }
-          await queue.set({current:'',phase:'idle'});paint();
-        }
-        if(!paused)message('Queue complete','ok');
-      }catch(error){message(error.message,error.outcome==='unknown'?'bad':'warn');}
-      finally{busy=false;context=null;try{if(owns)await queue.set({running:false,current:'',phase:'idle'});}catch(error){message('Recovery save failed · '+error.message,'bad');}finally{await queue.release();paint();}}
-    };
-    q('[data-pause]').onclick=()=>{paused=true;message('Pause requested — finishing submitted action','warn');};
-    q('[data-done]').onclick=async()=>{if(busy)return;try{await queue.clearDone();paint();}catch(error){message(error.message,'bad');}};
-    q('[data-verify]').onclick=async()=>{if(busy)return;try{await V3.state.resolveAttention(scope);await queue.resolve();message('Verified rows returned to queue');paint();}catch(error){message(error.message,'bad');}};
-    void queue.load().then(()=>{message(queue.state.items.some(row=>row.status==='attention')?'VERIFY PREVIOUS WORK':'Ready');paint();}).catch(error=>message(error.message,'bad'));
-    life.own(()=>{paused=true;});
-    return Object.freeze({get isBusy(){return busy;},dispose(){paused=true;}});
-  }
-  return Object.freeze({mount});
-})();
-
 // ---- src/sideline-native.js ----
 V3.sidelineNative = (() => {
   const C=V3.core,N=V3.native;
   const step=()=>{
-    const labels=[...N.root().querySelectorAll('h1,h2,h3,h4,label,legend,span,p,strong,[role="heading"]')].filter(N.visible).map(el=>C.lower(el.textContent));
+    const labels=[...N.root().querySelectorAll('h1,h2,h3,h4,label,legend,span,div,p,strong,b,[role="heading"]')].filter(N.visible).map(el=>C.lower(el.textContent));
     for(const [name,re] of [['quantity',/^enter quantity$/],['verify',/^verify item$/],['production',/^enter production date/],['expiry',/^enter (expiry|expiration) date/],['destination',/^scan destination container$/],['source',/^scan source container$/],['item',/^scan item$/]])if(labels.some(value=>re.test(value)))return name;
     return '';
   };
@@ -1109,13 +1058,65 @@ V3.sidelineNative = (() => {
   const button=re=>[...document.querySelectorAll('button,[role="button"],input[type="submit"],input[type="button"]')].filter(N.visible).find(el=>!el.disabled&&re.test(C.lower(el.innerText||el.textContent||el.value)));
   const confirm=()=>{const direct=document.getElementById('confirm-button');return N.visible(direct)&&!direct.disabled?direct:button(/^(confirm|item match|continue|submit|enter)\b/);};
   function mountQueue(root,{engine,life,prefix='sideline.queue'}={}) {
-    return V3.queueUI.mount(root,{name:prefix,scope:'sideline',life,action:(container,_context,maySubmit)=>V3.state.exclusive('sideline',async()=>{
-      V3.state.assertClear('sideline');await engine.source(container);if(!maySubmit())throw Object.assign(new Error('Paused before close'),{outcome:'cancelled'});await engine.close(container,true);
-    })});
+    const queue=C.queue({name:prefix,life}),draftKey='bwu2.v3.form.'+prefix+'.draft';
+    let busy=false,stopped=false,disposed=false,ready=false;
+    root.innerHTML='<section class="v3-section"><label class="v3-field">Containers<textarea data-input placeholder="tsX...\ncsX..."></textarea></label><div class="v3-row"><button class="v3-btn" data-add>ADD</button><button class="v3-btn primary" data-run>RUN</button><button class="v3-btn" data-pause>PAUSE</button><button class="v3-btn danger" data-stop>STOP</button><button class="v3-btn danger" data-verify hidden>I VERIFIED IT · RETRY ATTENTION</button></div><div class="v3-note" data-msg></div></section><section class="v3-section"><div data-list></div></section>';
+    const q=selector=>root.querySelector(selector),input=q('[data-input]');input.value=localStorage.getItem(draftKey)||'';
+    input.oninput=()=>localStorage.setItem(draftKey,input.value);
+    const message=value=>{if(!disposed)q('[data-msg]').textContent=value;};
+    const paint=()=>{if(disposed)return;
+      q('[data-list]').innerHTML=queue.state.items.map(row=>'<div class="v3-list-row"><b>'+C.esc(row.id)+'</b> · '+C.esc(row.status.toUpperCase())+(row.error?' · '+C.esc(row.error):'')+'</div>').join('')||'<div class="v3-note">Queue empty.</div>';
+      input.disabled=q('[data-add]').disabled=busy||!ready;q('[data-run]').disabled=busy||!ready;
+      q('[data-stop]').disabled=!ready;q('[data-verify]').hidden=!queue.state.items.some(row=>['attention','rejected'].includes(row.status))&&!V3.state.attention('sideline');
+    };
+    const add=async()=>{await queue.add(C.lines(input.value));input.value='';localStorage.removeItem(draftKey);paint();};
+    q('[data-add]').onclick=async()=>{if(busy||!ready)return;try{await add();}catch(error){message(error.message);}};
+    q('[data-run]').onclick=async()=>{
+      if(busy||!ready||disposed)return;busy=true;stopped=false;let owns=false;paint();
+      try{
+        if(input.value.trim())await add();
+        if(!await queue.acquire())throw new Error('Queue active in another tab');owns=true;
+        V3.state.assertClear('sideline');if(queue.state.items.some(row=>row.status==='attention'))throw new C.UnknownError('Verify ATTENTION before RUN');
+        if(!queue.next())throw new Error('Add containers first');
+        await queue.set({running:true});
+        for(let row=queue.next();row&&!stopped;row=queue.next()){
+          await queue.item(row,{status:'active',error:''});await queue.set({current:row.id});paint();message('Validating '+row.id);
+          try{await V3.state.exclusive('sideline',async()=>{
+            V3.state.assertClear('sideline');await engine.source(row.id);
+            if(stopped)throw Object.assign(new Error('Stopped before close'),{outcome:'cancelled'});
+            message('Closing '+row.id);await engine.close(row.id,true);
+          });await queue.item(row,{status:'done'});}
+          catch(error){const unknown=error.outcome==='unknown',cancelled=error.outcome==='cancelled';
+            await queue.item(row,{status:unknown?'attention':cancelled?'queued':'rejected',error:cancelled?'':C.clean(error.message)});
+            message(error.message);if(unknown||cancelled)stopped=true;
+          }
+          await queue.set({current:''});paint();
+        }
+        message(stopped?'STOPPED · press STOP again to clear fields':'Queue complete');
+      }catch(error){message(error.message);}
+      finally{try{if(owns)await queue.set({running:false,current:''});}catch(error){message('Recovery save failed · '+error.message);}finally{await queue.release();busy=false;paint();}}
+    };
+    q('[data-pause]').onclick=()=>{stopped=true;message('Pause requested — finishing submitted action');};
+    q('[data-stop]').onclick=async()=>{
+      if(!ready||disposed)return;
+      if(busy){stopped=true;message('Stop requested — finishing submitted action');return;}
+      busy=true;paint();let owns=false;
+      try{
+        if(!await queue.acquire())throw new Error('Queue active in another tab');owns=true;
+        // Clearing ordinary rows must never erase an uncertain mutation.
+        await queue.set({items:queue.state.items.filter(row=>row.status==='attention'),running:false,current:'',phase:'idle'});
+        input.value='';localStorage.removeItem(draftKey);
+        message(queue.state.items.length||V3.state.attention('sideline')?'Fields cleared · VERIFY uncertain work':'Fields cleared');
+      }catch(error){message(error.message);}finally{if(owns)await queue.release();busy=false;paint();}
+    };
+    q('[data-verify]').onclick=async()=>{if(busy)return;try{await V3.state.resolveAttention('sideline');await queue.resolve();message('Verified rows returned to queue');paint();}catch(error){message(error.message);}};
+    paint();void queue.load().then(()=>{ready=true;message('Ready');paint();}).catch(error=>message(error.message));
+    life.own(()=>{stopped=true;disposed=true;});
+    return Object.freeze({get isBusy(){return busy;},dispose(){stopped=true;disposed=true;}});
   }
   function mountQuantity(root,{life}={}) {
     let busy=false;const controller=new AbortController();life.own(()=>controller.abort());
-    root.innerHTML='<section class="v3-section"><div class="v3-row">'+[1,2,3,4,5,10].map(qty=>'<button class="v3-btn" data-qty="'+qty+'">'+qty+'</button>').join('')+'</div><label class="v3-field">Quantity<input data-number type="number" min="1" value="1"></label><div class="v3-row"><button class="v3-btn primary" data-send>SEND QTY</button><button class="v3-btn danger" data-clear>DOUBLE CLICK · CLEAR CURRENT</button><button class="v3-btn" data-cancel>CANCEL WAIT</button></div><div class="v3-note" data-status></div></section>';
+    root.innerHTML='<section class="v3-section"><div class="v3-row">'+Array.from({length:10},(_,i)=>i+1).map(qty=>'<button class="v3-btn" data-qty="'+qty+'">'+qty+'</button>').join('')+'</div><label class="v3-field">Quantity<input data-number type="number" min="1" value="1"></label><div class="v3-row"><button class="v3-btn primary" data-send>SEND QTY</button><button class="v3-btn danger" data-clear>DOUBLE CLICK · CLEAR CURRENT</button><button class="v3-btn" data-cancel>CANCEL WAIT</button></div><div class="v3-note" data-status></div></section>';
     let waitController=null;const message=value=>root.querySelector('[data-status]').textContent=value;
     const run=async qty=>{if(busy)return;if(!Number.isSafeInteger(qty)||qty<1){message('Whole positive quantity required');return;}busy=true;waitController=new AbortController();const cancel=()=>waitController.abort();controller.signal.addEventListener('abort',cancel,{once:true});
       try{await V3.state.exclusive('sideline',async()=>{V3.state.assertClear('sideline');if(step()==='verify'){const btn=confirm();if(!btn)throw new Error('Native Verify button unavailable');btn.click();}
@@ -1130,19 +1131,38 @@ V3.sidelineNative = (() => {
     });}catch(error){message(error.message);}finally{busy=false;}};
     message('Select QTY, then scan using the native page.');return Object.freeze({get isBusy(){return busy;},dispose(){controller.abort();waitController?.abort();}});
   }
-  function dateHelper({engine,life}={}) {
-    let source='',generation=0,active=null;const controller=new AbortController();life.own(()=>{controller.abort();active?.abort();});
-    life.on(document,'keydown',event=>{if(event.key!=='Enter'||event.target!==input())return;
-      if(step()==='source'){generation++;active?.abort();source=C.clean(event.target.value);return;}
-      if(step()!=='item'||!C.container(source))return;const barcode=C.clean(event.target.value);if(!barcode)return;const run=++generation;active?.abort();active=new AbortController();const signal=active.signal;
-      void(async()=>{try{const rec=await engine.preflight(source,barcode,{signal});if(run!==generation||rec.result.kind!=='yellow')return;
-        const expected=rec.result.ctx.dateType==='PRODUCTION_DATE'?'production':'expiry';await N.waitFor(()=>step()===expected,{life,signal,timeout:15000});
-        const chosen=await V3.sidelineUI.pickDate({ctx:rec.result.ctx,life,signal});if(!chosen||run!==generation||step()!==expected)return;
-        const fields={month:N.findInput(/\b(mm|month)\b/),day:N.findInput(/\b(dd|day)\b/),year:N.findInput(/\b(yyyy|year)\b/)};if(Object.values(fields).some(el=>!el))throw new Error('Native date fields unavailable — enter date manually');
-        const date=new Date(chosen.enteredMs);for(const [el,value] of [[fields.month,date.getMonth()+1],[fields.day,date.getDate()],[fields.year,date.getFullYear()]]){N.setValue(el,String(value).padStart(2,'0'));el.dispatchEvent(new Event('blur',{bubbles:true}));}
-        confirm()?.click();
-      }catch(error){if(error.name!=='AbortError')C.telemetry('sideline',V3.build.version).emit('native.date.error',{message:error.message});}finally{if(run===generation)active=null;}})();
-    },true);
+  function dateHelper({life}={}) {
+    let lastStep='',active=null;
+    const check=()=>{
+      const current=step();
+      if(current===lastStep)return;
+      lastStep=current;active?.abort();active=null;
+      if(!['expiry','production'].includes(current))return;
+      const fields={month:N.findInput(/\b(mm|month)\b/),day:N.findInput(/\b(dd|day)\b/),year:N.findInput(/\b(yyyy|year)\b/)};
+      if(Object.values(fields).some(el=>!el)){lastStep='';return;}
+      const controller=new AbortController();active=controller;
+      const nativeText=C.clean(N.root().textContent);
+      const ctx={dateType:current==='production'?'PRODUCTION_DATE':'EXPIRATION_DATE',
+        asin:nativeText.match(/\bB[A-Z0-9]{9}\b/)?.[0]||'',fnsku:nativeText.match(/\bX[A-Z0-9]{9}\b/)?.[0]||''};
+      void(async()=>{
+        try{
+          const chosen=await V3.sidelineUI.pickDate({ctx,life,signal:controller.signal,requireShelfLife:false});
+          if(!chosen||controller.signal.aborted||step()!==current)return;
+          const date=new Date(chosen.enteredMs);
+          for(const [el,value] of [[fields.month,date.getMonth()+1],[fields.day,date.getDate()],[fields.year,date.getFullYear()]]){
+            if(!N.visible(el))throw new Error('Native date screen changed — enter date manually');
+            N.setValue(el,String(value).padStart(2,'0'));el.dispatchEvent(new Event('blur',{bubbles:true}));
+          }
+          const submit=confirm();if(!submit)throw new Error('Native date confirmation unavailable');submit.click();
+        }catch(error){if(error.name!=='AbortError')C.telemetry('sideline',V3.build.version).emit('native.date.error',{message:error.message});}
+        finally{if(active===controller)active=null;}
+      })();
+    };
+    // Native application transitions also cover reloads and click-based scans.
+    // Own panels live outside this root and do not drive date discovery.
+    const target=N.root();
+    const observer=new MutationObserver(check);observer.observe(target,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','aria-hidden','disabled']});
+    life.own(()=>{observer.disconnect();active?.abort();});check();
   }
   function mountModes(root,{engine,life,prefix,title='Sideline'}={}) {
     let mode='lazy',active=null;const render=()=>{if(active?.isBusy)return;active?.dispose?.();root.innerHTML='<section class="v3-section"><div class="v3-row"><button class="v3-btn" data-lazy>LAZY</button><button class="v3-btn" data-queue>TOTE QUEUE</button></div></section><div data-work></div>';
@@ -1230,8 +1250,30 @@ V3.bridge = (() => {
 V3.boot = () => {
   const C = V3.core, life = C.lifecycle('iss');
   const panel = C.panel({id: 'iss-console', title: 'V3 · ISS Console', width: 720, life});
-  const worker = V3.bridge.client({origin: V3.aft.DEFAULT_ORIGIN, path: '/app/edititems?experience=Desktop', family: 'aft', life,
-    onEvent: detail => window.dispatchEvent(new CustomEvent('bwu2-v3:event', {detail}))});
+  let worker=null,workerLife=null,workerRunning=false,workerProgress=false;
+  const ensureWorker=()=>{
+    if(!worker){
+      workerLife=C.lifecycle('iss-aft-worker');
+      worker=V3.bridge.client({origin:V3.aft.DEFAULT_ORIGIN,path:'/app/edititems?experience=Desktop',family:'aft',life:workerLife,
+        onEvent:detail=>window.dispatchEvent(new CustomEvent('bwu2-v3:event',{detail}))});
+    }
+    return worker;
+  };
+  const runWorker=async(command,input={})=>{
+    if(workerRunning)throw new Error('ISS AFT workflow already running');
+    workerRunning=true;workerProgress=false;
+    try{return await ensureWorker().run(command,{...input,onProgress:info=>{workerProgress=true;input.onProgress?.(info);}});}
+    finally{workerRunning=false;}
+  };
+  const stopWorker=()=>{
+    if(!workerRunning)return;
+    worker.stop();
+    // Before the first progress event, cancellation must also stop startup.
+    // The canonical bridge rejects unsent work as cancelled and dispatched work
+    // as UNKNOWN, preserving the verification barrier if delivery is uncertain.
+    if(!workerProgress){workerLife.dispose();worker=null;workerLife=null;}
+  };
+  life.own(()=>workerLife?.dispose());
   const engine = V3.sideline.create({life, telemetry: C.telemetry('sideline', V3.build.version)});
   let tab = 'sideline', active = null, mounted = false;
   const render = () => {
@@ -1246,11 +1288,11 @@ V3.boot = () => {
     for (const button of root.querySelectorAll('[data-tab]')) button.onclick = () => {
       if (active?.isBusy) return; tab = button.dataset.tab; render();
     };
-    const options = {stop: () => worker.stop(), resolveAttention: () => worker.run('resolve')};
+    const options = {stop: stopWorker, resolveAttention: () => runWorker('resolve')};
     if (tab === 'edit') active = V3.workflowUI.mountEdit(work, {...options, prefix: 'iss.edit',
-      runEach: input => worker.run('edit.each', input), runSku: input => worker.run('edit.sku', input)});
-    else if (tab === 'move') active = V3.workflowUI.mountMove(work, {...options, prefix: 'iss.move', run: input => worker.run('move.run', input)});
-    else if (tab === 'fcsku') active = V3.workflowUI.mountFcsku(work, {...options, prefix: 'iss.fcsku', run: input => worker.run('fcsku.run', input)});
+      runEach: input => runWorker('edit.each', input), runSku: input => runWorker('edit.sku', input)});
+    else if (tab === 'move') active = V3.workflowUI.mountMove(work, {...options, prefix: 'iss.move', run: input => runWorker('move.run', input)});
+    else if (tab === 'fcsku') active = V3.workflowUI.mountFcsku(work, {...options, prefix: 'iss.fcsku', run: input => runWorker('fcsku.run', input)});
     else active = V3.sidelineNative.mountModes(work, {engine, life, title: 'ISS Sideline', prefix: 'iss.sideline'});
     mounted = true;
   };

@@ -14,7 +14,7 @@ V3.sidelineUI = (() => {
   const today = () => { const date = new Date(); date.setHours(0,0,0,0); return date; };
   const pao900 = () => { const date = today(); date.setDate(date.getDate()+900); return date.getTime(); };
   const dateKey = ctx => [C.upper(ctx?.fnsku || ctx?.asin || ctx?.barcode),ctx?.dateType,ctx?.dateDetail?.shelfLife || 0].join('|');
-  function pickDate({ctx, life, signal = life?.signal} = {}) {
+  function pickDate({ctx, life, signal = life?.signal, requireShelfLife = true} = {}) {
     if (activeDate) return Promise.resolve(null);
     return new Promise(resolve => {
       const production = ctx?.dateType === 'PRODUCTION_DATE', currentYear = today().getFullYear();
@@ -43,16 +43,18 @@ V3.sidelineUI = (() => {
           '<button class="v3-btn primary" data-use '+(!selection.year?'disabled':'')+'>USE DATE</button><button class="v3-btn" data-cancel>CANCEL</button></div>';
         for (const button of card.querySelectorAll('[data-part]')) button.onclick=()=>{
           selection[button.dataset.part]=Number(button.dataset.value); if(button.dataset.part!=='year')selection.year=0;
-          if(button.dataset.part==='month')selection.day=1; render();
+          if(button.dataset.part==='month')selection.day=1;
+          if(button.dataset.part==='year')useDate();else render();
         };
         card.querySelector('[data-cancel]').onclick=cancel;
         card.querySelector('[data-pao]')?.addEventListener('click',()=>{const ms=pao900();close({enteredMs:ms,finalExpirationMs:ms});});
-        card.querySelector('[data-use]').onclick=()=>{
+        card.querySelector('[data-use]').onclick=useDate;
+      };
+      const useDate=()=>{
           const enteredMs=V3.sideline.validDate(selection.day,selection.month,selection.year);if(!allowed(enteredMs))return;
           const shelfLife=Number(ctx?.dateDetail?.shelfLife);
-          if(production&&(!Number.isFinite(shelfLife)||shelfLife<=0))return;
-          close({enteredMs,finalExpirationMs:production?enteredMs+shelfLife:enteredMs});
-        };
+          if(production&&requireShelfLife&&(!Number.isFinite(shelfLife)||shelfLife<=0))return;
+          close({enteredMs,finalExpirationMs:production?(Number.isFinite(shelfLife)&&shelfLife>0?enteredMs+shelfLife:null):enteredMs});
       };
       render(); if(signal?.aborted)cancel();
     });
@@ -87,7 +89,7 @@ V3.sidelineUI = (() => {
     const resetLookups=()=>{generation++;controller.abort();controller=new AbortController();lookup.clear();inflight.clear();dates.clear();};
     const preflight=async()=>{
       const src=C.clean(source.value),list=parseItems(items.value,src,dest.value),run=generation;if(!C.container(src))return;
-      let cursor=0;const worker=async()=>{while(cursor<list.length&&run===generation&&!controller.signal.aborted){
+      let cursor=0;const worker=async()=>{while(cursor<list.length&&run===generation&&!controller.signal.aborted&&!stop){
         const row=list[cursor++],code=C.upper(row.code);if(lookup.has(code))continue;
         if(inflight.has(code)){await inflight.get(code);continue;}
         const request=(async()=>{try{const rec=await engine.preflight(src,row.code,{signal:controller.signal});if(run===generation)lookup.set(code,rec);}
@@ -103,18 +105,18 @@ V3.sidelineUI = (() => {
     const wait=message=>new Promise(resolve=>{paused=true;waiter=resolve;status(message,'warn');paint();});
     q('[data-resume]').onclick=()=>{if(!paused)return;paused=false;const resolve=waiter;waiter=null;resolve?.();paint();};
     q('[data-pause]').onclick=()=>{if(running){paused=true;status('Pause requested — finishing current action','warn');paint();}};
-    const requestStop=()=>{stop=true;paused=false;waiter?.();waiter=null;activeDate?.close();status('Stop requested — finishing current action','warn');paint();};
-    q('[data-stop]').onclick=requestStop;
+    const requestStop=()=>{stop=true;controller.abort();paused=false;waiter?.();waiter=null;activeDate?.close();status('Stop requested — finishing current action','warn');paint();};
+    q('[data-stop]').onclick=()=>{if(running)requestStop();else q('[data-reset]').click();};
     q('[data-reset]').onclick=()=>{if(running||attention)return;resetLookups();source.value=dest.value=items.value='';save();rows=[];status('Ready');paint();};
     q('[data-attn]').onclick=async()=>{try{await V3.state.resolveAttention('sideline');attention='';localStorage.removeItem(key+'attention');status('Attention cleared');paint();}catch(error){status(error.message,'bad');}};
     q('[data-run]').onclick=async()=>{
       if(running||attention)return;
-      running=true;stop=false;rows=parseItems(items.value,source.value,dest.value);paint();
+      if(controller.signal.aborted)resetLookups();running=true;stop=false;rows=parseItems(items.value,source.value,dest.value);paint();
       const journal=()=>localStorage.setItem(key+'run',JSON.stringify({source:source.value,dest:dest.value,rows}));
       try{await V3.state.exclusive('sideline',async()=>{
         V3.state.assertClear('sideline');
         if(!C.container(source.value)||!C.container(dest.value)||C.upper(source.value)===C.upper(dest.value))throw new Error('Valid different source/destination containers required');
-        if(!rows.length)throw new Error('No items');journal();status('Preflight…','warn');await preflight();
+        if(!rows.length)throw new Error('No items');journal();status('Preflight…','warn');await preflight();if(stop){status('STOPPED · no move sent','warn');return;}
         if(rows.some(row=>!lookup.has(C.upper(row.code))||lookup.get(C.upper(row.code)).result.kind==='retry'))throw new Error('PREFLIGHT FAILED — no moves sent');
         const sourceMeta=await engine.source(source.value);let establishedExpiry=null;
         for(const row of rows){if(stop)break;const rec=lookup.get(C.upper(row.code));row.status=rec.result.kind;

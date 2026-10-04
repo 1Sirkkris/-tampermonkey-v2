@@ -6,7 +6,7 @@
     "build": "node build/build.mjs",
     "check:dist": "node build/build.mjs --check",
     "test": "node tests/core.test.mjs",
-    "verify": "node build/build.mjs --check && node tests/verify_dist.mjs && node tests/core.test.mjs && node tests/domain.test.mjs && node tests/architecture.test.mjs && node tests/runtime.test.mjs && node tests/engines.test.mjs && node tests/behaviour.test.mjs"
+    "verify": "node build/build.mjs --check && node tests/verify_dist.mjs && node tests/core.test.mjs && node tests/domain.test.mjs && node tests/architecture.test.mjs && node tests/runtime.test.mjs && node tests/engines.test.mjs && node tests/behaviour.test.mjs && node tests/sideline-iss.test.mjs"
   },
   "devDependencies": {
     "jsdom": "26.1.0"
