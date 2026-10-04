@@ -22,7 +22,14 @@ V3.hierarchyNative=(()=>{
       else if(typeof URLSearchParams!=='undefined'&&body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
       else if(typeof body==='string'){
         try{value=JSON.parse(body);}
-        catch{try{value=Object.fromEntries(new URLSearchParams(body).entries());}catch{}}
+        catch{
+          const match=body.match(/(?:^|&)destinationWarehouseId=([^&]*)/);
+          if(match){
+            let decoded=match[1];
+            try{decoded=decodeURIComponent(decoded.replace(/\+/g,' '));}catch{}
+            value={destinationWarehouseId:decoded};
+          }
+        }
       }
     }catch{}
     return clean(value&&typeof value==='object'?value.destinationWarehouseId:'');
