@@ -19,7 +19,7 @@ V3.hierarchyNative=(()=>{
     let value=body;
     try{
       if(typeof FormData!=='undefined'&&body instanceof FormData)value=Object.fromEntries(body.entries());
-      else if(body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
+      else if(typeof URLSearchParams!=='undefined'&&body instanceof URLSearchParams)value=Object.fromEntries(body.entries());
       else if(typeof body==='string'){
         try{value=JSON.parse(body);}
         catch{try{value=Object.fromEntries(new URLSearchParams(body).entries());}catch{}}
