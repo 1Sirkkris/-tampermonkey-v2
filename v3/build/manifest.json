@@ -57,6 +57,7 @@
         "src/core.js",
         "src/aft.js",
         "src/sideline.js",
+        "src/workflow-ui.js",
         "src/apps/iss.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -82,10 +83,11 @@
       "sources": [
         "src/core.js",
         "src/aft.js",
+        "src/workflow-ui.js",
         "src/apps/aft.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
-      "noframes": true,
+      "noframes": false,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js",
       "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_AFT_Tools.user.js"
     },
