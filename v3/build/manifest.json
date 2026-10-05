@@ -369,7 +369,7 @@
     {
       "id": "sim",
       "name": "V3 | BWU2 SIM Toolbar",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "description": "SIM Markdown toolbar, snippets, attachments and fast native-checkbox ticket range selection.",
       "match": [
         "https://t.corp.amazon.com/*"

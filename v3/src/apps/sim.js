@@ -264,6 +264,12 @@ V3.boot=()=>{
       life.timeout(scan,60);
     };
 
+    const recordAtPoint=(x,y)=>{
+      const hit=document.elementFromPoint(x,y);
+      const row=hit?.closest?.('tr,[role="row"],li');
+      return row?rows.find(record=>record.row===row)||null:null;
+    };
+
     life.on(document,'pointerdown',event=>{
       if(syncing||busy||!event.shiftKey||event.button!==0)return;
       const record=eventRecord(event);
@@ -276,14 +282,16 @@ V3.boot=()=>{
 
       const from=lastIndex>=0?lastIndex:index;
       const on=lastIndex>=0?checked(rows[from].checkbox):!checked(record.checkbox);
-      drag={from,to:index,on};
+      drag={from,to:index,on,pointerId:event.pointerId};
       suppressShiftClick=true;
       preview(from,index,on);
+
+      try{event.target?.setPointerCapture?.(event.pointerId);}catch{}
     },true);
 
-    life.on(document,'pointerover',event=>{
+    life.on(document,'pointermove',event=>{
       if(!drag||busy||!(event.buttons&1))return;
-      const record=eventRecord(event);
+      const record=recordAtPoint(event.clientX,event.clientY)||eventRecord(event);
       if(!record)return;
       const index=rows.indexOf(record);
       if(index<0||index===drag.to)return;
@@ -297,6 +305,7 @@ V3.boot=()=>{
       event.stopImmediatePropagation();
       const work=drag;
       drag=null;
+      try{event.target?.releasePointerCapture?.(work.pointerId);}catch{}
       lastIndex=work.to;
       void applyRange(work.from,work.to,work.on);
       setTimeout(()=>{suppressShiftClick=false;},0);
