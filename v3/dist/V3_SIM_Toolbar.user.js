@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 SIM Toolbar
 // @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.4
+// @version      0.2.5
 // @description  SIM Markdown toolbar, snippets, attachments and native-checkbox ticket row navigation.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.4-1b7380b2
+// @v3-build     sim-0.2.5-35fd5ba1
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.4-1b7380b2","version":"0.2.4"});
+V3.build=Object.freeze({"id":"sim-0.2.5-35fd5ba1","version":"0.2.5"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -468,17 +468,31 @@ V3.boot=()=>{
       for(let index=a;index<=b;index++)nativeToggle(rows[index]?.checkbox,on);
     };
 
+    const eventRecord=event=>{
+      const path=event.composedPath?.()||[];
+      const pathBox=path.find(node=>node?.matches?.('input[type="checkbox"],[role="checkbox"]'));
+      if(pathBox){
+        const direct=rows.find(record=>record.checkbox===pathBox);
+        if(direct)return direct;
+      }
+
+      const row=path.find(node=>rows.some(record=>record.row===node))
+        || event.target?.closest?.('tr,[role="row"],li');
+      if(!row)return null;
+      return rows.find(record=>record.row===row)||null;
+    };
+
     const onNativeClick=event=>{
       if(syncing)return;
-      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
-      if(!box)return;
-      const index=rows.findIndex(record=>record.checkbox===box);
+      const record=eventRecord(event);
+      if(!record)return;
+      const index=rows.indexOf(record);
       if(index<0)return;
 
       if(event.shiftKey&&lastIndex>=0){
         event.preventDefault();
-        event.stopPropagation();
-        const targetState=!checked(box);
+        event.stopImmediatePropagation();
+        const targetState=!checked(record.checkbox);
         setRange(lastIndex,index,targetState);
         lastIndex=index;
         paint();
@@ -544,8 +558,8 @@ V3.boot=()=>{
 
     life.on(document,'click',onNativeClick,true);
     life.on(document,'change',event=>{
-      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
-      if(box&&rows.some(record=>record.checkbox===box))queueMicrotask(paint);
+      const record=eventRecord(event);
+      if(record)queueMicrotask(paint);
     },true);
 
     life.observe(document.body,records=>{
