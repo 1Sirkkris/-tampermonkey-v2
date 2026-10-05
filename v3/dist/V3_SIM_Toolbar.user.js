@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         v2 | BWU2 SIM Toolbar
-// @name:en      v2 | BWU2 SIM Toolbar
+// @name         V3 | BWU2 SIM Toolbar
+// @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.4
+// @version      0.2.3
 // @description  SIM Markdown toolbar, snippets, attachments and read-only ticket row navigation.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.4-v2rename
+// @v3-build     sim-0.2.3-7b29752a
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.4-v2rename","version":"0.2.4"});
+V3.build=Object.freeze({"id":"sim-0.2.3-7b29752a","version":"0.2.3"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
