@@ -54,7 +54,7 @@ V3.boot=()=>{
     if(navStarted||!/^\/issues(?:\/|$)/.test(location.pathname))return;
     navStarted=true;
 
-    let rows=[],anchorUrl=null,scanQueued=false,drag=null,scopeKey=location.pathname+location.search;
+    let rows=[],anchorUrl=null,scanQueued=false,drag=null,clearing=false,scopeKey=location.pathname+location.search;
     let selected=new Set();
 
     const checked=box=>box?.matches?.('input[type="checkbox"]')
@@ -176,7 +176,7 @@ html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crossha
       for(const record of rows){
         record.cell.dataset.v3SimCheckCell='1';
         ensureHit(record);
-        if(checked(record.checkbox))selected.add(record.url);
+        if(!clearing&&checked(record.checkbox))selected.add(record.url);
       }
       paint();
     };
@@ -330,16 +330,22 @@ html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crossha
 
     clear.addEventListener('click',()=>{
       const nativeUrls=rows.filter(record=>checked(record.checkbox)).map(record=>record.url);
+      clearing=true;
       selected.clear();
       anchorUrl=null;
       paint();
 
-      for(const url of nativeUrls){
+      try{
+        for(const url of nativeUrls){
+          scan();
+          const record=rows.find(row=>row.url===url);
+          if(record&&checked(record.checkbox))record.checkbox.click();
+        }
+      }finally{
+        clearing=false;
+        selected.clear();
         scan();
-        const record=rows.find(row=>row.url===url);
-        if(record&&checked(record.checkbox))record.checkbox.click();
       }
-      scan();
     });
 
     open.addEventListener('click',()=>{

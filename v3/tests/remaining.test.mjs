@@ -43,7 +43,7 @@ const panel=(h,id)=>h.w.document.querySelector(`[data-bwu2-v3-panel="${id}"]`);
   h.w.document.querySelector('[data-index="1"]').click();await frame();
   const hit=h.w.document.querySelector('[data-index="3"]').closest('td').querySelector('[data-v3-sim-hit]');
   hit.dispatchEvent(new h.w.MouseEvent('pointerdown',{bubbles:true,shiftKey:true,button:0,buttons:1,clientY:0}));
-  hit.dispatchEvent(new h.w.MouseEvent('pointerup',{bubbles:true,shiftKey:true,button:0,buttons:0,clientY:0}));
+  hit.dispatchEvent(new h.w.MouseEvent('pointerup',{bubbles:true,shiftKey:true,button:0,buttons:0}));
   await frame();
   assert.deepEqual([...native].sort(),[1,4]);
   const marked=[...h.w.document.querySelectorAll('tr[data-v3-sim-selected="1"] a')].map(a=>a.textContent);
