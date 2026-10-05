@@ -1,4 +1,4 @@
-# Native FCR read slice validation
+# FCR read capability validation
 
 5 October 2026. Independent source `fcr-read.mjs` 0.1.0; no V2/V3 source imported, no application requests submitted live.
 

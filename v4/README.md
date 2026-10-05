@@ -10,6 +10,8 @@ V4 installers are self-contained. Inherited root scripts remain V2 reference fil
 
 FCR read source capability is offline-verified: 24 native read, 16 enrichment and 13 Measurement auth fixtures pass. Master consumer/installer integration and live acceptance remain pending. These modules are internal source, not installers. [Read contract](FCR_READ_CONTRACT.md), [enrichment contract](FCR_ENRICHMENT_CONTRACT.md) and [validation](FCR_READ_VALIDATION.md).
 
+Next unit: [FCR Master contract](FCR_MASTER_CONTRACT.md). Its consumer installer is not implemented yet.
+
 Verification from this folder:
 
 ```sh

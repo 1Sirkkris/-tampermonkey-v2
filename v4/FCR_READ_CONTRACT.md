@@ -11,7 +11,7 @@ Evidence: pinned V2 `FCR_Data_Core.user.js` 0.2.41 and `FCResearch_Master.user.j
 - An inventory first-page preview is available promptly, but carries `complete: false`, `totalQuantity: null` and a warning while pages remain. Full inventory is fresh, never served from a stale tote cache.
 - Exact product identifiers/aliases and titles must belong to the requested item. A substring, unrelated table/image or a previous query cannot prove identity.
 - Native Inventory History accepts `MM/dd/yyyy` dates using `startSearchDateString`, `endSearchDateString` and `dateStringFormat`; continuation uses `inventory-history-more` with `token`.
-- FCR Master also needs external Pandash hazmat, Poirot exact binDescription and authenticated Item Measurement/MADCAT enrichment. These remain explicitly pending until independently contracted and verified; native FCR reads alone do not finish the entire capability.
+- FCR Master also needs external Pandash hazmat, Poirot exact binDescription and authenticated Item Measurement/MADCAT enrichment. Their independent source contract/fixtures and auth acquisition source are now available; native consumer integration and live acceptance remain required. Native FCR reads alone do not finish the entire capability.
 
 ## FAILURES
 
@@ -50,7 +50,7 @@ Evidence: pinned V2 `FCR_Data_Core.user.js` 0.2.41 and `FCResearch_Master.user.j
 
 - Authenticated native FCR origin/warehouse; native fetch, AbortController, DOMParser and form encoding. Supported section allowlist comes from the pinned Master controls, not arbitrary caller URL construction.
 - Known pagination marker: `.pagination-token` containing a JSON object/array; explicit empty/false/null/done ends pagination. Unknown nonempty formats remain incomplete. Fixtures cannot assert live undocumented formats.
-- External enrichment authentication/response contracts remain a later slice of this same unit, before FCR Master is called ready.
+- External enrichment/authentication source is governed by `FCR_ENRICHMENT_CONTRACT.md`; native installer integration/live acceptance remains required before FCR Master is called ready.
 
 ## VERIFY
 
