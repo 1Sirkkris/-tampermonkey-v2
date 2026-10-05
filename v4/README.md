@@ -8,7 +8,7 @@ Active branch: `v4-cleanroom`. [Scope and rebuild order](BASELINE.md). [Recovery
 
 V4 installers are self-contained. Inherited root scripts remain V2 reference files. The remaining V4 workflows are planned in the baseline and still require implementation.
 
-FCR read capability is in progress: 24 native read fixtures and 16 enrichment fixtures pass. Native Measurement auth capture/acquisition and the Master consumer remain pending. These modules are internal source, not installers. [Read contract](FCR_READ_CONTRACT.md), [enrichment contract](FCR_ENRICHMENT_CONTRACT.md) and [validation](FCR_READ_VALIDATION.md).
+FCR read source capability is offline-verified: 24 native read, 16 enrichment and 13 Measurement auth fixtures pass. Master consumer/installer integration and live acceptance remain pending. These modules are internal source, not installers. [Read contract](FCR_READ_CONTRACT.md), [enrichment contract](FCR_ENRICHMENT_CONTRACT.md) and [validation](FCR_READ_VALIDATION.md).
 
 Verification from this folder:
 

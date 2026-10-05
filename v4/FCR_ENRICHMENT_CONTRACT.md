@@ -21,6 +21,8 @@ This is the next slice of the FCR read capability, before Master integration. Ev
 
 - Each call owns its signal and pagination window. Native authenticated GM requests are injected through a validated read-only JSON adapter. There is no daemon, shared old storage, competing owner or idle polling.
 - The Measurement auth provider returns current native `{token, expiresAt}` and supports one renewal after auth rejection. Authentication capture must be implemented independently in the same eventual installer on both native origins.
+- V4 capture observes only successful native Measurement API responses and the effective request Authorization header. A rejected request, overridden unused header, expired/access/malformed JWT, disposed collector or unrelated origin cannot seed auth. Decoded JWT expiry is a freshness check; the native API response supplies acceptance evidence, not local signature verification.
+- V4-only `tm-v4.measurement.auth` stores the observed token with a unique capture record. Acquisition uses a temporary inert native item frame, GM value-change notification and one deadline. It reuses a current token when permitted, requires a distinct token after auth rejection, and removes frame/listener/timer on every exit. No poller or hidden automatic login popup is introduced; visible login remains a deliberate consumer action.
 - Source capabilities are included in the eventual self-contained Master; they are not separately installed dependencies.
 
 ## SUCCESS

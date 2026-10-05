@@ -1,0 +1,159 @@
+import { FcrReadError } from './fcr-read.mjs';
+import { MEASUREMENT_ORIGIN } from './fcr-enrichment.mjs';
+
+export const MEASUREMENT_AUTH_VERSION = '0.1.0';
+export const MEASUREMENT_AUTH_KEY = 'tm-v4.measurement.auth';
+const SITE = 'https://jp.item-measurement.aft.a2z.com';
+const GUARD = Symbol.for('tampermonkey.v4.measurement.capture');
+const failure = (code, message, cause) => new FcrReadError(code, message, { cause });
+
+export function normalizeMeasurementToken(value, now = Date.now()) {
+  const token = String(value ?? '').trim().replace(/^Bearer\s+/i, '');
+  if (token.length > 16384 || token.split('.').length !== 3) return null;
+  try {
+    const middle = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/');
+    const binary = atob(middle.padEnd(Math.ceil(middle.length / 4) * 4, '='));
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0))));
+    const expiresAt = payload.exp * 1000;
+    if (payload.token_use !== 'id' || typeof payload.exp !== 'number' || !Number.isInteger(payload.exp) || !Number.isFinite(expiresAt) || expiresAt <= now + 10000) return null;
+    return { token, expiresAt };
+  } catch { return null; }
+}
+
+function authHeader(headers) {
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return headers.get('Authorization') || '';
+  const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+  return entries.find(entry => Array.isArray(entry) && /^authorization$/i.test(String(entry[0])))?.[1] || '';
+}
+
+function nativeMeasurementUrl(value, page) {
+  try {
+    const url = new URL(value, page.location.href);
+    return url.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\//.test(url.pathname);
+  } catch { return false; }
+}
+
+// Installs only on the native Measurement site. The eventual Master installer includes both origins.
+export function installMeasurementCapture({ page, storage, now = Date.now }) {
+  if (page.location.origin !== SITE) throw failure('INPUT', 'Measurement capture requires the native Measurement page');
+  if (page[GUARD]) return page[GUARD];
+  const controller = new page.AbortController(), details = new WeakMap();
+  const originalFetch = page.fetch, proto = page.XMLHttpRequest?.prototype;
+  const originalOpen = proto?.open, originalHeader = proto?.setRequestHeader, originalSend = proto?.send;
+  const observe = fn => { try { fn(); } catch { /* Native calls must remain unchanged. */ } };
+  function save(raw) {
+    if (controller.signal.aborted) return;
+    const value = normalizeMeasurementToken(raw, now());
+    if (value) storage.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt: now(), captureId: page.crypto.randomUUID() }));
+  }
+  const wrappedFetch = function (...args) {
+    const result = Reflect.apply(originalFetch, this, args);
+    let raw = '';
+    observe(() => {
+      const input = args[0], url = typeof input === 'string' || input instanceof page.URL ? String(input) : input?.url;
+      if (nativeMeasurementUrl(url, page)) raw = args[1]?.headers !== undefined ? authHeader(args[1].headers) : authHeader(input?.headers);
+    });
+    return result.then(response => { observe(() => { if (response.status >= 200 && response.status < 300) save(raw); }); return response; });
+  };
+  const wrappedOpen = function (...args) {
+    const result = Reflect.apply(originalOpen, this, args);
+    observe(() => details.set(this, { wanted: nativeMeasurementUrl(args[1], page), token: '' }));
+    return result;
+  };
+  const wrappedHeader = function (...args) {
+    const result = Reflect.apply(originalHeader, this, args);
+    observe(() => { const detail = details.get(this); if (detail?.wanted && /^authorization$/i.test(String(args[0]))) detail.token = String(args[1]); });
+    return result;
+  };
+  const wrappedSend = function (...args) {
+    const detail = details.get(this);
+    const done = () => observe(() => { if (this.status >= 200 && this.status < 300) save(detail.token); });
+    if (detail?.wanted) this.addEventListener('loadend', done, { once: true, signal: controller.signal });
+    try { return Reflect.apply(originalSend, this, args); }
+    catch (error) { this.removeEventListener('loadend', done); throw error; }
+  };
+  function dispose() {
+    if (controller.signal.aborted) return;
+    controller.abort();
+    if (page.fetch === wrappedFetch) page.fetch = originalFetch;
+    if (proto?.open === wrappedOpen) proto.open = originalOpen;
+    if (proto?.setRequestHeader === wrappedHeader) proto.setRequestHeader = originalHeader;
+    if (proto?.send === wrappedSend) proto.send = originalSend;
+    if (page[GUARD] === dispose) delete page[GUARD];
+  }
+  if (typeof originalFetch === 'function') page.fetch = wrappedFetch;
+  if (typeof originalOpen === 'function' && typeof originalHeader === 'function' && typeof originalSend === 'function') {
+    proto.open = wrappedOpen; proto.setRequestHeader = wrappedHeader; proto.send = wrappedSend;
+  }
+  page[GUARD] = dispose;
+  return dispose;
+}
+
+export function createMeasurementAuth({ window, storage, now = Date.now, timeoutMs = 10000 }) {
+  if (!window?.document || !storage || !['get', 'listen', 'remove'].every(key => typeof storage[key] === 'function') ||
+      !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw failure('INPUT', 'Measurement auth configuration is invalid');
+  function read() {
+    try {
+      const raw = storage.get(MEASUREMENT_AUTH_KEY, 'null');
+      const stored = JSON.parse(raw);
+      return stored ? normalizeMeasurementToken(stored.token, now()) : null;
+    } catch (cause) { throw failure('STORAGE', 'Measurement auth storage cannot be read', cause); }
+  }
+  function loginUrl(identifier) {
+    const code = String(identifier ?? '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(code)) throw failure('INPUT', 'Measurement login identifier is invalid');
+    const url = new URL(SITE + '/item/' + code);
+    url.searchParams.set('tmV4MeasurementAuth', '1');
+    return url.href;
+  }
+  async function acquire(identifier, { signal, force = false, previousToken } = {}) {
+    const url = loginUrl(identifier);
+    if (signal?.aborted) throw failure('CANCELLED', 'Measurement acquisition cancelled', signal.reason);
+    const cached = read();
+    if (!force && cached && cached.token !== previousToken) return cached;
+    let baseline;
+    try { baseline = force ? storage.get(MEASUREMENT_AUTH_KEY, 'null') : null; }
+    catch (cause) { throw failure('STORAGE', 'Measurement auth storage cannot be read', cause); }
+    return new Promise((resolve, reject) => {
+      let listener = null, frame = null, timer = null, settled = false;
+      const cleanup = () => {
+        if (timer != null) window.clearTimeout(timer);
+        if (listener != null) { try { storage.remove(listener); } catch { /* Document lifecycle owns the native listener fallback. */ } }
+        signal?.removeEventListener('abort', cancelled);
+        frame?.remove();
+      };
+      const finish = (error, value = null) => {
+        if (settled) return;
+        settled = true; cleanup();
+        if (error) reject(error); else resolve(value);
+      };
+      const cancelled = () => finish(failure('CANCELLED', 'Measurement acquisition cancelled', signal.reason));
+      const changed = () => {
+        if (settled) return;
+        try {
+          if (force && storage.get(MEASUREMENT_AUTH_KEY, 'null') === baseline) return;
+          const value = read(); if (value && value.token !== previousToken) finish(null, value);
+        }
+        catch (error) { finish(error); }
+      };
+      signal?.addEventListener('abort', cancelled, { once: true });
+      try {
+        listener = storage.listen(MEASUREMENT_AUTH_KEY, changed);
+        if (settled) { cleanup(); return; }
+        if (signal?.aborted) { cancelled(); return; }
+        // Register first, then re-read: a native token update cannot disappear between these steps.
+        if (!force) changed();
+        if (settled) return;
+        timer = window.setTimeout(() => finish(null), timeoutMs);
+        frame = window.document.createElement('iframe');
+        frame.dataset.tmV4Auth = 'measurement'; frame.tabIndex = -1;
+        frame.setAttribute('aria-hidden', 'true'); frame.setAttribute('inert', '');
+        frame.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0';
+        frame.src = url;
+        (window.document.body || window.document.documentElement).append(frame);
+      } catch (cause) { finish(cause instanceof FcrReadError ? cause : failure('AUTH_REQUIRED', 'Measurement acquisition could not start', cause)); }
+    });
+  }
+  return Object.freeze({ read, acquire, loginUrl });
+}
