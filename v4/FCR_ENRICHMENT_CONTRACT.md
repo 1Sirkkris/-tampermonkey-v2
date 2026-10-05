@@ -1,0 +1,50 @@
+# FCR external enrichment contract
+
+This is the next slice of the FCR read capability, before Master integration. Evidence: pinned V2 Data Core 0.2.41 and Master 0.1.84 at `e4399d8`. No old implementation or authentication storage is used.
+
+## PRESERVE
+
+- Pandash: restriction GET `GridServlet?fc=BWU2`, then form POST with `source=<restriction>-hazmat-FC`, `marketPlaces=AU`, exact `asins`, `rows=1`, `page=1`, `fc` and `language=default`. Explicit native level zero remains zero; missing data does not become zero.
+- Poirot: read-only `api/scanitem`, container/item identity, null masterpack/andon fields and a fresh native request ID. The API's existing `tool: V3` field is a server protocol value, not a V3 implementation dependency. Read native `items[].binDescription` only for an exact item/verified alias, never a dimension estimate or an unrelated first row.
+- Measurement: authenticated ID-token GET on the native Japanese Measurement API for FNSKU (preferred) or ASIN, fixed rolling 30-day window, sequential `nextToken`, and raw MADCAT source/time checks.
+- Auth renewal is bounded and on demand. Future Master preserves automatic native auth acquisition and its existing deliberate visible login/retry action. Auth capture/transport installation is a separate integration slice, not satisfied by a mock token provider.
+- History fallback remains explicitly `history-fallback`, with no claim of a validated raw 30-day negative. A partial negative is UNKNOWN. Consumer badges distinguish raw, history and auth/error states as V2 does.
+
+## FAILURES
+
+- Login/redirect/HTTP/invalid JSON, ambiguous exact rows, malformed levels/events/tokens, repeated/remaining continuation and cancellation never become safe/negative success.
+- FNSKU-specific bin data cannot be accepted merely because a different SKU shares the ASIN. Conflicting exact sizes remain unresolved.
+- Native GM transport returns one settled promise, preserves cancellation ownership and releases listeners; synchronous callbacks and late events cannot double-settle or revive cancelled reads.
+- Tokens, query bodies and response payloads are never emitted to OBS. No inventory mutation endpoint is exposed.
+
+## STATE
+
+- Each call owns its signal and pagination window. Native authenticated GM requests are injected through a validated read-only JSON adapter. There is no daemon, shared old storage, competing owner or idle polling.
+- The Measurement auth provider returns current native `{token, expiresAt}` and supports one renewal after auth rejection. Authentication capture must be implemented independently in the same eventual installer on both native origins.
+- Source capabilities are included in the eventual self-contained Master; they are not separately installed dependencies.
+
+## SUCCESS
+
+- Hazmat has one unambiguous exact ASIN row with a valid nonnegative integer level.
+- BinDescription has unambiguous exact item evidence and one consistent nonempty description.
+- MADCAT YES has a valid raw MADCAT event inside the requested 30 days. MADCAT NO requires schema-valid pages through a validated terminal token. Raw and history evidence stay distinct.
+
+## UNKNOWN
+
+- Missing exact hazmat/bin result returns an explicit incomplete read. Invalid schema/auth/transport raises a typed read error.
+- No token, exhausted renewal or Measurement HTTP 400 can use a distinctly labelled injected history fallback; no fallback or incomplete negative returns `madcat:null`/auth-required or a visible failure, never raw NO.
+- Positive history evidence can be shown as history YES; it does not establish the raw 30-day window.
+
+## RESET
+
+- Stop/Clear/navigation cancellation aborts native GM handles and prevents pagination/renewal/fallback/result publication. Each retry is a new read request. No timer, listener or request remains while idle.
+- No cross-call inventory cache. Master cache/performance behaviour and user-triggered force rechecks remain integration requirements.
+
+## DEPENDENCIES
+
+- Native authenticated `GM_xmlhttpRequest`, Pandash, Poirot and Measurement API; ID-token freshness from the native Measurement application. Live token acquisition and browser-world access are still separate gates.
+- Optional V4 OBS owner messages: explicit read intent, version, endpoint/outcome and bounded counts/error codes only.
+
+## VERIFY
+
+Fixtures cover exact/ambiguous/missing rows, protocol fields, auth/login/redirect/JSON/transport failures, synchronous and late GM callbacks, cancellation, valid level zero, FNSKU/ASIN mismatch, MADCAT date window, complete negative vs incomplete pages, renewal once, fallback provenance, malformed/repeated tokens, no raw/token evidence and idle construction. Fixtures are not native auth or live operational proof.
