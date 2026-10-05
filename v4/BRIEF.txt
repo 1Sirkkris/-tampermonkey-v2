@@ -1,0 +1,579 @@
+TAMPERMONKEY V4 — CLEAN-ROOM RECOVERY / REBUILD
+
+REPO
+https://github.com/1Sirkkris/-tampermonkey-v2
+
+V2 REFERENCE
+Branch: main
+READ-ONLY.
+DO NOT MODIFY.
+
+FAILED V3 REFERENCE
+Branch: v3-groundup
+Known review point:
+77ff9f7818ea8d2d53422654a7e6b7ca51b6db13
+
+V3 is frozen as historical/reference evidence only.
+
+NEW ACTIVE TARGET
+Branch:
+v4-cleanroom
+
+V4 is the new implementation.
+
+==================================================
+OBJECTIVE
+==================================================
+
+V3 drifted too far from the proven V2 user experience.
+
+V4 is therefore a NEW CLEAN-ROOM REBUILD.
+
+We are restarting the implementation,
+NOT discarding accumulated knowledge.
+
+Target:
+
+PROVEN V2 BEHAVIOUR
++
+USEFUL HISTORICAL / OBS / TEST KNOWLEDGE
++
+CLEAN INDEPENDENT IMPLEMENTATION
+
+V2 tells you WHAT must work.
+
+V4 independently determines HOW it should be implemented correctly.
+
+When V4 is tested, all V2 and V3 scripts will be disabled.
+
+V4 must therefore be completely independent.
+
+==================================================
+VERSION BOUNDARIES
+==================================================
+
+Treat the versions as:
+
+V2
+= behavioural/reference source
+
+V3
+= failed/rejected implementation attempt
+= historical evidence only
+
+V4
+= new active clean-room implementation
+
+Do NOT:
+- continue developing V3
+- treat V3 architecture as a base
+- treat V4 as a V3 upgrade
+- preserve V3 structure merely because it exists
+- depend on V2 or V3 runtime code/state
+- solve V2/V3/V4 coexistence problems
+
+V4 should behave correctly when installed alone.
+
+==================================================
+SOURCE-OF-TRUTH ORDER
+==================================================
+
+Use evidence in this order:
+
+1. Explicit current user instructions
+2. Proven working V2 behaviour
+3. OBS/runtime/network evidence
+4. Historical user reports and successful fixes
+5. Governing rebuild documentation
+6. Existing verified tests/discoveries
+7. V3 findings and implementation as evidence only
+
+If sources conflict:
+
+newer explicit instructions
+and proven runtime behaviour
+take priority.
+
+Do not guess when evidence exists.
+
+==================================================
+IMPORTANT CORRECTION FROM V3
+==================================================
+
+Do NOT treat:
+
+“V2 Sideline + ISS Console Restructure 1.0”
+
+as a preferred architecture/design base.
+
+It became part of a failed restructuring path.
+
+It is evidence only.
+
+Likewise:
+
+v3-groundup is NOT a codebase to clean up.
+
+Recover useful knowledge from it:
+
+- tests
+- API discoveries
+- failure cases
+- regression knowledge
+- useful implementation lessons
+
+But do not automatically recover:
+
+- architecture
+- file structure
+- UI decisions
+- consolidation choices
+- state model
+- lifecycle design
+
+==================================================
+BRANCH / SAFETY RULES
+==================================================
+
+V2 main:
+READ-ONLY.
+
+V3 v3-groundup:
+READ-ONLY.
+
+All new implementation work belongs only on:
+
+v4-cleanroom
+
+Do not:
+- modify V2
+- modify V3
+- merge V2 into V4
+- merge V3 into V4 wholesale
+- cherry-pick old implementations merely for convenience
+- force-push checkpoint history
+- rewrite recovery history
+
+Old code may be inspected freely as evidence.
+
+==================================================
+CLEAN-ROOM RULE
+==================================================
+
+Start from required behaviour.
+
+Do NOT start from old source structure.
+
+For each script/workflow determine:
+
+- where it runs
+- what UI exists
+- what controls exist
+- scan sequence
+- keyboard behaviour
+- defaults
+- quantity behaviour
+- expiry behaviour
+- start/run behaviour
+- stop/pause behaviour
+- clear/reset behaviour
+- success behaviour
+- rejection behaviour
+- UNKNOWN behaviour
+- refresh/reload behaviour
+- repeated-use behaviour
+- long-idle behaviour
+
+Establish this from:
+
+- proven V2
+- OBS
+- user reports
+- previous failures
+- runtime/network evidence
+
+Only then design the V4 implementation.
+
+Do not copy an old implementation and “clean it up afterward”.
+
+==================================================
+PARITY BEFORE CONSOLIDATION
+==================================================
+
+This is critical.
+
+DO NOT begin V4 by aggressively consolidating systems.
+
+FIRST make each workflow behaviourally correct.
+
+Only introduce shared engines when multiple proven workflows genuinely share the same responsibility.
+
+A shared abstraction must clearly:
+
+- remove duplication
+- improve reliability
+- simplify maintenance
+
+Otherwise keep the implementation simple and independent.
+
+Do not alter user-facing behaviour merely to make internal consolidation easier.
+
+==================================================
+USER-FACING PARITY
+==================================================
+
+Default rule:
+
+If a V2 interaction was proven and useful,
+preserve it unless there is a clear reason not to.
+
+Examples:
+
+- scanner-driven workflows
+- barcode/control scans
+- quantity helpers
+- expiry helpers
+- familiar controls
+- sensible/native page location
+- keyboard interaction
+- Stop/Pause/Clear semantics
+- restart behaviour
+- visible failure/recovery state
+- useful quality-of-life features
+
+Do not silently reduce UI functionality.
+
+Do not redesign user workflow merely because a different architecture is cleaner.
+
+Material user-facing changes require approval.
+
+Internal architecture changes do not.
+
+==================================================
+ENGINEERING STANDARD
+==================================================
+
+Prefer:
+
+- explicit state ownership
+- explicit state transitions
+- deterministic lifecycle
+- explicit cleanup
+- stable APIs/application state
+- clear request identity
+- clear SUBMITTED / CONFIRMED / UNKNOWN state
+- bounded retries
+- event-driven behaviour
+- targeted observers only when necessary
+- minimal polling
+- minimal timers
+- low idle CPU/network activity
+- reusable helpers with clear ownership
+- meaningful low-noise OBS
+- visible recovery state
+
+Avoid:
+
+- patch stacks
+- compatibility archaeology
+- reconciliation loops
+- broad MutationObservers
+- unnecessary polling
+- arbitrary delays
+- race-prone timing hacks
+- DOM-as-state where avoidable
+- duplicate sources of truth
+- hidden recovery state
+- ambiguous success
+- duplicated implementations
+- unnecessary abstractions
+- CSS revision layering
+- forced UI centralisation
+
+If defensive code exists because of another flaw in our architecture:
+
+fix the root cause.
+
+Do not rebuild the workaround chain.
+
+==================================================
+KNOWN V3 FAILURE LESSONS
+==================================================
+
+The V3 readiness review identified remaining problems including:
+
+- Lazy scanner/control-scan parity missing
+- Predicant recovery ownership ending incorrectly
+- proven UI/control reductions
+- changed Lazy expiry sequence
+- AFT uncertain/reload work not visibly reviewable
+- OBS duplicate/noisy submission metadata
+- native/live long-run behaviour still unproven
+
+These are regression requirements for V4.
+
+Do NOT merely patch these into V3 architecture.
+
+Use them to ensure V4 is designed correctly.
+
+Also preserve the behavioural lessons behind previous fixes involving:
+
+- Unbind reload recovery
+- Dropzone replay protection
+- MoveContainer response validation
+- UNKNOWN movement handling
+- AFT uncertainty barriers
+- complete FCR inventory validation
+- exact FNSKU mapping
+- employee identity validation
+- ISS ownership
+- RIVER cancellation
+- hierarchy ownership
+- OBS mutation visibility
+
+==================================================
+WORK METHOD
+==================================================
+
+Do NOT rebuild everything simultaneously.
+
+Use this process for EACH script or major coupled workflow.
+
+------------------------------
+PHASE A — BEHAVIOUR CONTRACT
+------------------------------
+
+Before coding, write a concise contract:
+
+PRESERVE:
+proven user-visible behaviour
+
+FAILURES:
+historical problems that must not return
+
+STATE:
+what state exists and who owns it
+
+SUCCESS:
+what positively proves success
+
+UNKNOWN:
+what happens when outcome cannot be proven
+
+RESET:
+Stop/Clear/refresh/reload behaviour
+
+DEPENDENCIES:
+real external application/API dependencies
+
+Do not implement until this contract is internally consistent.
+
+------------------------------
+PHASE B — IMPLEMENT
+------------------------------
+
+Build the smallest clean V4 implementation that satisfies the contract.
+
+------------------------------
+PHASE C — VERIFY
+------------------------------
+
+Validate against:
+
+- proven V2 behaviour
+- historical failures
+- existing regression knowledge
+- offline fixtures
+- syntax/build checks
+- V4 independence
+- refresh/reset/repeated-use behaviour
+
+Where useful, directly compare V4 behaviour against proven V2.
+
+------------------------------
+PHASE D — CHECKPOINT
+------------------------------
+
+Commit and PUSH before moving to the next major unit.
+
+==================================================
+MANDATORY RECOVERY CHECKPOINTS
+==================================================
+
+Completed work must never exist only inside the worker/session.
+
+Default maximum unit:
+
+ONE SCRIPT
+or
+ONE LOGICALLY COUPLED MAJOR WORKFLOW.
+
+Before starting the next unit:
+
+1. Finish the current logical unit.
+2. Run available verification.
+3. Commit.
+4. PUSH to v4-cleanroom.
+5. Verify the remote SHA.
+6. Report the checkpoint.
+7. Continue automatically unless approval is genuinely required.
+
+I do NOT need to approve every checkpoint.
+
+Checkpointing is for recovery.
+
+If a unit becomes:
+
+- unusually long
+- risky
+- uncertain
+- difficult
+- blocked
+
+create and PUSH an intermediate checkpoint before continuing.
+
+Use clear commit labels such as:
+
+[checkpoint] <script/workflow> <short state>
+
+Never leave hours of meaningful completed work only inside the worker.
+
+==================================================
+HANG / FAILURE RULE
+==================================================
+
+If progress becomes stuck or repeatedly fails:
+
+DO NOT continue blindly for hours.
+
+Preserve all valid work with a checkpoint first.
+
+Then report:
+
+BLOCKED:
+<exact blocker>
+
+LAST SAFE SHA:
+<SHA>
+
+EVIDENCE:
+<short evidence>
+
+NEED FROM USER:
+Only if genuinely required.
+
+A future worker must be able to resume from the pushed SHA without reconstructing completed work from chat.
+
+==================================================
+CHECKPOINT REPORT FORMAT
+==================================================
+
+After each pushed checkpoint report only:
+
+CHECKPOINT:
+<script/workflow>
+
+SHA:
+<remote SHA>
+
+STATUS:
+COMPLETE / PARTIAL
+
+VERIFIED:
+<short evidence/tests>
+
+NEXT:
+<next unit>
+
+Then continue unless approval is required.
+
+==================================================
+APPROVAL RULE
+==================================================
+
+No approval required for:
+
+- internal implementation
+- refactoring
+- clean-room architecture
+- tests
+- OBS improvements
+- bug fixes restoring proven behaviour
+- checkpoint commits
+- shared engines that do not alter user behaviour
+
+APPROVAL NEEDED before materially changing:
+
+- user workflow
+- user-visible behaviour
+- controls
+- UI interaction
+- tool/page location
+- operational sequence
+- previously proven behaviour
+
+Do not interpret discussion, investigation or planning as approval.
+
+==================================================
+FIRST TASK — DO NOT CODE YET
+==================================================
+
+Before implementation:
+
+1. Verify remote V2 main.
+2. Verify v3-groundup remains intact.
+3. Create v4-cleanroom.
+4. Do not modify V2 or V3.
+5. Inventory every script/workflow expected in final V4.
+6. Classify each:
+
+PRESERVE BEHAVIOUR
+REBUILD
+SHARE LATER
+DO NOT MIGRATE
+
+7. Identify workflow dependencies.
+8. Identify historical regression requirements.
+9. Propose the safest rebuild order.
+
+Keep this report concise.
+
+DO NOT start implementation until this baseline inventory and rebuild sequence are established.
+
+After that baseline is established, continue implementation under the rules above without asking for approval at every normal engineering step.
+
+==================================================
+SUCCESS CONDITION
+==================================================
+
+V4 should feel like the BEST proven version of V2 from the user’s perspective.
+
+Internally it should look like it was designed correctly from the beginning.
+
+V4 must have:
+
+- no V2 runtime dependency
+- no V3 runtime dependency
+- no historical patch stack
+- no unnecessary consolidation
+- no silent UX reductions
+- no ambiguous success handling
+- no hidden unrecoverable state
+- no unrecoverable worker progress
+- clear ownership
+- predictable lifecycle
+- clean recovery
+- clean OBS
+- minimal moving parts
+
+Priority order:
+
+1. CORRECT BEHAVIOUR
+2. RELIABILITY
+3. CLEAN ARCHITECTURE
+4. CONSOLIDATION WHERE JUSTIFIED
+5. PERFORMANCE / POLISH
+
+V2 = reference.
+V3 = lessons.
+V4 = clean implementation.
