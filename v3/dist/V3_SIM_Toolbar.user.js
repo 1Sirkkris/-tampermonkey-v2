@@ -2,8 +2,8 @@
 // @name         V3 | BWU2 SIM Toolbar
 // @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.3
-// @description  SIM Markdown toolbar, snippets, attachments and read-only ticket row navigation.
+// @version      0.2.4
+// @description  SIM Markdown toolbar, snippets, attachments and native-checkbox ticket row navigation.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
 // @noframes
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.3-7b29752a
+// @v3-build     sim-0.2.4-1b7380b2
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.3-7b29752a","version":"0.2.3"});
+V3.build=Object.freeze({"id":"sim-0.2.4-1b7380b2","version":"0.2.4"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -407,20 +407,25 @@ V3.boot=()=>{
     if(navStarted||!/^\/issues(?:\/|$)/.test(location.pathname))return;
     navStarted=true;
 
-    const selected=new Set();
-    let rows=[],lastIndex=-1,paintState=null,scanQueued=false;
+    let rows=[],lastIndex=-1,scanQueued=false,syncing=false;
+
+    const checked=box=>box?.matches?.('input[type="checkbox"]')
+      ? !!box.checked
+      : box?.getAttribute?.('aria-checked')==='true';
+
+    const nativeToggle=(box,on)=>{
+      if(!box||checked(box)===on)return;
+      syncing=true;
+      try{box.click();}finally{syncing=false;}
+    };
 
     const style=document.createElement('style');
     style.dataset.bwu2Ui='1';
     style.dataset.v3SimNav='1';
     style.textContent=`
-[data-v3-sim-nav-gutter]{box-sizing:border-box;width:36px;min-width:36px;padding:2px!important;vertical-align:middle;text-align:center}
-div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 36px;align-items:center;justify-content:center}
-.v3-sim-nav-pick{display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;padding:0;border:1px solid #aeb8c4;border-radius:5px;background:#fff;color:#34465a;font:800 11px/1 Arial;cursor:pointer;user-select:none}
-.v3-sim-nav-pick:hover{background:#f3f6f8;border-color:#7e8d9e}
-.v3-sim-nav-pick[data-selected="1"]{background:#2f5f88;color:#fff;border-color:#2f5f88}
-.v3-sim-nav-pick[data-selected="1"] [data-number]::before{content:"✓ ";font-size:9px}
-[data-v3-sim-nav-selected="1"]{background:rgba(47,95,136,.045)!important}
+[data-v3-sim-check-cell]{position:relative}
+[data-v3-sim-check-cell]::after{content:attr(data-v3-sim-row-number);position:absolute;right:2px;top:50%;transform:translateY(-50%);min-width:10px;text-align:center;color:#6b7785;font:800 9px/1 Arial,sans-serif;pointer-events:none}
+[data-v3-sim-check-cell][data-v3-sim-checked="1"]::after{color:#245b86}
 #v3-sim-nav-bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147482998;display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px solid #b7c1cc;border-radius:7px;background:#fff;color:#27384b;box-shadow:0 3px 10px #0002;font:800 11px Arial,sans-serif}
 #v3-sim-nav-bar[hidden]{display:none!important}
 #v3-sim-nav-bar strong{min-width:70px;padding:0 4px;text-align:center;white-space:nowrap}
@@ -445,87 +450,56 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 3
     const clear=bar.querySelector('[data-clear]');
 
     const paint=()=>{
-      const visible=new Set(rows.map(row=>row.url));
-      for(const url of [...selected])if(!visible.has(url))selected.delete(url);
-
+      let total=0;
       rows.forEach((record,index)=>{
-        const button=record.button;
-        if(!button)return;
-        const on=selected.has(record.url);
-        button.dataset.selected=on?'1':'0';
-        button.setAttribute('aria-pressed',on?'true':'false');
-        button.title='Row '+(index+1)+(on?' selected':' — select');
-        record.row.dataset.v3SimNavSelected=on?'1':'0';
+        const on=checked(record.checkbox);
+        if(on)total++;
+        if(record.cell){
+          record.cell.dataset.v3SimRowNumber=String(index+1);
+          record.cell.dataset.v3SimChecked=on?'1':'0';
+        }
       });
-
-      count.textContent='Selected '+selected.size;
-      bar.hidden=selected.size===0;
+      count.textContent='Selected '+total;
+      bar.hidden=total===0;
     };
 
-    const setSelected=(index,on)=>{
-      const record=rows[index];
-      if(!record)return;
-      if(on)selected.add(record.url);else selected.delete(record.url);
+    const setRange=(from,to,on)=>{
+      const a=Math.min(from,to),b=Math.max(from,to);
+      for(let index=a;index<=b;index++)nativeToggle(rows[index]?.checkbox,on);
     };
 
-    const choose=(index,event)=>{
-      if(index<0||index>=rows.length)return;
+    const onNativeClick=event=>{
+      if(syncing)return;
+      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
+      if(!box)return;
+      const index=rows.findIndex(record=>record.checkbox===box);
+      if(index<0)return;
+
       if(event.shiftKey&&lastIndex>=0){
-        const a=Math.min(lastIndex,index),b=Math.max(lastIndex,index);
-        for(let i=a;i<=b;i++)setSelected(i,true);
-        paintState=true;
-      }else{
-        const next=!selected.has(rows[index].url);
-        setSelected(index,next);
-        paintState=next;
+        event.preventDefault();
+        event.stopPropagation();
+        const targetState=!checked(box);
+        setRange(lastIndex,index,targetState);
+        lastIndex=index;
+        paint();
+        return;
       }
-      lastIndex=index;
-      paint();
-    };
 
-    const makeGutter=(record,index)=>{
-      const isTable=record.row.tagName==='TR';
-      let gutter=record.row.querySelector('[data-v3-sim-nav-gutter]');
-      if(!gutter){
-        gutter=document.createElement(isTable?'td':'div');
-        gutter.dataset.bwu2Ui='1';
-        gutter.dataset.v3SimNav='1';
-        gutter.dataset.v3SimNavGutter='1';
-        const button=document.createElement('button');
-        button.type='button';
-        button.className='v3-sim-nav-pick';
-        button.dataset.v3SimNav='1';
-        button.innerHTML='<span data-number></span>';
-        button.addEventListener('pointerdown',event=>{
-          if(event.button!==0)return;
-          event.preventDefault();
-          event.stopPropagation();
-          const current=rows.findIndex(row=>row.url===record.url);
-          choose(current,event);
-        });
-        button.addEventListener('pointerenter',event=>{
-          if(paintState===null||!(event.buttons&1))return;
-          const current=rows.findIndex(row=>row.url===record.url);
-          setSelected(current,paintState);
-          lastIndex=current;
-          paint();
-        });
-        button.addEventListener('dragstart',event=>event.preventDefault());
-        gutter.appendChild(button);
-        record.row.insertBefore(gutter,record.row.firstChild);
-      }
-      record.gutter=gutter;
-      record.button=gutter.querySelector('.v3-sim-nav-pick');
-      record.button.querySelector('[data-number]').textContent=String(index+1);
+      lastIndex=index;
+      queueMicrotask(paint);
     };
 
     const scan=()=>{
       scanQueued=false;
       if(!/^\/issues(?:\/|$)/.test(location.pathname)){
-        selected.clear();
         rows=[];
+        lastIndex=-1;
         bar.hidden=true;
-        for(const gutter of document.querySelectorAll('[data-v3-sim-nav-gutter]'))gutter.remove();
+        for(const cell of document.querySelectorAll('[data-v3-sim-check-cell]')){
+          delete cell.dataset.v3SimCheckCell;
+          delete cell.dataset.v3SimRowNumber;
+          delete cell.dataset.v3SimChecked;
+        }
         return;
       }
 
@@ -535,17 +509,30 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 3
         if(!ticket||seen.has(ticket.url))continue;
         const row=ticketRow(anchor);
         if(!row)continue;
+        const checkbox=[...row.querySelectorAll('input[type="checkbox"],[role="checkbox"]')]
+          .find(V3.native.visible);
+        if(!checkbox)continue;
+
+        const cell=checkbox.closest('td,[role="cell"]')||checkbox.parentElement;
+        if(!cell)continue;
+
         seen.add(ticket.url);
-        found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,gutter:null,button:null});
+        found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,checkbox,cell});
       }
 
-      const currentRows=new Set(found.map(record=>record.row));
-      for(const gutter of document.querySelectorAll('[data-v3-sim-nav-gutter]')){
-        if(!currentRows.has(gutter.parentElement))gutter.remove();
+      const activeCells=new Set(found.map(record=>record.cell));
+      for(const cell of document.querySelectorAll('[data-v3-sim-check-cell]')){
+        if(activeCells.has(cell))continue;
+        delete cell.dataset.v3SimCheckCell;
+        delete cell.dataset.v3SimRowNumber;
+        delete cell.dataset.v3SimChecked;
       }
 
       rows=found;
-      rows.forEach(makeGutter);
+      rows.forEach((record,index)=>{
+        record.cell.dataset.v3SimCheckCell='1';
+        record.cell.dataset.v3SimRowNumber=String(index+1);
+      });
       paint();
     };
 
@@ -555,8 +542,12 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 3
       life.timeout(scan,60);
     };
 
-    life.on(window,'pointerup',()=>{paintState=null;});
-    life.on(window,'pointercancel',()=>{paintState=null;});
+    life.on(document,'click',onNativeClick,true);
+    life.on(document,'change',event=>{
+      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
+      if(box&&rows.some(record=>record.checkbox===box))queueMicrotask(paint);
+    },true);
+
     life.observe(document.body,records=>{
       const nativeChange=records.some(record=>{
         const target=record.target?.nodeType===1?record.target:record.target?.parentElement;
@@ -567,13 +558,13 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 3
     },{childList:true,subtree:true});
 
     clear.addEventListener('click',()=>{
-      selected.clear();
+      for(const record of rows)nativeToggle(record.checkbox,false);
       lastIndex=-1;
       paint();
     });
 
     open.addEventListener('click',()=>{
-      const urls=rows.filter(row=>selected.has(row.url)).map(row=>row.url);
+      const urls=rows.filter(record=>checked(record.checkbox)).map(record=>record.url);
       if(!urls.length)return;
       for(const url of urls){
         if(typeof GM_openInTab==='function')GM_openInTab(url,{active:false,insert:true,setParent:true});
@@ -584,7 +575,6 @@ div[data-v3-sim-nav-gutter],span[data-v3-sim-nav-gutter]{display:flex;flex:0 0 3
 
     scan();
   };
-
   const mount=async()=>{if(mounted)return;mounted=true;snippets=await store.get('snippets',[]);if(!Array.isArray(snippets))snippets=[];const root=document.createElement('div');
     root.innerHTML='<section class="v3-section"><div class="v3-row"><button class="v3-btn" data-wrap="**|**">B</button><button class="v3-btn" data-wrap="_|_">I</button><button class="v3-btn" data-wrap="`|`">CODE</button><button class="v3-btn" data-prefix="> ">QUOTE</button><button class="v3-btn" data-prefix="- ">LIST</button><button class="v3-btn" data-prefix="1. ">NUMBERED</button><button class="v3-btn" data-link>LINK</button><button class="v3-btn" data-table>TABLE</button><button class="v3-btn" data-save>+ SNIP</button><button class="v3-btn" data-export>EXPORT</button><label class="v3-btn">IMPORT<input data-import type="file" accept="application/json" hidden></label></div></section><section class="v3-section"><b>Snippets</b><div class="v3-row" data-snips style="margin-top:8px"></div></section><section class="v3-section"><b>Image attachments</b><div data-images class="v3-row" style="margin-top:8px"></div></section>';panel.set(root);
     const paint=()=>{const box=root.querySelector('[data-snips]');box.innerHTML='';snippets.forEach((s,i)=>{const b=document.createElement('button');b.className='v3-btn';b.textContent=s.name||('Snippet '+(i+1));b.onclick=()=>insert(s.text||'');box.appendChild(b);});const images=[...document.querySelectorAll('a[href]')].filter(a=>/\.(?:jpe?g|png|gif|webp|bmp|avif)(?:$|[?#])/i.test(a.href));root.querySelector('[data-images]').innerHTML=images.slice(0,20).map((a,i)=>'<a class="v3-btn" target="_blank" rel="noopener" href="'+C.esc(a.href)+'">IMAGE '+(i+1)+'</a>').join('')||'<span class="v3-note">No image attachments found.</span>';};
