@@ -123,8 +123,8 @@ test('installs alone with the familiar FCR header controls and explicit build id
   const app = fixture(); t.after(() => app.dispose());
   assert.equal(app.ui.parentElement.querySelector('.warehouse-id').textContent, 'BWU2');
   assert.deepEqual([...app.ui.querySelectorAll('button')].map(x => x.textContent), ['OBS 1/6000', 'FAT OFF', 'Clear']);
-  assert.match(app.ui.textContent, /V4 0\.1\.1/);
-  assert.equal(app.ui.dataset.tmV4Version, '0.1.1');
+  assert.match(app.ui.textContent, /V4 0\.1\.2/);
+  assert.equal(app.ui.dataset.tmV4Version, '0.1.2');
   assert.equal(app.window.BWU2Fleet, undefined);
   assert.equal(app.fetchCalls, 0);
   app.time.tick(2000); await settle();
@@ -399,4 +399,47 @@ test('a corrupted stored event cannot become a silent partial export; Clear rest
   app.click('clear'); app.operation('after-cleanup', 'SUBMITTED');
   const transcript = await app.export();
   assert(transcript.events.some(event => event.operationId === 'after-cleanup'));
+});
+
+test('export retries successfully after storage enumeration recovers without another event', async t => {
+  const app = fixture(); t.after(() => app.dispose());
+  app.operation('persisted-before-list-failure', 'UNKNOWN');
+  app.time.tick(300); await settle();
+  app.store.failLists = true; app.click('export');
+  assert.equal(app.downloads.length, 0);
+  app.store.failLists = false;
+  const transcript = await app.export();
+  assert(transcript.events.some(x => x.operationId === 'persisted-before-list-failure'));
+});
+
+test('requests completing after Clear or BFCache restoration do not revive old-session observations', async t => {
+  for (const reset of ['clear', 'restore']) {
+    let resolve;
+    const pending = new Promise(done => { resolve = done; });
+    const response = new Response('{}', { status: 200 });
+    const app = fixture({ fat: true, fetch: () => pending }); t.after(() => app.dispose());
+    const request = app.window.fetch('/old-request');
+    if (reset === 'clear') app.click('clear');
+    else { app.hide(); app.restore(); }
+    resolve(response);
+    assert.equal(await request, response);
+    const transcript = await app.export();
+    assert(!transcript.events.some(x => x.data.url?.endsWith('/old-request')));
+  }
+});
+
+test('Clear discards queued read summaries even before another page receives its GM notification', async t => {
+  const store = new Storage(), app = fixture({ store }), worker = fixture({ store });
+  t.after(() => { app.dispose(); worker.dispose(); });
+  await worker.window.fetch('/old-read');
+  app.click('clear'); worker.time.tick(1000);
+  const transcript = await app.export();
+  assert(!transcript.events.some(x => x.data.endpoints?.some(endpoint => endpoint.url.endsWith('/old-read'))));
+});
+
+test('an observation failure cannot replace a successful native fetch response', async t => {
+  const response = new Response('{}', { status: 200 });
+  const app = fixture({ fat: true, fetch: () => Promise.resolve(response) }); t.after(() => app.dispose());
+  const body = Object.create(null, { constructor: { get() { throw new Error('observation-only getter'); } } });
+  assert.equal(await app.window.fetch('/status', { method: 'POST', body }), response);
 });

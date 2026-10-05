@@ -4,7 +4,7 @@ Active branch: `v4-cleanroom`. [Scope and rebuild order](BASELINE.md). [Recovery
 
 | Installer | Version | Verification |
 |---|---|---|
-| [V4 OBS](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/OBS.user.js) | 0.1.1 | 22 offline installer fixtures and metadata/syntax/independence checks pass. Live Tampermonkey acceptance pending. |
+| [V4 OBS](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/OBS.user.js) | 0.1.2 | 26 offline installer fixtures and metadata/syntax/independence checks pass. Live Tampermonkey acceptance pending. |
 
 V4 installers are self-contained. Inherited root scripts remain V2 reference files. The remaining V4 workflows are planned in the baseline and still require implementation.
 

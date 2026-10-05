@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 OBS
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v4
-// @version      0.1.1
+// @version      0.1.2
 // @description  Independent native-page evidence and explicit V4 operation transcripts.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const PAGE = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const GUARD = Symbol.for('tampermonkey.v4.obs.document');
   if (PAGE[GUARD]) return;
@@ -125,6 +125,8 @@
       dirty = false;
       cancel(flushTimer); flushTimer = null;
       cancel(routineTimer); routineTimer = null;
+      for (const reader of readers) { void reader.cancel().catch(() => {}); }
+      readers.clear();
     }
     return current;
   }
@@ -269,7 +271,7 @@
   }
 
   function bodyShape(body) {
-    if (typeof body !== 'string') return { type: body?.constructor?.name || typeof body };
+    if (typeof body !== 'string') return { type: typeof body };
     if (body.length > 32768) return { type: 'large', length: body.length };
     try { return shape(JSON.parse(body)); }
     catch (error) { return { type: 'text', length: body.length }; }
@@ -301,13 +303,30 @@
 
   function flushRoutine() {
     cancel(routineTimer); routineTimer = null;
+    sync();
     if (!routine.size) return;
     record('network.summary', { evidenceSource: 'native-network', endpoints: [...routine.values()] });
     routine.clear();
   }
 
-  async function sampleResponse(response, url) {
-    if (!fat() || !running) return;
+  function observationContext() {
+    sync();
+    return storageErrors.has('get:' + META) || storageErrors.has('parse:session') ? null :
+      { epoch, signal: controller.signal };
+  }
+
+  function currentObservation(context) {
+    if (!running || !context || context.signal.aborted) return false;
+    const current = sync();
+    return !storageErrors.has('get:' + META) && !storageErrors.has('parse:session') && current.id === context.epoch;
+  }
+
+  function observe(fn) {
+    try { fn(); } catch (error) { /* Supplementary evidence must never alter a native result. */ }
+  }
+
+  async function sampleResponse(response, url, context) {
+    if (!fat() || !currentObservation(context)) return;
     let reader;
     try {
       const contentType = response.headers?.get('content-type') || '';
@@ -316,20 +335,20 @@
       if (!copy.body?.getReader) return;
       reader = copy.body.getReader(); readers.add(reader);
       const parts = []; let bytes = 0;
-      while (running) {
+      while (currentObservation(context)) {
         const part = await reader.read();
         if (part.done) break;
         bytes += part.value.byteLength;
         if (bytes > 32768) { void reader.cancel().catch(() => {}); return; }
         parts.push(part.value);
       }
-      if (!running) return;
+      if (!currentObservation(context)) return;
       const body = new Uint8Array(bytes); let cursor = 0;
       for (const part of parts) { body.set(part, cursor); cursor += part.byteLength; }
       const text = new TextDecoder().decode(body);
       record('network.shape', { url, responseShape: bodyShape(text) });
     } catch (error) {
-      if (running) record('network.shape', { url, responseShape: 'unavailable' });
+      if (currentObservation(context)) record('network.shape', { url, responseShape: 'unavailable' });
     } finally { if (reader) readers.delete(reader); }
   }
 
@@ -341,18 +360,25 @@
       const rawUrl = typeof request === 'string' || request instanceof PAGE.URL ? String(request) : request?.url;
       if (!networkInterest(rawUrl)) return Reflect.apply(original, this, args);
       const started = performance.now();
+      const context = observationContext();
       const method = String(args[1]?.method || request?.method || 'GET').toUpperCase();
       const url = safeUrl(rawUrl);
       let result;
       try { result = Reflect.apply(original, this, args); }
-      catch (error) { network({ url, method, error: safeText(error.message), durationMs: Math.round(performance.now() - started) }); throw error; }
+      catch (error) {
+        observe(() => { if (currentObservation(context)) network({ url, method, error: safeText(error?.message || error), durationMs: Math.round(performance.now() - started) }); });
+        throw error;
+      }
       return result.then(response => {
-        network({ url, method, status: response.status, finalUrl: safeUrl(response.url || rawUrl),
-          durationMs: Math.round(performance.now() - started), ...(fat() ? { requestShape: bodyShape(args[1]?.body) } : {}) });
-        void sampleResponse(response, url);
+        observe(() => {
+          if (!currentObservation(context)) return;
+          network({ url, method, status: response.status, finalUrl: safeUrl(response.url || rawUrl),
+            durationMs: Math.round(performance.now() - started), ...(fat() ? { requestShape: bodyShape(args[1]?.body) } : {}) });
+          void sampleResponse(response, url, context);
+        });
         return response;
       }, error => {
-        network({ url, method, error: safeText(error?.message || error), durationMs: Math.round(performance.now() - started) });
+        observe(() => { if (currentObservation(context)) network({ url, method, error: safeText(error?.message || error), durationMs: Math.round(performance.now() - started) }); });
         throw error;
       });
     };
@@ -373,7 +399,9 @@
       const detail = xhrDetails.get(this);
       if (!detail || !networkInterest(detail.rawUrl)) return Reflect.apply(send, this, [body]);
       const started = performance.now();
+      const context = observationContext();
       const done = () => {
+        if (!currentObservation(context)) return;
         const data = { url: detail.url, method: detail.method, status: this.status,
           finalUrl: safeUrl(this.responseURL || detail.rawUrl), durationMs: Math.round(performance.now() - started) };
         if (this.status === 0) data.error = 'No HTTP response';
@@ -382,13 +410,13 @@
           try { data.responseShape = this.responseType === 'json' ? shape(this.response) : bodyShape(this.responseText); }
           catch (error) { data.responseShape = 'unavailable'; }
         }
-        network(data);
+        observe(() => network(data));
       };
       this.addEventListener('loadend', done, { once: true, signal: controller.signal });
       try { return Reflect.apply(send, this, [body]); }
       catch (error) {
         this.removeEventListener('loadend', done);
-        network({ url: detail.url, method: detail.method, error: safeText(error.message), durationMs: Math.round(performance.now() - started) });
+        observe(() => { if (currentObservation(context)) network({ url: detail.url, method: detail.method, error: safeText(error?.message || error), durationMs: Math.round(performance.now() - started) }); });
         throw error;
       }
     };

@@ -23,6 +23,7 @@ Reference: V2 `BWU2_Observability_Core.user.js` 0.1.37 at `e4399d8`; audit F14/F
 - A session epoch and mode live in one atomic metadata value and change only on Clear/download/FAT reset. Initial epoch is deterministic, avoiding competing first-page session creation. Every record/flush reads the current epoch. An old frame cannot bring old events into the new session; a failed mode reset cannot leave a partially changed FAT preference.
 - Export merges current-epoch shards in time order, deduplicates, and observes the current mode's capacity. Each shard also has a hard bound; limit/full status is honest. Writes coalesce after activity, never poll while idle.
 - Cross-page count changes use GM value-change notification; pagehide flushes then cleans listeners, hooks, timers and the header observer. Restore a hook only if it is still ours.
+- Asynchronous native observations carry their original epoch and lifecycle signal. Clear/BFCache excludes stale completions and queued summaries; epoch changes cancel outstanding response-clone readers.
 - UI and styles use explicit V4 ownership markers for future Screenshot Mode. Observe only the native header parent once located; use DOMContentLoaded/load for bootstrap, no body-subtree observer.
 
 ## SUCCESS
