@@ -8,6 +8,8 @@ Active branch: `v4-cleanroom`. [Scope and rebuild order](BASELINE.md). [Recovery
 
 V4 installers are self-contained. Inherited root scripts remain V2 reference files. The remaining V4 workflows are planned in the baseline and still require implementation.
 
+FCR read capability is in progress: native product/inventory/history/section source has 24 passing fixtures; external enrichment and the Master consumer remain pending. `fcr-read.mjs` is internal source, not an installer. [Read contract](FCR_READ_CONTRACT.md) and [validation](FCR_READ_VALIDATION.md).
+
 Verification from this folder:
 
 ```sh

@@ -23,4 +23,12 @@ for (const name of files) {
   const syntax = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
 }
-console.log('PASS: ' + files.length + ' V4 installer metadata, syntax and independence checks');
+const modules = readdirSync(root).filter(name => name.endsWith('.mjs') && name !== 'checks.mjs');
+for (const name of modules) {
+  const path = root + '/' + name, source = readFileSync(path, 'utf8');
+  assert(!/BWU2Fleet|BWU2Actions|FCRDataCore|fcr-data-core:|fcrm_native_section_load_v4|bwu2\.v3\./.test(source), name + ': old runtime dependency');
+  assert(!/setInterval\s*\(/.test(source), name + ': recurring idle timer');
+  const syntax = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
+  assert.equal(syntax.status, 0, syntax.stderr);
+}
+console.log('PASS: ' + files.length + ' V4 installers and ' + modules.length + ' source modules: syntax and independence; installer metadata');
