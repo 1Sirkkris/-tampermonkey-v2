@@ -1,0 +1,12 @@
+{
+  "name": "tampermonkey-v4-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check OBS.user.js && node checks.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
