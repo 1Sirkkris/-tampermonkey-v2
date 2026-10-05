@@ -29,7 +29,7 @@ try{
  work.querySelector('[data-field="items"]').value='X1\nX2\nX3';await work.querySelector('[data-run]').onclick();assert.equal(work.querySelector('[data-field="items"]').value,'X3');assert.equal(work.querySelector('[data-run]').disabled,true);
  console.log('PASS engines: lost responses, no UNKNOWN replay, close-source payload, mutation timeout, AFT ERRORED, remaining work');
 }finally{h.close();}
-const f=harness({url:'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=tsX1',modules:['core.js','state.js','transport.js','identity.js','native.js','pandash.js','fcr.js']});
+const f=harness({url:'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=tsX1',modules:['core.js','state.js','transport.js','identity.js','native.js','pandash.js','fcr-data.js']});
 try{
  const head='<table id="table-inventory"><thead><tr><th>Container</th><th>ASIN</th><th>FNSKU</th><th>FCSKU</th><th>Quantity</th></tr></thead><tbody>',row='<tr><td>tsX1</td><td>B012345678</td><td>X012345678</td><td>FC123</td><td>1</td></tr>',first=head+row+'</tbody></table><span class="pagination-token">{"next":1}</span>';
  let responses=[first,row],requests=0;f.V3.transport={...f.V3.transport,request:async()=>({raw:responses[requests++]})};const engine=f.V3.fcr.create({});const inventory=await engine.inventory('tsX1');assert.equal(inventory.rows.length,2);assert.equal(inventory.totalQuantity,2);assert.equal(inventory.complete,true);

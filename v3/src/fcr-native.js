@@ -1,13 +1,13 @@
 V3.fcrNative = (() => {
   const C=V3.core;
   const exactBin=(payload,aliases)=>{
-    const wanted=new Set(aliases.map(C.upper).filter(Boolean)),matches=(payload?.items||[]).filter(item=>[item.scannableId,item.value,item.scannedBarcode,item.skuDetail?.fnSku,item.skuDetail?.asin,item.skuDetail?.fcSku].map(C.upper).some(code=>wanted.has(code)));
+    const wanted=V3.fcrAudit.preferredAliases(aliases),matches=(payload?.items||[]).filter(item=>{const fnsku=C.upper(item.skuDetail?.fnSku);if(aliases.some(alias=>/^(?:X0|ZZ)[A-Z0-9]{8}$/.test(C.upper(alias)))&&fnsku&&!wanted.has(fnsku))return false;return [item.scannableId,item.value,item.scannedBarcode,fnsku,item.skuDetail?.asin,item.skuDetail?.fcSku].map(C.upper).some(code=>wanted.has(code));});
     const sizes=[...new Set(matches.map(item=>C.clean(item.binDescription)).filter(Boolean))];if(sizes.length!==1)throw new Error(sizes.length?'Conflicting exact-item bin descriptions':'No exact-item bin description');return sizes[0];
   };
   function mount({life,telemetry,fcr,print,move,unbind}={}) {
     const measurement=V3.measurement.create({life}),mounted=new WeakSet();let hoverGeneration=0;
     const message=document.createElement('div');message.dataset.bwu2Ui='1';message.className='v3-note';
-    const readBin=async(product,inventory)=>{const aliases=[product.asin,product.isbn,product.fnsku,product.fcsku],wanted=new Set(aliases.map(C.upper).filter(Boolean));
+    const readBin=async(product,inventory)=>{const aliases=[product.asin,product.isbn,product.fnsku,product.fcsku],wanted=V3.fcrAudit.preferredAliases(aliases);
       const row=V3.fcr.inventoryRows({querySelector:()=>inventory}).find(row=>[row.asin,row.fnsku,row.fcsku].map(C.upper).some(code=>wanted.has(code))&&C.container(row.container));
       if(!row)throw new Error('No exact-item native inventory container');
       const response=await C.request('https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem',{method:'POST',body:JSON.stringify({containerScannableId:row.container,itemBarcode:product.fnsku||product.asin,isMasterpack:null,itemAndonContext:null,requestId:'amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.'+crypto.randomUUID(),tool:'V3'}),headers:{'Content-Type':'application/json'},signal:life.signal});return exactBin(response.data,aliases);

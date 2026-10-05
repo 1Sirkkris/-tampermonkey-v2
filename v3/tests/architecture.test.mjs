@@ -22,16 +22,15 @@ const fcr=byId.fcr.sources.join('\n');
 for(const forbidden of ['src/aft.js','src/sideline.js','src/workflow-ui.js','src/sideline-ui.js','src/apps/iss.js']){
   assert.ok(!fcr.includes(forbidden),'FCR must not own '+forbidden);
 }
+assert.ok(byId.fcr.sources.includes('src/fcr-data.js'));
+assert.ok(!byId.fcr.sources.includes('src/fcr.js'));
 assert.ok(byId.iss.sources.includes('src/aft.js'));
 assert.ok(byId.iss.sources.includes('src/sideline.js'));
 assert.ok(byId.aft.sources.includes('src/aft.js'));
 assert.ok(byId.sideline.sources.includes('src/sideline.js'));
 
 const actions=fs.readFileSync(path.join(root,'src','actions.js'),'utf8');
-assert.ok(actions.includes("destination:'/validateDestination'"));
-assert.ok(!/localStorage|sessionStorage|GM_setValue|GM\.setValue/.test(actions.slice(actions.indexOf('// Bind deliberately'),actions.indexOf('return Object.freeze'))),'Bind destination proof must stay memory-only');
-assert.ok(!actions.includes("forceBind"),'Ground-up Bind must not directly call forceBind');
-
+assert.ok(!/validateDestination|bindNative|unbindContainer|validateContainer/.test(actions),'Movement bundles must not retain inactive Hierarchy engines');
 // Hierarchy owns the active canonical Bind/Unbind engine; FCR uses its worker.
 assert.ok(byId.hierarchy.sources.includes('src/hierarchy.js'));
 assert.ok(!byId.hierarchy.sources.includes('src/actions.js'));

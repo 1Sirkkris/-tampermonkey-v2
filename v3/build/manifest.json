@@ -3,7 +3,7 @@
     {
       "id": "fcr",
       "name": "V3 | BWU2 FCResearch",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "FCResearch-native BWU2 tools: Tote Audit, Bin Check, Pandash, MoveContainer, Unbind and exact print.",
       "include": [
         "/^https?:\\/\\/.*fcresearch.*\\//",
@@ -34,7 +34,8 @@
         "src/identity.js",
         "src/native.js",
         "src/pandash.js",
-        "src/fcr.js",
+        "src/fcr-data.js",
+        "src/fcr-audit.js",
         "src/actions.js",
         "src/bridge.js",
         "src/measurement.js",
@@ -182,7 +183,7 @@
     {
       "id": "movecontainer",
       "name": "V3 | BWU2 MoveContainer",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Native MoveContainer floor/dropzone helper and sequential queue.",
       "include": [
         "/^https?:\\/\\/aft-moveapp-[^\\/.]+(?:\\.nrt)?\\.proxy\\.amazon\\.com\\/move-container(?:[\\/?#]|$)/"

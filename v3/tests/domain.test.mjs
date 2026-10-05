@@ -8,20 +8,20 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const context={console,crypto,performance,DOMException,setTimeout,clearTimeout,setInterval,clearInterval,URL,URLSearchParams,location:{origin:'https://example.amazon.com',href:'https://example.amazon.com/',pathname:'/',hostname:'example.amazon.com'},globalThis:null};
 context.V3={};context.globalThis=context;context.window=context;
 vm.createContext(context);
-for(const file of ['core.js','actions.js','aft.js','sideline.js']){
+for(const file of ['core.js','actions.js','hierarchy.js','aft.js','sideline.js']){
   vm.runInContext(fs.readFileSync(path.join(root,'src',file),'utf8'),context,{filename:file});
 }
 vm.runInContext(fs.readFileSync(path.join(root,'src','transport.js'),'utf8'),context);
-const A=context.V3.actions;
+const A=context.V3.actions,H=context.V3.hierarchy;
 assert.equal(A.destination('P3','Cubiscan'),'dz-Pcubiscan-P3');
 assert.equal(A.destination('P1','P1-Nonsort'),'dz-P-IB-nonsort');
 assert.equal(A.destination('P4','PRIME'),'dz-P-PRIME');
-assert.equal(A.normalizeFacility(' bwu1 '),'BWU1');
-assert.equal(A.normalizeFacility('AVV2'),'AVV2');
-assert.equal(A.normalizeFacility('bad fc'),'');
-assert.equal(A.tokenFromBody('{"destinationWarehouseId":"opaque-123"}'),'opaque-123');
-assert.equal(A.tokenFromBody('destinationWarehouseId=opaque-456'),'opaque-456');
-assert.equal(A.facilityFromResponse('"BWU1"'),'BWU1');
+assert.equal(H.normalizeFacility(' bwu1 '),'BWU1');
+assert.equal(H.normalizeFacility('AVV2'),'AVV2');
+assert.equal(H.normalizeFacility('bad fc'),'');
+assert.equal(H.tokenFromBody('{"destinationWarehouseId":"opaque-123"}'),'opaque-123');
+assert.equal(H.tokenFromBody('destinationWarehouseId=opaque-456'),'opaque-456');
+assert.equal(H.facilityFromResponse('"BWU1"'),'BWU1');
 
 const aft=context.V3.aft;
 assert.equal(aft.mapState('Sellable'),'INVENTORY');

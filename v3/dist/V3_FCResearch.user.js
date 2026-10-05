@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 FCResearch
 // @name:en      V3 | BWU2 FCResearch
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.1
 // @description  FCResearch-native BWU2 tools: Tote Audit, Bin Check, Pandash, MoveContainer, Unbind and exact print.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -21,13 +21,13 @@
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FCResearch.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_FCResearch.user.js
-// @v3-build     fcr-0.2.0-c69ae18c
+// @v3-build     fcr-0.2.1-20450618
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"fcr-0.2.0-c69ae18c","version":"0.2.0"});
+V3.build=Object.freeze({"id":"fcr-0.2.1-20450618","version":"0.2.1"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -406,7 +406,7 @@ V3.pandash = (() => {
   return Object.freeze({create});
 })();
 
-// ---- src/fcr.js ----
+// ---- src/fcr-data.js ----
 V3.fcr=(()=>{
   const C=V3.core;
   const warehouse=()=>location.pathname.match(/^\/([^/]+)\/results(?:\/|$)/i)?.[1]||'';
@@ -429,15 +429,17 @@ V3.fcr=(()=>{
     const find=(...names)=>hs.findIndex(h=>names.includes(h.id)||names.includes(h.text));
     return{container:find('inventory-container','container'),asin:find('inventory-asin','asin'),fnsku:find('inventory-fnsku','fnsku'),fcsku:find('inventory-fcsku','fcsku'),lpn:find('inventory-lpn','lpn'),qty:find('inventory-quantity','quantity'),disposition:find('inventory-disposition','disposition'),consumer:find('inventory-consumer','consumer'),consumerId:find('inventory-consumer-id','consumer id','consumerid'),outerLocation:find('inventory-outer-location','outer location'),outerLocationType:find('inventory-outer-location-type','outer location type'),title:find('inventory-title','title')};
   };
+  const inventoryRow=(tr,idx)=>{
+    const value=i=>i>=0?C.clean(tr.cells[i]?.textContent):'';
+    const row={container:value(idx.container),asin:value(idx.asin),fnsku:value(idx.fnsku),fcsku:value(idx.fcsku),lpn:value(idx.lpn),qty:Number(value(idx.qty).replace(/,/g,'')),disposition:value(idx.disposition),consumer:value(idx.consumer),consumerId:value(idx.consumerId),outerLocation:value(idx.outerLocation),outerLocationType:value(idx.outerLocationType),title:value(idx.title)};
+    if(!row.container&&!row.asin&&!row.fnsku&&!row.fcsku)return null;
+    if(!value(idx.qty)||!Number.isSafeInteger(row.qty)||row.qty<0)throw new Error('Inventory row has invalid quantity');
+    return row;
+  };
   const inventoryRows=doc=>{
     const table=doc.querySelector('#table-inventory');if(!table)throw new Error('Inventory table not returned');
-    const idx=inventoryIndexes(table),rows=[];if(idx.qty<0||[idx.asin,idx.fnsku,idx.fcsku].every(index=>index<0))throw new Error('Inventory schema missing item / quantity columns');
-    for(const tr of table.tBodies?.[0]?.rows||[]){
-      const value=i=>i>=0?C.clean(tr.cells[i]?.textContent):'';
-      const row={container:value(idx.container),asin:value(idx.asin),fnsku:value(idx.fnsku),fcsku:value(idx.fcsku),lpn:value(idx.lpn),qty:Number(value(idx.qty).replace(/,/g,'')),disposition:value(idx.disposition),consumer:value(idx.consumer),consumerId:value(idx.consumerId),outerLocation:value(idx.outerLocation),outerLocationType:value(idx.outerLocationType),title:value(idx.title)};
-      if(row.container||row.asin||row.fnsku||row.fcsku){if(!value(idx.qty)||!Number.isSafeInteger(row.qty)||row.qty<0)throw new Error('Inventory row has invalid quantity');rows.push(row);}
-    }
-    return rows;
+    const idx=inventoryIndexes(table);if(idx.qty<0||[idx.asin,idx.fnsku,idx.fcsku].every(index=>index<0))throw new Error('Inventory schema missing item / quantity columns');
+    return [...(table.tBodies?.[0]?.rows||[])].map(row=>inventoryRow(row,idx)).filter(Boolean);
   };
   const paginationToken=doc=>{const raw=C.clean(doc.querySelector('.pagination-token')?.textContent);if(!raw)return '';try{const token=JSON.parse(raw);if(!token||typeof token!=='object')throw new Error();return raw;}catch{throw new Error('Inventory incomplete: malformed pagination token');}};
   const podOf=value=>C.clean(value).match(/\bP-\d-(?:[A-Z]\d{3}){2}\b/i)?.[0]||'';
@@ -451,7 +453,7 @@ V3.fcr=(()=>{
       const work=(async()=>{let attempt=0;for(;;){try{return(await C.request(base()+'/'+endpoint,{method:'POST',body:params.toString(),headers:FORM_HEADERS,allowHtml:true,signal:life?.signal})).raw;}catch(error){if(!(error.status>=500&&error.status<600)||attempt>=2)throw error;await C.sleep([150,400][attempt++]||400,life?.signal);}}})();
       inFlight.set(key,work);try{return await work;}finally{if(inFlight.get(key)===work)inFlight.delete(key);}
     };
-    const products=new Map();const getProduct=async code=>{const key=C.upper(code),cached=products.get(key);if(cached&&Date.now()-cached.at<300000)return cached.value;const value=product(await post('product',{s:C.clean(code)}));if(value){products.set(key,{value,at:Date.now()});if(products.size>300)products.delete(products.keys().next().value);}return value;};
+    const products=new Map();const getProduct=async code=>{const key=C.upper(code),cached=products.get(key);if(cached&&Date.now()-cached.at<300000)return cached.value;const value=product(await post('product',{s:C.clean(code)}));if(value){if(/^(?:B[A-Z0-9]{9}|(?:X0|ZZ)[A-Z0-9]{8})$/.test(key)&&![value.asin,value.isbn,value.fnsku,value.fcsku].map(C.upper).includes(key))throw new Error('Product response does not match requested identifier');products.set(key,{value,at:Date.now()});if(products.size>300)products.delete(products.keys().next().value);}return value;};
 
     const fullInventory=async(code,{onPreview}={})=>{
       const started=performance.now(),first=await post('inventory',{s:C.clean(code)}),doc=C.html(first),table=doc.querySelector('#table-inventory');
@@ -474,7 +476,7 @@ V3.fcr=(()=>{
         for(const row of rows)tbody.appendChild(doc.importNode(row,true));
         next=following;
       }
-      const rows=inventoryRows(doc),totalQuantity=rows.reduce((sum,row)=>sum+(Number(row.qty)||0),0);
+      const rows=inventoryRows(doc),totalQuantity=rows.reduce((sum,row)=>sum+row.qty,0);if(!Number.isSafeInteger(totalQuantity))throw new Error('Inventory quantity exceeds safe range');
       const headerTotal=Number(table.querySelector('#inventory-quantity')?.textContent?.match(/\(([\d,]+)\)/)?.[1]?.replace(/,/g,''));if(Number.isFinite(headerTotal)&&headerTotal!==totalQuantity)throw new Error('Inventory incomplete: quantity header does not match returned rows');
       telemetry?.emit('fcr.inventory',{search:C.mask(code),pages,rows:rows.length,complete:true,ms:Math.round(performance.now()-started)});
       return{rows,pages,complete:true,totalQuantity};
@@ -502,7 +504,83 @@ V3.fcr=(()=>{
     return Object.freeze({post,product:getProduct,inventory:fullInventory,floor,pandash});
   }
 
-  return Object.freeze({create,warehouse,base,product,inventoryIndexes,inventoryRows,paginationToken,podOf,floorFromHtml});
+  return Object.freeze({create,warehouse,base,product,inventoryIndexes,inventoryRow,inventoryRows,paginationToken,podOf,floorFromHtml});
+})();
+
+// ---- src/fcr-audit.js ----
+V3.fcrAudit = (() => {
+  const C = V3.core;
+  const strictInternal = code => /^(?:X0|ZZ)[A-Z0-9]{8}$/.test(C.upper(code));
+  const preferredAliases=values=>{const all=values.map(C.upper).filter(Boolean),strict=all.filter(strictInternal);return new Set(strict.length?strict:all);};
+  function create({inventory,product,onChange=()=>{},telemetry}={}) {
+    let generation=0;
+    const state={container:'',phase:'empty',rows:[],lookup:new Map(),scans:new Map(),pending:[],message:'Scan source container'};
+    const paint=()=>onChange(state);
+    const reset=()=>{generation++;Object.assign(state,{container:'',phase:'empty',rows:[],lookup:new Map(),scans:new Map(),pending:[],message:'Scan source container'});paint();};
+    const index=rows=>{
+      const map=new Map();
+      for(const row of rows)for(const code of [row.asin,row.fnsku,row.fcsku]){
+        const key=C.upper(code);if(!key)continue;if(!map.has(key))map.set(key,new Set());map.get(key).add(row);
+      }
+      return map;
+    };
+    const matches=(raw,metadata)=>{
+      const exact=state.lookup.get(C.upper(raw));if(exact)return [...exact];
+      if(strictInternal(raw))return [];
+      const out=new Set();for(const code of [metadata?.asin,metadata?.isbn,metadata?.fnsku,metadata?.fcsku])
+        for(const row of state.lookup.get(C.upper(code))||[])out.add(row);
+      return [...out];
+    };
+    const allocate=(rows,quantity)=>{
+      let left=quantity;
+      for(const row of rows){const amount=Math.min(left,Math.max(0,row.qty-row._scan));row._scan+=amount;left-=amount;if(!left)break;}
+      return left;
+    };
+    const totals=()=>({units:state.rows.reduce((sum,row)=>sum+row.qty,0),scanned:state.rows.reduce((sum,row)=>sum+row._scan,0),
+      overage:[...state.scans.values()].reduce((sum,row)=>sum+row.overage,0)});
+    async function load(container,{keepPending=false}={}) {
+      const run=++generation,pending=keepPending?state.pending:[];
+      Object.assign(state,{container,phase:'loading',rows:[],lookup:new Map(),scans:new Map(),pending,message:'Loading full inventory…'});paint();
+      try{
+        const result=await inventory(container,{onPreview:preview=>{if(run===generation){state.message='Loading inventory page '+preview.pages+'…';paint();}}});
+        if(run!==generation)return;
+        if(result.complete!==true || !Array.isArray(result.rows))throw new Error('Inventory is incomplete');
+        state.rows=result.rows.map(row=>({...row,_scan:0}));state.lookup=index(state.rows);state.phase='ready';state.message='Ready';
+        const queued=state.pending.splice(0);paint();
+        for(const code of queued){if(run!==generation)break;await scan(code);}
+      }catch(error){if(run===generation){state.phase='failed';state.rows=[];state.lookup=new Map();state.message='Inventory unavailable · '+error.message+' · '+state.pending.length+' scan(s) saved';paint();}}
+    }
+    async function scan(value){
+      const raw=C.clean(value);if(!raw)return;
+      if(C.container(raw)){
+        if(!C.upper(state.container)||C.upper(raw)!==C.upper(state.container))return load(raw);
+        if(state.phase==='failed')return load(raw,{keepPending:true});
+        state.message=state.phase==='loading'?'Inventory loading · keep scanning':'Container already loaded';paint();return;
+      }
+      if(!state.container){state.message='SCAN SOURCE CONTAINER FIRST';paint();return;}
+      if(state.phase!=='ready'){
+        state.pending.push(raw);state.message=(state.phase==='failed'?'RETRY INVENTORY · ':'Loading inventory · ')+state.pending.length+' scan(s) saved';paint();return;
+      }
+      const key=C.upper(raw),old=state.scans.get(key);
+      if(old){old.count++;if(old.state!=='checking'&&old.matches.length){old.overage+=allocate(old.matches,1);old.state=old.overage?'overage':'found';}
+        state.message=raw+' ×'+old.count+(old.state==='checking'?' · checking':' · '+old.state.toUpperCase());paint();return;}
+      const run=generation,record={raw,count:1,state:'checking',matches:[],product:null,overage:0};state.scans.set(key,record);paint();
+      try{
+        record.matches=matches(raw,null);
+        // Native exact identifiers need no extra product request. Unresolved UPC/EAN scans still resolve through FCR.
+        if(!record.matches.length&&!strictInternal(raw)){record.product=await product(raw);if(run!==generation)return;if(!record.product)throw new Error('Product barcode could not be resolved');record.matches=matches(raw,record.product);}
+        if(run!==generation)return;
+        if(record.matches.length){record.overage=allocate(record.matches,record.count);record.state=record.overage?'overage':'found';}
+        else record.state='missing';
+        state.message=record.state==='found'?'IN '+state.container:record.state==='overage'?'EXTRA '+record.overage+' · '+raw:'NOT IN '+state.container;
+        telemetry?.emit('tote.scan',{code:C.mask(raw),found:record.matches.length>0,count:record.count,overage:record.overage});
+      }catch(error){if(run!==generation)return;record.state='error';state.message=error.message;}
+      paint();
+    }
+    const retry=()=>state.phase==='failed'&&state.container?load(state.container,{keepPending:true}):Promise.resolve();
+    return Object.freeze({state,scan,reset,retry,totals});
+  }
+  return Object.freeze({create,preferredAliases});
 })();
 
 // ---- src/actions.js ----
@@ -510,9 +588,7 @@ V3.actions=(()=>{
   const C=V3.core;
   const MOVE_ORIGIN='https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com';
   const HIERARCHY_ORIGIN='https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
-  const WAREHOUSE='BWU2';
   const MOVE_PATH='/api/move-container';
-  const HIERARCHY={validate:'/validateContainer',summary:'/getTransshipmentBindingSummary',unbind:'/unbindContainer',destination:'/validateDestination'};
   const FLOORS=['P1','P2','P3','P4'];
   const UPPER=[
     {key:'Cubiscan',label:'Cubiscan',pattern:'dz-Pcubiscan-{floor}'},
@@ -534,30 +610,39 @@ V3.actions=(()=>{
     {key:'P1-Receive-Damages',label:'Receive Damages',dest:'dz-P-rcv-Damages'}
   ];
 
-  const dropChoices=floor=>floor==='P1'?P1:UPPER;
+  const dropChoices=floor=>FLOORS.includes(floor)?floor==='P1'?P1:UPPER:[];
   const destination=(floor,key)=>{
-    if(key==='PRIME'||key==='Prime')return'dz-P-PRIME';
     if(!FLOORS.includes(floor))return'';
+    if(key==='PRIME'||key==='Prime')return'dz-P-PRIME';
     const row=dropChoices(floor).find(x=>x.key===key||x.label===key);
     return row?(floor==='P1'?row.dest:row.pattern.replace('{floor}',floor)):'';
   };
 
   const movePayload=(container,dest)=>({sourceScannableId:null,destinationScannableId:C.clean(dest),containerScannableId:C.clean(container),confirmed:'true'});
-  const strictMoveConfirmation=result=>{
-    if(!result||!Number.isInteger(Number(result.status))||Number(result.status)<=0||Number(result.status)>=500||Number(result.status)===408)throw new C.UnknownError('MoveContainer outcome unknown HTTP '+Number(result?.status||0));
-    if(Number(result.status)<200||Number(result.status)>=300)throw new C.RejectedError('MoveContainer rejected HTTP '+Number(result.status));
+  const strictMoveConfirmation=(result,{container,destination}={})=>{
+    const status=Number(result?.status);
+    if(!Number.isInteger(status)||status<=0||status>=500||status===408||status===202)throw new C.UnknownError('MoveContainer outcome unknown HTTP '+(status||0));
     if(result.flags?.auth||result.flags?.html)throw new C.UnknownError('MoveContainer confirmation was an authentication/HTML response');
-    const expected=new URL(MOVE_ORIGIN+MOVE_PATH);
-    const actual=new URL(result.finalUrl||expected.href,expected.href);
-    if(actual.origin!==expected.origin||actual.pathname.replace(/\/+$/,'')!==expected.pathname.replace(/\/+$/,''))throw new C.UnknownError('MoveContainer confirmation redirected unexpectedly');
-    if(result.data?.success===false||result.data?.error||result.data?.errorMessage)throw new C.RejectedError(C.clean(result.data.message||result.data.errorMessage||'MoveContainer rejected'));
-    if(C.clean(result.raw)&&!(result.data?.success===true||result.data?.status==='SUCCESS'))throw new C.UnknownError('MoveContainer response not recognized — verify before retry');
+    const expected=new URL(MOVE_ORIGIN+MOVE_PATH);let actual;
+    try{actual=new URL(result.finalUrl||expected.href,expected.href);}catch{throw new C.UnknownError('MoveContainer confirmation URL is invalid');}
+    if(actual.origin!==expected.origin||actual.pathname.replace(/\/+$/,'')!==expected.pathname)throw new C.UnknownError('MoveContainer confirmation redirected unexpectedly');
+    if(status<200||status>=300)throw new C.RejectedError('MoveContainer rejected HTTP '+status);
+    const data=result.data,positive=data?.success===true||data?.status==='SUCCESS',negative=data?.success===false||data?.error||data?.errorMessage;
+    if(positive&&negative)throw new C.UnknownError('MoveContainer confirmation is contradictory — verify before retry');
+    if(negative)throw new C.RejectedError(C.clean(data.message||data.errorMessage||'MoveContainer rejected'));
+    if((container&&data?.containerScannableId!=null&&C.upper(data.containerScannableId)!==C.upper(container))||
+      (destination&&data?.destinationScannableId!=null&&C.upper(data.destinationScannableId)!==C.upper(destination)))
+      throw new C.UnknownError('MoveContainer response identifies another container/destination');
+    // V2's native API permits an empty synchronous response. An accepted/pending response is not completion.
+    const empty=!C.clean(result.raw)&&data==null;
+    if(!positive&&!(empty&&[200,204].includes(status)))throw new C.UnknownError('MoveContainer response not recognized — verify before retry');
     return result;
   };
   async function moveContainer(container,dest,{telemetry,maySubmit=()=>true}={}){
     const code=C.clean(container),target=C.clean(dest);
     if(!C.container(code))throw new Error('Container must be tsX/csX');
     if(!target)throw new Error('Destination required');
+    if(C.upper(code)===C.upper(target))throw new Error('Source and destination are the same');
     if(!maySubmit())throw Object.assign(new Error('Paused before Move submission'),{outcome:'cancelled'});
     const op=C.operation({kind:'move-container',ref:code,scope:'movecontainer',telemetry});op.submitted({destination:target});
     let result;
@@ -565,7 +650,7 @@ V3.actions=(()=>{
       result=await C.request(MOVE_ORIGIN+MOVE_PATH,{method:'POST',body:JSON.stringify(movePayload(code,target)),headers:{'Content-Type':'application/json'},timeout:15000,allowHttpError:true});
     }catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('Move submitted; confirmation lost — verify before retry',{cause:error});}
     try{
-      strictMoveConfirmation(result);
+      strictMoveConfirmation(result,{container:code,destination:target});
       op.confirmed({status:result.status,destination:target});
       return result;
     }catch(error){
@@ -574,143 +659,8 @@ V3.actions=(()=>{
     }
   }
 
-  async function hierarchyPost(path,body,{timeout=15000,allowHttpError=false}={}){
-    return C.request(HIERARCHY_ORIGIN+path,{method:'POST',body:JSON.stringify(body),headers:{'Content-Type':'application/json'},timeout,allowHttpError});
-  }
-  async function validateContainer(container){
-    const code=C.clean(container),r=await hierarchyPost(HIERARCHY.validate,{warehouseId:WAREHOUSE,scannableId:code});
-    if(!r.data||typeof r.data!=='object')throw new Error('Unexpected hierarchy validation response');
-    if(C.upper(r.data.warehouseId)!==WAREHOUSE)throw new Error('Container is not validated in '+WAREHOUSE);
-    if(C.lower(r.data.scannableId)!==C.lower(code))throw new Error('Validation returned another container');
-    return r.data;
-  }
-  async function bindingSummary(container){
-    const code=C.clean(container),r=await hierarchyPost(HIERARCHY.summary,{warehouseId:WAREHOUSE,scannableId:code});
-    if(!Array.isArray(r.data?.transferBindingSummaryList))throw new Error('Unexpected binding summary');
-    return r.data;
-  }
-  async function unbind(container,login,{telemetry,maySubmit=()=>true}={}){
-    const code=C.clean(container),employee=C.normLogin(login);
-    if(!C.container(code))throw new Error('Container must be tsX/csX');
-    if(!employee)throw new Error('Authenticated employee identity unavailable');
-    await validateContainer(code);await bindingSummary(code);
-    if(!maySubmit())throw Object.assign(new Error('Paused before Unbind submission'),{outcome:'cancelled'});
-    const op=C.operation({kind:'hierarchy-unbind',ref:code,scope:'hierarchy',telemetry});op.submitted();
-    let r;
-    try{r=await hierarchyPost(HIERARCHY.unbind,{sourceWarehouseId:WAREHOUSE,scannableId:code,employeeLogin:employee},{timeout:20000,allowHttpError:true});}
-    catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('Unbind submitted; confirmation lost — verify before retry',{cause:error});}
-    if(r.status>=500||r.status===408){op.unknown({status:r.status});throw new C.UnknownError('Unbind HTTP '+r.status+' — verify before retry');}
-    if(r.status<200||r.status>=300){op.rejected({status:r.status});throw new C.RejectedError('Unbind rejected HTTP '+r.status);}
-    if(!C.clean(r.data?.hostName)){op.unknown({reason:'unexpected-response'});throw new C.UnknownError('Unbind response ambiguous — verify container');}
-    op.confirmed({status:r.status});return r.data;
-  }
-
-  // Bind deliberately uses the native page. The only native network traffic observed
-  // is /validateDestination, solely to map the user's typed FC to Amazon's opaque ID.
-  const FACILITY=/^[A-Z0-9]{3,8}$/;
-  const normalizeFacility=value=>{const fc=C.upper(value);return FACILITY.test(fc)?fc:'';};
-  let destinationSeq=0,destinationRevision=0;
-  const destinationProofs=[];
-  const endpointPath=value=>{try{const url=new URL(String(value||''),location.href);return url.origin===HIERARCHY_ORIGIN?url.pathname:'';}catch{return'';}};
-  const tokenFromBody=body=>{
-    if(body==null)return'';
-    if(typeof body==='object'){
-      try{
-        if(typeof FormData!=='undefined'&&body instanceof FormData)return C.clean(body.get('destinationWarehouseId'));
-        if(typeof URLSearchParams!=='undefined'&&body instanceof URLSearchParams)return C.clean(body.get('destinationWarehouseId'));
-        return C.clean(body.destinationWarehouseId);
-      }catch{return'';}
-    }
-    const raw=String(body);
-    try{return C.clean(JSON.parse(raw)?.destinationWarehouseId);}catch{}
-    const match=raw.match(/(?:^|&)destinationWarehouseId=([^&]*)/);
-    if(!match)return'';
-    try{return C.clean(decodeURIComponent(match[1].replace(/\+/g,' ')));}catch{return C.clean(match[1]);}
-  };
-  const facilityFromResponse=raw=>{
-    let value=raw;
-    if(typeof raw==='string'){try{value=JSON.parse(raw);}catch{}}
-    if(typeof value==='string')return normalizeFacility(value);
-    if(value&&typeof value==='object')return normalizeFacility(value.warehouseId||value.destination||value.facility||value.fc||'');
-    return'';
-  };
-  const recordDestination=(token,facility,status)=>{if(!token||!facility)return;destinationProofs.push({seq:++destinationSeq,token,facility,status:Number(status)||0,at:Date.now()});if(destinationProofs.length>12)destinationProofs.splice(0,destinationProofs.length-12);window.dispatchEvent(new Event('bwu2-v3:destination-validation'));};
-  function installDestinationTap(){
-    const page=typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window;
-    try{
-      const XHR=page.XMLHttpRequest;
-      if(XHR?.prototype&&!XHR.prototype.__bwu2V3GroundDestinationTap){
-        const nativeOpen=XHR.prototype.open,nativeSend=XHR.prototype.send;
-        XHR.prototype.open=function(method,url){this.__bwu2V3GroundDestinationPath=endpointPath(url);return nativeOpen.apply(this,arguments);};
-        XHR.prototype.send=function(body){
-          if(this.__bwu2V3GroundDestinationPath!==HIERARCHY.destination)return nativeSend.apply(this,arguments);
-          const token=tokenFromBody(body);
-          this.addEventListener('loadend',()=>{let raw='';try{if(!this.responseType||this.responseType==='text')raw=this.responseText||'';else if(this.responseType==='json')raw=JSON.stringify(this.response??null);}catch{}recordDestination(token,facilityFromResponse(raw),this.status);},{once:true});
-          return nativeSend.apply(this,arguments);
-        };
-        Object.defineProperty(XHR.prototype,'__bwu2V3GroundDestinationTap',{value:true,configurable:true});
-      }
-    }catch{}
-    try{
-      const nativeFetch=page.fetch;
-      if(typeof nativeFetch==='function'&&!nativeFetch.__bwu2V3GroundDestinationTap){
-        const wrapped=async function(input,init={}){
-          const rawUrl=typeof input==='string'||input instanceof URL?String(input):String(input?.url||'');
-          if(endpointPath(rawUrl)!==HIERARCHY.destination)return nativeFetch.apply(this,arguments);
-          const token=tokenFromBody(init?.body),response=await nativeFetch.apply(this,arguments);
-          let raw='';try{raw=await response.clone().text();}catch{}
-          recordDestination(token,facilityFromResponse(raw),response.status);return response;
-        };
-        Object.defineProperty(wrapped,'__bwu2V3GroundDestinationTap',{value:true});
-        page.fetch=wrapped;
-      }
-    }catch{}
-  }
-
-  const visible=element=>V3.native.visible(element);
-  const findDestinationInput=()=>V3.native.findInput(/destination|warehouse|facility|\bfc\b/,/container|scannable|tote/);
-  const findContainerInput=()=>V3.native.findInput(/container|scannable|scan|tote/,/destination|warehouse|facility|\bfc\b/);
-  const setNative=(input,value)=>{V3.native.setValue(input,value);return true;};
-  const pressEnter=async(input)=>V3.native.enter(input);
-  const statusText=()=>V3.native.status();
-  const errorText=()=>{const text=statusText();return /error|invalid|failed|cannot|unable|reject|not found/i.test(text)?text:'';};
-  const pageText=()=>V3.native.text();
-  const waitFor=(predicate,options)=>V3.native.waitFor(predicate,options);
-
-  async function validateDestinationNative(destination,{life,telemetry}={}){
-    const fc=normalizeFacility(destination);if(!fc)throw new Error('Enter destination FC, e.g. BWU1 or AVV2');
-    installDestinationTap();const marker=destinationSeq,previousStatus=statusText(),input=findDestinationInput();if(!input)throw new Error('Native destination field not found');
-    if(!input.dataset.v3DestinationRevision){input.dataset.v3DestinationRevision='1';input.addEventListener('input',()=>{destinationRevision++;});input.addEventListener('change',()=>{destinationRevision++;});}
-    if(!setNative(input,fc))throw new Error('Could not enter destination FC');try{input.focus({preventScroll:true});}catch{}await pressEnter(input,life);
-    telemetry?.emit('hierarchy.destination.submit',{destination:fc});
-    const proof=await waitFor(()=>{const error=errorText();if(error&&error!==previousStatus)throw new Error(error);return destinationProofs.find(x=>x.seq>marker&&x.facility===fc&&x.status>=200&&x.status<300&&x.token);},{life,timeout:10000,events:['bwu2-v3:destination-validation']});
-    telemetry?.emit('hierarchy.destination.validated',{destination:fc});
-    return Object.freeze({facility:fc,destinationWarehouseId:proof.token,proofSeq:proof.seq,revision:destinationRevision});
-  }
-
-  const nativeScan=async(container,life)=>{const input=findContainerInput();if(!input)throw new Error('Native container scan field not found');if(!setNative(input,container))throw new Error('Could not enter container');try{input.focus({preventScroll:true});}catch{}const before=pageText();await pressEnter(input,life);return before;};
-  async function bindNative(container,context,{life,telemetry,maySubmit=()=>true}={}){
-    const code=C.clean(container),fc=normalizeFacility(context?.facility);if(!C.container(code))throw new Error('Container must be tsX/csX');if(!fc||!C.clean(context?.destinationWarehouseId))throw new Error('Destination must be validated before Bind');
-    const latest=destinationProofs.at(-1);if(context.revision!==destinationRevision||latest?.seq!==context.proofSeq||latest?.facility!==fc||latest?.token!==context.destinationWarehouseId)throw new Error('Destination changed — fresh native validation required');
-    const before1=await nativeScan(code,life);
-    await waitFor(()=>{const error=errorText();if(error)throw new C.RejectedError(error);const text=pageText(),input=findContainerInput();return text!==before1&&input&&visible(input)&&!input.disabled&&C.clean(input.value)!==code;},{life,timeout:12000,});
-    if(!maySubmit())throw Object.assign(new Error('Paused before Bind submission'),{outcome:'cancelled'});
-    if(context.revision!==destinationRevision)throw new Error('Destination changed before Bind — validate again');
-    const op=C.operation({kind:'hierarchy-bind',ref:code,scope:'hierarchy',telemetry});op.submitted({destination:fc});
-    const previousStatus=statusText();
-    try{await nativeScan(code,life);
-      const proof=await waitFor(()=>{const error=errorText();if(error)throw new C.RejectedError(error);const status=statusText();return status!==previousStatus&&/(?:successfully|container.*bound|binding.*complete)/i.test(status)?status:'';},{life,timeout:15000,});
-      op.confirmed({destination:fc,proof:C.clean(proof).slice(0,100)});return{container:code,destination:fc};
-    }catch(error){
-      if(error instanceof C.RejectedError){op.rejected({reason:C.clean(error.message)});throw error;}
-      op.unknown({reason:'native-confirmation-missing'});throw new C.UnknownError('Bind submitted but native page did not prove success — verify container',{cause:error});
-    }
-  }
-
   const ownedMove=(...args)=>V3.state.exclusive('movecontainer',()=>{V3.state.assertClear('movecontainer');return moveContainer(...args);});
-  const ownedUnbind=(...args)=>V3.state.exclusive('hierarchy',()=>{V3.state.assertClear('hierarchy');return unbind(...args);});
-  const ownedBind=(...args)=>V3.state.exclusive('hierarchy',()=>{V3.state.assertClear('hierarchy');return bindNative(...args);});
-  return Object.freeze({MOVE_ORIGIN,HIERARCHY_ORIGIN,WAREHOUSE,FLOORS,UPPER,P1,dropChoices,destination,movePayload,strictMoveConfirmation,moveContainer:ownedMove,validateContainer,bindingSummary,unbind:ownedUnbind,normalizeFacility,tokenFromBody,facilityFromResponse,validateDestinationNative,bindNative:ownedBind});
+  return Object.freeze({MOVE_ORIGIN,HIERARCHY_ORIGIN,FLOORS,UPPER,P1,dropChoices,destination,movePayload,strictMoveConfirmation,moveContainer:ownedMove});
 })();
 
 // ---- src/bridge.js ----
@@ -820,13 +770,13 @@ V3.measurement = (() => {
 V3.fcrNative = (() => {
   const C=V3.core;
   const exactBin=(payload,aliases)=>{
-    const wanted=new Set(aliases.map(C.upper).filter(Boolean)),matches=(payload?.items||[]).filter(item=>[item.scannableId,item.value,item.scannedBarcode,item.skuDetail?.fnSku,item.skuDetail?.asin,item.skuDetail?.fcSku].map(C.upper).some(code=>wanted.has(code)));
+    const wanted=V3.fcrAudit.preferredAliases(aliases),matches=(payload?.items||[]).filter(item=>{const fnsku=C.upper(item.skuDetail?.fnSku);if(aliases.some(alias=>/^(?:X0|ZZ)[A-Z0-9]{8}$/.test(C.upper(alias)))&&fnsku&&!wanted.has(fnsku))return false;return [item.scannableId,item.value,item.scannedBarcode,fnsku,item.skuDetail?.asin,item.skuDetail?.fcSku].map(C.upper).some(code=>wanted.has(code));});
     const sizes=[...new Set(matches.map(item=>C.clean(item.binDescription)).filter(Boolean))];if(sizes.length!==1)throw new Error(sizes.length?'Conflicting exact-item bin descriptions':'No exact-item bin description');return sizes[0];
   };
   function mount({life,telemetry,fcr,print,move,unbind}={}) {
     const measurement=V3.measurement.create({life}),mounted=new WeakSet();let hoverGeneration=0;
     const message=document.createElement('div');message.dataset.bwu2Ui='1';message.className='v3-note';
-    const readBin=async(product,inventory)=>{const aliases=[product.asin,product.isbn,product.fnsku,product.fcsku],wanted=new Set(aliases.map(C.upper).filter(Boolean));
+    const readBin=async(product,inventory)=>{const aliases=[product.asin,product.isbn,product.fnsku,product.fcsku],wanted=V3.fcrAudit.preferredAliases(aliases);
       const row=V3.fcr.inventoryRows({querySelector:()=>inventory}).find(row=>[row.asin,row.fnsku,row.fcsku].map(C.upper).some(code=>wanted.has(code))&&C.container(row.container));
       if(!row)throw new Error('No exact-item native inventory container');
       const response=await C.request('https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem',{method:'POST',body:JSON.stringify({containerScannableId:row.container,itemBarcode:product.fnsku||product.asin,isMasterpack:null,itemAndonContext:null,requestId:'amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite.'+crypto.randomUUID(),tool:'V3'}),headers:{'Content-Type':'application/json'},signal:life.signal});return exactBin(response.data,aliases);
@@ -882,35 +832,82 @@ V3.boot=()=>{
 
   function itemPanel(){
     const panel=C.panel({id:'fcr-item',title:'V3 · FCR Item',width:560,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">Search code<input data-code></label><div class="v3-row"><button class="v3-btn primary" data-run>LOOKUP</button><button class="v3-btn" data-print>PRINT CODE</button></div><div class="v3-note" data-msg style="margin-top:8px"></div></section><section class="v3-section"><div data-out></div></section>';panel.set(root);const input=root.querySelector('[data-code]'),msg=root.querySelector('[data-msg]'),out=root.querySelector('[data-out]');input.value=current();let last=null;root.querySelector('[data-run]').onclick=async()=>{const code=C.clean(input.value);if(!code)return;msg.textContent='Loading…';try{last=await fcr.product(code);if(!last)throw new Error('Product not found');out.innerHTML='<div class="v3-grid"><div><b>ASIN</b><br>'+C.esc(last.asin||'—')+'</div><div><b>FNSKU</b><br>'+C.esc(last.fnsku||'—')+'</div><div><b>FCSKU</b><br>'+C.esc(last.fcsku||'—')+'</div><div><b>Sortable</b><br>'+C.esc(last.sortableText||'—')+'</div><div><b>Dimensions</b><br>'+C.esc(last.dimensions||'—')+(last.suspicious?' <span class="v3-warn"><b>CHECK</b></span>':'')+'</div><div><b>Weight</b><br>'+C.esc(last.weight||'—')+'</div></div><div style="margin-top:9px"><b>'+C.esc(last.title||'')+'</b></div>';msg.className='v3-note v3-ok';msg.textContent='Ready';}catch(e){msg.className='v3-note v3-bad';msg.textContent=e.message;}};root.querySelector('[data-print]').onclick=async()=>{try{const code=C.clean(input.value),title=last&&[last.asin,last.fnsku,last.fcsku].some(x=>C.upper(x)===C.upper(code))?last.title:'';await print(code,title);msg.textContent='Printed '+code;}catch(e){msg.textContent=e.message;}};}panel.open();}};
+    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');
+      root.innerHTML='<section class="v3-section"><label class="v3-field">Search code<input data-code></label><div class="v3-row"><button class="v3-btn primary" data-run>LOOKUP</button><button class="v3-btn" data-print>PRINT CODE</button></div><div class="v3-note" data-msg style="margin-top:8px"></div></section><section class="v3-section"><div data-out></div></section>';panel.set(root);
+      const input=root.querySelector('[data-code]'),msg=root.querySelector('[data-msg]'),out=root.querySelector('[data-out]');input.value=current();let last=null,generation=0;
+      input.oninput=()=>{generation++;last=null;out.innerHTML='';msg.textContent='Ready to look up';};life.own(()=>generation++);
+      root.querySelector('[data-run]').onclick=async()=>{
+        const code=C.clean(input.value);if(!code)return;const run=++generation;last=null;out.innerHTML='';msg.textContent='Loading…';
+        try{
+          const product=await fcr.product(code);if(run!==generation||C.clean(input.value)!==code)return;if(!product)throw new Error('Product not found');last=product;
+          out.innerHTML='<div class="v3-grid">'+[['ASIN',product.asin],['FNSKU',product.fnsku],['FCSKU',product.fcsku],['Sortable',product.sortableText],['Dimensions',product.dimensions],['Weight',product.weight]].map(([label,value])=>'<div><b>'+label+'</b><br>'+C.esc(value||'—')+(label==='Dimensions'&&product.suspicious?' <span class="v3-warn"><b>CHECK</b></span>':'')+'</div>').join('')+'</div><div style="margin-top:9px"><b>'+C.esc(product.title||'')+'</b></div>';
+          msg.className='v3-note v3-ok';msg.textContent='Ready';
+        }catch(error){if(run!==generation||C.clean(input.value)!==code)return;msg.className='v3-note v3-bad';msg.textContent=error.message;}
+      };
+      root.querySelector('[data-print]').onclick=async()=>{try{const code=C.clean(input.value),title=last&&[last.asin,last.fnsku,last.fcsku].some(value=>C.upper(value)===C.upper(code))?last.title:'';await print(code,title);msg.textContent='Printed '+code;}catch(error){msg.textContent=error.message;}};
+    }panel.open();}};
   }
 
   function totePanel(){
     const panel=C.panel({id:'fcr-tote',title:'V3 · Tote Audit',width:760,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const state={container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),seq:0,message:'Scan source container'};const root=document.createElement('div');root.innerHTML='<section class="v3-section"><div class="v3-note" data-summary>Scan tsX/csX to begin.</div><label class="v3-field">Scanner<input data-scan autocomplete="off"></label><div class="v3-row"><button class="v3-btn" data-reset>NEW TOTE</button></div><div class="v3-note" data-msg></div></section><section class="v3-section"><b>Physical scans</b><div data-scans></div></section><section class="v3-section"><b>System inventory</b><div data-system></div></section>';panel.set(root);const q=s=>root.querySelector(s),scan=q('[data-scan]');
-      const lookup=rows=>{const map=new Map();for(const row of rows){row._scan=0;for(const v of [row.asin,row.fnsku,row.fcsku]){const k=C.upper(v);if(!k)continue;if(!map.has(k))map.set(k,[]);map.get(k).push(row);}}return map;};
-      const allocate=(rows,n=1)=>{let left=n;for(const row of rows){if(left<=0)break;const room=Math.max(0,Number(row.qty||0)-Number(row._scan||0)),add=Math.min(room,left);row._scan+=add;left-=add;}return left;};
-      const match=(product,raw)=>{const keys=[raw,product?.asin,product?.isbn,product?.fnsku,product?.fcsku].map(C.upper).filter(Boolean),seen=new Set(),out=[];for(const key of keys)for(const row of state.lookup.get(key)||[]){const id=[row.container,row.asin,row.fnsku,row.fcsku,row.disposition].join('|');if(!seen.has(id)){seen.add(id);out.push(row);}}return out;};
-      const paint=()=>{const total=state.rows.reduce((s,r)=>s+Number(r.qty||0),0),scanned=state.rows.reduce((s,r)=>s+Number(r._scan||0),0);q('[data-summary]').textContent=(state.container||'NO CONTAINER')+' · '+scanned+'/'+total+' units';q('[data-msg]').textContent=state.message;q('[data-scans]').innerHTML=[...state.scans.values()].reverse().map(r=>'<div class="v3-list-row"><button class="v3-btn" data-print="'+C.esc(r.raw)+'">'+C.esc(r.raw)+(r.count>1?' ×'+r.count:'')+'</button> · <b class="'+(r.state==='found'?'v3-ok':r.state==='missing'?'v3-bad':'v3-warn')+'">'+r.state.toUpperCase()+'</b></div>').join('')||'<div class="v3-note">No scans.</div>';q('[data-system]').innerHTML=state.rows.map(r=>'<div class="v3-list-row"><b>'+C.esc(r.fnsku||r.fcsku||r.asin||'—')+'</b> · '+Number(r._scan||0)+'/'+Number(r.qty||0)+' · '+C.esc(r.title||r.asin||'')+'</div>').join('')||'<div class="v3-note">No inventory loaded.</div>';for(const b of q('[data-scans]').querySelectorAll('[data-print]'))b.onclick=async()=>{const rec=state.scans.get(C.upper(b.dataset.print));try{await print(rec.raw,rec.product?.title||'');state.message='Printed '+rec.raw;}catch(e){state.message='Print failed: '+e.message;}paint();};};
-      const load=async code=>{const seq=++state.seq;state.container=code;state.loading=true;state.rows=[];state.lookup=new Map();state.pending=[];state.scans.clear();state.message='Loading full inventory…';paint();try{const result=await fcr.inventory(code,{onPreview:p=>{if(seq===state.seq){state.message='Loading inventory page '+p.pages+'…';paint();}}});if(seq!==state.seq)return;state.rows=result.rows;state.lookup=lookup(result.rows);state.loading=false;state.message='Ready';const queued=state.pending.splice(0);paint();for(const v of queued)await handle(v);}catch(e){if(seq===state.seq){state.loading=false;state.message='Inventory failed: '+e.message;paint();}}};
-      const handle=async value=>{const raw=C.clean(value);if(!raw)return;if(!state.container){if(!C.container(raw)){state.message='SCAN SOURCE CONTAINER FIRST';paint();return;}return load(raw);}if(C.container(raw)&&C.upper(raw)!==C.upper(state.container))return load(raw);if(state.loading){state.pending.push(raw);state.message='Queued '+state.pending.length+' scan(s)';paint();return;}const key=C.upper(raw),old=state.scans.get(key);if(old){old.count++;allocate(old.matches);state.message=raw+' ×'+old.count;paint();return;}const seq=state.seq;const rec={raw,count:1,state:'checking',matches:[],product:null};state.scans.set(key,rec);paint();try{try{rec.product=await fcr.product(raw);}catch(error){if(!state.lookup.has(key))throw error;}if(seq!==state.seq)return;rec.matches=match(rec.product,raw);rec.state=rec.matches.length?'found':'missing';if(rec.matches.length)allocate(rec.matches);state.message=rec.matches.length?'IN '+state.container:'NOT IN '+state.container;telemetry.emit('tote.scan',{code:C.mask(raw),found:Boolean(rec.matches.length)});}catch(e){if(seq!==state.seq)return;rec.state='error';state.message=e.message;}paint();};
-      scan.onkeydown=async e=>{if(e.key!=='Enter')return;e.preventDefault();const v=scan.value;scan.value='';await handle(v);scan.focus({preventScroll:true});};q('[data-reset]').onclick=()=>{state.seq++;Object.assign(state,{container:'',loading:false,rows:[],lookup:new Map(),pending:[],scans:new Map(),message:'Scan source container'});paint();scan.focus();};paint();}panel.open();}};
+    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');
+      root.innerHTML='<section class="v3-section"><div class="v3-note" data-summary>Scan tsX/csX to begin.</div><label class="v3-field">Scanner<input data-scan autocomplete="off"></label><div class="v3-row"><button class="v3-btn" data-reset>NEW TOTE</button><button class="v3-btn primary" data-retry hidden>RETRY INVENTORY</button></div><div class="v3-note" data-msg></div></section><section class="v3-section"><b>Physical scans</b><div data-scans></div></section><section class="v3-section"><b>System inventory</b><div data-system></div></section>';panel.set(root);
+      const q=selector=>root.querySelector(selector),scan=q('[data-scan]');let audit;
+      const paint=state=>{
+        const total=audit.totals();q('[data-summary]').textContent=(state.container||'NO CONTAINER')+' · '+total.scanned+'/'+total.units+' units'+(total.overage?' · EXTRA '+total.overage:'');
+        q('[data-msg]').textContent=state.message;q('[data-retry]').hidden=state.phase!=='failed';
+        q('[data-scans]').innerHTML=[...state.scans.values()].reverse().map(row=>'<div class="v3-list-row"><button class="v3-btn" data-print="'+C.esc(row.raw)+'">'+C.esc(row.raw)+(row.count>1?' ×'+row.count:'')+'</button> · <b class="'+(row.state==='found'?'v3-ok':['missing','overage','error'].includes(row.state)?'v3-bad':'v3-warn')+'">'+row.state.toUpperCase()+'</b></div>').join('')||'<div class="v3-note">No scans.</div>';
+        q('[data-system]').innerHTML=state.rows.map(row=>'<div class="v3-list-row"><b>'+C.esc(row.fnsku||row.fcsku||row.asin||'—')+'</b> · '+row._scan+'/'+row.qty+' · '+C.esc(row.title||row.asin||'')+'</div>').join('')||'<div class="v3-note">No inventory loaded.</div>';
+        for(const button of q('[data-scans]').querySelectorAll('[data-print]'))button.onclick=async()=>{
+          const record=state.scans.get(C.upper(button.dataset.print));try{await print(record.raw,record.product?.title||record.matches[0]?.title||'');state.message='Printed '+record.raw;}catch(error){state.message='Print failed: '+error.message;}paint(state);
+        };
+      };
+      audit=V3.fcrAudit.create({inventory:fcr.inventory,product:fcr.product,onChange:paint,telemetry});
+      scan.onkeydown=async event=>{if(event.key!=='Enter')return;event.preventDefault();const value=scan.value;scan.value='';await audit.scan(value);scan.focus({preventScroll:true});};
+      q('[data-reset]').onclick=()=>{audit.reset();scan.focus();};q('[data-retry]').onclick=()=>audit.retry();life.own(audit.reset);paint(audit.state);
+    }panel.open();}};
   }
 
   function binPanel(){
     const panel=C.panel({id:'fcr-bin',title:'V3 · Bin Check',width:800,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const state={rows:[],floors:new Map(),filter:new Set(['P2','P3','P4']),message:'Snapshot native inventory when ready.'};const root=document.createElement('div');root.innerHTML='<section class="v3-section"><div class="v3-row"><button class="v3-btn primary" data-load>SNAPSHOT VISIBLE/FILTERED</button><button class="v3-btn" data-copy>COPY VISIBLE TSV</button><button class="v3-btn primary" data-floor="P2">P2</button><button class="v3-btn primary" data-floor="P3">P3</button><button class="v3-btn primary" data-floor="P4">P4</button></div><div class="v3-note" data-msg style="margin-top:8px"></div></section><section class="v3-section"><div data-list></div></section>';panel.set(root);const q=s=>root.querySelector(s);
-      const snapshot=()=>{const table=document.querySelector('#table-inventory');if(!table)throw new Error('Native inventory table not ready');const heads=[...table.querySelectorAll('thead th')].map(x=>C.lower(String(x.textContent||'').replace(/\(\d+\)/g,''))),find=(...n)=>heads.findIndex(h=>n.includes(h)),idx={container:find('container'),asin:find('asin'),fnsku:find('fnsku'),fcsku:find('fcsku'),qty:find('quantity','qty')};if(idx.container<0)throw new Error('Container column not found');let nodes=null;try{const jq=globalThis.jQuery||unsafeWindow?.jQuery,dt=jq&&jq.fn?.dataTable?.isDataTable?.(table)?jq(table).DataTable():null;if(dt)nodes=dt.rows({search:'applied'}).nodes().toArray();}catch{}if(!nodes)nodes=[...(table.tBodies?.[0]?.rows||[])].filter(row=>{const r=row.getBoundingClientRect(),s=getComputedStyle(row);return r.height>0&&s.display!=='none'&&s.visibility!=='hidden';});return nodes.map(row=>{const v=i=>i>=0?C.clean(row.cells[i]?.textContent):'';return{container:v(idx.container),asin:v(idx.asin),fnsku:v(idx.fnsku),fcsku:v(idx.fcsku),qty:Number(v(idx.qty).replace(/[^\d.-]/g,''))||0};}).filter(x=>x.container);};
+    return{open(){if(!mounted){mounted=true;const state={rows:[],floors:new Map(),filter:new Set(['P2','P3','P4']),generation:0,message:'Snapshot native inventory when ready.'};life.own(()=>state.generation++);const root=document.createElement('div');root.innerHTML='<section class="v3-section"><div class="v3-row"><button class="v3-btn primary" data-load>SNAPSHOT VISIBLE/FILTERED</button><button class="v3-btn" data-copy>COPY VISIBLE TSV</button><button class="v3-btn primary" data-floor="P2">P2</button><button class="v3-btn primary" data-floor="P3">P3</button><button class="v3-btn primary" data-floor="P4">P4</button></div><div class="v3-note" data-msg style="margin-top:8px"></div></section><section class="v3-section"><div data-list></div></section>';panel.set(root);const q=s=>root.querySelector(s);
+      const snapshot=()=>{
+        const table=document.querySelector('#table-inventory');if(!table)throw new Error('Native inventory table not ready');
+        const idx=V3.fcr.inventoryIndexes(table);if(idx.container<0||idx.qty<0)throw new Error('Container / quantity column not found');
+        let nodes=null;try{const jq=globalThis.jQuery||unsafeWindow?.jQuery,dt=jq&&jq.fn?.dataTable?.isDataTable?.(table)?jq(table).DataTable():null;if(dt)nodes=dt.rows({search:'applied'}).nodes().toArray();}catch{}
+        if(!nodes)nodes=[...(table.tBodies?.[0]?.rows||[])].filter(row=>{const rect=row.getBoundingClientRect(),style=getComputedStyle(row);return rect.height>0&&style.display!=='none'&&style.visibility!=='hidden';});
+        return nodes.map(row=>V3.fcr.inventoryRow(row,idx)).filter(row=>row?.container);
+      };
       const visibleRows=()=>state.rows.filter(r=>{const pod=V3.fcr.podOf(r.container),floor=pod?state.floors.get(pod)||'PX':'PX';return !/^P[234]$/.test(floor)||state.filter.has(floor);});
       const paint=()=>{q('[data-msg]').textContent=state.message;for(const b of root.querySelectorAll('[data-floor]'))b.classList.toggle('primary',state.filter.has(b.dataset.floor));q('[data-list]').innerHTML=visibleRows().map((r,i)=>{const pod=V3.fcr.podOf(r.container),floor=pod?state.floors.get(pod)||'…':'—';return'<div class="v3-list-row">'+(i+1)+'. <b>'+C.esc(floor)+'</b> · <button class="v3-btn" data-print="'+C.esc(r.container)+'">'+C.esc(r.container)+'</button> · <button class="v3-btn" data-print="'+C.esc(r.fnsku)+'">'+C.esc(r.fnsku||'—')+'</button> · '+C.esc(r.fcsku||'—')+' · Q'+r.qty+'</div>';}).join('')||'<div class="v3-note">No rows.</div>';for(const b of q('[data-list]').querySelectorAll('[data-print]'))b.onclick=async e=>{if(!e.altKey)return;try{await print(b.dataset.print);state.message='Printed '+b.dataset.print;}catch(err){state.message=err.message;}paint();};};
-      q('[data-load]').onclick=async()=>{try{state.rows=snapshot();state.floors.clear();state.message='Resolving '+state.rows.length+' filtered row(s)…';paint();const pods=[...new Set(state.rows.map(r=>V3.fcr.podOf(r.container)).filter(Boolean))];let cursor=0;const worker=async()=>{while(cursor<pods.length){const pod=pods[cursor++];state.floors.set(pod,await fcr.floor(pod));paint();}};await Promise.all(Array.from({length:Math.min(8,pods.length)},worker));state.message='Ready · Alt-click Container/FNSKU to print';paint();}catch(e){state.message=e.message;paint();}};
+      q('[data-load]').onclick=async()=>{
+        const generation=++state.generation;
+        try{
+          state.rows=snapshot();state.floors.clear();state.message='Resolving '+state.rows.length+' filtered row(s)…';paint();
+          const pods=[...new Set(state.rows.map(row=>V3.fcr.podOf(row.container)).filter(Boolean))];let cursor=0;
+          const worker=async()=>{while(generation===state.generation&&cursor<pods.length){const pod=pods[cursor++],floor=await fcr.floor(pod);if(generation!==state.generation)return;state.floors.set(pod,floor);paint();}};
+          await Promise.all(Array.from({length:Math.min(8,pods.length)},worker));
+          if(generation!==state.generation)return;state.message='Ready · Alt-click Container/FNSKU to print';paint();
+        }catch(error){if(generation===state.generation){state.message=error.message;paint();}}
+      };
       for(const b of root.querySelectorAll('[data-floor]'))b.onclick=()=>{state.filter.has(b.dataset.floor)?state.filter.delete(b.dataset.floor):state.filter.add(b.dataset.floor);paint();};
       q('[data-copy]').onclick=()=>{const rows=visibleRows(),text=['Floor\tContainer\tASIN\tFNSKU\tFCSKU\tQty',...rows.map(r=>{const pod=V3.fcr.podOf(r.container),floor=pod?state.floors.get(pod)||'PX':'';return[floor,r.container,r.asin,r.fnsku,r.fcsku,r.qty].join('\t');})].join('\n');if(typeof GM_setClipboard==='function')GM_setClipboard(text,'text');else navigator.clipboard?.writeText(text);state.message='Copied '+rows.length+' visible row(s)';paint();};paint();}panel.open();}};
   }
 
   function pandashPanel(){
     const panel=C.panel({id:'fcr-pandash',title:'V3 · Pandash',width:480,life});let mounted=false;
-    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">ASIN<input data-asin></label><button class="v3-btn primary" data-run>CHECK</button><div class="v3-note" data-msg></div></section>';panel.set(root);const input=root.querySelector('[data-asin]'),msg=root.querySelector('[data-msg]');input.value=/^B[A-Z0-9]{9}$/i.test(current())?current():'';root.querySelector('[data-run]').onclick=async()=>{try{let asin=C.upper(input.value);if(!asin){const p=await fcr.product(current());asin=C.upper(p?.asin);input.value=asin;}const x=await fcr.pandash(asin);msg.className='v3-note '+(x.allowed?'v3-ok':'v3-bad');msg.textContent='L'+x.level+' · '+x.message;}catch(e){msg.className='v3-note v3-bad';msg.textContent=e.message;}};}panel.open();}};
+    return{open(){if(!mounted){mounted=true;const root=document.createElement('div');root.innerHTML='<section class="v3-section"><label class="v3-field">ASIN<input data-asin></label><button class="v3-btn primary" data-run>CHECK</button><div class="v3-note" data-msg></div></section>';panel.set(root);
+      const input=root.querySelector('[data-asin]'),msg=root.querySelector('[data-msg]');input.value=/^B[A-Z0-9]{9}$/i.test(current())?current():'';let generation=0;
+      input.oninput=()=>{generation++;msg.className='v3-note';msg.textContent='CHECK required';};life.own(()=>generation++);
+      root.querySelector('[data-run]').onclick=async()=>{
+        const run=++generation,requested=input.value;let asin=C.upper(requested);msg.className='v3-note v3-warn';msg.textContent='Checking…';
+        try{
+          if(!asin){const product=await fcr.product(current());if(run!==generation||input.value!==requested)return;asin=C.upper(product?.asin);input.value=asin;}
+          const result=await fcr.pandash(asin);if(run!==generation||C.upper(input.value)!==asin)return;
+          msg.className='v3-note '+(result.allowed?'v3-ok':'v3-bad');msg.textContent='L'+result.level+' · '+result.message;
+        }catch(error){if(run!==generation)return;msg.className='v3-note v3-bad';msg.textContent=error.message;}
+      };
+    }panel.open();}};
   }
 
   function actionPanel({family,id,title,path,origin,button,fields,prepare}) {

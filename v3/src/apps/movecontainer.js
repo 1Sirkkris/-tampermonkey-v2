@@ -13,7 +13,7 @@ V3.boot=()=>{
       onSettings:settings,values:()=>({destination:V3.actions.destination(root.querySelector('[data-floor]').value,root.querySelector('[data-drop]').value)}),
       prepare:input=>{if(!input.destination)throw new Error('Select destination first');return input.destination;},
       action:(container,destination,maySubmit)=>V3.actions.moveContainer(container,destination,{telemetry,maySubmit})});
-    root.querySelector('[data-floor]').value=localStorage.getItem('bwu2.v3.move.floor')||'P2';settings();
+    const savedFloor=localStorage.getItem('bwu2.v3.move.floor');root.querySelector('[data-floor]').value=V3.actions.FLOORS.includes(savedFloor)?savedFloor:'P2';settings();
   };
   C.dockButton({id:'movecontainer',label:'MOVE',title:'V3 MoveContainer',onClick:()=>{mount();panel.open();}});
 };

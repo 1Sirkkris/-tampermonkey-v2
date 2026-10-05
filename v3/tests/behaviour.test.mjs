@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import {harness,tick} from './harness.mjs';
-const h=harness({url:'https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy',html:'<input id="destination" aria-label="Destination FC"><input id="container" aria-label="Container"><span class="app-user-name">krislogin</span>',modules:['core.js','state.js','transport.js','identity.js','native.js','actions.js','measurement.js','fcr-native.js']});
+const h=harness({url:'https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy',html:'<input id="destination" aria-label="Destination FC"><input id="container" aria-label="Container"><span class="app-user-name">krislogin</span>',modules:['core.js','state.js','transport.js','identity.js','native.js','hierarchy.js','measurement.js','fcr-audit.js','fcr-native.js']});
 try{
  assert.equal(h.V3.core.identity({pageWindow:h.w}).login,'krislogin');
  const own=h.w.document.createElement('div');own.dataset.bwu2Ui='1';own.innerHTML='<input data-user="wrongalias">';h.w.document.body.appendChild(own);assert.equal(h.V3.core.identity({pageWindow:h.w}).login,'krislogin');
  let observed=[];h.w.fetch=async(url,options)=>{observed.push({url,body:JSON.parse(options.body)});return {status:200,clone:()=>({text:async()=>JSON.stringify('AVV2')})};};
- h.w.document.getElementById('destination').addEventListener('keydown',event=>{if(event.key==='Enter')void h.w.fetch('/validateDestination',{body:'{"destinationWarehouseId":"opaque-avv2"}'});});
- const life=h.V3.core.lifecycle('bind');const proof=await h.V3.actions.validateDestinationNative('AVV2',{life});assert.equal(proof.facility,'AVV2');assert.equal(proof.destinationWarehouseId,'opaque-avv2');assert.equal(h.sharedStorage.values.size,0);
- h.V3.native.setValue(h.w.document.getElementById('destination'),'BWU1');await assert.rejects(h.V3.actions.bindNative('tsX1',proof,{life}),/fresh native validation/);assert.equal(observed.length,1);
+ h.w.document.getElementById('destination').addEventListener('keydown',event=>{if(event.key==='Enter')void h.w.fetch('/validateDestination',{method:'POST',body:'{"destinationWarehouseId":"opaque-avv2"}'});});
+ const life=h.V3.core.lifecycle('bind');const proof=await h.V3.hierarchy.validateDestinationNative('AVV2',{life});assert.equal(proof.facility,'AVV2');assert.equal(proof.destinationWarehouseId,'opaque-avv2');assert.equal(h.sharedStorage.values.size,0);
+ h.V3.native.setValue(h.w.document.getElementById('destination'),'BWU1');await assert.rejects(h.V3.hierarchy.bindNative('tsX1',proof,{life}),/fresh native validation/);assert.equal(observed.length,1);
  assert.equal(h.V3.fcrNative.exactBin({items:[{binDescription:'WRONG',skuDetail:{fnSku:'X999999999'}},{binDescription:'SMALL',skuDetail:{fnSku:'X012345678'}}]},['X012345678']),'SMALL');assert.throws(()=>h.V3.fcrNative.exactBin({items:[{binDescription:'WRONG',skuDetail:{fnSku:'X999999999'}}]},['X012345678']),/No exact/);
  const now=Date.now(),request=h.V3.measurement.route('https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com/prod/measurementEvents/X012345678/FNSKU?effectiveAfter='+new Date(now-31*86400000).toISOString()+'&effectiveBefore='+new Date(now).toISOString());
  assert.equal(h.V3.measurement.classify({measurementEvents:[]},request,now).madcat,false);assert.equal(h.V3.measurement.classify({measurementEvents:[],nextToken:'more'},request,now).madcat,null);assert.equal(h.V3.measurement.classify({measurementEvents:[{measurementSource:'MADCAT',measurementInstant:new Date(now-1).toISOString()}],nextToken:'more'},request,now).madcat,true);
