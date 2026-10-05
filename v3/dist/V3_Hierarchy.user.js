@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 Hierarchy
 // @name:en      V3 | BWU2 Hierarchy
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.1
 // @description  Native Bind/Unbind queues with typed Bind destination validation.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -12,13 +12,13 @@
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Hierarchy.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Hierarchy.user.js
-// @v3-build     hierarchy-0.2.0-f9a71e46
+// @v3-build     hierarchy-0.2.1-83bade04
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"hierarchy-0.2.0-f9a71e46","version":"0.2.0"});
+V3.build=Object.freeze({"id":"hierarchy-0.2.1-83bade04","version":"0.2.1"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -370,212 +370,217 @@ V3.native = (() => {
   return Object.freeze({visible,root,inputs,descriptor,findInput,setValue,enter,text,status,waitFor});
 })();
 
-// ---- src/actions.js ----
-V3.actions=(()=>{
-  const C=V3.core;
-  const MOVE_ORIGIN='https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com';
-  const HIERARCHY_ORIGIN='https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
-  const WAREHOUSE='BWU2';
-  const MOVE_PATH='/api/move-container';
-  const HIERARCHY={validate:'/validateContainer',summary:'/getTransshipmentBindingSummary',unbind:'/unbindContainer',destination:'/validateDestination'};
-  const FLOORS=['P1','P2','P3','P4'];
-  const UPPER=[
-    {key:'Cubiscan',label:'Cubiscan',pattern:'dz-Pcubiscan-{floor}'},
-    {key:'Damages',label:'Damages',pattern:'dz-P-Damages-{floor}'},
-    {key:'Hazmat',label:'Hazmat',pattern:'dz-P-Hazmat-{floor}'},
-    {key:'ISS',label:'ISS',pattern:'dz-P-ISS-{floor}'},
-    {key:'Non-Sort',label:'Non-Sort',pattern:'dz-Pnonsort-{floor}'},
-    {key:'Prep',label:'Prep',pattern:'dz-P-Prep-{floor}'}
-  ];
-  const P1=[
-    {key:'P1-Hazmat',label:'Hazmat',dest:'dz-P-HAZMAT_OUT'},
-    {key:'P1-Ticketland',label:'Ticketland',dest:'dz-P-Ticketland'},
-    {key:'P1-Consolidation',label:'Consolidation',dest:'dz-P-issconsol'},
-    {key:'P1-ISS-WIP',label:'ISS WIP',dest:'dz-S-ISSWIP1'},
-    {key:'P1-Nonsort',label:'Nonsort',dest:'dz-P-IB-nonsort'},
-    {key:'P1-Shipdock',label:'Shipdock',dest:'dz-P-ISS-Shipdock'},
-    {key:'P1-OBIOL',label:'OB IOL',dest:'dz-P-OBIOL'},
-    {key:'P1-Damageland',label:'Damageland',dest:'dz-Pdamageland'},
-    {key:'P1-Receive-Damages',label:'Receive Damages',dest:'dz-P-rcv-Damages'}
-  ];
-
-  const dropChoices=floor=>floor==='P1'?P1:UPPER;
-  const destination=(floor,key)=>{
-    if(key==='PRIME'||key==='Prime')return'dz-P-PRIME';
-    if(!FLOORS.includes(floor))return'';
-    const row=dropChoices(floor).find(x=>x.key===key||x.label===key);
-    return row?(floor==='P1'?row.dest:row.pattern.replace('{floor}',floor)):'';
+// ---- src/hierarchy.js ----
+V3.hierarchy = (() => {
+  const C = V3.core;
+  const ORIGIN = 'https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com', WAREHOUSE = 'BWU2';
+  const PATH = Object.freeze({validate:'/validateContainer',summary:'/getTransshipmentBindingSummary',destination:'/validateDestination',bind:'/forceBind',unbind:'/unbindContainer'});
+  const EVENT = 'bwu2-v3:hierarchy-response';
+  const normalizeFacility = value => /^[A-Z0-9]{3,8}$/.test(C.upper(value)) ? C.upper(value) : '';
+  const same = (a,b) => C.lower(a) === C.lower(b);
+  const cancelled = () => Object.assign(new Error('Paused before Hierarchy submission'),{outcome:'cancelled'});
+  const parseBody = body => {
+    if (body == null) return {};
+    if (typeof body === 'string') { try { return JSON.parse(body); } catch { return Object.fromEntries(new URLSearchParams(body)); } }
+    if (body instanceof URLSearchParams || body instanceof FormData) return Object.fromEntries(body);
+    return typeof body === 'object' ? body : {};
   };
-
-  const movePayload=(container,dest)=>({sourceScannableId:null,destinationScannableId:C.clean(dest),containerScannableId:C.clean(container),confirmed:'true'});
-  const strictMoveConfirmation=result=>{
-    if(!result||!Number.isInteger(Number(result.status))||Number(result.status)<=0||Number(result.status)>=500||Number(result.status)===408)throw new C.UnknownError('MoveContainer outcome unknown HTTP '+Number(result?.status||0));
-    if(Number(result.status)<200||Number(result.status)>=300)throw new C.RejectedError('MoveContainer rejected HTTP '+Number(result.status));
-    if(result.flags?.auth||result.flags?.html)throw new C.UnknownError('MoveContainer confirmation was an authentication/HTML response');
-    const expected=new URL(MOVE_ORIGIN+MOVE_PATH);
-    const actual=new URL(result.finalUrl||expected.href,expected.href);
-    if(actual.origin!==expected.origin||actual.pathname.replace(/\/+$/,'')!==expected.pathname.replace(/\/+$/,''))throw new C.UnknownError('MoveContainer confirmation redirected unexpectedly');
-    if(result.data?.success===false||result.data?.error||result.data?.errorMessage)throw new C.RejectedError(C.clean(result.data.message||result.data.errorMessage||'MoveContainer rejected'));
-    if(C.clean(result.raw)&&!(result.data?.success===true||result.data?.status==='SUCCESS'))throw new C.UnknownError('MoveContainer response not recognized — verify before retry');
-    return result;
+  const tokenFromBody = body => C.clean(parseBody(body)?.destinationWarehouseId);
+  const facilityFromResponse = data => {
+    if (typeof data === 'string') { try { data = JSON.parse(data); } catch {} }
+    return normalizeFacility(typeof data === 'string' ? data : data?.warehouseId || data?.destination || data?.facility || data?.fc);
   };
-  async function moveContainer(container,dest,{telemetry,maySubmit=()=>true}={}){
-    const code=C.clean(container),target=C.clean(dest);
-    if(!C.container(code))throw new Error('Container must be tsX/csX');
-    if(!target)throw new Error('Destination required');
-    if(!maySubmit())throw Object.assign(new Error('Paused before Move submission'),{outcome:'cancelled'});
-    const op=C.operation({kind:'move-container',ref:code,scope:'movecontainer',telemetry});op.submitted({destination:target});
-    let result;
-    try{
-      result=await C.request(MOVE_ORIGIN+MOVE_PATH,{method:'POST',body:JSON.stringify(movePayload(code,target)),headers:{'Content-Type':'application/json'},timeout:15000,allowHttpError:true});
-    }catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('Move submitted; confirmation lost — verify before retry',{cause:error});}
-    try{
-      strictMoveConfirmation(result);
-      op.confirmed({status:result.status,destination:target});
-      return result;
-    }catch(error){
-      if(error instanceof C.RejectedError){op.rejected({status:result.status});throw error;}
-      op.unknown({status:result.status,reason:C.clean(error.message)});throw error;
-    }
+  const errorResponse = data => data?.success === false || data?.error || data?.errorMessage;
+  const assertValidation = (data,code) => {
+    if (!data || typeof data !== 'object' || errorResponse(data)) throw new Error('Unexpected hierarchy validation response');
+    if (C.upper(data.warehouseId) !== WAREHOUSE) throw new Error('Container is not validated in '+WAREHOUSE);
+    if (!same(data.scannableId,code)) throw new Error('Validation returned another container');
+  };
+  const assertSummary = data => {
+    if (!Array.isArray(data?.transferBindingSummaryList) || errorResponse(data)) throw new Error('Unexpected binding summary');
+  };
+  const responseRoute = (result,path) => {
+    try { const url = new URL(result.finalUrl || ORIGIN+path);return url.origin === ORIGIN && url.pathname === path; } catch { return false; }
+  };
+  const cleanResponse = (result,path) => Number.isInteger(result?.status) && result.status >= 200 && result.status < 300 &&
+    !result.flags?.auth && !result.flags?.html && responseRoute(result,path);
+  const assertRead = (result,path) => {
+    if (!cleanResponse(result,path)) throw new Error('Hierarchy validation response was not confirmed');
+    return result.data;
+  };
+  const mutationResult = (result,path,code,destination) => {
+    const status = Number(result?.status);
+    if (!Number.isInteger(status) || status <= 0 || status >= 500 || status === 408 || result.flags?.auth || result.flags?.html || !responseRoute(result,path))
+      throw new C.UnknownError('Hierarchy response ambiguous — verify container');
+    if (status < 200 || status >= 300) throw new C.RejectedError('Hierarchy rejected HTTP '+status);
+    // hostName is the known V2 mutation response contract. Contradictory fields are never confirmation.
+    if (typeof result.data?.hostName !== 'string' || !C.clean(result.data.hostName) || errorResponse(result.data) ||
+      (result.data.scannableId != null && !same(result.data.scannableId,code)) ||
+      (destination && result.data.destinationWarehouseId != null && result.data.destinationWarehouseId !== destination))
+      throw new C.UnknownError('Hierarchy response did not prove the requested mutation — verify container');
+    return result.data;
+  };
+  const post = (path,body,options={}) => C.request(ORIGIN+path,{method:'POST',body:JSON.stringify(body),headers:{'Content-Type':'application/json'},timeout:15000,...options});
+  async function validateContainer(container) {
+    const code = C.clean(container),result = await post(PATH.validate,{warehouseId:WAREHOUSE,scannableId:code});
+    const data = assertRead(result,PATH.validate);assertValidation(data,code);return data;
   }
-
-  async function hierarchyPost(path,body,{timeout=15000,allowHttpError=false}={}){
-    return C.request(HIERARCHY_ORIGIN+path,{method:'POST',body:JSON.stringify(body),headers:{'Content-Type':'application/json'},timeout,allowHttpError});
+  async function bindingSummary(container) {
+    const result = await post(PATH.summary,{warehouseId:WAREHOUSE,scannableId:C.clean(container)});
+    const data = assertRead(result,PATH.summary);assertSummary(data);return data;
   }
-  async function validateContainer(container){
-    const code=C.clean(container),r=await hierarchyPost(HIERARCHY.validate,{warehouseId:WAREHOUSE,scannableId:code});
-    if(!r.data||typeof r.data!=='object')throw new Error('Unexpected hierarchy validation response');
-    if(C.upper(r.data.warehouseId)!==WAREHOUSE)throw new Error('Container is not validated in '+WAREHOUSE);
-    if(C.lower(r.data.scannableId)!==C.lower(code))throw new Error('Validation returned another container');
-    return r.data;
-  }
-  async function bindingSummary(container){
-    const code=C.clean(container),r=await hierarchyPost(HIERARCHY.summary,{warehouseId:WAREHOUSE,scannableId:code});
-    if(!Array.isArray(r.data?.transferBindingSummaryList))throw new Error('Unexpected binding summary');
-    return r.data;
-  }
-  async function unbind(container,login,{telemetry,maySubmit=()=>true}={}){
-    const code=C.clean(container),employee=C.normLogin(login);
-    if(!C.container(code))throw new Error('Container must be tsX/csX');
-    if(!employee)throw new Error('Authenticated employee identity unavailable');
+  async function unbind(container,login,{telemetry,maySubmit=()=>true}={}) {
+    const code = C.clean(container),employee = C.normLogin(login);
+    if (!C.container(code)) throw new Error('Container must be tsX/csX');
+    if (!employee) throw new Error('Authenticated employee identity unavailable');
+    if (!maySubmit()) throw cancelled();
     await validateContainer(code);await bindingSummary(code);
-    if(!maySubmit())throw Object.assign(new Error('Paused before Unbind submission'),{outcome:'cancelled'});
-    const op=C.operation({kind:'hierarchy-unbind',ref:code,scope:'hierarchy',telemetry});op.submitted();
-    let r;
-    try{r=await hierarchyPost(HIERARCHY.unbind,{sourceWarehouseId:WAREHOUSE,scannableId:code,employeeLogin:employee},{timeout:20000,allowHttpError:true});}
-    catch(error){op.unknown({reason:'transport'});throw new C.UnknownError('Unbind submitted; confirmation lost — verify before retry',{cause:error});}
-    if(r.status>=500||r.status===408){op.unknown({status:r.status});throw new C.UnknownError('Unbind HTTP '+r.status+' — verify before retry');}
-    if(r.status<200||r.status>=300){op.rejected({status:r.status});throw new C.RejectedError('Unbind rejected HTTP '+r.status);}
-    if(!C.clean(r.data?.hostName)){op.unknown({reason:'unexpected-response'});throw new C.UnknownError('Unbind response ambiguous — verify container');}
-    op.confirmed({status:r.status});return r.data;
-  }
-
-  // Bind deliberately uses the native page. The only native network traffic observed
-  // is /validateDestination, solely to map the user's typed FC to Amazon's opaque ID.
-  const FACILITY=/^[A-Z0-9]{3,8}$/;
-  const normalizeFacility=value=>{const fc=C.upper(value);return FACILITY.test(fc)?fc:'';};
-  let destinationSeq=0,destinationRevision=0;
-  const destinationProofs=[];
-  const endpointPath=value=>{try{const url=new URL(String(value||''),location.href);return url.origin===HIERARCHY_ORIGIN?url.pathname:'';}catch{return'';}};
-  const tokenFromBody=body=>{
-    if(body==null)return'';
-    if(typeof body==='object'){
-      try{
-        if(typeof FormData!=='undefined'&&body instanceof FormData)return C.clean(body.get('destinationWarehouseId'));
-        if(typeof URLSearchParams!=='undefined'&&body instanceof URLSearchParams)return C.clean(body.get('destinationWarehouseId'));
-        return C.clean(body.destinationWarehouseId);
-      }catch{return'';}
+    if (!maySubmit()) throw cancelled();
+    const op = C.operation({kind:'hierarchy-unbind',ref:code,scope:'hierarchy',telemetry});op.submitted();
+    try {
+      const result = await post(PATH.unbind,{sourceWarehouseId:WAREHOUSE,scannableId:code,employeeLogin:employee},{timeout:20000,allowHttpError:true});
+      const data = mutationResult(result,PATH.unbind,code);op.confirmed({status:result.status});return data;
+    } catch (error) {
+      if (error instanceof C.RejectedError) { op.rejected({reason:error.message});throw error; }
+      op.unknown({reason:'unbind-confirmation-missing'});
+      throw new C.UnknownError('Unbind submitted; result unproven — verify before retry',{cause:error});
     }
-    const raw=String(body);
-    try{return C.clean(JSON.parse(raw)?.destinationWarehouseId);}catch{}
-    const match=raw.match(/(?:^|&)destinationWarehouseId=([^&]*)/);
-    if(!match)return'';
-    try{return C.clean(decodeURIComponent(match[1].replace(/\+/g,' ')));}catch{return C.clean(match[1]);}
-  };
-  const facilityFromResponse=raw=>{
-    let value=raw;
-    if(typeof raw==='string'){try{value=JSON.parse(raw);}catch{}}
-    if(typeof value==='string')return normalizeFacility(value);
-    if(value&&typeof value==='object')return normalizeFacility(value.warehouseId||value.destination||value.facility||value.fc||'');
-    return'';
-  };
-  const recordDestination=(token,facility,status)=>{if(!token||!facility)return;destinationProofs.push({seq:++destinationSeq,token,facility,status:Number(status)||0,at:Date.now()});if(destinationProofs.length>12)destinationProofs.splice(0,destinationProofs.length-12);window.dispatchEvent(new Event('bwu2-v3:destination-validation'));};
-  function installDestinationTap(){
-    const page=typeof unsafeWindow==='object'&&unsafeWindow?unsafeWindow:window;
-    try{
-      const XHR=page.XMLHttpRequest;
-      if(XHR?.prototype&&!XHR.prototype.__bwu2V3GroundDestinationTap){
-        const nativeOpen=XHR.prototype.open,nativeSend=XHR.prototype.send;
-        XHR.prototype.open=function(method,url){this.__bwu2V3GroundDestinationPath=endpointPath(url);return nativeOpen.apply(this,arguments);};
-        XHR.prototype.send=function(body){
-          if(this.__bwu2V3GroundDestinationPath!==HIERARCHY.destination)return nativeSend.apply(this,arguments);
-          const token=tokenFromBody(body);
-          this.addEventListener('loadend',()=>{let raw='';try{if(!this.responseType||this.responseType==='text')raw=this.responseText||'';else if(this.responseType==='json')raw=JSON.stringify(this.response??null);}catch{}recordDestination(token,facilityFromResponse(raw),this.status);},{once:true});
-          return nativeSend.apply(this,arguments);
-        };
-        Object.defineProperty(XHR.prototype,'__bwu2V3GroundDestinationTap',{value:true,configurable:true});
-      }
-    }catch{}
-    try{
-      const nativeFetch=page.fetch;
-      if(typeof nativeFetch==='function'&&!nativeFetch.__bwu2V3GroundDestinationTap){
-        const wrapped=async function(input,init={}){
-          const rawUrl=typeof input==='string'||input instanceof URL?String(input):String(input?.url||'');
-          if(endpointPath(rawUrl)!==HIERARCHY.destination)return nativeFetch.apply(this,arguments);
-          const token=tokenFromBody(init?.body),response=await nativeFetch.apply(this,arguments);
-          let raw='';try{raw=await response.clone().text();}catch{}
-          recordDestination(token,facilityFromResponse(raw),response.status);return response;
-        };
-        Object.defineProperty(wrapped,'__bwu2V3GroundDestinationTap',{value:true});
-        page.fetch=wrapped;
-      }
-    }catch{}
   }
 
-  const visible=element=>V3.native.visible(element);
-  const findDestinationInput=()=>V3.native.findInput(/destination|warehouse|facility|\bfc\b/,/container|scannable|tote/);
-  const findContainerInput=()=>V3.native.findInput(/container|scannable|scan|tote/,/destination|warehouse|facility|\bfc\b/);
-  const setNative=(input,value)=>{V3.native.setValue(input,value);return true;};
-  const pressEnter=async(input)=>V3.native.enter(input);
-  const statusText=()=>V3.native.status();
-  const errorText=()=>{const text=statusText();return /error|invalid|failed|cannot|unable|reject|not found/i.test(text)?text:'';};
-  const pageText=()=>V3.native.text();
-  const waitFor=(predicate,options)=>V3.native.waitFor(predicate,options);
-
-  async function validateDestinationNative(destination,{life,telemetry}={}){
-    const fc=normalizeFacility(destination);if(!fc)throw new Error('Enter destination FC, e.g. BWU1 or AVV2');
-    installDestinationTap();const marker=destinationSeq,previousStatus=statusText(),input=findDestinationInput();if(!input)throw new Error('Native destination field not found');
-    if(!input.dataset.v3DestinationRevision){input.dataset.v3DestinationRevision='1';input.addEventListener('input',()=>{destinationRevision++;});input.addEventListener('change',()=>{destinationRevision++;});}
-    if(!setNative(input,fc))throw new Error('Could not enter destination FC');try{input.focus({preventScroll:true});}catch{}await pressEnter(input,life);
-    telemetry?.emit('hierarchy.destination.submit',{destination:fc});
-    const proof=await waitFor(()=>{const error=errorText();if(error&&error!==previousStatus)throw new Error(error);return destinationProofs.find(x=>x.seq>marker&&x.facility===fc&&x.status>=200&&x.status<300&&x.token);},{life,timeout:10000,events:['bwu2-v3:destination-validation']});
+  // Observe only native Hierarchy contracts; never send a Bind API request or retain credentials.
+  let sequence = 0, latestDestination = 0, destinationRecord = null, revision = 0, installed = false;
+  const records = [], watchedInputs = new WeakSet();
+  const endpoint = value => {
+    try { const url = new URL(String(value || ''),location.href);return url.origin === ORIGIN &&
+      [PATH.validate,PATH.summary,PATH.destination,PATH.bind].includes(url.pathname) ? url.pathname : ''; } catch { return ''; }
+  };
+  const notify = () => window.dispatchEvent(new Event(EVENT));
+  const begin = (path,method,body) => {
+    const data = parseBody(body);
+    const record = {seq:++sequence,path,method:C.upper(method),request:{scannableId:C.clean(data?.scannableId),warehouseId:C.upper(data?.warehouseId),sourceWarehouseId:C.clean(data?.sourceWarehouseId),destinationWarehouseId:C.clean(data?.destinationWarehouseId)},done:false};
+    if (path === PATH.destination) { latestDestination = record.seq;destinationRecord = record; }
+    records.push(record);if(records.length > 32) records.shift();notify();return record;
+  };
+  const finish = (record,status,raw,finalUrl,contentType='') => {
+    let data;try { data = JSON.parse(raw); } catch { data = raw; }
+    // Retain only fields used for proof; summary contents and employee identity are unnecessary.
+    record.result = {status:Number(status)||0,finalUrl:finalUrl || ORIGIN+record.path,
+      flags:V3.transport.authLike(status,contentType,finalUrl,raw),data:typeof data === 'object' && data ? {
+        warehouseId:data.warehouseId,scannableId:data.scannableId,hostName:data.hostName,destinationWarehouseId:data.destinationWarehouseId,
+        success:data.success,error:Boolean(data.error),errorMessage:Boolean(data.errorMessage),
+        transferBindingSummaryList:Array.isArray(data.transferBindingSummaryList)?[]:undefined,
+        destination:data.destination,facility:data.facility,fc:data.fc
+      }:data};record.done = true;notify();
+  };
+  function installNativeTap() {
+    if (installed) return;installed = true;
+    const page = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+    const XHR = page.XMLHttpRequest;
+    if (XHR?.prototype) {
+      const nativeOpen = XHR.prototype.open,nativeSend = XHR.prototype.send,requests = new WeakMap();
+      XHR.prototype.open = function(method,url) { const result = nativeOpen.apply(this,arguments);requests.set(this,{path:endpoint(url),method});return result; };
+      XHR.prototype.send = function(body) {
+        const request = requests.get(this);
+        if (request?.path) {
+          const record = begin(request.path,request.method,body);
+          this.addEventListener('loadend',() => {
+            let raw = '',contentType = '';try { raw = this.responseType === 'json' ? JSON.stringify(this.response) : this.responseText;contentType = this.getResponseHeader('content-type') || ''; } catch {}
+            finish(record,this.status,raw,this.responseURL,contentType);
+          },{once:true});
+          try { return nativeSend.apply(this,arguments); } catch (error) { finish(record,0,'','');throw error; }
+        }
+        return nativeSend.apply(this,arguments);
+      };
+    }
+    const nativeFetch = page.fetch;
+    if (typeof nativeFetch === 'function') page.fetch = function(input,init) {
+      const path = endpoint(typeof input === 'string' || input instanceof URL ? input : input?.url);
+      if (!path) return nativeFetch.apply(this,arguments);
+      const record = begin(path,init?.method || input?.method || 'GET',init?.body);
+      // Clone a Request body without consuming the native request. Sequence belongs to request start.
+      const bodyReady = init?.body == null && typeof input?.clone === 'function' ?
+        input.clone().text().then(body => { const data = parseBody(body);record.request = {scannableId:C.clean(data?.scannableId),warehouseId:C.upper(data?.warehouseId),sourceWarehouseId:C.clean(data?.sourceWarehouseId),destinationWarehouseId:C.clean(data?.destinationWarehouseId)}; }).catch(()=>{}) : Promise.resolve();
+      let response;
+      try { response = nativeFetch.apply(this,arguments); } catch (error) { finish(record,0,'','');throw error; }
+      return Promise.resolve(response).then(value => {
+        void bodyReady.then(async()=>{try { finish(record,value.status,await value.clone().text(),value.url,value.headers?.get('content-type') || ''); } catch { finish(record,value.status,'',value.url); }});
+        return value;
+      },error => { finish(record,0,'','');throw error; });
+    };
+  }
+  const destinationInput = () => V3.native.findInput(/destination|warehouse|facility|\bfc\b/,/container|scannable|tote/);
+  const containerInput = () => V3.native.findInput(/container|scannable|scan|tote/,/destination|warehouse|facility|\bfc\b/);
+  const waitFor = (predicate,life,timeout=12000) => V3.native.waitFor(predicate,{life,timeout,events:[EVENT]});
+  const after = (path,marker,predicate=()=>true) => records.find(record=>record.seq>marker && record.path===path && predicate(record));
+  const sameContainer = code => record => record.method === 'POST' && same(record.request.scannableId,code);
+  function assertContext(context) {
+    const proof = destinationRecord,fc = normalizeFacility(context?.facility);
+    if (!fc || !context?.destinationWarehouseId || context.revision!==revision || latestDestination!==context.proofSeq ||
+      !proof?.done || !cleanResponse(proof.result,PATH.destination) || facilityFromResponse(proof.result.data)!==fc ||
+      proof.request.destinationWarehouseId!==context.destinationWarehouseId)
+      throw new Error('Destination changed — fresh native validation required');
+    return fc;
+  }
+  async function validateDestinationNative(destination,{life,telemetry}={}) {
+    const fc = normalizeFacility(destination);if(!fc) throw new Error('Enter destination FC, e.g. BWU1 or AVV2');
+    installNativeTap();const marker = sequence,input = destinationInput();if(!input) throw new Error('Native destination field not found');
+    if (!watchedInputs.has(input)) { watchedInputs.add(input);for(const event of ['input','change'])input.addEventListener(event,()=>revision++); }
+    V3.native.setValue(input,fc);try { input.focus({preventScroll:true}); } catch {}V3.native.enter(input);
+    const proof = await waitFor(()=>{
+      const record = after(PATH.destination,marker,record=>record.method==='POST' && record.seq===latestDestination);
+      if (!record?.done) return false;
+      if (!cleanResponse(record.result,PATH.destination) || facilityFromResponse(record.result.data)!==fc || !record.request.destinationWarehouseId)
+        throw new Error('Native destination validation did not prove '+fc);
+      return record;
+    },life,10000);
     telemetry?.emit('hierarchy.destination.validated',{destination:fc});
-    return Object.freeze({facility:fc,destinationWarehouseId:proof.token,proofSeq:proof.seq,revision:destinationRevision});
+    return Object.freeze({facility:fc,destinationWarehouseId:proof.request.destinationWarehouseId,proofSeq:proof.seq,revision});
   }
-
-  const nativeScan=async(container,life)=>{const input=findContainerInput();if(!input)throw new Error('Native container scan field not found');if(!setNative(input,container))throw new Error('Could not enter container');try{input.focus({preventScroll:true});}catch{}const before=pageText();await pressEnter(input,life);return before;};
-  async function bindNative(container,context,{life,telemetry,maySubmit=()=>true}={}){
-    const code=C.clean(container),fc=normalizeFacility(context?.facility);if(!C.container(code))throw new Error('Container must be tsX/csX');if(!fc||!C.clean(context?.destinationWarehouseId))throw new Error('Destination must be validated before Bind');
-    const latest=destinationProofs.at(-1);if(context.revision!==destinationRevision||latest?.seq!==context.proofSeq||latest?.facility!==fc||latest?.token!==context.destinationWarehouseId)throw new Error('Destination changed — fresh native validation required');
-    const before1=await nativeScan(code,life);
-    await waitFor(()=>{const error=errorText();if(error)throw new C.RejectedError(error);const text=pageText(),input=findContainerInput();return text!==before1&&input&&visible(input)&&!input.disabled&&C.clean(input.value)!==code;},{life,timeout:12000,});
-    if(!maySubmit())throw Object.assign(new Error('Paused before Bind submission'),{outcome:'cancelled'});
-    if(context.revision!==destinationRevision)throw new Error('Destination changed before Bind — validate again');
-    const op=C.operation({kind:'hierarchy-bind',ref:code,scope:'hierarchy',telemetry});op.submitted({destination:fc});
-    const previousStatus=statusText();
-    try{await nativeScan(code,life);
-      const proof=await waitFor(()=>{const error=errorText();if(error)throw new C.RejectedError(error);const status=statusText();return status!==previousStatus&&/(?:successfully|container.*bound|binding.*complete)/i.test(status)?status:'';},{life,timeout:15000,});
-      op.confirmed({destination:fc,proof:C.clean(proof).slice(0,100)});return{container:code,destination:fc};
-    }catch(error){
-      if(error instanceof C.RejectedError){op.rejected({reason:C.clean(error.message)});throw error;}
-      op.unknown({reason:'native-confirmation-missing'});throw new C.UnknownError('Bind submitted but native page did not prove success — verify container',{cause:error});
+  const nativeScan = (code,beforeEnter) => {
+    const input = containerInput();if(!input) throw new Error('Native container scan field not found');
+    V3.native.setValue(input,code);try { input.focus({preventScroll:true}); } catch {}beforeEnter?.();V3.native.enter(input);
+  };
+  async function bindNative(container,context,{life,telemetry,maySubmit=()=>true}={}) {
+    const code = C.clean(container);if(!C.container(code)) throw new Error('Container must be tsX/csX');
+    const fc = assertContext(context);if(!maySubmit()) throw cancelled();
+    const marker = sequence,op = C.operation({kind:'hierarchy-bind',ref:code,scope:'hierarchy',telemetry});
+    // The native page may already be at confirmation: even the first scan can submit a mutation.
+    op.submitted({destination:fc});
+    let scanned=false,safeToCancel=false;
+    try {
+      nativeScan(code,()=>{scanned=true;});
+      const stage = await waitFor(()=>{
+        const bound = after(PATH.bind,marker);if(bound) return {bound};
+        const validation = after(PATH.validate,marker,sameContainer(code)),summary = after(PATH.summary,marker,sameContainer(code));
+        if(validation?.done) { assertValidation(assertRead(validation.result,PATH.validate),code);if(validation.request.warehouseId!==WAREHOUSE)throw new Error('Native validation used another warehouse'); }
+        if(summary?.done) { assertSummary(assertRead(summary.result,PATH.summary));if(summary.request.warehouseId!==WAREHOUSE)throw new Error('Native summary used another warehouse'); }
+        const input = containerInput();
+        return validation?.done && summary?.done && input && !input.disabled && !same(input.value,code) ? {ready:true} : false;
+      },life);
+      let bound = stage.bound;
+      if (!bound) {
+        safeToCancel=true;
+        if(!maySubmit()) throw cancelled();assertContext(context);
+        const secondMarker = sequence;nativeScan(code,()=>{safeToCancel=false;});
+        bound = await waitFor(()=>after(PATH.bind,secondMarker),life,15000);
+      }
+      await waitFor(()=>bound.done,life,15000);
+      // Success text has no authority. Both the native request and response must match this operation.
+      if(records.filter(record=>record.seq>marker && record.path===PATH.bind).length!==1 || bound.method!=='POST' || !same(bound.request.scannableId,code) || !bound.request.sourceWarehouseId ||
+        bound.request.destinationWarehouseId!==context.destinationWarehouseId)
+        throw new C.UnknownError('Native Bind request did not match container/destination');
+      assertContext(context);mutationResult(bound.result,PATH.bind,code,context.destinationWarehouseId);
+      op.confirmed({destination:fc,status:bound.result.status});return {container:code,destination:fc};
+    } catch(error) {
+      const submitted = after(PATH.bind,marker);
+      if((!scanned || (safeToCancel && !submitted)) || error instanceof C.RejectedError) { op.rejected({reason:C.clean(error.message)});throw error; }
+      op.unknown({reason:'native-bind-confirmation-missing'});
+      throw new C.UnknownError('Bind submitted; requested result unproven — verify container',{cause:error});
     }
   }
-
-  const ownedMove=(...args)=>V3.state.exclusive('movecontainer',()=>{V3.state.assertClear('movecontainer');return moveContainer(...args);});
-  const ownedUnbind=(...args)=>V3.state.exclusive('hierarchy',()=>{V3.state.assertClear('hierarchy');return unbind(...args);});
-  const ownedBind=(...args)=>V3.state.exclusive('hierarchy',()=>{V3.state.assertClear('hierarchy');return bindNative(...args);});
-  return Object.freeze({MOVE_ORIGIN,HIERARCHY_ORIGIN,WAREHOUSE,FLOORS,UPPER,P1,dropChoices,destination,movePayload,strictMoveConfirmation,moveContainer:ownedMove,validateContainer,bindingSummary,unbind:ownedUnbind,normalizeFacility,tokenFromBody,facilityFromResponse,validateDestinationNative,bindNative:ownedBind});
+  const owned = fn => (...args) => V3.state.exclusive('hierarchy',()=>{V3.state.assertClear('hierarchy');return fn(...args);});
+  return Object.freeze({ORIGIN,WAREHOUSE,normalizeFacility,tokenFromBody,facilityFromResponse,validateContainer,bindingSummary,
+    validateDestinationNative,bindNative:owned(bindNative),unbind:owned(unbind)});
 })();
 
 // ---- src/bridge.js ----
@@ -709,15 +714,15 @@ V3.boot=()=>{
   const C=V3.core,life=C.lifecycle('hierarchy'),telemetry=C.telemetry('hierarchy',V3.build.version);
   const login=()=>C.identity().login;
   if(location.hash==='#v3-hierarchy-worker'&&window.parent!==window){
-    V3.bridge.server({family:'hierarchy',life,commands:{run:input=>V3.actions.unbind(input.container,login(),{telemetry}),resolve:()=>V3.state.resolveAttention('hierarchy')},allowed:V3.bridge.isFCR});return;
+    V3.bridge.server({family:'hierarchy',life,commands:{run:input=>V3.hierarchy.unbind(input.container,login(),{telemetry}),resolve:()=>V3.state.resolveAttention('hierarchy')},allowed:V3.bridge.isFCR});return;
   }
   const bind=/\/bindHierarchy/i.test(location.pathname),panel=C.panel({id:'hierarchy',title:'V3 · '+(bind?'Bind':'Unbind'),width:600,life});let mounted=false;
   const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');panel.set(root);
     V3.queueUI.mount(root,{name:'hierarchy-'+(bind?'bind':'unbind'),scope:'hierarchy',life,
       fields:bind?'<label class="v3-field">Destination FC<input data-setting data-dest autocomplete="off" placeholder="BWU1 / AVV2"></label>':'',
       values:()=>({destination:root.querySelector('[data-dest]')?.value}),
-      prepare:async input=>bind?V3.actions.validateDestinationNative(input.destination,{life,telemetry}):null,
-      action:(container,context,maySubmit)=>bind?V3.actions.bindNative(container,context,{life,telemetry,maySubmit}):V3.actions.unbind(container,login(),{telemetry,maySubmit})});
+      prepare:async input=>bind?V3.hierarchy.validateDestinationNative(input.destination,{life,telemetry}):null,
+      action:(container,context,maySubmit)=>bind?V3.hierarchy.bindNative(container,context,{life,telemetry,maySubmit}):V3.hierarchy.unbind(container,login(),{telemetry,maySubmit})});
   };
   C.dockButton({id:'hierarchy',label:bind?'BIND':'UNBIND',title:'V3 Hierarchy',onClick:()=>{mount();panel.open();}});
 };

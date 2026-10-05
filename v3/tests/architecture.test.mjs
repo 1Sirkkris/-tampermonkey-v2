@@ -32,6 +32,14 @@ assert.ok(actions.includes("destination:'/validateDestination'"));
 assert.ok(!/localStorage|sessionStorage|GM_setValue|GM\.setValue/.test(actions.slice(actions.indexOf('// Bind deliberately'),actions.indexOf('return Object.freeze'))),'Bind destination proof must stay memory-only');
 assert.ok(!actions.includes("forceBind"),'Ground-up Bind must not directly call forceBind');
 
+// Hierarchy owns the active canonical Bind/Unbind engine; FCR uses its worker.
+assert.ok(byId.hierarchy.sources.includes('src/hierarchy.js'));
+assert.ok(!byId.hierarchy.sources.includes('src/actions.js'));
+const hierarchy=fs.readFileSync(path.join(root,'src/hierarchy.js'),'utf8');
+assert.ok(!/post\(PATH\.bind|C\.request\([^\n]*PATH\.bind/.test(hierarchy),'Bind must remain a native submission');
+assert.ok(!/localStorage|sessionStorage|setInterval/.test(hierarchy),'Native proof is memory-only and event-driven');
+assert.ok(!fs.readFileSync(path.join(root,'src/apps/hierarchy.js'),'utf8').includes('V3.actions.'));
+
 assert.notEqual(byId.obs.output,byId.screenshot.output,'OBS and Screenshot must remain independent');
 
 const core=fs.readFileSync(path.join(root,'src/core.js'),'utf8'),bridge=fs.readFileSync(path.join(root,'src/bridge.js'),'utf8');

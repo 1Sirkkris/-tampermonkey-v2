@@ -150,7 +150,7 @@
     {
       "id": "hierarchy",
       "name": "V3 | BWU2 Hierarchy",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Native Bind/Unbind queues with typed Bind destination validation.",
       "match": [
         "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*",
@@ -169,7 +169,7 @@
         "src/transport.js",
         "src/identity.js",
         "src/native.js",
-        "src/actions.js",
+        "src/hierarchy.js",
         "src/bridge.js",
         "src/queue-ui.js",
         "src/apps/hierarchy.js"

@@ -1,7 +1,7 @@
-# Rebuild checkpoint — batch 2 complete
+# Rebuild checkpoint — batch 3 complete
 
 Branch: `v3-groundup`.
-Current approved scope: AFT Tools + ISS Console. Batch 1 history follows.
+Current approved scope: Hierarchy only. Batches 1–2 history follows.
 Status: implementation and automated validation complete; live Amazon testing pending. STOP HERE until the user approves a further batch.
 
 ## Delivered versions
@@ -43,6 +43,22 @@ Reproduced invalid calendar dates being rejected only after the native engine co
 
 Full npm verification passed, including new date fixtures: invalid first/later rows cause zero requests/removals, leap-day success, replacement failure preserves attention, and earlier confirmed rows are excluded from a later failure. Existing ISS startup/Stop regressions also pass. No live Amazon mutations were performed; deployed markup and backend outcomes remain unproven.
 
-## Next checkpoint — approval required
+## Batch 2 checkpoint — superseded by batch 3 approval
 
 Proposed: Hierarchy only. Reproduced Bind falsely confirming a different container's success text. Review exact Bind identity proof and preserve Unbind contracts. Its current shared actions module is also bundled into FCResearch and MoveContainer: isolate Hierarchy's adapter before implementing so those installers remain unchanged. If that cannot be achieved without behaviour changes to other scripts, stop for revised approval. Do not start this batch automatically.
+
+## Batch 3 — approved Hierarchy only
+
+Delivered `V3_Hierarchy.user.js` 0.2.1. The other thirteen installers are byte-identical to this batch's parent. V2 files remain untouched.
+
+Reproduced Bind accepting another container's success text. V2 native contracts provided the evidence for `/validateContainer`, `/getTransshipmentBindingSummary`, `/validateDestination` and `/forceBind`: request container/destination must match, validations must prove BWU2 and response must contain the known nonempty string `hostName`. Success text alone is no longer proof. The new event-driven native observer correlates request-start sequence, POST method, container and destination and rejects contradictory, missing, redirected or error responses. It observes native Bind; it never issues a Bind API request. Only fields needed for proof are retained in bounded memory, without credentials or idle polling.
+
+The native page can submit on its first scan when already at confirmation. Journal ownership is persisted before scanning, and an observed first-scan Bind is confirmed without a second scan. Submitted ambiguity creates a persistent UNKNOWN barrier; pause prevents the next scan while allowing submitted confirmation to finish. Destination proof remains valid through long queues and is invalidated on native destination changes. Unbind keeps authenticated identity and V2 request shape; malformed/contradictory mutation responses require review, and pause before submission sends no mutation.
+
+The active canonical Hierarchy engine is now `src/hierarchy.js`, used by both native UI and its FCResearch worker. Hierarchy no longer imports the unrelated movement module. Older unreachable Hierarchy helpers remain inside the unchanged FCResearch/MoveContainer bundles until their approved cleanup batch; those apps invoke the Hierarchy worker rather than those legacy helpers.
+
+`npm run verify` passed. New fixtures cover native XHR, fetch and Request bodies; exact request/response proof; text-only and not-bound messages; wrong container/destination; first-scan mutation; duplicate submission detection; lost/negative/HTML/redirected responses; UNKNOWN replay and reload barriers; changed destination; pause before Bind and after submission; a long queue beyond the traffic buffer; and Unbind payload, authenticated identity, pause, read validation, rejection and uncertain outcomes. No live Amazon inventory mutations were submitted. Current deployed markup and backend contracts remain unproven until a live test.
+
+## Current next batch — approval required
+
+FCResearch + MoveContainer. Review native movement, destination selection, audit/bin behaviour and movement outcomes against V2; remove their unused Hierarchy helpers now that native Hierarchy owns the active engine. Keep other installers unchanged. Shared module behaviour outside this pair requires revised approval. STOP HERE; do not start automatically.
