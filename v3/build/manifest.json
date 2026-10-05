@@ -369,8 +369,8 @@
     {
       "id": "sim",
       "name": "V3 | BWU2 SIM Toolbar",
-      "version": "0.2.9",
-      "description": "SIM Markdown toolbar, snippets, attachments and fast native-checkbox ticket range selection.",
+      "version": "0.3.0",
+      "description": "SIM Markdown toolbar, snippets, attachments and independent ticket range/drag selection.",
       "match": [
         "https://t.corp.amazon.com/*"
       ],

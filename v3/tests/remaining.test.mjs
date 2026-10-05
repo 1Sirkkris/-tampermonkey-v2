@@ -33,11 +33,26 @@ const panel=(h,id)=>h.w.document.querySelector(`[data-bwu2-v3-panel="${id}"]`);
  const h2=harness({url:'https://t.corp.amazon.com/example',html:'<div contenteditable="true" role="textbox">hello</div>'});
  try{boot(h2,'sim');const el=h2.w.document.querySelector('[contenteditable]'),range=h2.w.document.createRange();range.selectNodeContents(el);h2.w.getSelection().addRange(range);h2.w.document.querySelector('[data-v3-button="sim"]').click();await tick();panel(h2,'sim').querySelector('[data-wrap]').click();assert.equal(el.textContent,'**hello**');}finally{h2.close();}
 }
-// Range selection follows ticket identities across React replacement and preserves an outside selected row.
+// SIM owns multi-selection independently of React checkboxes: native anchor + Shift range opens the range without mutating intermediate native boxes.
 {
- const h=harness({url:'https://t.corp.amazon.com/issues'});const selected=new Set([4]);
- const render=()=>{h.w.document.querySelector('#root').innerHTML='<table><tbody>'+[1,2,3,4].map(i=>`<tr><td><input type="checkbox" data-index="${i}" ${selected.has(i)?'checked':''}></td><td><a href="/issues/id${i}">P000000${i}</a></td></tr>`).join('')+'</tbody></table>';for(const box of h.w.document.querySelectorAll('[data-index]'))box.onclick=()=>{const i=Number(box.dataset.index);box.checked?selected.add(i):selected.delete(i);render();};};render();
- try{boot(h,'sim');h.w.document.querySelector('[data-index="1"]').click();await frame();const third=h.w.document.querySelector('[data-index="3"]');third.dispatchEvent(new h.w.MouseEvent('pointerdown',{bubbles:true,shiftKey:true,button:0}));third.dispatchEvent(new h.w.MouseEvent('pointerup',{bubbles:true,shiftKey:true,button:0}));await frame();assert.deepEqual([...selected].sort(),[1,2,3,4]);h.w.document.querySelector('#v3-sim-nav-bar [data-clear]').click();assert.equal(selected.size,0);}finally{h.close();}
+ const h=harness({url:'https://t.corp.amazon.com/issues'}),native=new Set([4]),opened=[];
+ h.w.GM_openInTab=url=>opened.push(url);
+ const render=()=>{h.w.document.querySelector('#root').innerHTML='<table><tbody>'+[1,2,3,4].map(i=>`<tr><td><input type="checkbox" data-index="${i}" ${native.has(i)?'checked':''}></td><td><a href="/issues/id${i}">P000000${i}</a></td></tr>`).join('')+'</tbody></table>';for(const box of h.w.document.querySelectorAll('[data-index]'))box.onclick=()=>{const i=Number(box.dataset.index);box.checked?native.add(i):native.delete(i);render();};};render();
+ try{
+  boot(h,'sim');
+  h.w.document.querySelector('[data-index="1"]').click();await frame();
+  const hit=h.w.document.querySelector('[data-index="3"]').closest('td').querySelector('[data-v3-sim-hit]');
+  hit.dispatchEvent(new h.w.MouseEvent('pointerdown',{bubbles:true,shiftKey:true,button:0,buttons:1,clientY:0}));
+  hit.dispatchEvent(new h.w.MouseEvent('pointerup',{bubbles:true,shiftKey:true,button:0,buttons:0,clientY:0}));
+  await frame();
+  assert.deepEqual([...native].sort(),[1,4]);
+  const marked=[...h.w.document.querySelectorAll('tr[data-v3-sim-selected="1"] a')].map(a=>a.textContent);
+  assert.deepEqual(marked,['P0000001','P0000002','P0000003','P0000004']);
+  h.w.document.querySelector('#v3-sim-nav-bar [data-open]').click();
+  assert.equal(opened.length,4);
+  h.w.document.querySelector('#v3-sim-nav-bar [data-clear]').click();
+  assert.equal(native.size,0);
+ }finally{h.close();}
 }
 function obs(shared=new Map(),fail=()=>false,setup=()=>{}){
  const h=harness(),menus=new Map();let exported;

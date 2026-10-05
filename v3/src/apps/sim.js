@@ -54,18 +54,12 @@ V3.boot=()=>{
     if(navStarted||!/^\/issues(?:\/|$)/.test(location.pathname))return;
     navStarted=true;
 
-    let rows=[],lastIndex=-1,scanQueued=false,syncing=false,busy=false,drag=null,suppressShiftClick=false;
+    let rows=[],anchorUrl=null,scanQueued=false,drag=null,scopeKey=location.pathname+location.search;
+    let selected=new Set();
 
     const checked=box=>box?.matches?.('input[type="checkbox"]')
       ? !!box.checked
       : box?.getAttribute?.('aria-checked')==='true';
-
-    const nativeToggle=(box,on)=>{
-      if(!box||box.disabled||box.getAttribute('aria-disabled')==='true'||checked(box)===on)return false;
-      syncing=true;
-      try{box.click();}finally{syncing=false;}
-      return true;
-    };
 
     const style=document.createElement('style');
     style.dataset.bwu2Ui='1';
@@ -73,16 +67,16 @@ V3.boot=()=>{
     style.textContent=`
 [data-v3-sim-check-cell]{position:relative}
 [data-v3-sim-check-cell]::after{content:attr(data-v3-sim-row-number);position:absolute;right:2px;top:50%;transform:translateY(-50%);min-width:10px;text-align:center;color:#6b7785;font:800 9px/1 Arial,sans-serif;pointer-events:none}
-[data-v3-sim-check-cell][data-v3-sim-checked="1"]::after{color:#245b86}
-[data-v3-sim-preview="on"]{background:rgba(35,110,170,.10)!important}
-[data-v3-sim-preview="off"]{background:rgba(176,0,32,.07)!important}
+[data-v3-sim-check-cell][data-v3-sim-selected="1"]::after{color:#245b86}
+tr[data-v3-sim-selected="1"]>td,[role="row"][data-v3-sim-selected="1"]>[role="cell"]{background:rgba(47,95,136,.08)}
+[data-v3-sim-hit]{position:absolute;inset:0;z-index:4;pointer-events:none;background:transparent}
+html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crosshair}
 #v3-sim-nav-bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147482998;display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px solid #b7c1cc;border-radius:7px;background:#fff;color:#27384b;box-shadow:0 3px 10px #0002;font:800 11px Arial,sans-serif}
 #v3-sim-nav-bar[hidden]{display:none!important}
 #v3-sim-nav-bar strong{min-width:70px;padding:0 4px;text-align:center;white-space:nowrap}
 #v3-sim-nav-bar .v3-btn{height:28px;padding:4px 9px;border:1px solid #9da9b6;border-radius:5px;background:#fff;color:#27384b;font:800 11px Arial;box-shadow:none}
 #v3-sim-nav-bar .v3-btn:hover{background:#f3f6f8}
 #v3-sim-nav-bar .v3-btn.primary{background:#2f5f88;color:#fff;border-color:#2f5f88}
-#v3-sim-nav-bar[data-busy="1"]{opacity:.72;pointer-events:none}
 `;
     document.head.appendChild(style);
     life.own(()=>style.remove());
@@ -100,59 +94,62 @@ V3.boot=()=>{
     const open=bar.querySelector('[data-open]');
     const clear=bar.querySelector('[data-clear]');
 
-    const paint=()=>{
-      let total=0;
-      rows.forEach((record,index)=>{
-        const on=checked(record.checkbox);
-        if(on)total++;
-        if(record.cell){
-          record.cell.dataset.v3SimRowNumber=String(index+1);
-          record.cell.dataset.v3SimChecked=on?'1':'0';
-        }
-      });
-      count.textContent=(busy?'Working · ':'Selected ')+total;
-      bar.hidden=total===0&&!busy;
-      bar.dataset.busy=busy?'1':'0';
+    const cleanupCell=cell=>{
+      if(!cell)return;
+      delete cell.dataset.v3SimCheckCell;
+      delete cell.dataset.v3SimRowNumber;
+      delete cell.dataset.v3SimSelected;
+      cell.querySelector?.('[data-v3-sim-hit]')?.remove();
     };
 
-    const clearPreview=()=>{
-      for(const record of rows)delete record.row.dataset.v3SimPreview;
-    };
-
-    const preview=(from,to,on)=>{
-      clearPreview();
-      const a=Math.min(from,to),b=Math.max(from,to);
-      for(let index=a;index<=b;index++)rows[index].row.dataset.v3SimPreview=on?'on':'off';
-    };
-
-    const eventRecord=event=>{
-      const path=event.composedPath?.()||[];
-      const pathBox=path.find(node=>node?.matches?.('input[type="checkbox"],[role="checkbox"]'));
-      if(pathBox){
-        const direct=rows.find(record=>record.checkbox===pathBox);
-        if(direct)return direct;
+    life.own(()=>{
+      delete document.documentElement.dataset.v3SimShift;
+      for(const record of rows){
+        delete record.row.dataset.v3SimSelected;
+        cleanupCell(record.cell);
       }
-      const row=path.find(node=>rows.some(record=>record.row===node))
-        || event.target?.closest?.('tr,[role="row"],li');
-      return row?rows.find(record=>record.row===row)||null:null;
+    });
+
+    const paint=()=>{
+      let visibleSelected=0;
+      rows.forEach((record,index)=>{
+        const on=selected.has(record.url);
+        if(on)visibleSelected++;
+        record.row.dataset.v3SimSelected=on?'1':'0';
+        record.cell.dataset.v3SimRowNumber=String(index+1);
+        record.cell.dataset.v3SimSelected=on?'1':'0';
+      });
+      count.textContent='Selected '+visibleSelected;
+      bar.hidden=visibleSelected===0;
     };
 
-    const checkboxHit=(event,record)=>{
-      if(!record)return false;
-      const path=event.composedPath?.()||[];
-      return path.includes(record.checkbox)||path.includes(record.cell)
-        || record.cell?.contains?.(event.target);
+    const ensureHit=record=>{
+      let hit=record.cell.querySelector('[data-v3-sim-hit]');
+      if(!hit){
+        hit=document.createElement('span');
+        hit.dataset.v3SimHit='1';
+        hit.setAttribute('aria-hidden','true');
+        record.cell.appendChild(hit);
+      }
+      record.hit=hit;
     };
 
     const scan=()=>{
       scanQueued=false;
+      const nextScope=location.pathname+location.search;
+      if(nextScope!==scopeKey){
+        scopeKey=nextScope;
+        selected=new Set();
+        anchorUrl=null;
+        drag=null;
+      }
+
       if(!/^\/issues(?:\/|$)/.test(location.pathname)){
-        rows=[];lastIndex=-1;bar.hidden=true;clearPreview();
-        for(const cell of document.querySelectorAll('[data-v3-sim-check-cell]')){
-          delete cell.dataset.v3SimCheckCell;
-          delete cell.dataset.v3SimRowNumber;
-          delete cell.dataset.v3SimChecked;
-        }
+        for(const record of rows){delete record.row.dataset.v3SimSelected;cleanupCell(record.cell);}
+        rows=[];
+        selected.clear();
+        anchorUrl=null;
+        bar.hidden=true;
         return;
       }
 
@@ -167,32 +164,22 @@ V3.boot=()=>{
         const cell=checkbox.closest('td,[role="cell"]')||checkbox.parentElement;
         if(!cell)continue;
         seen.add(ticket.url);
-        found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,checkbox,cell});
+        found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,checkbox,cell,hit:null});
       }
 
       const activeCells=new Set(found.map(record=>record.cell));
       for(const cell of document.querySelectorAll('[data-v3-sim-check-cell]')){
-        if(activeCells.has(cell))continue;
-        delete cell.dataset.v3SimCheckCell;
-        delete cell.dataset.v3SimRowNumber;
-        delete cell.dataset.v3SimChecked;
+        if(!activeCells.has(cell))cleanupCell(cell);
       }
 
       rows=found;
-      rows.forEach((record,index)=>{
+      for(const record of rows){
         record.cell.dataset.v3SimCheckCell='1';
-        record.cell.dataset.v3SimRowNumber=String(index+1);
-      });
+        ensureHit(record);
+        if(checked(record.checkbox))selected.add(record.url);
+      }
       paint();
     };
-
-    const changeSelection=(urls,on)=>{
-      if(busy||life.disposed)return;busy=true;paint();
-      try{for(const url of urls){scan();const current=rows.find(record=>record.url===url);nativeToggle(current?.checkbox,on);}}
-      finally{busy=false;scan();clearPreview();paint();}
-    };
-    const applyRange=(from,to,on)=>changeSelection(rows.slice(Math.min(from,to),Math.max(from,to)+1).map(record=>record.url),on);
-    const clearAll=()=>{changeSelection(rows.filter(record=>checked(record.checkbox)).map(record=>record.url),false);lastIndex=-1;};
 
     const schedule=()=>{
       if(scanQueued)return;
@@ -200,93 +187,163 @@ V3.boot=()=>{
       life.timeout(scan,60);
     };
 
-    const recordAtPoint=(x,y)=>{
-      const hit=document.elementFromPoint?.(x,y);
-      const row=hit?.closest?.('tr,[role="row"],li');
+    const eventRecord=event=>{
+      const path=event.composedPath?.()||[];
+      const hit=path.find(node=>node?.dataset?.v3SimHit==='1');
+      if(hit){
+        const direct=rows.find(record=>record.hit===hit);
+        if(direct)return direct;
+      }
+      const box=path.find(node=>node?.matches?.('input[type="checkbox"],[role="checkbox"]'));
+      if(box){
+        const direct=rows.find(record=>record.checkbox===box);
+        if(direct)return direct;
+      }
+      const row=path.find(node=>rows.some(record=>record.row===node))
+        || event.target?.closest?.('tr,[role="row"],li');
       return row?rows.find(record=>record.row===row)||null:null;
     };
 
-    life.on(window,'pointerdown',event=>{
-      if(syncing||busy||!event.shiftKey||event.button!==0)return;
-      scan();const record=recordAtPoint(event.clientX,event.clientY)||eventRecord(event);
-      if(!checkboxHit(event,record))return;
-      const index=rows.indexOf(record);
-      if(index<0)return;
+    const checkboxHit=(event,record)=>{
+      if(!record)return false;
+      const path=event.composedPath?.()||[];
+      return path.includes(record.checkbox)||path.includes(record.cell)||path.includes(record.hit)
+        || record.cell.contains(event.target);
+    };
 
-      event.preventDefault();
-      event.stopImmediatePropagation();
+    const anchorIndex=()=>{
+      const index=rows.findIndex(record=>record.url===anchorUrl);
+      return index>=0?index:null;
+    };
 
-      const from=lastIndex>=0?lastIndex:index;
-      const on=lastIndex>=0?checked(rows[from].checkbox):!checked(record.checkbox);
-      drag={from,to:index,on};
-      suppressShiftClick=true;
-      preview(from,index,on);
+    const rowIndexAtY=y=>{
+      if(!rows.length)return -1;
+      let nearest=-1,distance=Infinity;
+      for(let index=0;index<rows.length;index++){
+        const rect=rows[index].row.getBoundingClientRect();
+        if(y>=rect.top&&y<=rect.bottom)return index;
+        const d=y<rect.top?rect.top-y:y-rect.bottom;
+        if(d<distance){distance=d;nearest=index;}
+      }
+      return nearest;
+    };
 
-    },true);
-
-    life.on(window,'pointermove',event=>{
-      if(!drag||busy||!(event.buttons&1))return;
-      const record=recordAtPoint(event.clientX,event.clientY);
-      if(!record)return;
-      const index=rows.indexOf(record);
-      if(index<0||index===drag.to)return;
+    const applyDrag=index=>{
+      if(!drag||index<0||index>=rows.length)return;
       drag.to=index;
-      preview(drag.from,drag.to,drag.on);
+      selected=new Set(drag.base);
+      const a=Math.min(drag.from,index),b=Math.max(drag.from,index);
+      for(let i=a;i<=b;i++)selected.add(rows[i].url);
+      paint();
+    };
+
+    const syncNative=url=>{
+      scan();
+      const record=rows.find(row=>row.url===url);
+      if(!record)return;
+      if(checked(record.checkbox))selected.add(url);
+      else selected.delete(url);
+      paint();
+    };
+
+    life.on(window,'keydown',event=>{
+      if(event.key==='Shift')document.documentElement.dataset.v3SimShift='1';
     },true);
 
-    life.on(window,'pointerup',event=>{
-      if(!drag)return;
-      const finalRecord=recordAtPoint(event.clientX,event.clientY);if(finalRecord){const finalIndex=rows.indexOf(finalRecord);if(finalIndex>=0)drag.to=finalIndex;}
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const work=drag;
-      drag=null;
-      lastIndex=work.to;
-      void applyRange(work.from,work.to,work.on);
-      setTimeout(()=>{suppressShiftClick=false;},0);
+    life.on(window,'keyup',event=>{
+      if(event.key==='Shift')delete document.documentElement.dataset.v3SimShift;
     },true);
 
-    life.on(document,'click',event=>{
-      if(syncing)return;
+    life.on(document,'pointerdown',event=>{
       const record=eventRecord(event);
       if(!record)return;
 
-      if(event.shiftKey&&suppressShiftClick){
+      if(event.shiftKey&&event.button===0&&event.target?.dataset?.v3SimHit==='1'){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const index=rows.indexOf(record);
+        const from=anchorIndex()??index;
+        drag={from,to:index,base:new Set(selected),pointerId:event.pointerId,hit:record.hit};
+        applyDrag(index);
+        try{record.hit.setPointerCapture?.(event.pointerId);}catch{}
+        return;
+      }
+
+      if(!event.shiftKey&&event.button===0&&checkboxHit(event,record))anchorUrl=record.url;
+    },true);
+
+    life.on(document,'pointermove',event=>{
+      if(!drag||!(event.buttons&1))return;
+      const index=rowIndexAtY(event.clientY);
+      if(index<0||index===drag.to)return;
+      applyDrag(index);
+    },true);
+
+    life.on(document,'pointerup',event=>{
+      if(!drag)return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const index=rowIndexAtY(event.clientY);
+      if(index>=0)applyDrag(index);
+
+      const done=drag;
+      drag=null;
+      try{done.hit?.releasePointerCapture?.(done.pointerId);}catch{}
+    },true);
+
+    life.on(document,'click',event=>{
+      if(event.shiftKey&&event.target?.dataset?.v3SimHit==='1'){
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
 
-      if(!checkboxHit(event,record))return;
-      lastIndex=rows.indexOf(record);
-      queueMicrotask(paint);
+      const record=eventRecord(event);
+      if(!record||event.shiftKey||!checkboxHit(event,record))return;
+      anchorUrl=record.url;
+      life.timeout(()=>syncNative(record.url),0);
     },true);
 
     life.on(document,'change',event=>{
       const record=eventRecord(event);
-      if(record)queueMicrotask(paint);
+      if(!record)return;
+      anchorUrl=record.url;
+      life.timeout(()=>syncNative(record.url),0);
     },true);
 
     life.on(window,'blur',()=>{
+      delete document.documentElement.dataset.v3SimShift;
       if(!drag)return;
+      selected=new Set(drag.base);
       drag=null;
-      suppressShiftClick=false;
-      clearPreview();
+      paint();
     });
 
     life.observe(document.body,records=>{
-      const nativeChange=records.some(record=>{
+      if(records.some(record=>{
         const target=record.target?.nodeType===1?record.target:record.target?.parentElement;
-        if(target?.closest?.('[data-v3-sim-nav]'))return false;
-        return true;
-      });
-      if(nativeChange)schedule();
+        return !target?.closest?.('[data-v3-sim-nav]');
+      }))schedule();
     },{childList:true,subtree:true});
 
-    clear.addEventListener('click',()=>{void clearAll();});
+    clear.addEventListener('click',()=>{
+      const nativeUrls=rows.filter(record=>checked(record.checkbox)).map(record=>record.url);
+      selected.clear();
+      anchorUrl=null;
+      paint();
+
+      for(const url of nativeUrls){
+        scan();
+        const record=rows.find(row=>row.url===url);
+        if(record&&checked(record.checkbox))record.checkbox.click();
+      }
+      scan();
+    });
 
     open.addEventListener('click',()=>{
-      const urls=rows.filter(record=>checked(record.checkbox)).map(record=>record.url);
+      const urls=rows.filter(record=>selected.has(record.url)).map(record=>record.url);
       if(!urls.length)return;
       for(const url of urls){
         if(typeof GM_openInTab==='function')GM_openInTab(url,{active:false,insert:true,setParent:true});
