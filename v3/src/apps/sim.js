@@ -264,7 +264,7 @@ html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crossha
 
         const index=rows.indexOf(record);
         const from=anchorIndex()??index;
-        drag={from,to:index,base:new Set(selected),pointerId:event.pointerId,hit:record.hit};
+        drag={from,to:index,base:new Set(selected),pointerId:event.pointerId,hit:record.hit,moved:false};
         applyDrag(index);
         try{record.hit.setPointerCapture?.(event.pointerId);}catch{}
         return;
@@ -277,6 +277,7 @@ html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crossha
       if(!drag||!(event.buttons&1))return;
       const index=rowIndexAtY(event.clientY);
       if(index<0||index===drag.to)return;
+      drag.moved=true;
       applyDrag(index);
     },true);
 
@@ -285,8 +286,10 @@ html[data-v3-sim-shift="1"] [data-v3-sim-hit]{pointer-events:auto;cursor:crossha
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      const index=rowIndexAtY(event.clientY);
-      if(index>=0)applyDrag(index);
+      if(drag.moved){
+        const index=rowIndexAtY(event.clientY);
+        if(index>=0)applyDrag(index);
+      }
 
       const done=drag;
       drag=null;
