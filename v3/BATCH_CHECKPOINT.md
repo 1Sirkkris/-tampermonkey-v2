@@ -1,7 +1,7 @@
-# Rebuild checkpoint — batch 4 complete
+# Rebuild checkpoint — batch 5 complete
 
 Branch: `v3-groundup`.
-Current approved scope: FCResearch + MoveContainer. Batches 1–3 history follows.
+Current approved scope: RIVER + FNSKU Mapping. Batches 1–4 history follows.
 Status: implementation and automated validation complete; live Amazon testing pending. STOP HERE until the user approves a further batch.
 
 ## Delivered versions
@@ -79,6 +79,23 @@ The shared movement engine in `src/actions.js` now contains only movement contra
 
 Full `npm run verify` passed, including new `tests/fcr-move.test.mjs` fixtures: rapid duplicate UPC resolution, exact identifier fast path, distinct identical rows, SKU isolation and overage, failed/incomplete inventory with pending-scan retry, source/reset invalidation, unknown product resolution, exact product cache rejection, bounded HTTP500 continuation failure, native bin attribution, real Tote UI count, stale item/hazard results, filtered snapshot generations without extra reads, Copy/Alt-print payload, saved-floor repair, exact movement payload, PAUSE-after-current and UNKNOWN replay prevention. Real deployed markup/authentication/backend responses remain unproven.
 
-## Current next batch — approval required
+## Batch 4 checkpoint — superseded by batch 5 approval
 
 RIVER + FNSKU Mapping. Review native RIVER scans/quantity and lookup/copy flows, migrate RIVER to the canonical FCR data implementation, and review exact regional FNSKU matches/partial-region outcomes against V2 and OBS. Keep other installers unchanged; edits to shared engines that affect earlier scripts require revised approval. STOP HERE and wait for explicit approval.
+
+
+## Batch 5 — approved RIVER + FNSKU Mapping
+
+Both installers delivered at 0.2.1. Only this pair changes; other twelve installers remain byte-identical to the publication parent. V2 remains untouched. Eight unique installers have completed scoped review batches; six remain: PO Portal, Carton PrEditor, Calm Code, SIM Toolbar, OBS and Screenshot Mode.
+
+V2 RIVER's dated latest-PO selection and FNSKU native GET/pagination forms supplied the contracts. RIVER now imports the canonical `src/fcr-data.js`; the unused legacy `src/fcr.js` is removed. The canonical data engine and FCResearch installer are unchanged. Ambiguous undated matching PO lines cannot silently choose the first. Quantities require safe whole numbers, and zero live inventory remains evidence of disagreement with a positive PO. Manual blank quantity cannot become zero. Native field lookup includes associated labels and excludes assistant UI. Observers arm before native Next, catching synchronous transitions; disabled Next cannot advance. Clear/disposal invalidates pending writes. Create/manual steps remain manual.
+
+Capture serializes button work, invalidates old results on input changes, clears obsolete saved capture, requires a valid ASIN and opens only a newly captured, generated RIVER URL. Failed or obsolete capture cannot revive a previous payload through Open.
+
+FNSKU lookup now validates returned table/schema/identities and reads every native continuation before using regional results. Repeated, missing, changed-identity or off-origin/path continuations fail explicitly; native GET forms retain the requested identity. Authentication HTML is failed regional evidence rather than an empty success. Conflicting exact ASINs across pages prevent guessing. Regional failures remain visible and successful exact rows survive a failed JP ASIN expansion. Exact input FNSKU proof and JP related-ASIN rows are separately labeled, with region and deduplicated rows. Input changes abort pending reads and discard stale results; teardown cancels work.
+
+Full `npm run verify` passed, including `tests/river-fnsku.test.mjs`: multi-page ASIN conflicts, GET continuation forms, missing continuation, authentication HTML, partial exact proof retained, stale lookup/capture rejection, zero disagreement/manual choice, synchronous Next recognition, final create staying manual, and undated PO ambiguity. Existing RIVER Clear regression and all earlier batches also pass. No live Amazon workflow or inventory mutation was submitted. Actual deployed markup, regional authentication/token acceptance and backend operation remain unproven.
+
+## Current next batch — approval required
+
+PO Portal + Carton PrEditor. Review their native interaction and request contracts against V2, rebuild within this pair and verify the other installers remain unchanged. STOP HERE; require explicit user reapproval before implementation.

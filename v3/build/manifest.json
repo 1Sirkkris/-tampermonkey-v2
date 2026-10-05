@@ -217,7 +217,7 @@
     {
       "id": "river",
       "name": "V3 | BWU2 RIVER Assistant",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "FCResearch capture plus cancellable native RIVER assistant.",
       "include": [
         "/^https?:\\/\\/.*fcresearch.*\\//",
@@ -240,7 +240,7 @@
         "src/identity.js",
         "src/native.js",
         "src/pandash.js",
-        "src/fcr.js",
+        "src/fcr-data.js",
         "src/apps/river.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
@@ -251,7 +251,7 @@
     {
       "id": "fnsku",
       "name": "V3 | BWU2 FNSKU Mapping",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Exact regional FNSKU/ASIN mapping helper.",
       "match": [
         "https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*",
