@@ -1,7 +1,9 @@
 // ==UserScript==
-// @name         V2 | MAIN FNSKU mapping Lookup
+// @name       v2 MAIN v1.4.0-test FNSKU mapping Lookup
+// @name:en      v2 MAIN FNSKU mapping Lookup
 // @version      1.4.4-test
 // @description  Read-only regional FNSKU lookup with polished HOME/JP comparison, native JP handoff and compact minimize mode.
+// @author       (USER)
 // @match        https://fba-fnsku-commingling-console-eu.aka.amazon.com/tool/fnsku-mappings-tool*
 // @match        https://fba-fnsku-commingling-console-na.aka.amazon.com/tool/fnsku-mappings-tool*
 // @match        https://fba-fnsku-commingling-console-jp.aka.amazon.com/tool/fnsku-mappings-tool*

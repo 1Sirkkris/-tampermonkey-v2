@@ -1,5 +1,6 @@
 // ==UserScript==
-// @name         V2 | Bind Hierarchy Queue
+// @name         v2 Bind Hierarchy Queue
+// @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
 // @version      0.3.0
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
@@ -25,7 +26,7 @@
 
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
-  // @version and the UI only.
+  // @version, @name:en, and the UI only.
   const VERSION = '0.3.0';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;

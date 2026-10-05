@@ -1,5 +1,6 @@
 // ==UserScript==
-// @name         V2 | PO Portal Lite
+// @name         v2 PO Portal Lite
+// @name:en      v2 PO Portal Lite
 // @namespace    https://github.com/1Sirkkris
 // @version      0.1.2
 // @description  Lightweight PO Portal controls and results view for AU ISS workflow.

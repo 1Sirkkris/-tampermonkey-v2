@@ -1,5 +1,6 @@
 // ==UserScript==
-// @name         V2 | MAIN SIM Markdown Toolbar
+// @name        v2 MAIN v5.1.5 SIM Markdown Toolbar
+// @name:en      v2 MAIN SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
 // @version      5.1.9
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images

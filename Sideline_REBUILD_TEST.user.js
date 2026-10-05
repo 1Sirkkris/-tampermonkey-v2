@@ -1,9 +1,11 @@
 // ==UserScript==
-// @name         V2 | Sideline REBUILD TEST
+// @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.31
+// @version      0.0.32
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
+// @include      /^https?:\/\/.*fcresearch.*\//
+// @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @connect      pandash.amazon.com
@@ -17,13 +19,14 @@
   'use strict';
 
   const IS_POIROT = location.hostname === 'aft-poirot-website-nrt.nrt.proxy.amazon.com';
-  const ISS_CONSOLE_HOST = IS_POIROT && location.hash === '#iss-console';
-  if (!IS_POIROT) return;
+  const IS_FCR = /fcresearch/i.test(location.hostname) || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
+  const ISS_LOCAL_FCR_WORKER = IS_FCR && location.hash === '#iss-console-sideline-worker';
+  if (!IS_POIROT && !ISS_LOCAL_FCR_WORKER) return;
 
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.31-REBUILD';
+  const VERSION = '0.0.32-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -42,10 +45,16 @@
   const API_MOVE_ITEMS = '/api/move-items';
   const API_BOOTSTRAP = '/api/get-bootstrap-data';
   const HAZMAT_MARKETPLACE = 'AU';
-  const ISS_CONSOLE_WORKER = ISS_CONSOLE_HOST;
+  const ISS_WORKER_BY_HASH = location.hash.startsWith('#iss-console-worker');
+  const ISS_WORKER_BY_QUERY = new URLSearchParams(location.search).get('issConsoleWorker') === '1';
+  const ISS_WORKER_BY_NAME = window.name === 'iss-console-sideline-worker';
+  const ISS_CONSOLE_WORKER = ISS_LOCAL_FCR_WORKER || ISS_WORKER_BY_HASH || ISS_WORKER_BY_QUERY || ISS_WORKER_BY_NAME;
 
   function issControllerWindow() {
-    return window;
+    try {
+      if (window.opener && !window.opener.closed) return window.opener;
+    } catch {}
+    return window.parent;
   }
 
   const itemQty = item => Math.max(1, Number(item?.qty) || 1);
@@ -82,7 +91,70 @@
   }
 
   function sidelineFetch(path, options = {}) {
-    return fetch(path, options);
+    if (!ISS_LOCAL_FCR_WORKER) return fetch(path, options);
+
+    const url = /^https?:\/\//i.test(String(path || ''))
+      ? String(path)
+      : POIROT_ORIGIN + String(path || '');
+    const method = String(options.method || 'GET').toUpperCase();
+    const headers = options.headers || {};
+    const body = options.body == null ? undefined : String(options.body);
+
+    return new Promise((resolve,reject) => {
+      if (options.signal?.aborted) {
+        reject(makeAbortError('Run cancelled'));
+        return;
+      }
+
+      let settled = false;
+      let request = null;
+      const cleanup = () => {
+        try { options.signal?.removeEventListener('abort', abort); } catch {}
+      };
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        try { request?.abort?.(); } catch {}
+        cleanup();
+        reject(makeAbortError('Run cancelled'));
+      };
+
+      request = GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data:body,
+        anonymous:false,
+        timeout:15000,
+        onload:response => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const raw = String(response.responseText || '');
+          resolve({
+            ok:response.status >= 200 && response.status < 300,
+            status:response.status,
+            url:response.finalUrl || url,
+            text:async () => raw,
+            json:async () => raw ? JSON.parse(raw) : null
+          });
+        },
+        onerror:error => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
+        },
+        ontimeout:() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error('Poirot request timed out'));
+        }
+      });
+
+      try { options.signal?.addEventListener('abort', abort, {once:true}); } catch {}
+    });
   }
 
   async function warehouseId() {
@@ -901,19 +973,6 @@
       dockButtons.push(b);
       dock.appendChild(b);
     }
-    const iss = document.createElement('button');
-    iss.textContent = 'ISS';
-    iss.title = 'Open ISS Console';
-    iss.onclick = () => {
-      if (q.running || lazy.running || lazy.activeRun || shared.owner) {
-        iss.textContent = 'BUSY';
-        setTimeout(() => { iss.textContent = 'ISS'; }, 900);
-        return;
-      }
-      location.hash = '#iss-console';
-      location.reload();
-    };
-    dock.appendChild(iss);
     document.body.appendChild(dock);
   }
 
@@ -3167,17 +3226,37 @@
     return normalizeImageUrl(ctx?.sku?.imageUrls?.[0]);
   }
 
+  function expiryPickerHostDocument() {
+    if (!ISS_LOCAL_FCR_WORKER) return document;
+    try {
+      const parentDoc = window.parent?.document;
+      if (window.parent !== window && parentDoc?.body) return parentDoc;
+    } catch {}
+    return document;
+  }
+
+  function ensureExpiryPickerHostStyle(hostDoc) {
+    if (!hostDoc || hostDoc === document || hostDoc.getElementById('sh-worker-expiry-style')) return;
+    const hostStyle = hostDoc.createElement('style');
+    hostStyle.id = 'sh-worker-expiry-style';
+    hostStyle.textContent = style.textContent;
+    (hostDoc.head || hostDoc.documentElement).appendChild(hostStyle);
+  }
+
   function showApiDatePicker(item) {
     const owner = lazy;
     return new Promise(resolve => {
       const ctx = item.ctx;
       const production = ctx.dateType === 'PRODUCTION_DATE';
       const selection = { month:null, day:1, year:null };
-      const root = document.createElement('div');
+      const hostDoc = expiryPickerHostDocument();
+      ensureExpiryPickerHostStyle(hostDoc);
+      hostDoc.getElementById('sh-og-expiry')?.remove();
+      const root = hostDoc.createElement('div');
       root.id = 'sh-og-expiry';
       root.dataset.owner = 'lazy';
       root.innerHTML = '<div class="og-wrap"></div>';
-      document.body.appendChild(root);
+      hostDoc.body.appendChild(root);
       const wrap = $('.og-wrap',root);
 
       owner.dateResolve = value => {
@@ -3233,7 +3312,7 @@
             production
               ? `<button class="production-confirm" data-a="apply" ${selection.month&&selection.day&&selection.year?'':'disabled'}>USE PRODUCTION DATE</button>`
               : `<button data-a="pao">PAO +900 DAYS &nbsp; ${dateLabel(paoDateMs())}</button>`
-          }<button type="button" class="og-return-source" data-return-source>↩ RETURN TO SOURCE</button></div>`;
+          }${hostDoc === document ? `<button type="button" class="og-return-source" data-return-source>↩ RETURN TO SOURCE</button>` : ''}</div>`;
       }
 
       root.addEventListener('click',e=>{
@@ -4387,7 +4466,7 @@
     window.addEventListener('message', async event => {
       const message = event.data;
       const sourceOk = event.source === issControllerWindow();
-      const originOk = event.origin === POIROT_ORIGIN;
+      const originOk = /fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '');
       if (!sourceOk || !originOk || message?.type !== 'ISS_CONSOLE_RPC' || message?.worker !== 'sideline') return;
 
       const id = String(message.id || '');
