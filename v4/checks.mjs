@@ -16,7 +16,7 @@ for (const name of files) {
   assert(field('name').startsWith('V4 '), name + ': wrong identity');
   assert.equal(field('downloadURL'), 'https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/' + basename(path));
   assert.equal(field('updateURL'), field('downloadURL'));
-  assert.equal(source.match(/const VERSION = '([^']+)'/)?.[1], field('version'));
+  assert.equal(source.match(/(?:const|var|let) VERSION\s*=\s*(['"])([^'"]+)\1/)?.[2], field('version'));
   assert(!/\/\/ @require\b/.test(metadata), name + ': external implementation dependency');
   assert(!/BWU2Fleet|BWU2Actions|FCRDataCore|bwu2-observability:event|bwu2-v3:event|bwu2\.v3\./.test(source), name + ': old runtime dependency');
   assert(!/setInterval\s*\(/.test(source), name + ': recurring idle timer');
