@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.2
+// @version      0.2.3
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.2';
+  const VERSION = '0.2.3';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -570,6 +570,27 @@
     host.dataset.show = '1';
   }
 
+  function sidelineAsideItems(entries = []) {
+    return (Array.isArray(entries) ? entries : []).map(entry => ({
+      code:clean(entry?.code || ''),
+      qty:Math.max(1, Number(entry?.qty) || 1),
+      status:'SKIPPED',
+      asin:'',
+      fnsku:'',
+      issue:clean(entry?.reason || 'PUT ASIDE')
+    })).filter(item => item.code);
+  }
+
+  function sidelineAsideStatus(entries = [], fallback = 'Item put ASIDE') {
+    const rows = sidelineAsideItems(entries);
+    if (!rows.length) return clean(fallback) || 'Item put ASIDE';
+    const total = rows.reduce((sum,item) => sum + item.qty, 0);
+    const detail = rows.map(item =>
+      item.code + ' ×' + item.qty + ' — ' + (item.issue || 'PUT ASIDE')
+    ).join(' • ');
+    return 'ASIDE ' + total + ' unit' + (total === 1 ? '' : 's') + ' — ' + detail;
+  }
+
   function resetSidelineLazyInputs() {
     for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     $('[data-side-source]')?.focus();
@@ -643,6 +664,13 @@
         renderSidelineItems(message.items, false);
         if (message.metrics && typeof message.metrics === 'object') paintLazyMetrics(message.metrics);
       }
+      if (message.mode === 'lazy' && Array.isArray(message.aside) && message.aside.length && !message.running) {
+        sidelineItemsSignature = '';
+        renderSidelineItems(sidelineAsideItems(message.aside), true);
+        if (/\bASIDE\b/i.test(clean(message.message || ''))) {
+          panelStatus('sideline', sidelineAsideStatus(message.aside, message.message), 'error');
+        }
+      }
 
       const meta = $('[data-progress="sideline"]');
       if (meta) {
@@ -697,7 +725,14 @@
         mode:message.mode || '',
         current:Number.isFinite(Number(message.current)) ? Number(message.current) : undefined,
         total:Number.isFinite(Number(message.total)) ? Number(message.total) : undefined,
-        done:Number.isFinite(Number(message.done)) ? Number(message.done) : undefined
+        done:Number.isFinite(Number(message.done)) ? Number(message.done) : undefined,
+        aside:Array.isArray(message.aside)
+          ? message.aside.slice(0,20).map(entry => ({
+              code:clean(entry?.code || ''),
+              reason:clean(entry?.reason || ''),
+              qty:Math.max(0,Number(entry?.qty)||0)
+            }))
+          : undefined
       });
       handleProgress(message);
       return;
@@ -725,7 +760,14 @@
       command:pending.command,
       ok:!!message.ok,
       error:message.ok ? '' : clean(message.error || pending.command + ' failed').slice(0, 180),
-      result:resultSummary
+      result:resultSummary,
+      aside:!message.ok && Array.isArray(message.data?.aside)
+        ? message.data.aside.slice(0,20).map(entry => ({
+            code:clean(entry?.code || ''),
+            reason:clean(entry?.reason || ''),
+            qty:Math.max(0,Number(entry?.qty)||0)
+          }))
+        : undefined
     });
     if (pending.timedOut) {
       observe('RPC_LATE_RESULT', {
@@ -1373,7 +1415,25 @@
           panelStatus('sideline', sidelineCompletionStatus, 'ok');
         }
       } catch (error) {
-        if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
+        if (!error?.data?.cancelled) {
+          const aside = Array.isArray(error?.data?.aside) ? error.data.aside : [];
+          if (aside.length) {
+            sidelineItemsSignature = '';
+            renderSidelineItems(sidelineAsideItems(aside), true);
+            if (error?.data?.metrics) paintLazyMetrics(error.data.metrics);
+            panelStatus('sideline', sidelineAsideStatus(aside, error.message), 'error');
+            observe('LAZY_ASIDE', {
+              total:aside.reduce((sum,entry) => sum + Math.max(0,Number(entry?.qty)||0),0),
+              entries:aside.slice(0,20).map(entry => ({
+                code:clean(entry?.code || ''),
+                reason:clean(entry?.reason || ''),
+                qty:Math.max(0,Number(entry?.qty)||0)
+              }))
+            });
+          } else {
+            panelStatus('sideline', error.message, 'error');
+          }
+        }
       } finally {
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);

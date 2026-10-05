@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.32
+// @version      0.0.33
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.32-REBUILD';
+  const VERSION = '0.0.33-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -4366,7 +4366,16 @@
       error.issCancelled = true;
       throw error;
     }
-    if (lazy.error) throw new Error(lazy.error);
+    if (lazy.error) {
+      const error = new Error(lazy.error);
+      error.issData = {
+        kind:'lazy',
+        metrics:issSideLazyMetrics(lazy.items),
+        aside:issSideAsideEntries(),
+        items:issSideLazyItems()
+      };
+      throw error;
+    }
 
     const moved = lazy.items
       .filter(item => item.status === 'MOVED')
@@ -4511,7 +4520,9 @@
           id,
           ok:false,
           error:String(error?.message || error || 'Sideline worker error'),
-          data:error?.issCancelled ? {cancelled:true} : null
+          data:error?.issCancelled
+            ? {cancelled:true}
+            : (error?.issData && typeof error.issData === 'object' ? error.issData : null)
         });
       } finally {
         if (['lazy.run','queue.run'].includes(command)) issSideWorkerBusy = false;
