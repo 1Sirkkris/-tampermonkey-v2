@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 Carton PrEditor
 // @name:en      V3 | BWU2 Carton PrEditor
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.1
 // @description  Carton PrEditor auto-complete after barcode and count readiness.
 // @match        https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*
 // @run-at       document-body
@@ -11,13 +11,13 @@
 // @grant        GM_setValue
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Carton_PrEditor.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Carton_PrEditor.user.js
-// @v3-build     carton-0.2.0-1efa5fec
+// @v3-build     carton-0.2.1-3fdbdfda
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"carton-0.2.0-1efa5fec","version":"0.2.0"});
+V3.build=Object.freeze({"id":"carton-0.2.1-3fdbdfda","version":"0.2.1"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -373,12 +373,12 @@ V3.native = (() => {
 V3.boot=()=>{
   const C=V3.core,life=C.lifecycle('carton'),telemetry=C.telemetry('carton',V3.build.version),store=C.store('carton',1);
   const BAR='input-page-barcode-container-tertiary-text',BTN='input-page-button-container-button',RE=/(csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})/i,COUNT=/Barcodes scanned:\s*(\d+)/i;
-  let enabled=true,last='',lastCount=0,observer=null,target=null,queued=false;
-  const button=C.dockButton({id:'carton',label:'CARTON ON',title:'Toggle Carton autocomplete',onClick:async()=>{enabled=!enabled;button.textContent='CARTON '+(enabled?'ON':'OFF');await store.set('enabled',enabled);}});
-  void store.get('enabled',true).then(v=>{enabled=v!==false;button.textContent='CARTON '+(enabled?'ON':'OFF');});
-  const inspect=()=>{if(!enabled)return;const el=document.getElementById(BAR);if(!el)return;const barcode=C.clean(el.textContent),count=Number(String(document.body?.innerText||'').match(COUNT)?.[1]||0);if(count<lastCount)last='';lastCount=count;if(count<2){last='';return;}if(!barcode||!RE.test(barcode))return;const id=barcode;if(id===last)return;const btn=document.getElementById(BTN);if(!btn||btn.disabled||btn.getAttribute('aria-disabled')==='true'||!V3.native.visible(btn))return;last=id;btn.click();telemetry.emit('complete',{barcode:C.mask(barcode),count});};
-  const schedule=()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;attach();inspect();});};
-  const attach=()=>{const barcode=document.getElementById(BAR),next=barcode?.closest('main,#root,#app')||barcode?.parentElement||V3.native.root();if(!next||next===target)return;observer?.disconnect();target=next;observer=life.observe(next,schedule,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','aria-disabled']});};
+  let enabled=false,ready=false,toggleGeneration=0,last='',lastCount=0,observer=null,target=null,queued=false;
+  const button=C.dockButton({id:'carton',label:'CARTON ON',title:'Toggle Carton autocomplete',onClick:async()=>{if(!ready)return;toggleGeneration++;enabled=!enabled;button.textContent='CARTON '+(enabled?'ON':'OFF');await store.set('enabled',enabled);}});
+  button.textContent='CARTON LOADING';const loadGeneration=toggleGeneration;void store.get('enabled',true).then(v=>{if(life.disposed||loadGeneration!==toggleGeneration)return;enabled=v!==false;ready=true;button.textContent='CARTON '+(enabled?'ON':'OFF');schedule();}).catch(()=>{ready=true;button.textContent='CARTON OFF';});
+  const inspect=()=>{if(!ready||!enabled||life.disposed)return;const el=document.getElementById(BAR);if(!el)return;const barcode=C.clean(el.textContent),count=Number(String(document.body?.innerText||document.body?.textContent||'').match(COUNT)?.[1]||0);if(count<lastCount)last='';lastCount=count;if(count<2){last='';return;}if(!barcode||!RE.test(barcode))return;const id=barcode;if(id===last)return;const btn=document.getElementById(BTN);if(!btn||btn.disabled||btn.getAttribute('aria-disabled')==='true'||!V3.native.visible(btn))return;last=id;btn.click();telemetry.emit('complete',{barcode:C.mask(barcode),count});};
+  const schedule=()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;if(life.disposed)return;attach();inspect();});};
+  const attach=()=>{const next=document.body;if(!next||next===target)return;observer?.disconnect();target=next;observer=life.observe(next,schedule,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['disabled','aria-disabled']});};
   attach();inspect();life.on(document,'input',schedule,true);life.on(document,'keydown',schedule,true);
 };
 

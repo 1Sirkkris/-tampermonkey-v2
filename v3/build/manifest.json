@@ -285,7 +285,7 @@
     {
       "id": "poportal",
       "name": "V3 | BWU2 PO Portal",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Native PO Portal AU ISS helper.",
       "include": [
         "/^https?:\\/\\/console\\.harmony\\.a2z\\.com\\/poportal(?:[\\/?#]|$)/"
@@ -311,7 +311,7 @@
     {
       "id": "carton",
       "name": "V3 | BWU2 Carton PrEditor",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Carton PrEditor auto-complete after barcode and count readiness.",
       "match": [
         "https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*"
@@ -338,7 +338,7 @@
     {
       "id": "calm",
       "name": "V3 | BWU2 Calm Code",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Native Calm Code role shortcuts.",
       "match": [
         "https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*",
@@ -369,7 +369,7 @@
     {
       "id": "sim",
       "name": "V3 | BWU2 SIM Toolbar",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "description": "SIM Markdown toolbar, snippets, attachments and fast native-checkbox ticket range selection.",
       "match": [
         "https://t.corp.amazon.com/*"
@@ -397,7 +397,7 @@
     {
       "id": "obs",
       "name": "V3 | BWU2 OBS",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Sanitized operation-level telemetry collector and export.",
       "include": [
         "/^https?:\\/\\/aft-poirot-website-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
@@ -410,7 +410,8 @@
         "/^https?:\\/\\/tx-b-hierarchy-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
         "/^https?:\\/\\/aftcartonpreditorapp-tcp-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
         "/^https?:\\/\\/fcmenu-(?:iad|nrt)-regionalized\\.corp\\.amazon\\.com\\//",
-        "https://t.corp.amazon.com/*"
+        "https://t.corp.amazon.com/*",
+        "/^https?:\\/\\/jp\\.item-measurement\\.aft\\.a2z\\.com\\//"
       ],
       "runAt": "document-start",
       "grant": [
@@ -418,7 +419,8 @@
         "GM_setValue",
         "GM_registerMenuCommand",
         "GM_listValues",
-        "GM_deleteValue"
+        "GM_deleteValue",
+        "unsafeWindow"
       ],
       "output": "V3_OBS.user.js",
       "sources": [
@@ -430,14 +432,14 @@
         "src/apps/obs.js"
       ],
       "namespace": "https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup",
-      "noframes": true,
+      "noframes": false,
       "updateURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_OBS.user.js",
       "downloadURL": "https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_OBS.user.js"
     },
     {
       "id": "screenshot",
       "name": "V3 | BWU2 Screenshot Mode",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Ctrl+Q hides/shows V3 userscript UI for clean screenshots.",
       "include": [
         "/^https?:\\/\\/aft-poirot-website-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
@@ -450,7 +452,8 @@
         "/^https?:\\/\\/tx-b-hierarchy-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
         "/^https?:\\/\\/aftcartonpreditorapp-tcp-nrt\\.nrt\\.proxy\\.amazon\\.com\\//",
         "/^https?:\\/\\/fcmenu-(?:iad|nrt)-regionalized\\.corp\\.amazon\\.com\\//",
-        "https://t.corp.amazon.com/*"
+        "https://t.corp.amazon.com/*",
+        "/^https?:\\/\\/jp\\.item-measurement\\.aft\\.a2z\\.com\\//"
       ],
       "runAt": "document-start",
       "grant": [

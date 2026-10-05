@@ -2,8 +2,28 @@ V3.boot=()=>{
   const C=V3.core,life=C.lifecycle('sim'),telemetry=C.telemetry('sim',V3.build.version),store=C.store('sim',1),panel=C.panel({id:'sim',title:'V3 · SIM Toolbar',width:680,life});
   let snippets=[],mounted=false,navStarted=false;
 
-  const editor=()=>['textarea[placeholder*="markdown" i]','textarea','[contenteditable="true"][role="textbox"]','[contenteditable="true"]'].map(s=>[...document.querySelectorAll(s)].find(V3.native.visible)).find(Boolean)||null;
-  const insert=(before,after='',prefix='',replace=false)=>{const el=editor();if(!el)return;if('selectionStart'in el){const s=el.selectionStart??el.value.length,e=el.selectionEnd??s,selected=el.value.slice(s,e),body=prefix?selected.split(/\r?\n/).map(x=>prefix+x).join('\n'):before+(replace?'':selected)+after;el.setRangeText(body,s,e,'end');el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();}else{el.focus();document.execCommand('insertText',false,before);}};
+  let focusedEditor=null;
+  const editable=el=>el&&V3.native.visible(el)&&!el.disabled&&!el.readOnly&&!el.closest('[data-bwu2-ui]')&&el.matches('textarea,[contenteditable="true"]');
+  life.on(document,'focusin',event=>{const candidate=event.target.closest?.('textarea,[contenteditable="true"]');if(editable(candidate))focusedEditor=candidate;});
+  const editor=()=>{
+    if(editable(focusedEditor)&&focusedEditor.isConnected)return focusedEditor;
+    const marked=[...document.querySelectorAll('textarea[placeholder*="markdown" i],[contenteditable="true"][role="textbox"]')].filter(editable);
+    if(marked.length===1)return marked[0];
+    const all=[...document.querySelectorAll('textarea,[contenteditable="true"]')].filter(editable);return all.length===1?all[0]:null;
+  };
+  const insert=(before,after='',prefix='',replace=false)=>{
+    const el=editor();if(!el){telemetry.emit('editor.unavailable');return;}
+    const body=selected=>prefix?selected.split(/\r?\n/).map(line=>prefix+line).join('\n'):before+(replace?'':selected)+after;
+    if('selectionStart'in el){const start=el.selectionStart??el.value.length,end=el.selectionEnd??start;el.setRangeText(body(el.value.slice(start,end)),start,end,'end');}
+    else{
+      const selection=window.getSelection();if(!selection?.rangeCount)return;
+      const range=selection.getRangeAt(0);if(!el.contains(range.commonAncestorContainer))return;
+      const text=body(range.toString());el.focus();
+      if(typeof document.execCommand==='function')document.execCommand('insertText',false,text);
+      else{range.deleteContents();const node=document.createTextNode(text);range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);}
+    }
+    el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();
+  };
   const download=(name,text)=>{const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),0);};
   const merge=(oldRows,newRows)=>{const out=[...oldRows],used=new Set(out.map(x=>x.name));for(const row of newRows){let name=C.clean(row?.name),text=String(row?.text??'');if(!name||!text)continue;let n=name,i=2;while(used.has(n))n=name+' ('+(i++)+')';used.add(n);out.push({name:n,text});}return out;};
 
@@ -41,7 +61,7 @@ V3.boot=()=>{
       : box?.getAttribute?.('aria-checked')==='true';
 
     const nativeToggle=(box,on)=>{
-      if(!box||checked(box)===on)return false;
+      if(!box||box.disabled||box.getAttribute('aria-disabled')==='true'||checked(box)===on)return false;
       syncing=true;
       try{box.click();}finally{syncing=false;}
       return true;
@@ -124,18 +144,6 @@ V3.boot=()=>{
         || record.cell?.contains?.(event.target);
     };
 
-    const masterCheckbox=()=>{
-      if(!rows.length)return null;
-      const rowBoxes=new Set(rows.map(record=>record.checkbox));
-      const scope=rows[0].row.closest('table,[role="table"],[role="grid"]')||document;
-      const rowLeft=rows[0].checkbox.getBoundingClientRect().left;
-      return [...scope.querySelectorAll('input[type="checkbox"],[role="checkbox"]')]
-        .filter(box=>V3.native.visible(box)&&!rowBoxes.has(box))
-        .map(box=>({box,rect:box.getBoundingClientRect()}))
-        .filter(item=>item.rect.top<rows[0].row.getBoundingClientRect().top&&Math.abs(item.rect.left-rowLeft)<80)
-        .sort((a,b)=>b.rect.top-a.rect.top)[0]?.box||null;
-    };
-
     const scan=()=>{
       scanQueued=false;
       if(!/^\/issues(?:\/|$)/.test(location.pathname)){
@@ -178,85 +186,13 @@ V3.boot=()=>{
       paint();
     };
 
-    const settle=async(wanted,timeout=1800)=>{
-      const end=performance.now()+timeout;
-      while(performance.now()<end){
-        await new Promise(resolve=>requestAnimationFrame(resolve));
-        scan();
-        if(rows.length&&rows.every(record=>checked(record.checkbox)===wanted))return true;
-      }
-      scan();
-      return rows.length&&rows.every(record=>checked(record.checkbox)===wanted);
+    const changeSelection=(urls,on)=>{
+      if(busy||life.disposed)return;busy=true;paint();
+      try{for(const url of urls){scan();const current=rows.find(record=>record.url===url);nativeToggle(current?.checkbox,on);}}
+      finally{busy=false;scan();clearPreview();paint();}
     };
-
-    const applyRange=async(from,to,on)=>{
-      if(busy||!rows.length)return;
-      const a=Math.min(from,to),b=Math.max(from,to);
-      const snapshot=new Map(rows.map(record=>[record.url,checked(record.checkbox)]));
-      const direct=rows.slice(a,b+1).filter(record=>checked(record.checkbox)!==on);
-
-      busy=true;
-      paint();
-      try{
-        if(on){
-          const master=masterCheckbox();
-          const outsideFalse=rows.filter((record,index)=>(index<a||index>b)&&snapshot.get(record.url)===false);
-          const directCost=direct.length;
-          const bulkCost=master?3+outsideFalse.length:Number.POSITIVE_INFINITY;
-
-          if(master&&bulkCost<directCost){
-            syncing=true;
-            try{master.click();}finally{syncing=false;}
-            await settle(true);
-
-            for(const url of outsideFalse.map(record=>record.url)){
-              const current=rows.find(record=>record.url===url);
-              nativeToggle(current?.checkbox,false);
-            }
-          }else{
-            for(const record of direct)nativeToggle(record.checkbox,true);
-          }
-        }else{
-          for(const record of direct)nativeToggle(record.checkbox,false);
-        }
-      }finally{
-        busy=false;
-        scan();
-        clearPreview();
-        paint();
-      }
-    };
-
-    const clearAll=async()=>{
-      if(busy)return;
-      const selected=rows.filter(record=>checked(record.checkbox));
-      if(!selected.length)return;
-
-      busy=true;
-      paint();
-      try{
-        const master=masterCheckbox();
-        if(master&&selected.length>4){
-          syncing=true;
-          try{master.click();}finally{syncing=false;}
-          await new Promise(resolve=>setTimeout(resolve,0));
-          scan();
-
-          if(rows.some(record=>checked(record.checkbox))){
-            syncing=true;
-            try{masterCheckbox()?.click();}finally{syncing=false;}
-            await settle(false);
-          }
-        }else{
-          for(const record of selected)nativeToggle(record.checkbox,false);
-        }
-      }finally{
-        lastIndex=-1;
-        busy=false;
-        scan();
-        paint();
-      }
-    };
+    const applyRange=(from,to,on)=>changeSelection(rows.slice(Math.min(from,to),Math.max(from,to)+1).map(record=>record.url),on);
+    const clearAll=()=>{changeSelection(rows.filter(record=>checked(record.checkbox)).map(record=>record.url),false);lastIndex=-1;};
 
     const schedule=()=>{
       if(scanQueued)return;
@@ -265,14 +201,14 @@ V3.boot=()=>{
     };
 
     const recordAtPoint=(x,y)=>{
-      const hit=document.elementFromPoint(x,y);
+      const hit=document.elementFromPoint?.(x,y);
       const row=hit?.closest?.('tr,[role="row"],li');
       return row?rows.find(record=>record.row===row)||null:null;
     };
 
     life.on(window,'pointerdown',event=>{
       if(syncing||busy||!event.shiftKey||event.button!==0)return;
-      const record=recordAtPoint(event.clientX,event.clientY)||eventRecord(event);
+      scan();const record=recordAtPoint(event.clientX,event.clientY)||eventRecord(event);
       if(!checkboxHit(event,record))return;
       const index=rows.indexOf(record);
       if(index<0)return;
@@ -285,6 +221,7 @@ V3.boot=()=>{
       drag={from,to:index,on};
       suppressShiftClick=true;
       preview(from,index,on);
+
     },true);
 
     life.on(window,'pointermove',event=>{
@@ -299,16 +236,9 @@ V3.boot=()=>{
 
     life.on(window,'pointerup',event=>{
       if(!drag)return;
-
-      const finalRecord=recordAtPoint(event.clientX,event.clientY);
-      if(finalRecord){
-        const finalIndex=rows.indexOf(finalRecord);
-        if(finalIndex>=0)drag.to=finalIndex;
-      }
-
+      const finalRecord=recordAtPoint(event.clientX,event.clientY);if(finalRecord){const finalIndex=rows.indexOf(finalRecord);if(finalIndex>=0)drag.to=finalIndex;}
       event.preventDefault();
       event.stopImmediatePropagation();
-
       const work=drag;
       drag=null;
       lastIndex=work.to;
@@ -367,7 +297,7 @@ V3.boot=()=>{
 
     scan();
   };
-  const mount=async()=>{if(mounted)return;mounted=true;snippets=await store.get('snippets',[]);if(!Array.isArray(snippets))snippets=[];const root=document.createElement('div');
+  const mount=async()=>{if(mounted)return;mounted=true;snippets=await store.get('snippets',[]);if(!Array.isArray(snippets))snippets=[];snippets=snippets.filter(row=>row&&typeof row.name==='string'&&typeof row.text==='string').map(row=>({name:C.clean(row.name),text:row.text}));if(life.disposed)return;const root=document.createElement('div');
     root.innerHTML='<section class="v3-section"><div class="v3-row"><button class="v3-btn" data-wrap="**|**">B</button><button class="v3-btn" data-wrap="_|_">I</button><button class="v3-btn" data-wrap="`|`">CODE</button><button class="v3-btn" data-prefix="> ">QUOTE</button><button class="v3-btn" data-prefix="- ">LIST</button><button class="v3-btn" data-prefix="1. ">NUMBERED</button><button class="v3-btn" data-link>LINK</button><button class="v3-btn" data-table>TABLE</button><button class="v3-btn" data-save>+ SNIP</button><button class="v3-btn" data-export>EXPORT</button><label class="v3-btn">IMPORT<input data-import type="file" accept="application/json" hidden></label></div></section><section class="v3-section"><b>Snippets</b><div class="v3-row" data-snips style="margin-top:8px"></div></section><section class="v3-section"><b>Image attachments</b><div data-images class="v3-row" style="margin-top:8px"></div></section>';panel.set(root);
     const paint=()=>{const box=root.querySelector('[data-snips]');box.innerHTML='';snippets.forEach((s,i)=>{const b=document.createElement('button');b.className='v3-btn';b.textContent=s.name||('Snippet '+(i+1));b.onclick=()=>insert(s.text||'');box.appendChild(b);});const images=[...document.querySelectorAll('a[href]')].filter(a=>/\.(?:jpe?g|png|gif|webp|bmp|avif)(?:$|[?#])/i.test(a.href));root.querySelector('[data-images]').innerHTML=images.slice(0,20).map((a,i)=>'<a class="v3-btn" target="_blank" rel="noopener" href="'+C.esc(a.href)+'">IMAGE '+(i+1)+'</a>').join('')||'<span class="v3-note">No image attachments found.</span>';};
     for(const b of root.querySelectorAll('[data-wrap]'))b.onclick=()=>{const [a,z]=b.dataset.wrap.split('|');insert(a,z);};
@@ -381,5 +311,5 @@ V3.boot=()=>{
   };
 
   startTicketNavigator();
-  C.dockButton({id:'sim',label:'SIM',title:'V3 SIM Toolbar',onClick:()=>{void mount().then(()=>panel.open());}});
+  C.dockButton({id:'sim',label:'SIM',title:'V3 SIM Toolbar',onClick:()=>{void mount().then(()=>{if(!life.disposed)panel.open();}).catch(error=>{mounted=false;telemetry.emit('snippets.load.failed',{message:error.message});});}});
 };

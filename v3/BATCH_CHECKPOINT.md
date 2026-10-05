@@ -1,8 +1,8 @@
-# Rebuild checkpoint — batch 5 complete
+# Rebuild checkpoint — remaining batches complete
 
 Branch: `v3-groundup`.
-Current approved scope: RIVER + FNSKU Mapping. Batches 1–4 history follows.
-Status: implementation and automated validation complete; live Amazon testing pending. STOP HERE until the user approves a further batch.
+Current scope: all six remaining scripts explicitly approved by the user on Oct 5, 2026, after batch 5. This later authorization covers the three remaining pairs without another approval request; future changes still require their own scope. Batches 1–5 history follows.
+Status: all fourteen installers have completed scoped recovery reviews and automated validation. Live Amazon testing remains pending. STOP HERE; do not initiate further changes automatically.
 
 ## Delivered versions
 
@@ -96,6 +96,33 @@ FNSKU lookup now validates returned table/schema/identities and reads every nati
 
 Full `npm run verify` passed, including `tests/river-fnsku.test.mjs`: multi-page ASIN conflicts, GET continuation forms, missing continuation, authentication HTML, partial exact proof retained, stale lookup/capture rejection, zero disagreement/manual choice, synchronous Next recognition, final create staying manual, and undated PO ambiguity. Existing RIVER Clear regression and all earlier batches also pass. No live Amazon workflow or inventory mutation was submitted. Actual deployed markup, regional authentication/token acceptance and backend operation remain unproven.
 
-## Current next batch — approval required
+## Batch 5 checkpoint — superseded by all-remaining approval
 
 PO Portal + Carton PrEditor. Review their native interaction and request contracts against V2, rebuild within this pair and verify the other installers remain unchanged. STOP HERE; require explicit user reapproval before implementation.
+
+
+## Remaining approval — PO Portal + Carton PrEditor; Calm Code + SIM Toolbar; OBS + Screenshot Mode
+
+The user explicitly approved all six remaining scripts on Oct 5 at 12:59 Sydney time. This supersedes the preceding request for just PO Portal + Carton and permits completing these three pairs without reapproval. No delegation was used. V2 main remains untouched. Only these six installers differ from the publication parent; the eight earlier installers remain byte-identical. Concurrent SIM updates through 0.2.8, including window-capture pointer tracking and final-release row detection, were merged and preserved.
+
+Delivered: PO Portal, Carton PrEditor, Calm Code, OBS and Screenshot Mode 0.2.1; SIM Toolbar 0.2.9. All fourteen installers have now received their scoped review; this is not proof of live fleet correctness or a claim that every historical log was re-read in this final batch.
+
+PO Portal preserves V2's local-calendar formatting, clamped six-month month-end default and valid ordered date range. Its Lite headers use word boundaries, avoiding an unrelated Recipient column being mistaken for Rec. A stable document-body observer supports native result subtree replacement without polling or fragile reattachment. Search request parameters and Lite/Full controls remain native.
+
+Carton still requires two scans and a ready native Complete button, with one click per barcode and reset on count decrease. Saved ON/OFF must load before any automatic click, eliminating startup submission despite a persisted OFF. Read failure defaults to OFF; teardown stops scheduled inspection. Native markup replacement remains observed, and textContent is a fallback where innerText is unavailable. No keyboard fallback or automatic mutation replay was introduced.
+
+Calm preserves the eleven V2 role shortcuts and native location. It targets only the form owning the enabled native calmCode input, checks field retention and form validity, and suppresses a rapid double click. It cannot fall back to an unrelated first form.
+
+SIM formatting follows the last focused native editor and rejects disabled/readonly/assistant inputs. Ambiguous unfocused editors are not guessed. Rich-text wrapping now includes the selected text, prefix and suffix, with native insertText where supported and a Range fallback. Invalid persisted snippets are filtered and failed initialization can retry. Range selection rescans by ticket identity through synchronous React row replacement. It uses individual native checkbox changes rather than a master-checkbox operation that could select unrelated/new rows or ignore a failed bulk settle. This removes the animation-frame polling loop. Existing numbering, open tabs, drag/window capture and outside-row selection are retained.
+
+OBS is one collector in both native pages and worker frames, so canonical operation events include GM-backed mutations in those workers. Fetch/XHR hooks record only native mutation start/result or read failures, with correlation, HTTP status and elapsed time. They preserve original arguments, return values, errors and native response objects, do not read request bodies/headers, and restore or become inert on disposal. HTTP202/2xx is merely network evidence and is never classified as a confirmed mutation. Other userscripts' private GM calls are not globally interceptable: canonical V3 operation telemetry is the source of their mutation outcomes.
+
+Collector writes serialize and retain their pending batch on storage failure. A shared clear generation prevents other contexts or delayed old events from restoring cleared history, while new events survive. Exports sanitize query strings/credentials even on legacy data, report save failures/drops and preserve chronological order. Queued and per-context events are bounded at 6000; context retention is three days/4096 contexts, with pruning on a context's first saved batch and explicit export rather than an idle timer. Shards permit independent contexts to write without replacing another context's array. Export requires current pending logs to save successfully; failures remain visible. Persistent storage denial at teardown cannot guarantee saving an in-memory batch.
+
+Screenshot Mode keeps the single CSS marker approach, hides later-added marked UI and SIM row-number pseudo-elements, and restores existing styles unchanged. Repeated keydown cannot toggle multiple times while Ctrl+Q is held. Duplicate installation and iframe handling are guarded. OBS/Screenshot now also cover the native measurement page.
+
+Full `npm run verify` passed, including `tests/remaining.test.mjs`: local month-end/date validation and replacement tables; saved Carton OFF, count latch and native readiness; Calm owning-form and double click; focused and rich-text SIM editors, selection through React replacement and preserved outside selection; failed OBS save/retry, cross-context Clear isolation, credential redaction, canonical operation outcomes from a real iframe realm into shared storage, native fetch/XHR argument/response passthrough and hook disposal; Screenshot repeat and restoration. Earlier batch regressions and all fourteen generated-installer startups pass.
+
+## Final checkpoint
+
+No scripts remain for this scoped recovery review. Real Amazon authentication, deployed markup, regional token acceptance and end-to-end workflows remain unproven. Next action: install/update the V3 set, keep duplicate V2 workers disabled, and run native workflow smoke tests while OBS is enabled. Investigate runtime evidence only after a new user request; do not change further scripts automatically.

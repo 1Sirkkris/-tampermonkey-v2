@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 Calm Code
 // @name:en      V3 | BWU2 Calm Code
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.0
+// @version      0.2.1
 // @description  Native Calm Code role shortcuts.
 // @match        https://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*
 // @match        http://fcmenu-iad-regionalized.corp.amazon.com/*/laborTrackingKiosk*
@@ -15,13 +15,13 @@
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Calm_Code.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_Calm_Code.user.js
-// @v3-build     calm-0.2.0-f09efe5a
+// @v3-build     calm-0.2.1-c1672c11
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"calm-0.2.0-f09efe5a","version":"0.2.0"});
+V3.build=Object.freeze({"id":"calm-0.2.1-c1672c11","version":"0.2.1"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -376,9 +376,9 @@ V3.native = (() => {
 // ---- src/apps/calm.js ----
 V3.boot=()=>{
   const C=V3.core,life=C.lifecycle('calm'),telemetry=C.telemetry('calm',V3.build.version),panel=C.panel({id:'calm',title:'V3 · Calm Code',width:480,life});
-  const groups=[['ISS',[['IBPS','IBPS'],['RECON','RECON'],['PSBL','PSBL'],['ICVR','ICVR'],['LPSWEEP','LPSWEEP']]],['Damages',[['ICQADMP','ICQADMP'],['DAMAGES','DAMAGES']]],['Etc',[['HRACCOM','HRACCOM'],['IB Lead/PA','LRSR'],['Non-sort','FCPRJ'],['MSTOP','MSTOP']]]];let mounted=false;
+  const groups=[['ISS',[['IBPS','IBPS'],['RECON','RECON'],['PSBL','PSBL'],['ICVR','ICVR'],['LPSWEEP','LPSWEEP']]],['Damages',[['ICQADMP','ICQADMP'],['DAMAGES','DAMAGES']]],['Etc',[['HRACCOM','HRACCOM'],['IB Lead/PA','LRSR'],['Non-sort','FCPRJ'],['MSTOP','MSTOP']]]];let mounted=false,submitting=false;
   const mount=()=>{if(mounted)return;mounted=true;const root=document.createElement('div');root.innerHTML=groups.map(([g,roles])=>'<section class="v3-section"><b>'+C.esc(g)+'</b><div class="v3-row" style="margin-top:8px">'+roles.map(([n,code])=>'<button class="v3-btn" data-code="'+C.esc(code)+'">'+C.esc(n)+'</button>').join('')+'</div></section>').join('');panel.set(root);
-    for(const b of root.querySelectorAll('[data-code]'))b.onclick=()=>{const input=document.getElementById('calmCode')||document.querySelector('input[name="calmCode"]'),form=input?.form||document.forms[0];if(!input||!form)return;V3.native.setValue(input,b.dataset.code);telemetry.emit('submit',{code:b.dataset.code});form.requestSubmit?form.requestSubmit():form.submit();};
+    for(const b of root.querySelectorAll('[data-code]'))b.onclick=()=>{const input=document.getElementById('calmCode')||document.querySelector('input[name="calmCode"]'),form=input?.form;if(submitting||!input||!form||input.disabled||input.readOnly||!V3.native.visible(input))return;if(!V3.native.setValue(input,b.dataset.code)||input.value!==b.dataset.code)return;if(!form.checkValidity())return;submitting=true;for(const button of root.querySelectorAll('[data-code]'))button.disabled=true;telemetry.emit('submit',{code:b.dataset.code});try{if(form.requestSubmit)form.requestSubmit();else HTMLFormElement.prototype.submit.call(form);}finally{life.timeout(()=>{submitting=false;for(const button of root.querySelectorAll('[data-code]'))button.disabled=false;},500);}};
   };
   mount();panel.el.style.position='static';panel.el.style.width='100%';panel.el.style.maxHeight='none';panel.el.hidden=false;(document.querySelector('#body')||document.body).appendChild(panel.el);
 };
