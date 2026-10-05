@@ -2,7 +2,7 @@
 // @name         V3 | BWU2 SIM Toolbar
 // @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.6
+// @version      0.2.7
 // @description  SIM Markdown toolbar, snippets, attachments and fast native-checkbox ticket range selection.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.6-0173f437
+// @v3-build     sim-0.2.7-a64943a6
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.6-0173f437","version":"0.2.6"});
+V3.build=Object.freeze({"id":"sim-0.2.7-a64943a6","version":"0.2.7"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -637,6 +637,12 @@ V3.boot=()=>{
       life.timeout(scan,60);
     };
 
+    const recordAtPoint=(x,y)=>{
+      const hit=document.elementFromPoint(x,y);
+      const row=hit?.closest?.('tr,[role="row"],li');
+      return row?rows.find(record=>record.row===row)||null:null;
+    };
+
     life.on(document,'pointerdown',event=>{
       if(syncing||busy||!event.shiftKey||event.button!==0)return;
       const record=eventRecord(event);
@@ -649,14 +655,16 @@ V3.boot=()=>{
 
       const from=lastIndex>=0?lastIndex:index;
       const on=lastIndex>=0?checked(rows[from].checkbox):!checked(record.checkbox);
-      drag={from,to:index,on};
+      drag={from,to:index,on,pointerId:event.pointerId};
       suppressShiftClick=true;
       preview(from,index,on);
+
+      try{event.target?.setPointerCapture?.(event.pointerId);}catch{}
     },true);
 
-    life.on(document,'pointerover',event=>{
+    life.on(document,'pointermove',event=>{
       if(!drag||busy||!(event.buttons&1))return;
-      const record=eventRecord(event);
+      const record=recordAtPoint(event.clientX,event.clientY)||eventRecord(event);
       if(!record)return;
       const index=rows.indexOf(record);
       if(index<0||index===drag.to)return;
@@ -670,6 +678,7 @@ V3.boot=()=>{
       event.stopImmediatePropagation();
       const work=drag;
       drag=null;
+      try{event.target?.releasePointerCapture?.(work.pointerId);}catch{}
       lastIndex=work.to;
       void applyRange(work.from,work.to,work.on);
       setTimeout(()=>{suppressShiftClick=false;},0);
