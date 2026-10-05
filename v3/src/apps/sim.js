@@ -95,17 +95,31 @@ V3.boot=()=>{
       for(let index=a;index<=b;index++)nativeToggle(rows[index]?.checkbox,on);
     };
 
+    const eventRecord=event=>{
+      const path=event.composedPath?.()||[];
+      const pathBox=path.find(node=>node?.matches?.('input[type="checkbox"],[role="checkbox"]'));
+      if(pathBox){
+        const direct=rows.find(record=>record.checkbox===pathBox);
+        if(direct)return direct;
+      }
+
+      const row=path.find(node=>rows.some(record=>record.row===node))
+        || event.target?.closest?.('tr,[role="row"],li');
+      if(!row)return null;
+      return rows.find(record=>record.row===row)||null;
+    };
+
     const onNativeClick=event=>{
       if(syncing)return;
-      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
-      if(!box)return;
-      const index=rows.findIndex(record=>record.checkbox===box);
+      const record=eventRecord(event);
+      if(!record)return;
+      const index=rows.indexOf(record);
       if(index<0)return;
 
       if(event.shiftKey&&lastIndex>=0){
         event.preventDefault();
-        event.stopPropagation();
-        const targetState=!checked(box);
+        event.stopImmediatePropagation();
+        const targetState=!checked(record.checkbox);
         setRange(lastIndex,index,targetState);
         lastIndex=index;
         paint();
@@ -171,8 +185,8 @@ V3.boot=()=>{
 
     life.on(document,'click',onNativeClick,true);
     life.on(document,'change',event=>{
-      const box=event.target?.closest?.('input[type="checkbox"],[role="checkbox"]');
-      if(box&&rows.some(record=>record.checkbox===box))queueMicrotask(paint);
+      const record=eventRecord(event);
+      if(record)queueMicrotask(paint);
     },true);
 
     life.observe(document.body,records=>{
