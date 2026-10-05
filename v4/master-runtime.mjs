@@ -1,6 +1,6 @@
 import { createFcrReader, FCR_SECTIONS } from './fcr-read.mjs';
 
-export const MASTER_VERSION = '0.1.0';
+export const MASTER_VERSION = '0.1.1';
 export const MASTER_LABELS = Object.freeze([
   'Product', 'Inventory', 'Inventory History', 'Container History', 'Purchase Order Items',
   'Purchase Order', 'Receive History', 'Shipment', 'Container Details', 'Employee',
@@ -17,16 +17,17 @@ const registryKey = Symbol.for('tampermonkey.v4.master.native-transport');
 // are handled. There is no synthetic XMLHttpRequest or replacement native UI.
 export function watchNativeAjax(page, getRuntime) {
   let registry = page[registryKey];
-  if (registry) { registry.getRuntime = getRuntime; return registry; }
+  if (registry) { registry.getRuntime = getRuntime; registry.watch(); return registry; }
   registry = { getRuntime, attached: new WeakSet(), restore: null };
   page[registryKey] = registry;
   const identify = options => registry.getRuntime()?.nativeRequest(options);
   function attach(jq) {
-    if (typeof jq?.ajaxTransport !== 'function' || typeof jq.ajaxPrefilter !== 'function' || registry.attached.has(jq)) return false;
+    if (typeof jq?.ajaxTransport !== 'function' || typeof jq.ajaxPrefilter !== 'function') return false;
+    if (registry.attached.has(jq)) { registry.restore?.(); return true; }
     registry.attached.add(jq);
     jq.ajaxPrefilter(options => {
       const request = identify(options);
-      if (request && !registry.getRuntime().automatic(request.endpoint)) {
+      if (request && !registry.getRuntime().automatic(request.endpoint, request.query)) {
         // An unsent lazy read must not leave native global loading active or time
         // out while the user deliberately leaves the section closed.
         options.global = false;
@@ -45,7 +46,7 @@ export function watchNativeAjax(page, getRuntime) {
     registry.restore?.();
     return true;
   }
-  if (!attach(page.jQuery)) {
+  registry.watch = () => { if (!attach(page.jQuery)) {
     const descriptor = Object.getOwnPropertyDescriptor(page, 'jQuery');
     if (!descriptor || (descriptor.configurable && 'value' in descriptor)) {
       let value = descriptor?.value;
@@ -59,11 +60,12 @@ export function watchNativeAjax(page, getRuntime) {
         registry.restore = null;
       };
     }
-  }
+  } };
+  registry.watch();
   return registry;
 }
 
-export function createMasterRuntime({ window, page = window, storage, fetch, onRender = () => {}, onEvidence = () => {} }) {
+export function createMasterRuntime({ window, page = window, storage, fetch, onRender = () => {}, onRefresh = () => {}, onReset = () => {}, onDispose = () => {}, onEvidence = () => {} }) {
   const document = window.document;
   let life = null, generation = null, ready = false, observers = [], scheduled = false;
   const owned = new Set(), hidden = new Map(), prefs = new Map(), saveErrors = new Set();
@@ -79,18 +81,20 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
   }
   function notify(message) { problem = message; refresh(); }
   function active(gen) { return life && !life.signal.aborted && generation === gen && !gen.controller.signal.aborted && route(); }
-  function automatic(endpoint) { return prefs.get(endpoint) ?? ['product', 'inventory'].includes(endpoint); }
+  function preferred(endpoint) { return prefs.get(endpoint) ?? ['product', 'inventory'].includes(endpoint); }
+  function automatic(endpoint, query = generation?.query) { return generation && generation.query === query ? generation.automatic.get(endpoint) : preferred(endpoint); }
   function begin(query) {
     if (generation?.query === query && !generation.controller.signal.aborted) return generation;
     if (generation) {
       generation.controller.abort();
       for (const section of generation.sections.values()) for (const waiter of [...section.waiters]) waiter.finish(0, 'abort');
+      onReset();
     }
-    generation = { query, controller: new window.AbortController(), sections: new Map() };
+    generation = { query, controller: new window.AbortController(), sections: new Map(), automatic: new Map(FCR_SECTIONS.map(endpoint => [endpoint, preferred(endpoint)])) };
     return generation;
   }
   function state(endpoint, gen = generation) {
-    if (!gen.sections.has(endpoint)) gen.sections.set(endpoint, { endpoint, status: 'idle', result: null, error: null, promise: null, waiters: new Set(), options: {} });
+    if (!gen.sections.has(endpoint)) gen.sections.set(endpoint, { endpoint, visible: false, status: 'idle', result: null, error: null, promise: null, waiters: new Set(), options: {} });
     return gen.sections.get(endpoint);
   }
   function nativeRequest(options) {
@@ -121,19 +125,25 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
       catch (error) { if (active(gen)) notify('Native ' + MASTER_LABELS[FCR_SECTIONS.indexOf(request.endpoint)] + ' rendering failed: ' + clean(error.message)); }
     } };
     section.waiters.add(waiter);
-    if (automatic(request.endpoint) || section.status !== 'idle') void load(request.endpoint, { gen });
+    if (automatic(request.endpoint) || section.visible) void load(request.endpoint, { gen });
     schedule();
     return () => {
       section.waiters.delete(waiter);
       // Aborting one native subscriber never cancels another's read.
     };
   }
-  async function load(endpoint, { gen = generation, force = false } = {}) {
+  async function load(endpoint, { gen = generation, force = false, render = true } = {}) {
     if (!gen || !active(gen)) return null;
     const section = state(endpoint, gen);
+    if (render) section.visible = true;
     if (section.promise) return section.promise;
     if (!force && section.result) {
-      for (const waiter of [...section.waiters]) waiter.finish(200, 'success', { text: section.result.html });
+      if (section.visible) {
+        if (section.waiters.size) { section.status = section.result.complete ? 'ready' : 'partial'; section.error = null; }
+        for (const waiter of [...section.waiters]) waiter.finish(200, 'success', { text: section.result.html });
+        onRender({ endpoint, result: section.result, generation: gen, signal: gen.controller.signal, reader, runtime: api });
+        schedule();
+      }
       return section.result;
     }
     const controller = new window.AbortController();
@@ -145,9 +155,13 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
         const result = await reader.section(endpoint, gen.query, { ...section.options, signal: controller.signal, allowPartial: true });
         if (!active(gen) || controller.signal.aborted) return null;
         section.result = result; section.status = result.complete ? 'ready' : 'partial';
-        if (section.waiters.size) for (const waiter of [...section.waiters]) waiter.finish(200, 'success', { text: result.html });
-        else paint(endpoint, result);
-        onRender({ endpoint, result, generation: gen, signal: controller.signal, reader, runtime: api });
+        if (section.visible) {
+          if (section.waiters.size) for (const waiter of [...section.waiters]) waiter.finish(200, 'success', { text: result.html });
+          else if (!paint(endpoint)) {
+            section.status = 'error'; section.error = new Error('Native rendering callback unavailable — repeat the native search');
+          }
+          if (section.status !== 'error') onRender({ endpoint, result, generation: gen, signal: controller.signal, reader, runtime: api });
+        }
         return result;
       } catch (error) {
         if (!active(gen) || controller.signal.aborted || error.code === 'CANCELLED') return null;
@@ -162,20 +176,12 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
     })();
     section.promise = work; return work;
   }
-  function paint(endpoint, result) {
-    const container = document.querySelector('[data-section-type="' + endpoint + '"]');
-    if (!container) { notify('Native ' + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + ' container is missing'); return; }
-    // The native transport remains the normal rendering path. This fallback is
-    // for deliberate retry after the native jqXHR was externally aborted.
-    const parsed = new window.DOMParser().parseFromString(result.html, 'text/html');
-    parsed.querySelectorAll('script').forEach(node => node.remove());
-    const content = parsed.querySelector('[data-section-type="' + endpoint + '"]') || parsed.body;
-    container.replaceChildren(...[...content.childNodes].map(node => document.importNode(node, true)));
-    if (page.jQuery?.fn?.DataTable) {
-      for (const table of container.querySelectorAll('table[id^="table-"]')) {
-        if (!page.jQuery.fn.dataTable?.isDataTable(table)) page.jQuery(table).DataTable();
-      }
-    }
+  function paint(endpoint) {
+    // No replacement table or guessed generic DataTables initialization. The
+    // deployed native renderer contract must be captured for retry after the
+    // first native jqXHR has completed/been externally aborted.
+    notify('Native ' + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + ' rendering callback unavailable — repeat the native search');
+    return false;
   }
   function schedule() {
     if (!life || life.signal.aborted || !ready || scheduled) return;
@@ -191,6 +197,7 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
   }
   function refresh() {
     if (!ready || !route()) return;
+    for (const node of owned) if (!node.isConnected) owned.delete(node);
     const nav = findNavigation();
     let status = document.querySelector('[data-tm-v4-master-status]');
     if (!status) {
@@ -208,7 +215,7 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
         if (!anchor) { problem = 'Native section label missing: ' + label; continue; }
         toggle = button('', event => {
           event.preventDefault(); event.stopPropagation();
-          const previous = automatic(endpoint), next = !previous;
+          const previous = preferred(endpoint), next = !previous;
           try { storage.set(PREFIX + endpoint, next); if (storage.get(PREFIX + endpoint) !== next) throw new Error('Readback failed'); prefs.set(endpoint, next); saveErrors.delete(endpoint); }
           catch { saveErrors.add(endpoint); }
           refresh();
@@ -217,14 +224,14 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
         anchor.addEventListener('click', () => { if (generation) void load(endpoint); }, { signal: life.signal });
       }
       const failed = saveErrors.has(endpoint);
-      toggle.textContent = failed ? '!' : automatic(endpoint) ? 'A' : 'L'; toggle.setAttribute('aria-pressed', String(automatic(endpoint)));
-      toggle.title = label + ': ' + (failed ? 'SAVE FAILED — selection unchanged' : automatic(endpoint) ? 'AUTO — loads every search' : 'LAZY — click section to load');
+      toggle.textContent = failed ? '!' : preferred(endpoint) ? 'A' : 'L'; toggle.setAttribute('aria-pressed', String(preferred(endpoint)));
+      toggle.title = label + ': ' + (failed ? 'SAVE FAILED — selection unchanged' : preferred(endpoint) ? 'AUTO — loads every search' : 'LAZY — click section to load');
       toggle.setAttribute('aria-label', toggle.title);
       const container = document.querySelector('[data-section-type="' + endpoint + '"]');
       const section = generation?.sections.get(endpoint);
       if (!container) continue;
       if (!hidden.has(container)) hidden.set(container, container.hidden);
-      container.hidden = !automatic(endpoint) && (!section || section.status === 'idle');
+      container.hidden = !automatic(endpoint) && !section?.visible;
       let note = container.querySelector(':scope > [data-tm-v4-read-status]');
       if (!note && section) { note = mark(document.createElement('div')); note.setAttribute('data-tm-v4-read-status', ''); note.setAttribute('role', 'status'); container.prepend(note); }
       if (note && section) {
@@ -237,6 +244,7 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
         }
       }
     }
+    onRefresh(api);
   }
   function observeNative() {
     const roots = new Set([findNavigation(), ...document.querySelectorAll('[data-section-type]')].filter(Boolean));
@@ -259,12 +267,20 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
       catch { problem = 'Section preferences unavailable'; }
     }
     begin(currentQuery());
+    document.addEventListener('submit', event => {
+      const input = event.target.querySelector?.('#search,input[name="s"]');
+      if (input) { begin(clean(input.value)); schedule(); }
+    }, { capture: true, signal: life.signal });
+    document.addEventListener('input', event => {
+      if (event.target.matches?.('#search,input[name="s"]') && !clean(event.target.value)) { begin(''); schedule(); }
+    }, { signal: life.signal });
     const mount = () => { if (!life || life.signal.aborted || ready) return; ready = true; refresh(); observeNative(); };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true, signal: life.signal }); else mount();
   }
   function dispose() {
     if (!life || life.signal.aborted) return;
     life.abort(); generation?.controller.abort();
+    onDispose();
     for (const section of generation?.sections.values() || []) for (const waiter of [...section.waiters]) waiter.finish(0, 'abort');
     observers.forEach(observer => observer.disconnect()); observers = []; scheduled = false;
     for (const node of owned) node.remove(); owned.clear();

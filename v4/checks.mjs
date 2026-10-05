@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, basename } from 'node:path';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const files = readdirSync(root).filter(name => name.endsWith('.user.js'));
+files.push(...readdirSync(root + '/diagnostics').filter(name => name.endsWith('.user.js')).map(name => 'diagnostics/' + name));
 assert(files.length > 0, 'No V4 installer');
 for (const name of files) {
   const path = root + '/' + name;
@@ -14,7 +15,7 @@ for (const name of files) {
   assert(metadata, name + ': metadata missing');
   const field = key => metadata.match(new RegExp('// @' + key + '\\s+([^\\n]+)'))?.[1].trim();
   assert(field('name').startsWith('V4 '), name + ': wrong identity');
-  assert.equal(field('downloadURL'), 'https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/' + basename(path));
+  assert.equal(field('downloadURL'), 'https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/' + name);
   assert.equal(field('updateURL'), field('downloadURL'));
   assert.equal(source.match(/(?:const|var|let) VERSION\s*=\s*(['"])([^'"]+)\1/)?.[2], field('version'));
   assert(!/\/\/ @require\b/.test(metadata), name + ': external implementation dependency');

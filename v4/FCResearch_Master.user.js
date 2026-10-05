@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.0
+// @version      0.1.1
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -161,7 +161,7 @@
     if (!/^https?:$/.test(site.protocol) || !allowedHost.test(site.hostname) || site.username || site.password || !/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof nativeFetch !== "function" || typeof Parser !== "function" || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 200 || !Number.isInteger(maxRows) || maxRows < 1 || maxRows > 1e5 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4 || !Array.isArray(retryDelays) || retryDelays.length > 3 || retryDelays.some((ms) => !Number.isFinite(ms) || ms < 0 || ms > 5e3)) throw failure("INPUT", "FCR reader configuration is invalid");
     const base = `${site.origin}/${encodeURIComponent(warehouse)}/results/`;
     const endpoints = /* @__PURE__ */ new Set([...FCR_SECTIONS, "inventory-more", "inventory-history-more"]);
-    function evidence(data) {
+    function evidence2(data) {
       try {
         onEvidence({ type: "fcr.read", script: "FCR READ", version: FCR_READ_VERSION, intent: "read", data });
       } catch {
@@ -227,12 +227,12 @@
           active(signal);
           if (timedOut) throw failure("TIMEOUT", endpoint + ": timed out");
           if (typeof html !== "string" || html.length > 8e6) throw failure("SCHEMA", endpoint + ": response exceeds the read limit");
-          evidence({ endpoint, status: response.status, outcome: "received", attempt: attempt + 1 });
+          evidence2({ endpoint, status: response.status, outcome: "received", attempt: attempt + 1 });
           return documentFrom(html, endpoint.endsWith("-more"));
         } catch (cause) {
           active(signal);
           const error = timedOut ? failure("TIMEOUT", endpoint + ": timed out", { cause }) : cause instanceof FcrReadError ? cause : failure("NETWORK", endpoint + ": request failed", { cause });
-          evidence({ endpoint, status: error.status, outcome: "failed", code: error.code, attempt: attempt + 1 });
+          evidence2({ endpoint, status: error.status, outcome: "failed", code: error.code, attempt: attempt + 1 });
           retry = error.code === "HTTP" && error.status >= 500 && error.status < 600 && attempt < retryDelays.length;
           if (!retry) throw error;
         } finally {
@@ -349,12 +349,12 @@
         if (advertised !== null && sum !== advertised) throw failure("TOTAL", "Inventory quantity does not match the advertised total");
         complete = true;
         active(signal);
-        evidence({ endpoint: "inventory", outcome: "complete", pages, records: rows.length });
+        evidence2({ endpoint: "inventory", outcome: "complete", pages, records: rows.length });
       } catch (cause) {
         active(signal);
         if (!(cause instanceof FcrReadError) || cause.code === "CANCELLED") throw cause;
         error = cause;
-        evidence({ endpoint: "inventory", outcome: "incomplete", code: error.code, pages, records: rows.length });
+        evidence2({ endpoint: "inventory", outcome: "incomplete", code: error.code, pages, records: rows.length });
         if (!allowPartial) throw failure(error.code, "Inventory incomplete: " + error.message, { cause: error, partial: result(error.message, error.code) });
       }
       active(signal);
@@ -409,7 +409,7 @@
       }
       document.querySelectorAll(".pagination-token").forEach((node) => node.remove());
       active(signal);
-      evidence({ endpoint: "inventory-history", outcome: complete ? "complete" : "incomplete", pages, records, code: error?.code });
+      evidence2({ endpoint: "inventory-history", outcome: complete ? "complete" : "incomplete", pages, records, code: error?.code });
       active(signal);
       return { query, html: document.body.innerHTML, pages, records, complete, warning: error?.message || "", ...error ? { code: error.code } : {}, source: "network" };
     }
@@ -436,7 +436,7 @@
   }
 
   // master-runtime.mjs
-  var MASTER_VERSION = "0.1.0";
+  var MASTER_VERSION = "0.1.1";
   var MASTER_LABELS = Object.freeze([
     "Product",
     "Inventory",
@@ -466,17 +466,22 @@
     let registry = page2[registryKey];
     if (registry) {
       registry.getRuntime = getRuntime;
+      registry.watch();
       return registry;
     }
     registry = { getRuntime, attached: /* @__PURE__ */ new WeakSet(), restore: null };
     page2[registryKey] = registry;
     const identify = (options) => registry.getRuntime()?.nativeRequest(options);
     function attach(jq) {
-      if (typeof jq?.ajaxTransport !== "function" || typeof jq.ajaxPrefilter !== "function" || registry.attached.has(jq)) return false;
+      if (typeof jq?.ajaxTransport !== "function" || typeof jq.ajaxPrefilter !== "function") return false;
+      if (registry.attached.has(jq)) {
+        registry.restore?.();
+        return true;
+      }
       registry.attached.add(jq);
       jq.ajaxPrefilter((options) => {
         const request = identify(options);
-        if (request && !registry.getRuntime().automatic(request.endpoint)) {
+        if (request && !registry.getRuntime().automatic(request.endpoint, request.query)) {
           options.global = false;
           options.timeout = 0;
         }
@@ -498,27 +503,33 @@
       registry.restore?.();
       return true;
     }
-    if (!attach(page2.jQuery)) {
-      const descriptor = Object.getOwnPropertyDescriptor(page2, "jQuery");
-      if (!descriptor || descriptor.configurable && "value" in descriptor) {
-        let value = descriptor?.value;
-        const getter = () => value;
-        const setter = (next) => {
-          value = next;
-          attach(next);
-        };
-        Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, get: getter, set: setter });
-        registry.restore = () => {
-          if (Object.getOwnPropertyDescriptor(page2, "jQuery")?.get === getter) {
-            Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: descriptor?.writable ?? true, value });
-          }
-          registry.restore = null;
-        };
+    registry.watch = () => {
+      if (!attach(page2.jQuery)) {
+        const descriptor = Object.getOwnPropertyDescriptor(page2, "jQuery");
+        if (!descriptor || descriptor.configurable && "value" in descriptor) {
+          let value = descriptor?.value;
+          const getter = () => value;
+          const setter = (next) => {
+            value = next;
+            attach(next);
+          };
+          Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, get: getter, set: setter });
+          registry.restore = () => {
+            if (Object.getOwnPropertyDescriptor(page2, "jQuery")?.get === getter) {
+              Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: descriptor?.writable ?? true, value });
+            }
+            registry.restore = null;
+          };
+        }
       }
-    }
+    };
+    registry.watch();
     return registry;
   }
   function createMasterRuntime({ window: window2, page: page2 = window2, storage: storage2, fetch, onRender = () => {
+  }, onRefresh = () => {
+  }, onReset = () => {
+  }, onDispose = () => {
   }, onEvidence = () => {
   } }) {
     const document = window2.document;
@@ -545,23 +556,27 @@
       problem = message;
       refresh();
     }
-    function active2(gen) {
+    function active3(gen) {
       return life && !life.signal.aborted && generation === gen && !gen.controller.signal.aborted && route();
     }
-    function automatic(endpoint) {
+    function preferred(endpoint) {
       return prefs.get(endpoint) ?? ["product", "inventory"].includes(endpoint);
+    }
+    function automatic(endpoint, query = generation?.query) {
+      return generation && generation.query === query ? generation.automatic.get(endpoint) : preferred(endpoint);
     }
     function begin(query) {
       if (generation?.query === query && !generation.controller.signal.aborted) return generation;
       if (generation) {
         generation.controller.abort();
         for (const section of generation.sections.values()) for (const waiter of [...section.waiters]) waiter.finish(0, "abort");
+        onReset();
       }
-      generation = { query, controller: new window2.AbortController(), sections: /* @__PURE__ */ new Map() };
+      generation = { query, controller: new window2.AbortController(), sections: /* @__PURE__ */ new Map(), automatic: new Map(FCR_SECTIONS.map((endpoint) => [endpoint, preferred(endpoint)])) };
       return generation;
     }
     function state(endpoint, gen = generation) {
-      if (!gen.sections.has(endpoint)) gen.sections.set(endpoint, { endpoint, status: "idle", result: null, error: null, promise: null, waiters: /* @__PURE__ */ new Set(), options: {} });
+      if (!gen.sections.has(endpoint)) gen.sections.set(endpoint, { endpoint, visible: false, status: "idle", result: null, error: null, promise: null, waiters: /* @__PURE__ */ new Set(), options: {} });
       return gen.sections.get(endpoint);
     }
     function nativeRequest(options) {
@@ -576,8 +591,8 @@
       if (url.origin !== window2.location.origin || !match || !FCR_SECTIONS.includes(match[1])) return null;
       const fields = new URLSearchParams(typeof options.data === "string" ? options.data : options.data || {});
       const query = clean(fields.get("s"));
-      const allowed = match[1] === "inventory-history" ? ["s", "startSearchDateString", "endSearchDateString", "dateStringFormat"] : ["s"];
-      if (!query || [...fields.keys()].some((key) => !allowed.includes(key))) return null;
+      const allowed2 = match[1] === "inventory-history" ? ["s", "startSearchDateString", "endSearchDateString", "dateStringFormat"] : ["s"];
+      if (!query || [...fields.keys()].some((key) => !allowed2.includes(key))) return null;
       if (fields.has("dateStringFormat") && fields.get("dateStringFormat") !== "MM/dd/yyyy") return null;
       const optionsForRead = fields.has("startSearchDateString") || fields.has("endSearchDateString") ? { startDate: fields.get("startSearchDateString"), endDate: fields.get("endSearchDateString") } : {};
       return { endpoint: match[1], query, options: optionsForRead };
@@ -597,22 +612,31 @@
         try {
           complete(status, statusText, responses, "Content-Type: text/html; charset=UTF-8\r\n");
         } catch (error) {
-          if (active2(gen)) notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(request.endpoint)] + " rendering failed: " + clean(error.message));
+          if (active3(gen)) notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(request.endpoint)] + " rendering failed: " + clean(error.message));
         }
       } };
       section.waiters.add(waiter);
-      if (automatic(request.endpoint) || section.status !== "idle") void load(request.endpoint, { gen });
+      if (automatic(request.endpoint) || section.visible) void load(request.endpoint, { gen });
       schedule();
       return () => {
         section.waiters.delete(waiter);
       };
     }
-    async function load(endpoint, { gen = generation, force = false } = {}) {
-      if (!gen || !active2(gen)) return null;
+    async function load(endpoint, { gen = generation, force = false, render = true } = {}) {
+      if (!gen || !active3(gen)) return null;
       const section = state(endpoint, gen);
+      if (render) section.visible = true;
       if (section.promise) return section.promise;
       if (!force && section.result) {
-        for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: section.result.html });
+        if (section.visible) {
+          if (section.waiters.size) {
+            section.status = section.result.complete ? "ready" : "partial";
+            section.error = null;
+          }
+          for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: section.result.html });
+          onRender({ endpoint, result: section.result, generation: gen, signal: gen.controller.signal, reader, runtime: api });
+          schedule();
+        }
         return section.result;
       }
       const controller = new window2.AbortController();
@@ -625,15 +649,20 @@
       const work = (async () => {
         try {
           const result = await reader.section(endpoint, gen.query, { ...section.options, signal: controller.signal, allowPartial: true });
-          if (!active2(gen) || controller.signal.aborted) return null;
+          if (!active3(gen) || controller.signal.aborted) return null;
           section.result = result;
           section.status = result.complete ? "ready" : "partial";
-          if (section.waiters.size) for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: result.html });
-          else paint(endpoint, result);
-          onRender({ endpoint, result, generation: gen, signal: controller.signal, reader, runtime: api });
+          if (section.visible) {
+            if (section.waiters.size) for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: result.html });
+            else if (!paint(endpoint)) {
+              section.status = "error";
+              section.error = new Error("Native rendering callback unavailable — repeat the native search");
+            }
+            if (section.status !== "error") onRender({ endpoint, result, generation: gen, signal: controller.signal, reader, runtime: api });
+          }
           return result;
         } catch (error) {
-          if (!active2(gen) || controller.signal.aborted || error.code === "CANCELLED") return null;
+          if (!active3(gen) || controller.signal.aborted || error.code === "CANCELLED") return null;
           section.error = error;
           section.status = "error";
           return null;
@@ -648,21 +677,9 @@
       section.promise = work;
       return work;
     }
-    function paint(endpoint, result) {
-      const container = document.querySelector('[data-section-type="' + endpoint + '"]');
-      if (!container) {
-        notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + " container is missing");
-        return;
-      }
-      const parsed = new window2.DOMParser().parseFromString(result.html, "text/html");
-      parsed.querySelectorAll("script").forEach((node) => node.remove());
-      const content = parsed.querySelector('[data-section-type="' + endpoint + '"]') || parsed.body;
-      container.replaceChildren(...[...content.childNodes].map((node) => document.importNode(node, true)));
-      if (page2.jQuery?.fn?.DataTable) {
-        for (const table of container.querySelectorAll('table[id^="table-"]')) {
-          if (!page2.jQuery.fn.dataTable?.isDataTable(table)) page2.jQuery(table).DataTable();
-        }
-      }
+    function paint(endpoint) {
+      notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + " rendering callback unavailable — repeat the native search");
+      return false;
     }
     function schedule() {
       if (!life || life.signal.aborted || !ready || scheduled) return;
@@ -682,6 +699,7 @@
     }
     function refresh() {
       if (!ready || !route()) return;
+      for (const node of owned) if (!node.isConnected) owned.delete(node);
       const nav = findNavigation();
       let status = document.querySelector("[data-tm-v4-master-status]");
       if (!status) {
@@ -705,7 +723,7 @@
           toggle = button("", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            const previous = automatic(endpoint), next = !previous;
+            const previous = preferred(endpoint), next = !previous;
             try {
               storage2.set(PREFIX + endpoint, next);
               if (storage2.get(PREFIX + endpoint) !== next) throw new Error("Readback failed");
@@ -723,15 +741,15 @@
           }, { signal: life.signal });
         }
         const failed = saveErrors.has(endpoint);
-        toggle.textContent = failed ? "!" : automatic(endpoint) ? "A" : "L";
-        toggle.setAttribute("aria-pressed", String(automatic(endpoint)));
-        toggle.title = label + ": " + (failed ? "SAVE FAILED — selection unchanged" : automatic(endpoint) ? "AUTO — loads every search" : "LAZY — click section to load");
+        toggle.textContent = failed ? "!" : preferred(endpoint) ? "A" : "L";
+        toggle.setAttribute("aria-pressed", String(preferred(endpoint)));
+        toggle.title = label + ": " + (failed ? "SAVE FAILED — selection unchanged" : preferred(endpoint) ? "AUTO — loads every search" : "LAZY — click section to load");
         toggle.setAttribute("aria-label", toggle.title);
         const container = document.querySelector('[data-section-type="' + endpoint + '"]');
         const section = generation?.sections.get(endpoint);
         if (!container) continue;
         if (!hidden.has(container)) hidden.set(container, container.hidden);
-        container.hidden = !automatic(endpoint) && (!section || section.status === "idle");
+        container.hidden = !automatic(endpoint) && !section?.visible;
         let note = container.querySelector(":scope > [data-tm-v4-read-status]");
         if (!note && section) {
           note = mark(document.createElement("div"));
@@ -749,6 +767,7 @@
           }
         }
       }
+      onRefresh(api);
     }
     function observeNative() {
       const roots = new Set([findNavigation(), ...document.querySelectorAll("[data-section-type]")].filter(Boolean));
@@ -789,6 +808,19 @@
         }
       }
       begin(currentQuery());
+      document.addEventListener("submit", (event) => {
+        const input = event.target.querySelector?.('#search,input[name="s"]');
+        if (input) {
+          begin(clean(input.value));
+          schedule();
+        }
+      }, { capture: true, signal: life.signal });
+      document.addEventListener("input", (event) => {
+        if (event.target.matches?.('#search,input[name="s"]') && !clean(event.target.value)) {
+          begin("");
+          schedule();
+        }
+      }, { signal: life.signal });
       const mount = () => {
         if (!life || life.signal.aborted || ready) return;
         ready = true;
@@ -802,6 +834,7 @@
       if (!life || life.signal.aborted) return;
       life.abort();
       generation?.controller.abort();
+      onDispose();
       for (const section of generation?.sections.values() || []) for (const waiter of [...section.waiters]) waiter.finish(0, "abort");
       observers.forEach((observer) => observer.disconnect());
       observers = [];
@@ -823,7 +856,7 @@
       mark,
       notify,
       current: () => generation,
-      active: active2,
+      active: active3,
       refresh,
       reader,
       warehouse,
@@ -833,7 +866,267 @@
   }
 
   // fcr-enrichment.mjs
+  var FCR_ENRICHMENT_VERSION = "0.1.0";
   var MEASUREMENT_ORIGIN = "https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com";
+  var BIN_URL = "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem";
+  var PANDASH_URL = "https://pandash.amazon.com/GridServlet";
+  var clean2 = (value) => String(value ?? "").trim();
+  var upper = (value) => clean2(value).toUpperCase();
+  var fail = (code, message, options) => new FcrReadError(code, message, options);
+  function active2(signal) {
+    if (signal?.aborted) throw fail("CANCELLED", "Enrichment read cancelled", { cause: signal.reason });
+  }
+  function allowed(url, method) {
+    const value = new URL(url);
+    return !value.username && !value.password && (value.origin + value.pathname === PANDASH_URL && ["GET", "POST"].includes(method) || value.origin + value.pathname === BIN_URL && method === "POST" || value.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\/[A-Z0-9]{10}\/(?:FNSKU|ASIN)$/.test(value.pathname) && method === "GET");
+  }
+  function createGmJsonReader(gmRequest, { timeoutMs = 15e3 } = {}) {
+    if (typeof gmRequest !== "function" || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4) throw fail("INPUT", "GM read transport configuration is invalid");
+    return function read({ url, method = "GET", headers = {}, body, signal }) {
+      active2(signal);
+      try {
+        if (!allowed(url, method)) throw new Error();
+      } catch {
+        throw fail("INPUT", "Unsupported external read endpoint");
+      }
+      return new Promise((resolve, reject) => {
+        let handle, settled = false;
+        const finish = (error, value) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", cancelled);
+          if (error) reject(error);
+          else resolve(value);
+        };
+        const cancelled = () => {
+          finish(fail("CANCELLED", "External read cancelled", { cause: signal.reason }));
+          try {
+            handle?.abort();
+          } catch {
+          }
+        };
+        signal?.addEventListener("abort", cancelled, { once: true });
+        try {
+          handle = gmRequest({
+            url,
+            method,
+            headers,
+            ...body == null ? {} : { data: body },
+            responseType: "text",
+            timeout: timeoutMs,
+            onload: (response) => {
+              if (settled) return;
+              try {
+                active2(signal);
+                if ([401, 403].includes(response.status)) throw fail("AUTH_REQUIRED", "External read authentication required", { status: response.status });
+                const final = response.finalUrl ? new URL(response.finalUrl) : new URL(url), requested = new URL(url);
+                if (final.origin !== requested.origin || final.pathname !== requested.pathname) throw fail("AUTH_REQUIRED", "External read redirected to another resource");
+                if (response.status < 200 || response.status >= 300) throw fail("HTTP", "External read HTTP " + response.status, { status: response.status });
+                if (typeof response.responseText !== "string" || response.responseText.length > 1e6) throw fail("SCHEMA", "External read body is invalid or too large");
+                let value;
+                try {
+                  value = JSON.parse(response.responseText);
+                } catch {
+                  throw fail("SCHEMA", "External read did not return JSON");
+                }
+                if (!value || typeof value !== "object" || Array.isArray(value)) throw fail("SCHEMA", "External read JSON object is missing");
+                finish(null, value);
+              } catch (error) {
+                finish(error);
+              }
+            },
+            onerror: () => finish(fail("NETWORK", "External read request failed")),
+            ontimeout: () => finish(fail("TIMEOUT", "External read timed out")),
+            onabort: () => finish(fail("CANCELLED", "External read aborted"))
+          });
+          if (signal?.aborted) cancelled();
+        } catch (cause) {
+          finish(fail("NETWORK", "External read could not start", { cause }));
+        }
+      });
+    };
+  }
+  function createFcrEnrichment({
+    warehouse,
+    readJson,
+    getMeasurementAuth = async () => null,
+    historyFallback,
+    now = Date.now,
+    uuid: uuid2 = () => crypto.randomUUID(),
+    maxMeasurementPages = 10,
+    onEvidence = () => {
+    }
+  }) {
+    if (!/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof readJson !== "function" || !Number.isInteger(maxMeasurementPages) || maxMeasurementPages < 1 || maxMeasurementPages > 100) throw fail("INPUT", "Enrichment configuration is invalid");
+    function evidence2(endpoint, data) {
+      try {
+        onEvidence({ type: "fcr.read", script: "FCR ENRICHMENT", version: FCR_ENRICHMENT_VERSION, intent: "read", data: { endpoint, ...data } });
+      } catch {
+      }
+    }
+    async function read(options) {
+      active2(options.signal);
+      try {
+        const result = await readJson(options);
+        active2(options.signal);
+        return result;
+      } catch (error) {
+        active2(options.signal);
+        const path = new URL(options.url).pathname;
+        evidence2(path.startsWith("/prod/measurementEvents/") ? "measurementEvents" : path.split("/").at(-1), { outcome: "failed", code: error.code || "NETWORK" });
+        throw error;
+      }
+    }
+    async function hazmat(asinValue, { signal } = {}) {
+      const asin = upper(asinValue);
+      if (!/^B[A-Z0-9]{9}$/.test(asin)) throw fail("INPUT", "An exact ASIN is required");
+      let restriction = "default", restrictionWarning = "";
+      try {
+        const settings = await read({ url: PANDASH_URL + "?fc=" + encodeURIComponent(warehouse), signal });
+        if (typeof settings.restriction === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(settings.restriction)) restriction = settings.restriction;
+        else restrictionWarning = "Native restriction unavailable; default restriction used";
+      } catch (error) {
+        active2(signal);
+        if (error.code === "AUTH_REQUIRED") throw error;
+        restrictionWarning = "Restriction lookup failed; default restriction used";
+      }
+      const payload = await read({
+        url: PANDASH_URL,
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ language: "default", source: restriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
+        signal
+      });
+      if (!Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are missing");
+      const matches = payload.rows.filter((row) => upper(row?.asin) === asin);
+      if (!matches.length) return { hazmat: null, complete: false, warning: "No exact ASIN hazmat result", source: "network" };
+      const mapped = matches.map((row) => {
+        const level = Number(row.level);
+        if (row.level == null || clean2(row.level) === "" || !Number.isInteger(level) || level < 0 || typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
+        return { level, message: row.message };
+      });
+      if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
+      active2(signal);
+      evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
+      return { hazmat: mapped[0], complete: true, warning: restrictionWarning, source: "network" };
+    }
+    async function binDescription(containerValue, itemValue, { signal, verifiedAliases = [] } = {}) {
+      const container = clean2(containerValue), item = upper(itemValue);
+      if (!container || container.length > 128 || !item || item.length > 128 || !Array.isArray(verifiedAliases)) throw fail("INPUT", "Bin read identities are invalid");
+      const payload = await read({
+        url: BIN_URL,
+        method: "POST",
+        headers: { Accept: "*/*", "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+          containerScannableId: container,
+          isMasterpack: null,
+          itemAndonContext: null,
+          itemBarcode: item,
+          requestId: "amzn1.fc.v1.common.request-id.v1.AFTPoirotWebsite." + uuid2(),
+          tool: "V3"
+        })
+      });
+      if (!Array.isArray(payload.items)) throw fail("SCHEMA", "Native bin item rows are missing");
+      const wanted = /* @__PURE__ */ new Set([item, ...verifiedAliases.map(upper)]), matches = [];
+      for (const row of payload.items) {
+        if (!row || typeof row !== "object") throw fail("SCHEMA", "Native bin item row is invalid");
+        if (/^X[A-Z0-9]{9}$/.test(item) && row.skuDetail?.fnSku && upper(row.skuDetail.fnSku) !== item) continue;
+        const codes = [row.scannableId, row.value, row.scannedBarcode, row.skuDetail?.fnSku, row.skuDetail?.asin, row.skuDetail?.fcSku].map(upper).filter(Boolean);
+        const matched = codes.find((code) => wanted.has(code));
+        if (matched && typeof row.binDescription === "string" && clean2(row.binDescription)) matches.push({ size: clean2(row.binDescription), matched });
+      }
+      if (!matches.length) return { size: "", complete: false, warning: "No exact-item binDescription returned", source: "network" };
+      if (new Set(matches.map((row) => row.size)).size > 1) throw fail("IDENTITY", "Conflicting exact-item binDescription");
+      active2(signal);
+      evidence2("scanitem", { outcome: "complete" });
+      return { ...matches[0], complete: true, source: "network" };
+    }
+    async function fallback(identifier2, reason, signal, authRequired) {
+      active2(signal);
+      const result = historyFallback ? await historyFallback(identifier2, { signal }) : null;
+      active2(signal);
+      if (result && typeof result.madcat !== "boolean") throw fail("SCHEMA", "History fallback result is invalid");
+      return {
+        madcat: result?.madcat === true ? true : result?.complete === true ? false : null,
+        source: "history-fallback",
+        madcatSource: "history",
+        complete: result?.complete === true,
+        windowDays: null,
+        authRequired,
+        fallbackReason: reason,
+        historyRows: result?.rows || 0
+      };
+    }
+    async function recentMadcat({ fnsku, asin }, { signal, forceAuth = false } = {}) {
+      const identifier2 = upper(fnsku || asin), identifierType = fnsku ? "FNSKU" : "ASIN";
+      if (!/^[A-Z0-9]{10}$/.test(identifier2)) throw fail("INPUT", "Measurement identifier is invalid");
+      const before = now(), after = before - 30 * 24 * 60 * 60 * 1e3;
+      let auth = await getMeasurementAuth(identifier2, { signal, force: forceAuth });
+      active2(signal);
+      const validAuth = (value) => value && typeof value.token === "string" && value.token && Number.isFinite(value.expiresAt) && value.expiresAt > now() + 1e4;
+      if (!validAuth(auth)) return fallback(identifier2, "measurement-login-required", signal, true);
+      const url = new URL(MEASUREMENT_ORIGIN + "/prod/measurementEvents/" + identifier2 + "/" + identifierType);
+      url.searchParams.set("effectiveAfter", new Date(after).toISOString());
+      url.searchParams.set("effectiveBefore", new Date(before).toISOString());
+      const seen = /* @__PURE__ */ new Set();
+      let next = "", pages = 0, eventsChecked = 0, renewed = false;
+      do {
+        active2(signal);
+        if (pages >= maxMeasurementPages || next && seen.has(next)) throw fail("PAGINATION", "Measurement history incomplete or repeated");
+        if (next) {
+          seen.add(next);
+          url.searchParams.set("nextToken", next);
+        } else url.searchParams.delete("nextToken");
+        let payload;
+        try {
+          payload = await read({ url: url.href, headers: { Accept: "application/json", Authorization: auth.token }, signal });
+        } catch (error) {
+          active2(signal);
+          if (error.code === "AUTH_REQUIRED" && !renewed) {
+            renewed = true;
+            const fresh = await getMeasurementAuth(identifier2, { signal, force: true, previousToken: auth.token });
+            active2(signal);
+            if (!validAuth(fresh) || fresh.token === auth.token) return fallback(identifier2, "measurement-token-expired", signal, true);
+            auth = fresh;
+            try {
+              payload = await read({ url: url.href, headers: { Accept: "application/json", Authorization: auth.token }, signal });
+            } catch (retryError) {
+              active2(signal);
+              if (retryError.code === "AUTH_REQUIRED") return fallback(identifier2, "measurement-token-expired", signal, true);
+              if (retryError.status === 400) return fallback(identifier2, "measurement-http-400", signal, false);
+              throw retryError;
+            }
+          } else if (error.code === "AUTH_REQUIRED") return fallback(identifier2, "measurement-token-expired", signal, true);
+          else if (error.status === 400) return fallback(identifier2, "measurement-http-400", signal, false);
+          else throw error;
+        }
+        if (!Array.isArray(payload.measurementEvents) || payload.measurementEvents.length > 1e4) throw fail("SCHEMA", "Measurement events are missing or oversized");
+        let positive = false;
+        for (const event of payload.measurementEvents) {
+          if (!event || typeof event.measurementSource !== "string" || !event.measurementSource || !Number.isFinite(Date.parse(event.measurementInstant))) {
+            throw fail("SCHEMA", "Measurement event source/time is invalid");
+          }
+          const instant = Date.parse(event.measurementInstant);
+          if (upper(event.measurementSource) === "MADCAT" && instant >= after && instant <= before) positive = true;
+        }
+        pages++;
+        eventsChecked += payload.measurementEvents.length;
+        if (payload.nextToken != null && typeof payload.nextToken !== "string") throw fail("PAGINATION", "Measurement continuation token is invalid");
+        next = clean2(payload.nextToken);
+        if (next.length > 16384) throw fail("PAGINATION", "Measurement continuation token is oversized");
+        if (positive) {
+          active2(signal);
+          evidence2("measurementEvents", { outcome: "positive", pages, eventsChecked });
+          return { madcat: true, madcatSource: "raw", windowDays: 30, complete: true, pages, eventsChecked, identifierType, source: "network" };
+        }
+      } while (next);
+      active2(signal);
+      evidence2("measurementEvents", { outcome: "negative", pages, eventsChecked });
+      return { madcat: false, madcatSource: "raw", windowDays: 30, complete: true, pages, eventsChecked, identifierType, source: "network" };
+    }
+    return Object.freeze({ hazmat, binDescription, recentMadcat });
+  }
 
   // measurement-auth.mjs
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
@@ -943,23 +1236,780 @@
     page2[GUARD] = dispose;
     return dispose;
   }
+  function createMeasurementAuth({ window: window2, storage: storage2, now = Date.now, timeoutMs = 1e4 }) {
+    if (!window2?.document || !storage2 || !["get", "listen", "remove"].every((key) => typeof storage2[key] === "function") || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4) throw failure2("INPUT", "Measurement auth configuration is invalid");
+    function read() {
+      try {
+        const raw = storage2.get(MEASUREMENT_AUTH_KEY, "null");
+        const stored = JSON.parse(raw);
+        return stored ? normalizeMeasurementToken(stored.token, now()) : null;
+      } catch (cause) {
+        throw failure2("STORAGE", "Measurement auth storage cannot be read", cause);
+      }
+    }
+    function loginUrl(identifier2) {
+      const code = String(identifier2 ?? "").trim().toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(code)) throw failure2("INPUT", "Measurement login identifier is invalid");
+      const url = new URL(SITE + "/item/" + code);
+      url.searchParams.set("tmV4MeasurementAuth", "1");
+      return url.href;
+    }
+    async function acquire(identifier2, { signal, force = false, previousToken } = {}) {
+      const url = loginUrl(identifier2);
+      if (signal?.aborted) throw failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason);
+      const cached = read();
+      if (!force && cached && cached.token !== previousToken) return cached;
+      let baseline;
+      try {
+        baseline = force ? storage2.get(MEASUREMENT_AUTH_KEY, "null") : null;
+      } catch (cause) {
+        throw failure2("STORAGE", "Measurement auth storage cannot be read", cause);
+      }
+      return new Promise((resolve, reject) => {
+        let listener = null, frame = null, timer = null, settled = false;
+        const cleanup = () => {
+          if (timer != null) window2.clearTimeout(timer);
+          if (listener != null) {
+            try {
+              storage2.remove(listener);
+            } catch {
+            }
+          }
+          signal?.removeEventListener("abort", cancelled);
+          frame?.remove();
+        };
+        const finish = (error, value = null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (error) reject(error);
+          else resolve(value);
+        };
+        const cancelled = () => finish(failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason));
+        const changed = () => {
+          if (settled) return;
+          try {
+            if (force && storage2.get(MEASUREMENT_AUTH_KEY, "null") === baseline) return;
+            const value = read();
+            if (value && value.token !== previousToken) finish(null, value);
+          } catch (error) {
+            finish(error);
+          }
+        };
+        signal?.addEventListener("abort", cancelled, { once: true });
+        try {
+          listener = storage2.listen(MEASUREMENT_AUTH_KEY, changed);
+          if (settled) {
+            cleanup();
+            return;
+          }
+          if (signal?.aborted) {
+            cancelled();
+            return;
+          }
+          if (!force) changed();
+          if (settled) return;
+          timer = window2.setTimeout(() => finish(null), timeoutMs);
+          frame = window2.document.createElement("iframe");
+          frame.dataset.tmV4Auth = "measurement";
+          frame.tabIndex = -1;
+          frame.setAttribute("aria-hidden", "true");
+          frame.setAttribute("inert", "");
+          frame.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0";
+          frame.src = url;
+          (window2.document.body || window2.document.documentElement).append(frame);
+        } catch (cause) {
+          finish(cause instanceof FcrReadError ? cause : failure2("AUTH_REQUIRED", "Measurement acquisition could not start", cause));
+        }
+      });
+    }
+    return Object.freeze({ read, acquire, loginUrl });
+  }
+
+  // master-features.mjs
+  var clean3 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  var upper2 = (value) => clean3(value).toUpperCase();
+  var UI2 = "[data-tm-v4-master]";
+  var STYLE = `
+[data-tm-v4-section]{margin-left:5px;padding:0 4px;font-weight:bold}
+[data-tm-v4-master-status]{display:block;font-size:11px;margin:4px 0}
+[data-tm-v4-badge]{display:inline-block;margin-left:6px;padding:2px 6px;border:1px solid #666;border-radius:5px;background:#fff;color:#111;font-weight:bold;font-size:12px}
+[data-tm-v4-badge][data-state="yes"],[data-tm-v4-property="true"]{background:#00875a;color:#fff}
+[data-tm-v4-badge][data-state="no"],[data-tm-v4-property="false"]{background:#bb1637;color:#fff}
+[data-tm-v4-badge][data-state="history"],[data-tm-v4-badge][data-state="error"],[data-tm-v4-property="unknown"]{background:#ffe299;color:#111}
+[data-tm-v4-property]{font-weight:bold}
+[data-tm-v4-po~="unfilled"]{background:#ffe299;font-weight:bold}
+[data-tm-v4-po~="cancelled"]{background:#bb1637;color:#fff;font-weight:bold}
+[data-tm-v4-po~="band"]{box-shadow:inset 0 0 0 2px #bb1637}
+[data-tm-v4-po~="old"]{background:#f6b6c2;color:#111;font-weight:bold}
+[data-tm-v4-label-action]{cursor:pointer;text-decoration:underline dotted}
+[data-tm-v4-quantity]{margin-left:6px;width:4.5em;font-size:12px}
+`;
+  var sydney = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  function nextSydneyCutoff(now) {
+    const day = new Date(now);
+    const midnight = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+    const candidates = [];
+    for (let offset = 0; offset < 3; offset++) for (const hour of [7, 8]) {
+      const candidate = midnight + offset * 864e5 + hour * 36e5;
+      if (candidate <= now) continue;
+      const parts = Object.fromEntries(sydney.formatToParts(new Date(candidate)).map((part) => [part.type, part.value]));
+      if (parts.hour === "18" && parts.minute === "00") candidates.push(candidate);
+    }
+    if (!candidates.length) throw new Error("Sydney cache cutoff unavailable");
+    return Math.min(...candidates);
+  }
+  function sizeCandidates(rows, item, aliases = []) {
+    const wanted = new Set([item, ...aliases].map(upper2));
+    const rank = (value) => /^(?:tsX|csX)[A-Za-z0-9]+$/i.test(value) ? 0 : /^P-\d-/i.test(value) ? 1 : 2;
+    const sorted = rows.filter((row) => row.container && (!/^X[A-Z0-9]{9}$/.test(upper2(item)) || !row.fnsku || upper2(row.fnsku) === upper2(item)) && [row.asin, row.fnsku, row.fcsku, row.lpn].some((code) => wanted.has(upper2(code)))).sort((a, b) => rank(a.container) - rank(b.container) || b.qty - a.qty);
+    return [...new Map(sorted.map((row) => [upper2(row.container), row.container])).values()].slice(0, 3);
+  }
+  function createMadcatCache({ storage: storage2, now = Date.now }) {
+    const key = "tm-v4.master.madcat.cache", entries = /* @__PURE__ */ new Map();
+    function valid([identity, entry]) {
+      return /^(?:ASIN|FNSKU):[A-Z0-9]{10}$/.test(identity) && entry && Number.isFinite(entry.expiresAt) && entry.expiresAt > now() && entry.expiresAt <= (entry.value?.madcat ? nextSydneyCutoff(now()) : now() + 3e5) && typeof entry.value?.madcat === "boolean" && entry.value.madcatSource === "raw" && entry.value.complete === true && entry.value.windowDays === 30;
+    }
+    try {
+      const stored = storage2.get(key, []);
+      if (Array.isArray(stored)) {
+        for (const pair of stored.slice(-200)) if (Array.isArray(pair) && pair.length === 2 && valid(pair)) entries.set(...pair);
+      }
+    } catch {
+    }
+    function get(identity) {
+      const entry = entries.get(identity);
+      if (entry && valid([identity, entry])) return { ...entry.value, source: "cache" };
+      entries.delete(identity);
+      return null;
+    }
+    function put(identity, value) {
+      if (value.madcatSource !== "raw" || !value.complete || value.windowDays !== 30 || typeof value.madcat !== "boolean") return;
+      const entry = {
+        expiresAt: value.madcat ? nextSydneyCutoff(now()) : now() + 3e5,
+        value: { madcat: value.madcat, madcatSource: "raw", complete: true, windowDays: 30 }
+      };
+      if (!valid([identity, entry])) return;
+      entries.delete(identity);
+      entries.set(identity, entry);
+      for (const pair of entries) if (!valid(pair)) entries.delete(pair[0]);
+      while (entries.size > 200) entries.delete(entries.keys().next().value);
+      try {
+        storage2.set(key, [...entries]);
+      } catch {
+      }
+    }
+    return Object.freeze({ get, put });
+  }
+  function productPanel(document, verified) {
+    if (!verified) return null;
+    const table = document.querySelector('[data-section-type="product"] table');
+    if (!table) return null;
+    const entries = /* @__PURE__ */ new Map();
+    for (const row of table.rows) {
+      const label = row.querySelector("th"), value = row.querySelector("td");
+      if (!label || !value) continue;
+      const clone = value.cloneNode(true);
+      clone.querySelectorAll(UI2).forEach((node) => node.remove());
+      entries.set(upper2(label.textContent), { label, value, text: clean3(clone.textContent) });
+    }
+    const declared = ["ASIN", "ISBN", "FNSKU", "FCSKU"].map((field) => upper2(entries.get(field)?.text)).filter(Boolean);
+    if (!declared.length || declared.some((code) => !verified.aliases.includes(code))) return null;
+    if (clean3(entries.get("TITLE")?.text) !== clean3(verified.title)) return null;
+    return { table, entries, product: verified };
+  }
+  function createMasterFeatures({ window: window2, page: page2 = window2, runtime, enrichment, auth, storage: storage2, now = Date.now, onEvidence = () => {
+  } }) {
+    const document = window2.document, lifetime = new window2.AbortController();
+    const cache = createMadcatCache({ storage: storage2, now });
+    const hazCache = /* @__PURE__ */ new Map(), states = /* @__PURE__ */ new WeakMap(), modified = /* @__PURE__ */ new Map(), nodes = /* @__PURE__ */ new Set();
+    let style;
+    const isCurrent = (gen) => !lifetime.signal.aborted && runtime.active(gen);
+    const mark = (node) => {
+      runtime.mark(node);
+      nodes.add(node);
+      return node;
+    };
+    function setAttribute(node, name, value) {
+      if (!modified.has(node)) modified.set(node, /* @__PURE__ */ new Map());
+      const attributes = modified.get(node);
+      if (!attributes.has(name)) attributes.set(name, node.getAttribute(name));
+      node.setAttribute(name, value);
+    }
+    function state(gen) {
+      if (!states.has(gen)) states.set(gen, { size: { status: "idle", serial: 0 }, madcat: { status: "idle", serial: 0 }, haz: /* @__PURE__ */ new Map(), jobs: [], workers: 0 });
+      return states.get(gen);
+    }
+    function ownButton(host, name, label, action) {
+      let node = host.querySelector(':scope > [data-tm-v4-badge="' + name + '"]');
+      if (!node) {
+        node = mark(document.createElement("button"));
+        node.type = "button";
+        node.setAttribute("data-tm-v4-badge", name);
+        host.append(node);
+      }
+      if (node.textContent !== label) node.textContent = label;
+      node.onclick = action;
+      return node;
+    }
+    async function size(gen, force = false) {
+      const product = gen.sections.get("product")?.result?.product;
+      if (!product || !isCurrent(gen)) return;
+      const current = state(gen).size;
+      if (current.status === "loading" || !force && current.status !== "idle") return;
+      const serial = ++current.serial;
+      current.status = "loading";
+      current.value = "";
+      current.error = "";
+      runtime.schedule();
+      try {
+        const inventory = await runtime.load("inventory", { gen, render: false });
+        if (!isCurrent(gen) || current.serial !== serial) return;
+        if (!inventory) throw new Error("Inventory read unavailable");
+        const item = product.fnsku || product.asin || product.isbn, candidates = sizeCandidates(inventory.rows, item, product.aliases);
+        let lastError;
+        for (const container of candidates) {
+          let result;
+          try {
+            result = await enrichment.binDescription(container, item, { signal: gen.controller.signal, verifiedAliases: product.aliases });
+          } catch (error) {
+            if (error.code === "CANCELLED" || error.code === "AUTH_REQUIRED") throw error;
+            lastError = error;
+            continue;
+          }
+          if (!isCurrent(gen) || current.serial !== serial) return;
+          if (result.complete && result.size) {
+            current.value = result.size;
+            break;
+          }
+        }
+        if (!current.value && lastError) throw lastError;
+        current.status = current.value ? "ready" : "unavailable";
+      } catch (error) {
+        if (!isCurrent(gen) || current.serial !== serial) return;
+        current.status = "error";
+        current.error = clean3(error.message);
+      }
+      if (isCurrent(gen)) runtime.schedule();
+    }
+    async function madcat(gen, force = false) {
+      const product = gen.sections.get("product")?.result?.product;
+      if (!product || !isCurrent(gen)) return;
+      const current = state(gen).madcat;
+      if (current.status === "loading" || !force && current.status !== "idle") return;
+      const code = upper2(product.fnsku || product.asin || product.isbn), identity = (product.fnsku ? "FNSKU:" : "ASIN:") + code;
+      const serial = ++current.serial;
+      current.status = "loading";
+      current.error = "";
+      runtime.schedule();
+      try {
+        current.authPending = force || typeof auth.read === "function" && !auth.read();
+        const result = !force && cache.get(identity) || await enrichment.recentMadcat({ fnsku: product.fnsku, asin: product.asin || product.isbn }, { signal: gen.controller.signal, forceAuth: force });
+        if (!isCurrent(gen) || current.serial !== serial) return;
+        if (result.madcatSource === "raw" && (result.complete !== true || result.windowDays !== 30 || typeof result.madcat !== "boolean")) throw new Error("Incomplete raw Measurement result");
+        if (!["raw", "history"].includes(result.madcatSource) || result.madcatSource === "history" && result.madcat !== null && typeof result.madcat !== "boolean") throw new Error("Unrecognized Measurement provenance");
+        current.result = result;
+        current.status = "ready";
+        cache.put(identity, result);
+      } catch (error) {
+        if (!isCurrent(gen) || current.serial !== serial) return;
+        current.status = "error";
+        current.error = clean3(error.message);
+      }
+      if (isCurrent(gen)) runtime.schedule();
+    }
+    function queueHaz(gen, asin, force = false) {
+      if (!/^B[A-Z0-9]{9}$/.test(asin) || !isCurrent(gen)) return;
+      const group = state(gen), previous = group.haz.get(asin);
+      if (previous?.status === "loading" || !force && previous) return;
+      const cached = hazCache.get(asin);
+      if (!force && cached && cached.expiresAt > now()) {
+        group.haz.set(asin, { ...cached.value });
+        return;
+      }
+      group.haz.set(asin, { status: "loading" });
+      group.jobs.push(asin);
+      pump(gen);
+    }
+    function pump(gen) {
+      const group = state(gen);
+      while (isCurrent(gen) && group.jobs.length && group.workers < 4) {
+        const asin = group.jobs.shift();
+        group.workers++;
+        (async () => {
+          let value;
+          try {
+            const result = await enrichment.hazmat(asin, { signal: gen.controller.signal });
+            value = { status: "ready", result };
+          } catch (error) {
+            value = { status: "error", error: clean3(error.message) };
+          } finally {
+            group.workers--;
+          }
+          if (!isCurrent(gen)) return;
+          group.haz.set(asin, value);
+          hazCache.delete(asin);
+          hazCache.set(asin, { value, expiresAt: now() + (value.result?.complete ? 216e5 : 6e4) });
+          while (hazCache.size > 500) hazCache.delete(hazCache.keys().next().value);
+          pump(gen);
+          runtime.schedule();
+        })();
+      }
+    }
+    function river(gen) {
+      if (!isCurrent(gen)) return;
+      const url = new URL("https://river.amazon.com/" + runtime.warehouse + "/workflows");
+      for (const [key, value] of Object.entries({ buildingType: "fc", workflowId: "undefined", q0: "3654ec14-7232-4f65-84c3-87927cdb4d0c", q1: "f2738dec-7f6f-4c2e-a85a-db7228de25f1", id: "f2738dec-7f6f-4c2e-a85a-db7228de25f1" })) url.searchParams.set(key, value);
+      const tab = window2.open(url.href, "_blank");
+      if (tab) tab.opener = null;
+      else runtime.notify("RIVER popup blocked — allow popups and retry");
+      try {
+        onEvidence({ type: "fcr.handoff", script: "FCR MASTER", version: "0.1.1", intent: "read", data: { action: "river.open", warehouse: runtime.warehouse } });
+      } catch {
+      }
+    }
+    function paintHaz(host, asin, gen, product = false) {
+      queueHaz(gen, asin);
+      const status = state(gen).haz.get(asin);
+      if (!status) return;
+      const hazmat = status.result?.complete ? status.result.hazmat : null;
+      const label = status.status === "loading" ? "CHECK…" : status.status === "error" ? "ERROR" : hazmat ? "L" + hazmat.level : "N/A";
+      const canRiver = product && status.status === "ready" && (!hazmat || hazmat.level === 0);
+      const badge = ownButton(host, "hazmat", label, () => canRiver ? river(gen) : (queueHaz(gen, asin, true), runtime.schedule()));
+      badge.disabled = status.status === "loading";
+      badge.dataset.state = status.status === "error" ? "error" : "hazmat";
+      badge.title = canRiver ? "Create Hazmat RIVER ticket" : status.error || hazmat?.message || "No exact ASIN hazmat result; recheck";
+      const colours = ["#999", "#33cc02", "#ffe103", "#ffbf03", "#ff8002", "#ff4001", "#ed0700", "#ad03de", "#3333ff"];
+      badge.style.background = hazmat && hazmat.level < colours.length ? colours[hazmat.level] : "#fff";
+      badge.style.color = hazmat && hazmat.level >= 6 ? "#fff" : "#111";
+      if (product) {
+        const recheck = ownButton(host, "pandash", "Pandash", () => {
+          queueHaz(gen, asin, true);
+          runtime.schedule();
+        });
+        recheck.disabled = status.status === "loading";
+      }
+    }
+    function highlightProperties(panel) {
+      for (const label of ["SORTABLE", "VERY HIGH VALUE", "CONVEYABLE", "MASTER CASE"]) {
+        const entry = panel.entries.get(label);
+        if (!entry) continue;
+        const value = /^(?:true|yes|1)$/i.test(entry.text) ? "true" : /^(?:false|no|0)$/i.test(entry.text) ? "false" : "unknown";
+        setAttribute(entry.value, "data-tm-v4-property", value);
+      }
+    }
+    function poHighlights() {
+      const table = document.querySelector("#table-purchase-order-item");
+      if (!table?.tBodies[0]) return;
+      const wrapper = table.closest(".dataTables_scroll"), head = wrapper?.querySelector(".dataTables_scrollHead table") || table;
+      const headers = [...head.querySelectorAll("thead th")].map((node) => clean3(node.textContent).toLowerCase());
+      const unfilled = headers.findIndex((value) => value.includes("unfilled")), cancelled = headers.findIndex((value) => /cancelled|canceled/.test(value)), dateIndex = headers.findIndex((value) => /order date|^date$/.test(value));
+      const six = new Date(now());
+      six.setMonth(six.getMonth() - 6);
+      const seven = new Date(now());
+      seven.setMonth(seven.getMonth() - 7);
+      for (const row of table.tBodies[0].rows) {
+        const flags = row.cells ? [...row.cells].map(() => []) : [];
+        const readNumber = (index) => Number(clean3(row.cells[index]?.querySelector("input")?.value ?? row.cells[index]?.textContent).replace(/[ ,]/g, ""));
+        if (unfilled >= 0 && readNumber(unfilled) > 0) flags[unfilled]?.push("unfilled");
+        if (cancelled >= 0 && readNumber(cancelled) > 0) flags[cancelled]?.push("cancelled");
+        const raw = clean3(row.cells[dateIndex]?.textContent), match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+        if (match) {
+          const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+          if (date.getFullYear() === Number(match[1]) && date.getMonth() + 1 === Number(match[2]) && date.getDate() === Number(match[3])) {
+            if (date < six) for (let delta = 0; delta <= 2; delta++) flags[dateIndex - delta]?.push("band");
+            if (date < seven) flags[dateIndex]?.push("old");
+          }
+        }
+        [...row.cells].forEach((cell, index) => {
+          if (flags[index].length || modified.get(cell)?.has("data-tm-v4-po")) setAttribute(cell, "data-tm-v4-po", flags[index].join(" "));
+        });
+      }
+    }
+    function refresh() {
+      const gen = runtime.current();
+      if (!gen || !isCurrent(gen)) return;
+      for (const node of nodes) if (!node.isConnected) nodes.delete(node);
+      for (const node of modified.keys()) if (!node.isConnected) modified.delete(node);
+      if (!style?.isConnected) {
+        style = runtime.mark(document.createElement("style"));
+        style.textContent = STYLE;
+        (document.head || document.documentElement).append(style);
+      }
+      const group = state(gen), product = gen.sections.get("product")?.result?.product, panel = productPanel(document, product);
+      if (panel) {
+        highlightProperties(panel);
+        const host = (panel.entries.get("DIMENSIONS") || panel.entries.get("ASIN") || panel.entries.get("ISBN"))?.value;
+        if (host) {
+          const sizeLabel = "Size: " + (group.size.status === "loading" || group.size.status === "idle" ? "CHECK…" : group.size.status === "error" ? "ERROR ↻" : group.size.value || "Unavailable");
+          const badge = ownButton(host, "size", sizeLabel, () => void size(gen, true));
+          badge.disabled = group.size.status === "loading";
+          badge.title = group.size.error || "Exact native binDescription — click to recheck";
+          const result = group.madcat.result, history = result?.madcatSource === "history";
+          const label = group.madcat.status === "error" ? "Madcat: ERROR ↻" : group.madcat.status !== "ready" ? group.madcat.authPending ? "Madcat: AUTH…" : "Madcat: CHECK…" : result.madcat === true ? "Madcat: YES" : history ? "Madcat: NO?" : "Madcat: NO";
+          const mad = ownButton(host, "madcat", label, () => {
+            if (group.madcat.status === "ready" && history && result.authRequired) {
+              const tab = window2.open(auth.loginUrl(product.fnsku || product.asin || product.isbn), "_blank");
+              if (tab) tab.opener = null;
+            }
+            void madcat(gen, true);
+          });
+          mad.dataset.state = group.madcat.status === "error" ? "error" : history ? "history" : result ? result.madcat ? "yes" : "no" : "checking";
+          mad.disabled = group.madcat.status === "loading" || group.madcat.status === "ready" && !history;
+          mad.title = group.madcat.error || (history ? "Inventory History fallback only; click to renew RAW auth and retry" : "RAW Item Measurement: rolling 30-day check");
+        }
+        const primary = (panel.entries.get("ASIN") || panel.entries.get("ISBN"))?.value;
+        if (primary && /^B[A-Z0-9]{9}$/.test(upper2(product.asin))) paintHaz(primary, upper2(product.asin), gen, true);
+        void size(gen);
+        void madcat(gen);
+      }
+      const inventory = gen.sections.get("inventory")?.result;
+      const table = inventory && document.querySelector("#table-inventory");
+      if (table) {
+        const head = table.closest(".dataTables_scroll")?.querySelector(".dataTables_scrollHead table") || table;
+        const asinIndex = [...head.querySelectorAll("thead th")].findIndex((node) => /^ASIN$/i.test(clean3(node.textContent)));
+        const permitted = new Set(inventory.rows.map((row) => upper2(row.asin)));
+        for (const row of table.tBodies[0]?.rows || []) {
+          const cell = row.cells[asinIndex];
+          if (!cell) continue;
+          const clone = cell.cloneNode(true);
+          clone.querySelectorAll(UI2).forEach((node) => node.remove());
+          const asin = upper2(clone.textContent);
+          if (permitted.has(asin)) paintHaz(cell, asin, gen);
+        }
+        let recheck = table.closest('[data-section-type="inventory"]')?.querySelector(':scope > [data-tm-v4-badge="recheck-hazmat"]');
+        if (!recheck) recheck = ownButton(table.closest('[data-section-type="inventory"]') || table.parentElement, "recheck-hazmat", "Recheck N/A + L0", () => {
+          for (const [asin, value] of group.haz) if (permitted.has(asin) && value.status !== "loading" && (!value.result?.hazmat || value.result.hazmat.level === 0)) queueHaz(gen, asin, true);
+          runtime.schedule();
+        });
+      }
+      poHighlights();
+    }
+    function reset() {
+      for (const node of nodes) node.remove();
+      nodes.clear();
+      for (const [node, attributes] of modified) for (const [name, original] of attributes) original == null ? node.removeAttribute(name) : node.setAttribute(name, original);
+      modified.clear();
+    }
+    function dispose() {
+      lifetime.abort();
+      reset();
+    }
+    return Object.freeze({ refresh, reset, dispose, size, madcat });
+  }
+
+  // master-actions.mjs
+  var clean4 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  var upper3 = (value) => clean4(value).toUpperCase();
+  var UI3 = "[data-tm-v4-master]";
+  var hex = (value) => Array.from(String(value)).map((character) => character.charCodeAt(0).toString(16)).join("");
+  function printableCode(value) {
+    const match = clean4(value).match(/\b(?:LPN[A-Za-z0-9-]{4,}|FBA[A-Za-z0-9]{6,}|[A-Za-z0-9]{10})\b/);
+    return match?.[0] || "";
+  }
+  function printmonUrl({ code, quantity: quantity2, description = "", badge = "", sequence }) {
+    if (!code || !/^[A-Za-z0-9-]{1,128}$/.test(code) || !Number.isInteger(quantity2) || quantity2 < 1 || quantity2 > 9999) throw new Error("Invalid print code or quantity");
+    const url = new URL("http://localhost:5965/printer");
+    for (const [key, value] of Object.entries({ action: "print", type: "barcode", data: hex(code), text: hex(code), quantity: quantity2, desc: hex(description), badgeid: badge, seq: sequence })) url.searchParams.set(key, String(value));
+    return url.href;
+  }
+  function plainText(fragment) {
+    const walk = (node) => {
+      if (node.nodeType === 3) return node.textContent;
+      if (node.nodeType !== 1 && node.nodeType !== 11) return "";
+      if (node.tagName === "BR") return "\n";
+      const values = [...node.childNodes].map(walk);
+      if (node.tagName === "TR") return [...node.children].map(walk).join("	") + "\n";
+      return values.join("") + (/^(?:TABLE|P|DIV)$/.test(node.tagName) ? "\n" : "");
+    };
+    return walk(fragment).trim();
+  }
+  function cleanProductSelection({ document, selection, table }) {
+    if (!selection || !table || selection.isCollapsed || !selection.rangeCount) return null;
+    const ranges = Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index));
+    if (!ranges.some((range) => {
+      try {
+        return range.intersectsNode(table);
+      } catch {
+        return false;
+      }
+    })) return null;
+    const touchedUi = [...table.querySelectorAll(UI3)].some((node) => ranges.some((range) => {
+      try {
+        return range.intersectsNode(node);
+      } catch {
+        return false;
+      }
+    }));
+    if (!touchedUi) return null;
+    const text2 = [], html = [];
+    for (const range of ranges) {
+      const ancestor = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      if (ancestor?.closest(UI3)) continue;
+      const fragment = range.cloneContents();
+      fragment.querySelectorAll(UI3).forEach((node) => node.remove());
+      fragment.querySelectorAll("[data-tm-v4-label-action], [data-tm-v4-property]").forEach((node) => {
+        node.removeAttribute("data-tm-v4-label-action");
+        node.removeAttribute("data-tm-v4-property");
+        node.removeAttribute("role");
+        node.removeAttribute("tabindex");
+      });
+      for (const anchor of fragment.querySelectorAll("a[href]")) anchor.setAttribute("href", anchor.href);
+      const wrapper = document.createElement("div");
+      wrapper.append(fragment);
+      text2.push(plainText(wrapper));
+      html.push(wrapper.innerHTML);
+    }
+    return { text: text2.filter(Boolean).join("\n"), html: html.join("<br>") };
+  }
+  function createMasterActions({ window: window2, runtime, fetch = window2.fetch.bind(window2), onEvidence = () => {
+  }, uuid: uuid2 = () => window2.crypto.randomUUID(), timeoutMs = 15e3 }) {
+    const document = window2.document, lifetime = new window2.AbortController();
+    const modified = /* @__PURE__ */ new Map(), nodes = /* @__PURE__ */ new Set(), prints = /* @__PURE__ */ new Set();
+    const mark = (node) => {
+      runtime.mark(node);
+      nodes.add(node);
+      return node;
+    };
+    function attr(node, name, value) {
+      if (!modified.has(node)) modified.set(node, /* @__PURE__ */ new Map());
+      if (!modified.get(node).has(name)) modified.get(node).set(name, node.getAttribute(name));
+      node.setAttribute(name, value);
+    }
+    function panel() {
+      return productPanel(document, runtime.current()?.sections.get("product")?.result?.product);
+    }
+    function emit(operationId, phase, data) {
+      try {
+        onEvidence({ type: "operation", script: "FCR MASTER", version: "0.1.1", intent: "mutation", operationId, phase, data: { kind: "label-print", endpoint: "Printmon", ...data } });
+      } catch {
+      }
+    }
+    function clickedDescription(code, target, currentPanel) {
+      const row = target?.closest("tr"), table = row?.closest("table");
+      if (row && table) {
+        const head = table.closest(".dataTables_scroll")?.querySelector(".dataTables_scrollHead table") || table;
+        const index = [...head.querySelectorAll("thead th")].findIndex((node) => /^(?:title|product|description|item name)$/i.test(clean4(node.textContent)));
+        if (index >= 0) return clean4(row.cells[index]?.textContent);
+      }
+      return currentPanel?.product.aliases.includes(upper3(code)) ? currentPanel.product.title : "";
+    }
+    async function print(code, quantity2 = 1, target) {
+      const gen = runtime.current();
+      if (!gen || !runtime.active(gen) || lifetime.signal.aborted) return;
+      if (/^LPN/i.test(code) && !window2.confirm("Barcode: " + code + "\n\nLPNs are unique. Print this LPN?")) return;
+      let description = /^LPN|^FBA/i.test(code) ? "" : clickedDescription(code, target, panel());
+      if (!description && /^[A-Z0-9]{10}$/i.test(code)) {
+        try {
+          const result = await runtime.reader.product(code, { signal: gen.controller.signal });
+          description = result.product.title;
+        } catch {
+        }
+      }
+      if (!runtime.active(gen) || lifetime.signal.aborted) return;
+      const operationId = "print." + uuid2(), controller = new window2.AbortController();
+      const job = { controller, settled: false, timer: null, finish: null };
+      const badge = document.cookie.split(";").map((value) => value.trim()).find((value) => value.startsWith("fcmenu-employeeId="))?.slice("fcmenu-employeeId=".length) || "";
+      let url;
+      try {
+        url = printmonUrl({ code, quantity: quantity2, description, badge, sequence: window2.crypto.getRandomValues(new Uint32Array(1))[0] });
+      } catch (error) {
+        runtime.notify(error.message);
+        return;
+      }
+      const finished = (outcome, message) => {
+        if (job.settled) return;
+        job.settled = true;
+        window2.clearTimeout(job.timer);
+        prints.delete(job);
+        emit(operationId, "UNKNOWN", { quantity: quantity2, outcome, acknowledgement: "unverified" });
+        if (runtime.active(gen) && !lifetime.signal.aborted) runtime.notify(message);
+      };
+      job.finish = finished;
+      prints.add(job);
+      emit(operationId, "SUBMITTED", { quantity: quantity2 });
+      job.timer = window2.setTimeout(() => {
+        finished("timeout", "Printmon timed out — check the printer before printing again");
+        controller.abort();
+      }, timeoutMs);
+      try {
+        const response = await fetch(url, { method: "GET", signal: controller.signal });
+        if (response.ok) finished("response-received", "Print request sent; label output unverified");
+        else finished("http-" + response.status, "Printmon HTTP " + response.status + " — check the printer before printing again");
+      } catch {
+        finished("transport-failed", "Printmon request failed — check the printer before printing again");
+      }
+    }
+    function targetCode(target) {
+      if (!(target instanceof window2.Element) || target.closest(UI3)) return "";
+      const context = target.closest('[data-section-type],table[id^="table-"]');
+      if (!context) return "";
+      const node = target.closest("a,td,th") || target;
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll(UI3).forEach((child) => child.remove());
+      return printableCode(clone.textContent);
+    }
+    const activate = (event) => {
+      if (event.type === "keydown" && !["Enter", " "].includes(event.key)) return;
+      const target = event.target instanceof window2.Element ? event.target : event.target?.parentElement;
+      if (!target) return;
+      const quantity2 = target.closest("[data-tm-v4-quantity]");
+      if (quantity2 && event.type === "keydown" && event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        const code = quantity2.dataset.code, count = Number(quantity2.value);
+        if (/^\d{1,4}$/.test(quantity2.value) && count > 0) void print(code, count, quantity2);
+        return;
+      }
+      if (event.type === "click" && event.altKey) {
+        const code = targetCode(target);
+        if (!code) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void print(code, 1, target);
+        return;
+      }
+      const label = target.closest("[data-tm-v4-label-action]");
+      if (!label) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (label.dataset.tmV4LabelAction === "ISS") {
+        window2.location.hash = "#iss-console";
+        return;
+      }
+      const current = panel(), entry = current?.entries.get(label.dataset.tmV4LabelAction);
+      if (entry) void print(entry.text, 1, label);
+    };
+    document.addEventListener("click", activate, { capture: true, signal: lifetime.signal });
+    document.addEventListener("keydown", activate, { capture: true, signal: lifetime.signal });
+    for (const type of ["pointerdown", "mousedown", "auxclick"]) document.addEventListener(type, (event) => {
+      if (event.altKey && targetCode(event.target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, { capture: true, signal: lifetime.signal });
+    document.addEventListener("input", (event) => {
+      if (event.target.matches?.("[data-tm-v4-quantity]")) event.target.value = event.target.value.replace(/\D/g, "").slice(0, 4);
+    }, { signal: lifetime.signal });
+    document.addEventListener("copy", (event) => {
+      const current = panel();
+      if (!current || !event.clipboardData) return;
+      const output = cleanProductSelection({ document, selection: window2.getSelection(), table: current.table });
+      if (!output) return;
+      event.preventDefault();
+      event.clipboardData.setData("text/plain", output.text);
+      event.clipboardData.setData("text/html", output.html);
+    }, { capture: true, signal: lifetime.signal });
+    function refresh() {
+      for (const node of nodes) if (!node.isConnected) nodes.delete(node);
+      for (const node of modified.keys()) if (!node.isConnected) modified.delete(node);
+      const current = panel();
+      if (!current) return;
+      for (const field of ["ASIN", "ISBN", "FNSKU", "WEIGHT"]) {
+        const entry = current.entries.get(field);
+        if (!entry) continue;
+        attr(entry.label, "data-tm-v4-label-action", field === "WEIGHT" ? "ISS" : field);
+        attr(entry.label, "role", "button");
+        attr(entry.label, "tabindex", "0");
+        attr(entry.label, "title", field === "WEIGHT" ? "Open ISS Console" : "Click to print " + field);
+        if (field === "WEIGHT" || entry.value.querySelector("[data-tm-v4-quantity]")) continue;
+        const input = mark(document.createElement("input"));
+        input.type = "text";
+        input.inputMode = "numeric";
+        input.maxLength = 4;
+        input.value = "1";
+        input.setAttribute("data-tm-v4-quantity", field);
+        input.dataset.code = entry.text;
+        input.setAttribute("aria-label", field + " print quantity");
+        entry.value.append(input);
+      }
+    }
+    function reset() {
+      for (const node of nodes) node.remove();
+      nodes.clear();
+      for (const [node, attributes] of modified) for (const [name, value] of attributes) value == null ? node.removeAttribute(name) : node.setAttribute(name, value);
+      modified.clear();
+    }
+    function dispose() {
+      lifetime.abort();
+      reset();
+      for (const job of [...prints]) {
+        job.finish("page-disposed", "");
+        job.controller.abort();
+      }
+    }
+    return Object.freeze({ refresh, reset, dispose, print });
+  }
 
   // master-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
-  var storage = { get: (key, fallback) => GM_getValue(key, fallback), set: (key, value) => GM_setValue(key, value) };
+  var storage = {
+    get: (key, fallback) => GM_getValue(key, fallback),
+    set: (key, value) => GM_setValue(key, value),
+    listen: (key, callback) => GM_addValueChangeListener(key, callback),
+    remove: (id) => GM_removeValueChangeListener(id)
+  };
+  var evidence = (value) => {
+    try {
+      window.dispatchEvent(new window.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify(value) }));
+    } catch {
+    }
+  };
+  var uuid = () => typeof window.crypto.randomUUID === "function" ? window.crypto.randomUUID() : [...window.crypto.getRandomValues(new Uint32Array(4))].map((value) => value.toString(16).padStart(8, "0")).join("-");
   var guard = Symbol.for("tampermonkey.v4.master.installer");
   if (!page[guard]) {
     let start = function() {
       if (location.origin === "https://jp.item-measurement.aft.a2z.com") {
         stop = installMeasurementCapture({ page, storage });
+        evidence({ type: "script.start", script: "FCR MASTER", version: VERSION, intent: "read", data: { context: "measurement-auth" } });
         return;
       }
       if (!/\/[A-Z0-9-]{2,12}\/results(?:\/|$)/.test(location.pathname) || /^#(?:fcr-tote-checker|iss-console)/.test(location.hash)) return;
-      const runtime = createMasterRuntime({ window, page, storage, fetch: page.fetch.bind(page) });
+      let features, actions;
+      const runtime = createMasterRuntime({
+        window,
+        page,
+        storage,
+        fetch: page.fetch.bind(page),
+        onEvidence: evidence,
+        onRefresh: () => {
+          features?.refresh();
+          actions?.refresh();
+        },
+        onReset: () => {
+          features?.reset();
+          actions?.reset();
+        },
+        onDispose: () => {
+          features?.dispose();
+          actions?.dispose();
+        }
+      });
+      const auth = createMeasurementAuth({ window, storage });
+      const enrichment = createFcrEnrichment({
+        warehouse: runtime.warehouse,
+        readJson: createGmJsonReader(GM_xmlhttpRequest),
+        getMeasurementAuth: auth.acquire,
+        onEvidence: evidence,
+        uuid,
+        historyFallback: async (code, { signal }) => {
+          const end = /* @__PURE__ */ new Date(), start2 = new Date(end.getTime() - 30 * 864e5);
+          const result = await runtime.reader.history(code, { signal, startDate: start2.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), allowPartial: true });
+          const doc = new window.DOMParser().parseFromString(result.html, "text/html");
+          const rows = [...doc.querySelectorAll("#table-inventory-history tbody tr")].filter((row) => !row.querySelector(".dataTables_empty"));
+          return { madcat: rows.some((row) => /\bMADCAT\b/i.test(row.textContent)), complete: result.complete, rows: rows.length };
+        }
+      });
+      features = createMasterFeatures({ window, page, runtime, enrichment, auth, storage, onEvidence: evidence });
+      actions = createMasterActions({ window, runtime, fetch: page.fetch.bind(page), onEvidence: evidence, uuid });
       runtime.start();
-      watchNativeAjax(page, () => runtime);
-      stop = () => runtime.dispose();
+      const bridge = watchNativeAjax(page, () => runtime);
+      evidence({ type: "script.start", script: "FCR MASTER", version: VERSION, intent: "read", data: { context: "native-fcr" } });
+      stop = () => {
+        runtime.dispose();
+        bridge.restore?.();
+      };
     };
     page[guard] = { version: VERSION };
     let stop = () => {
