@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.33
+// @version      0.0.34
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.33-REBUILD';
+  const VERSION = '0.0.34-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -1249,7 +1249,9 @@
     damagedDest:'',
     inputCollapsed:false,
     delayEnabled: localStorage.getItem(LAZY_DELAY_KEY) !== '0',
-    nextMoveAt:0
+    nextMoveAt:0,
+    recoveryStep:'',
+    recoveryItem:''
   };
 
 
@@ -2191,6 +2193,7 @@
     lazy.note = note;
     lazy.predicantResolve?.();
     lazy.predicantResolve = null;
+    clearLazyRecovery();
     lazy.dateResolve?.(null);
     lazy.dateResolve = null;
     shared.owner = '';
@@ -2323,15 +2326,18 @@
     const sameDest = norm(code) === norm(lDest.value);
     const startTrigger = norm(code) === norm(START_TRIGGER);
 
-    if (lazy.predicant && sameDest && lazy.predicantResolve) {
-      const done = lazy.predicantResolve;
-      lazy.predicantResolve = null;
-      lazy.predicant = false;
-      lazy.paused = false;
-      lazy.error = '';
-      lazy.note = 'destination rescanned — recovery starting';
-      lItems.classList.remove('sh-predicant-scan');
-      done();
+    if (lazy.predicant && sameDest) {
+      if (lazy.predicantResolve) {
+        const done = lazy.predicantResolve;
+        lazy.predicantResolve = null;
+        lazy.error = '';
+        lazy.note = 'destination rescan received — recovery continuing';
+        lItems.classList.remove('sh-predicant-scan');
+        done();
+      } else {
+        lazy.note = 'destination rescan received — recovery already running';
+        renderLazy();
+      }
       return true;
     }
 
@@ -2433,15 +2439,18 @@
       e.stopImmediatePropagation();
       removeTextareaLine(line);
 
-      if (lazy.predicant && sameDest && lazy.predicantResolve) {
-        const done = lazy.predicantResolve;
-        lazy.predicantResolve = null;
-        lazy.predicant = false;
-        lazy.paused = false;
-        lazy.error = '';
-        lazy.note = 'destination rescanned — recovery starting';
-        lItems.classList.remove('sh-predicant-scan');
-        done();
+      if (lazy.predicant && sameDest) {
+        if (lazy.predicantResolve) {
+          const done = lazy.predicantResolve;
+          lazy.predicantResolve = null;
+          lazy.error = '';
+          lazy.note = 'destination rescan received — recovery continuing';
+          lItems.classList.remove('sh-predicant-scan');
+          done();
+        } else {
+          lazy.note = 'destination rescan received — recovery already running';
+          renderLazy();
+        }
         return;
       }
 
@@ -2924,6 +2933,25 @@
     });
   }
 
+  function lazyRecoveryEvent(step, item=null, detail='') {
+    const code = clean(item?.code || lazy.recoveryItem || '');
+    lazy.recoveryStep = clean(step);
+    lazy.recoveryItem = code;
+    issSideSend('ISS_CONSOLE_RECOVERY', {
+      recovery:{
+        step:lazy.recoveryStep,
+        code,
+        destination:clean(lazy.dest),
+        detail:clean(detail)
+      }
+    });
+  }
+
+  function clearLazyRecovery() {
+    lazy.recoveryStep = '';
+    lazy.recoveryItem = '';
+  }
+
   async function waitWhilePaused(run=lazy.activeRun) {
     while (currentLazyRun(run) && lazy.running && lazy.paused && !lazy.predicant) await sleep(80);
     return currentLazyRun(run) && lazy.running;
@@ -2932,63 +2960,72 @@
   async function waitPredicant(item, run) {
     lazy.predicant = true;
     lazy.paused = true;
+    shared.owner = 'lazy';
     lazy.error = `WAITING FOR YOU — RESCAN DESTINATION ${lazy.dest} TO CONTINUE`;
     lazy.note = `${item.code} paused — no more moves will run until destination is rescanned`;
+    lazyRecoveryEvent('PREDICANT_DETECTED', item);
     renderLazy();
 
     if (!lazy.inputCollapsed) lItems.focus();
     lPredicantCard?.scrollIntoView?.({block:'nearest', inline:'nearest'});
 
-    await new Promise(resolve => { lazy.predicantResolve = resolve; });
-    if (!currentLazyRun(run) || !lazy.running) return false;
-
-    lazy.predicant = true;
-    lazy.paused = true;
-    shared.owner = 'lazy-recovery';
-
-    const setRecovery = message => {
-      lazy.error = '';
-      lazy.note = message;
-      renderLazy();
-    };
-
-    try {
-      setRecovery(`Predicant — emptying destination ${lazy.dest} by API...`);
-      await closeContainerDirect(lazy.dest, true);
+    while (currentLazyRun(run) && lazy.running) {
+      await new Promise(resolve => { lazy.predicantResolve = resolve; });
+      lazy.predicantResolve = null;
 
       if (!currentLazyRun(run) || !lazy.running) return false;
 
-      lazy.predicant = false;
-      lazy.paused = false;
-      lazy.error = '';
-      lazy.note = `Destination emptied — retrying ${item.code} ×${item.qty}`;
-      shared.owner = 'lazy';
-      renderLazy();
-      return true;
-    } catch (error) {
-      if (error?.outcomeUnknown) {
-        cancelLazyRun();
-        lazy.running = false;
-        lazy.predicant = false;
-        lazy.paused = false;
-        lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
-        lazy.note = 'VERIFY DESTINATION STATE MANUALLY — no automatic close retry was sent';
-        shared.owner = '';
-        setLazyRunningIndicator(false);
-        renderLazy();
-        return false;
-      }
-
-      if (runWasCancelled(error, run)) return false;
-
       lazy.predicant = true;
       lazy.paused = true;
-      lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
-      lazy.note = 'scan destination again to retry recovery';
-      shared.owner = 'lazy';
+      shared.owner = 'lazy-recovery';
+      lazy.error = '';
+      lazy.note = `Destination confirmed — emptying ${lazy.dest}`;
+      lazyRecoveryEvent('DEST_RESCAN_ACCEPTED', item);
       renderLazy();
-      return false;
+
+      try {
+        lazyRecoveryEvent('DEST_EMPTY_START', item);
+        await closeContainerDirect(lazy.dest, true);
+
+        if (!currentLazyRun(run) || !lazy.running) return false;
+
+        lazyRecoveryEvent('DEST_EMPTY_OK', item);
+        lazy.predicant = false;
+        lazy.paused = false;
+        lazy.error = '';
+        lazy.note = `Destination emptied — retrying ${item.code} ×${itemQty(item)}`;
+        shared.owner = 'lazy';
+        renderLazy();
+        return true;
+      } catch (error) {
+        if (error?.outcomeUnknown) {
+          lazyRecoveryEvent('DEST_EMPTY_UNKNOWN', item, error?.message || error);
+          cancelLazyRun();
+          lazy.running = false;
+          lazy.predicant = false;
+          lazy.paused = false;
+          lazy.error = `Predicant recovery stopped — ${error?.message || error}`;
+          lazy.note = 'VERIFY DESTINATION STATE MANUALLY — no automatic retry was sent';
+          shared.owner = '';
+          setLazyRunningIndicator(false);
+          renderLazy();
+          return false;
+        }
+
+        if (runWasCancelled(error, run)) return false;
+
+        lazyRecoveryEvent('DEST_EMPTY_FAILED', item, error?.message || error);
+        lazy.predicant = true;
+        lazy.paused = true;
+        lazy.error = `Predicant recovery stopped: ${error?.message || error}`;
+        lazy.note = 'Rescan destination to retry emptying — item has NOT been retried';
+        shared.owner = 'lazy';
+        renderLazy();
+        // Stay in this recovery owner and wait for another deliberate destination scan.
+      }
     }
+
+    return false;
   }
 
   function randomLazyMoveDelayMs() {
@@ -3040,6 +3077,7 @@
     renderLazy();
 
     const payload = buildMovePayload(lazy.src, lazy.dest, lazy.sourceMeta, ctx, totalQty, expirationMs);
+    let predicantRetry = false;
 
     while (lazy.running && currentLazyRun(run)) {
       if (lazyItemShouldSkip(item)) {
@@ -3051,6 +3089,9 @@
 
       try {
         if (!await waitLazyMovePacing(run)) return false;
+        // Every known-safe retry gets a new request id. Never reuse the rejected
+        // Predicant attempt's id, which can be deduped/replayed by the backend.
+        payload.requestId = requestId();
         response = await api(API_MOVE_ITEMS, payload, run);
       } catch (error) {
         if (error?.submitted && error?.responseReceived !== true) {
@@ -3077,16 +3118,12 @@
       }
 
       if (hasPredicant(response) && !moveOk(response)) {
-        while (lazy.running) {
-          const recovered = await waitPredicant(item, run);
-          if (recovered) break;
+        const recovered = await waitPredicant(item, run);
+        if (!recovered || !lazy.running || !currentLazyRun(run)) return false;
 
-          if (!lazy.running || !currentLazyRun(run)) return false;
-
-          await new Promise(resolve => { lazy.predicantResolve = resolve; });
-          if (!lazy.running || !currentLazyRun(run)) return false;
-        }
-
+        predicantRetry = true;
+        lazyRecoveryEvent('MOVE_RETRY', item);
+        // Retry this exact item only after close-container returned confirmed success.
         continue;
       }
 
@@ -3113,6 +3150,11 @@
       }
 
       item.status = 'MOVED';
+      if (predicantRetry) {
+        lazyRecoveryEvent('MOVE_OK', item);
+        clearLazyRecovery();
+        predicantRetry = false;
+      }
       lazy.nextMoveAt = lazy.delayEnabled ? Date.now() + randomLazyMoveDelayMs() : 0;
       lazy.error = '';
       renderLazy();
@@ -4049,6 +4091,7 @@
     if (lPause) lPause.textContent = 'Pause';
     lazy.predicantResolve?.();
     lazy.predicantResolve = null;
+    clearLazyRecovery();
     lazy.dateResolve?.(null);
     lazy.dateResolve = null;
     lazy.error = '';
@@ -4310,6 +4353,7 @@
     lazy.damagedDest = '';
     lazy.predicantResolve?.();
     lazy.predicantResolve = null;
+    clearLazyRecovery();
     lazy.dateResolve?.(null);
     lazy.dateResolve = null;
     $('#sh-og-expiry')?.remove();
@@ -4400,23 +4444,20 @@
     const code = clean(payload.code || payload.item || '');
     if (!code) throw new Error('Scan required');
 
-    const confirmingPredicant = !!(
-      lazy.predicant &&
-      lazy.predicantResolve &&
-      norm(code) === norm(lazy.dest)
-    );
+    const sameDest = norm(code) === norm(lazy.dest);
+    const waitingForRecoveryScan = !!(lazy.predicant && sameDest && lazy.predicantResolve);
+    const recoveryAlreadyRunning = !!(lazy.predicant && sameDest && !lazy.predicantResolve);
     const accepted = acceptCollapsedLazyScan(code);
     if (!accepted) throw new Error('Lazy scan not accepted in current state');
 
-    if (confirmingPredicant) {
-      lazy.predicant = true;
-      lazy.paused = true;
-      lazy.error = '';
-      lazy.note = `destination confirmed — emptying ${lazy.dest}`;
-      shared.owner = 'lazy-recovery';
-    }
+    // ISS is transport only. waitPredicant() exclusively owns recovery state.
     issSideEmitProgress(true);
-    return {accepted:true, code, recovery:confirmingPredicant};
+    return {
+      accepted:true,
+      code,
+      recovery:waitingForRecoveryScan,
+      recoveryAlreadyRunning
+    };
   }
 
   async function issSideQueueRun(payload = {}) {

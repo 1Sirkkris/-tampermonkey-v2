@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.3
+// @version      0.2.4
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.3';
+  const VERSION = '0.2.4';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -710,6 +710,42 @@
         rpcRaw('sideline', 'mode', { mode: sidelineMode }, 15000)
           .then(() => syncSidelineModeUi(false))
           .catch(error => panelStatus('sideline', error.message, 'error'));
+      }
+      return;
+    }
+
+    if (message.type === 'ISS_CONSOLE_RECOVERY') {
+      const recovery = message.recovery && typeof message.recovery === 'object'
+        ? message.recovery
+        : {};
+      const step = clean(recovery.step || '');
+      observe('LAZY_RECOVERY', {
+        step,
+        code:clean(recovery.code || ''),
+        destination:clean(recovery.destination || ''),
+        detail:clean(recovery.detail || '')
+      });
+
+      if (step === 'PREDICANT_DETECTED') {
+        panelStatus('sideline', 'Destination must be rescanned before this item can move', 'attention');
+      } else if (step === 'DEST_RESCAN_ACCEPTED') {
+        setPanelLoading('sideline', true, 'Destination confirmed • starting recovery…', { lock:false });
+        panelStatus('sideline', 'Destination confirmed • starting recovery…', 'working');
+      } else if (step === 'DEST_EMPTY_START') {
+        setPanelLoading('sideline', true, 'Emptying destination…', { lock:false });
+        panelStatus('sideline', 'Emptying destination before retry…', 'working');
+      } else if (step === 'DEST_EMPTY_OK') {
+        panelStatus('sideline', 'Destination emptied ✓ • preparing item retry…', 'working');
+      } else if (step === 'MOVE_RETRY') {
+        panelStatus('sideline', 'Retrying the same item…', 'working');
+      } else if (step === 'MOVE_OK') {
+        panelStatus('sideline', 'Retry moved ✓', 'ok');
+      } else if (step === 'DEST_EMPTY_UNKNOWN') {
+        setPanelLoading('sideline', false);
+        panelStatus('sideline', 'Destination empty outcome UNKNOWN — VERIFY MANUALLY; item was NOT retried', 'error');
+      } else if (step === 'DEST_EMPTY_FAILED') {
+        setPanelLoading('sideline', false);
+        panelStatus('sideline', 'Destination empty failed — rescan destination to retry recovery; item was NOT retried', 'error');
       }
       return;
     }
@@ -1530,8 +1566,10 @@
       try {
         const result = await rpc('sideline', 'lazy.scan', { code }, 15000);
         if (result?.recovery) {
-          setPanelLoading('sideline', true, 'Destination confirmed • emptying destination…');
-          panelStatus('sideline', 'Destination confirmed • emptying destination…', 'working');
+          setPanelLoading('sideline', true, 'Destination confirmed • recovery starting…', { lock:false });
+          panelStatus('sideline', 'Destination confirmed • recovery starting…', 'working');
+        } else if (result?.recoveryAlreadyRunning) {
+          panelStatus('sideline', 'Recovery already running • duplicate destination scan ignored', 'working');
         } else {
           panelStatus('sideline', code + ' accepted', 'working');
         }
