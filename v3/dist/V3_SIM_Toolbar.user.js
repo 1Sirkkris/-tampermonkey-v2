@@ -2,8 +2,8 @@
 // @name         V3 | BWU2 SIM Toolbar
 // @name:en      V3 | BWU2 SIM Toolbar
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v3-groundup
-// @version      0.2.5
-// @description  SIM Markdown toolbar, snippets, attachments and native-checkbox ticket row navigation.
+// @version      0.2.6
+// @description  SIM Markdown toolbar, snippets, attachments and fast native-checkbox ticket range selection.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-body
 // @noframes
@@ -12,13 +12,13 @@
 // @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v3-groundup/v3/dist/V3_SIM_Toolbar.user.js
-// @v3-build     sim-0.2.5-35fd5ba1
+// @v3-build     sim-0.2.6-0173f437
 // ==/UserScript==
 
 (()=>{
 'use strict';
 const V3=Object.create(null);
-V3.build=Object.freeze({"id":"sim-0.2.5-35fd5ba1","version":"0.2.5"});
+V3.build=Object.freeze({"id":"sim-0.2.6-0173f437","version":"0.2.6"});
 
 // ---- src/core.js ----
 V3.core=(()=>{
@@ -407,16 +407,17 @@ V3.boot=()=>{
     if(navStarted||!/^\/issues(?:\/|$)/.test(location.pathname))return;
     navStarted=true;
 
-    let rows=[],lastIndex=-1,scanQueued=false,syncing=false;
+    let rows=[],lastIndex=-1,scanQueued=false,syncing=false,busy=false,drag=null,suppressShiftClick=false;
 
     const checked=box=>box?.matches?.('input[type="checkbox"]')
       ? !!box.checked
       : box?.getAttribute?.('aria-checked')==='true';
 
     const nativeToggle=(box,on)=>{
-      if(!box||checked(box)===on)return;
+      if(!box||checked(box)===on)return false;
       syncing=true;
       try{box.click();}finally{syncing=false;}
+      return true;
     };
 
     const style=document.createElement('style');
@@ -426,12 +427,15 @@ V3.boot=()=>{
 [data-v3-sim-check-cell]{position:relative}
 [data-v3-sim-check-cell]::after{content:attr(data-v3-sim-row-number);position:absolute;right:2px;top:50%;transform:translateY(-50%);min-width:10px;text-align:center;color:#6b7785;font:800 9px/1 Arial,sans-serif;pointer-events:none}
 [data-v3-sim-check-cell][data-v3-sim-checked="1"]::after{color:#245b86}
+[data-v3-sim-preview="on"]{background:rgba(35,110,170,.10)!important}
+[data-v3-sim-preview="off"]{background:rgba(176,0,32,.07)!important}
 #v3-sim-nav-bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147482998;display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px solid #b7c1cc;border-radius:7px;background:#fff;color:#27384b;box-shadow:0 3px 10px #0002;font:800 11px Arial,sans-serif}
 #v3-sim-nav-bar[hidden]{display:none!important}
 #v3-sim-nav-bar strong{min-width:70px;padding:0 4px;text-align:center;white-space:nowrap}
 #v3-sim-nav-bar .v3-btn{height:28px;padding:4px 9px;border:1px solid #9da9b6;border-radius:5px;background:#fff;color:#27384b;font:800 11px Arial;box-shadow:none}
 #v3-sim-nav-bar .v3-btn:hover{background:#f3f6f8}
 #v3-sim-nav-bar .v3-btn.primary{background:#2f5f88;color:#fff;border-color:#2f5f88}
+#v3-sim-nav-bar[data-busy="1"]{opacity:.72;pointer-events:none}
 `;
     document.head.appendChild(style);
     life.own(()=>style.remove());
@@ -459,13 +463,19 @@ V3.boot=()=>{
           record.cell.dataset.v3SimChecked=on?'1':'0';
         }
       });
-      count.textContent='Selected '+total;
-      bar.hidden=total===0;
+      count.textContent=(busy?'Working · ':'Selected ')+total;
+      bar.hidden=total===0&&!busy;
+      bar.dataset.busy=busy?'1':'0';
     };
 
-    const setRange=(from,to,on)=>{
+    const clearPreview=()=>{
+      for(const record of rows)delete record.row.dataset.v3SimPreview;
+    };
+
+    const preview=(from,to,on)=>{
+      clearPreview();
       const a=Math.min(from,to),b=Math.max(from,to);
-      for(let index=a;index<=b;index++)nativeToggle(rows[index]?.checkbox,on);
+      for(let index=a;index<=b;index++)rows[index].row.dataset.v3SimPreview=on?'on':'off';
     };
 
     const eventRecord=event=>{
@@ -475,40 +485,34 @@ V3.boot=()=>{
         const direct=rows.find(record=>record.checkbox===pathBox);
         if(direct)return direct;
       }
-
       const row=path.find(node=>rows.some(record=>record.row===node))
         || event.target?.closest?.('tr,[role="row"],li');
-      if(!row)return null;
-      return rows.find(record=>record.row===row)||null;
+      return row?rows.find(record=>record.row===row)||null:null;
     };
 
-    const onNativeClick=event=>{
-      if(syncing)return;
-      const record=eventRecord(event);
-      if(!record)return;
-      const index=rows.indexOf(record);
-      if(index<0)return;
+    const checkboxHit=(event,record)=>{
+      if(!record)return false;
+      const path=event.composedPath?.()||[];
+      return path.includes(record.checkbox)||path.includes(record.cell)
+        || record.cell?.contains?.(event.target);
+    };
 
-      if(event.shiftKey&&lastIndex>=0){
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const targetState=!checked(record.checkbox);
-        setRange(lastIndex,index,targetState);
-        lastIndex=index;
-        paint();
-        return;
-      }
-
-      lastIndex=index;
-      queueMicrotask(paint);
+    const masterCheckbox=()=>{
+      if(!rows.length)return null;
+      const rowBoxes=new Set(rows.map(record=>record.checkbox));
+      const scope=rows[0].row.closest('table,[role="table"],[role="grid"]')||document;
+      const rowLeft=rows[0].checkbox.getBoundingClientRect().left;
+      return [...scope.querySelectorAll('input[type="checkbox"],[role="checkbox"]')]
+        .filter(box=>V3.native.visible(box)&&!rowBoxes.has(box))
+        .map(box=>({box,rect:box.getBoundingClientRect()}))
+        .filter(item=>item.rect.top<rows[0].row.getBoundingClientRect().top&&Math.abs(item.rect.left-rowLeft)<80)
+        .sort((a,b)=>b.rect.top-a.rect.top)[0]?.box||null;
     };
 
     const scan=()=>{
       scanQueued=false;
       if(!/^\/issues(?:\/|$)/.test(location.pathname)){
-        rows=[];
-        lastIndex=-1;
-        bar.hidden=true;
+        rows=[];lastIndex=-1;bar.hidden=true;clearPreview();
         for(const cell of document.querySelectorAll('[data-v3-sim-check-cell]')){
           delete cell.dataset.v3SimCheckCell;
           delete cell.dataset.v3SimRowNumber;
@@ -523,13 +527,10 @@ V3.boot=()=>{
         if(!ticket||seen.has(ticket.url))continue;
         const row=ticketRow(anchor);
         if(!row)continue;
-        const checkbox=[...row.querySelectorAll('input[type="checkbox"],[role="checkbox"]')]
-          .find(V3.native.visible);
+        const checkbox=[...row.querySelectorAll('input[type="checkbox"],[role="checkbox"]')].find(V3.native.visible);
         if(!checkbox)continue;
-
         const cell=checkbox.closest('td,[role="cell"]')||checkbox.parentElement;
         if(!cell)continue;
-
         seen.add(ticket.url);
         found.push({url:ticket.url,shortId:ticket.shortId,row,anchor,checkbox,cell});
       }
@@ -550,17 +551,157 @@ V3.boot=()=>{
       paint();
     };
 
+    const settle=async(wanted,timeout=1800)=>{
+      const end=performance.now()+timeout;
+      while(performance.now()<end){
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        scan();
+        if(rows.length&&rows.every(record=>checked(record.checkbox)===wanted))return true;
+      }
+      scan();
+      return rows.length&&rows.every(record=>checked(record.checkbox)===wanted);
+    };
+
+    const applyRange=async(from,to,on)=>{
+      if(busy||!rows.length)return;
+      const a=Math.min(from,to),b=Math.max(from,to);
+      const snapshot=new Map(rows.map(record=>[record.url,checked(record.checkbox)]));
+      const direct=rows.slice(a,b+1).filter(record=>checked(record.checkbox)!==on);
+
+      busy=true;
+      paint();
+      try{
+        if(on){
+          const master=masterCheckbox();
+          const outsideFalse=rows.filter((record,index)=>(index<a||index>b)&&snapshot.get(record.url)===false);
+          const directCost=direct.length;
+          const bulkCost=master?3+outsideFalse.length:Number.POSITIVE_INFINITY;
+
+          if(master&&bulkCost<directCost){
+            syncing=true;
+            try{master.click();}finally{syncing=false;}
+            await settle(true);
+
+            for(const url of outsideFalse.map(record=>record.url)){
+              const current=rows.find(record=>record.url===url);
+              nativeToggle(current?.checkbox,false);
+            }
+          }else{
+            for(const record of direct)nativeToggle(record.checkbox,true);
+          }
+        }else{
+          for(const record of direct)nativeToggle(record.checkbox,false);
+        }
+      }finally{
+        busy=false;
+        scan();
+        clearPreview();
+        paint();
+      }
+    };
+
+    const clearAll=async()=>{
+      if(busy)return;
+      const selected=rows.filter(record=>checked(record.checkbox));
+      if(!selected.length)return;
+
+      busy=true;
+      paint();
+      try{
+        const master=masterCheckbox();
+        if(master&&selected.length>4){
+          syncing=true;
+          try{master.click();}finally{syncing=false;}
+          await new Promise(resolve=>setTimeout(resolve,0));
+          scan();
+
+          if(rows.some(record=>checked(record.checkbox))){
+            syncing=true;
+            try{masterCheckbox()?.click();}finally{syncing=false;}
+            await settle(false);
+          }
+        }else{
+          for(const record of selected)nativeToggle(record.checkbox,false);
+        }
+      }finally{
+        lastIndex=-1;
+        busy=false;
+        scan();
+        paint();
+      }
+    };
+
     const schedule=()=>{
       if(scanQueued)return;
       scanQueued=true;
       life.timeout(scan,60);
     };
 
-    life.on(document,'click',onNativeClick,true);
+    life.on(document,'pointerdown',event=>{
+      if(syncing||busy||!event.shiftKey||event.button!==0)return;
+      const record=eventRecord(event);
+      if(!checkboxHit(event,record))return;
+      const index=rows.indexOf(record);
+      if(index<0)return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const from=lastIndex>=0?lastIndex:index;
+      const on=lastIndex>=0?checked(rows[from].checkbox):!checked(record.checkbox);
+      drag={from,to:index,on};
+      suppressShiftClick=true;
+      preview(from,index,on);
+    },true);
+
+    life.on(document,'pointerover',event=>{
+      if(!drag||busy||!(event.buttons&1))return;
+      const record=eventRecord(event);
+      if(!record)return;
+      const index=rows.indexOf(record);
+      if(index<0||index===drag.to)return;
+      drag.to=index;
+      preview(drag.from,drag.to,drag.on);
+    },true);
+
+    life.on(document,'pointerup',event=>{
+      if(!drag)return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const work=drag;
+      drag=null;
+      lastIndex=work.to;
+      void applyRange(work.from,work.to,work.on);
+      setTimeout(()=>{suppressShiftClick=false;},0);
+    },true);
+
+    life.on(document,'click',event=>{
+      if(syncing)return;
+      const record=eventRecord(event);
+      if(!record)return;
+
+      if(event.shiftKey&&suppressShiftClick){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if(!checkboxHit(event,record))return;
+      lastIndex=rows.indexOf(record);
+      queueMicrotask(paint);
+    },true);
+
     life.on(document,'change',event=>{
       const record=eventRecord(event);
       if(record)queueMicrotask(paint);
     },true);
+
+    life.on(window,'blur',()=>{
+      if(!drag)return;
+      drag=null;
+      suppressShiftClick=false;
+      clearPreview();
+    });
 
     life.observe(document.body,records=>{
       const nativeChange=records.some(record=>{
@@ -571,11 +712,7 @@ V3.boot=()=>{
       if(nativeChange)schedule();
     },{childList:true,subtree:true});
 
-    clear.addEventListener('click',()=>{
-      for(const record of rows)nativeToggle(record.checkbox,false);
-      lastIndex=-1;
-      paint();
-    });
+    clear.addEventListener('click',()=>{void clearAll();});
 
     open.addEventListener('click',()=>{
       const urls=rows.filter(record=>checked(record.checkbox)).map(record=>record.url);
