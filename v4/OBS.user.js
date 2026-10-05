@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 OBS
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v4
-// @version      0.1.0
+// @version      0.1.1
 // @description  Independent native-page evidence and explicit V4 operation transcripts.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -27,7 +27,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const PAGE = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const GUARD = Symbol.for('tampermonkey.v4.obs.document');
   if (PAGE[GUARD]) return;
@@ -35,7 +35,6 @@
 
   const PREFIX = 'tm-v4.obs.';
   const META = PREFIX + 'session';
-  const FAT = PREFIX + 'fat';
   const REVISION = PREFIX + 'revision';
   const SHARDS = PREFIX + 'page.';
   const BUS = 'tampermonkey-v4:evidence';
@@ -43,20 +42,23 @@
   const SECRET = /authorization|cookie|credential|csrf|password|passwd|secret|signature|token|api.?key|x-amz/i;
   const RAW = /^(?:headers|body|requestBody|responseBody|responseText|raw)$/i;
   const IDENTIFIER = /^(?:asin|fnsku|fcsku|barcode|container|employee|login|lpn|scannable|source|destination)$/i;
-  const uid = () => crypto.randomUUID();
+  const uid = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() :
+    [...crypto.getRandomValues(new Uint32Array(4))].map(n => n.toString(16).padStart(8, '0')).join('-');
   const pageId = uid();
-  const shardKey = SHARDS + pageId;
+  const shardKey = () => SHARDS + epoch + '.' + pageId;
   const timers = new Set();
   const readers = new Set();
+  const objectUrls = new Set();
+  const storageErrors = new Map();
   const xhrDetails = new WeakMap();
   const routine = new Map();
   let events = [];
   let keys = new Set();
   let epoch = 'initial';
+  let trustedSession = { id: 'initial', startedAt: 0, mode: 'normal' };
   let running = false;
   let sequence = 0;
   let dirty = false;
-  let storeError = '';
   let exportError = '';
   let total = 0;
   let pendingCount = 0;
@@ -72,6 +74,7 @@
   let revisionListener = null;
   let restoreFetch = () => {};
   let restoreXhr = () => {};
+  const storeError = () => storageErrors.values().next().value || '';
 
   function later(fn, ms) {
     const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
@@ -84,26 +87,31 @@
   }
 
   function get(key, fallback) {
-    try { return GM_getValue(key, fallback); }
-    catch (error) { storeError = 'Storage read failed'; return fallback; }
+    try { const value = GM_getValue(key, fallback); storageErrors.delete('get:' + key); return value; }
+    catch (error) { storageErrors.set('get:' + key, 'Storage read failed'); return fallback; }
   }
 
   function set(key, value) {
-    try { GM_setValue(key, value); return true; }
-    catch (error) { storeError = 'Storage write failed'; return false; }
+    try { GM_setValue(key, value); storageErrors.delete('set:' + key); return true; }
+    catch (error) { storageErrors.set('set:' + key, 'Storage write failed'); return false; }
   }
 
   function list() {
-    try { return GM_listValues(); }
-    catch (error) { storeError = 'Storage list failed'; return []; }
+    try { const values = GM_listValues(); storageErrors.delete('list'); return values; }
+    catch (error) { storageErrors.set('list', 'Storage list failed'); return []; }
   }
 
   function readSession() {
     try {
       const value = JSON.parse(get(META, 'null'));
-      if (value && /^[a-zA-Z0-9-]{1,80}$/.test(value.id) && Number.isFinite(value.startedAt)) return value;
-    } catch (error) { storeError = 'Invalid session metadata'; }
-    return { id: 'initial', startedAt: 0 };
+      if (storageErrors.has('get:' + META)) return trustedSession;
+      if (value !== null && !(value && typeof value.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(value.id) &&
+          Number.isFinite(value.startedAt) && ['normal', 'fat'].includes(value.mode))) throw new Error('Invalid session');
+      storageErrors.delete('parse:session');
+      trustedSession = value || { id: 'initial', startedAt: 0, mode: 'normal' };
+      return trustedSession;
+    } catch (error) { storageErrors.set('parse:session', 'Invalid session metadata'); }
+    return trustedSession;
   }
 
   function sync() {
@@ -121,7 +129,7 @@
     return current;
   }
 
-  const fat = () => get(FAT, false) === true;
+  const fat = () => readSession().mode === 'fat';
   const limit = () => fat() ? 50000 : 6000;
 
   function fingerprint(value) {
@@ -145,7 +153,8 @@
     return String(value)
       .replace(/https?:\/\/[^\s"'<>]+/gi, safeUrl)
       .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
-      .replace(/\b(?:authorization|cookie|password|secret|token|csrf|api[_-]?key)\s*[=:]\s*[^\s,;]+/gi, '[REDACTED]')
+      .replace(/\b(?:authorization|cookie)\s*:\s*[^\r\n]*/gi, '[REDACTED]')
+      .replace(/\b(?:password|secret|token|csrf|api[_-]?key)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '[REDACTED]')
       .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?\b/g, '[REDACTED]')
       .slice(0, 800);
   }
@@ -176,14 +185,20 @@
     sync();
     const merged = [];
     for (const key of list()) {
-      if (!key.startsWith(SHARDS) || key === shardKey) continue;
+      if (!key.startsWith(SHARDS + epoch + '.') || key === shardKey()) continue;
       try {
         const shard = JSON.parse(get(key, 'null'));
-        if (shard?.epoch === epoch && Array.isArray(shard.events)) merged.push(...shard.events.slice(0, 50000));
-      } catch (error) { storeError = 'Invalid evidence shard'; }
+        if (!shard || typeof shard.epoch !== 'string' || !Array.isArray(shard.events)) throw new Error('Invalid shard');
+        if (shard.events.some(event => !event || typeof event.eventId !== 'string' || !Number.isFinite(event.ts))) throw new Error('Invalid stored event');
+        storageErrors.delete('parse:' + key);
+        if (shard.epoch === epoch) merged.push(...shard.events.slice(0, 50000));
+      } catch (error) { storageErrors.set('parse:' + key, 'Invalid evidence shard'); }
     }
     merged.push(...events);
-    merged.sort((a, b) => (a.ts - b.ts) || String(a.eventId).localeCompare(String(b.eventId)));
+    const phaseOrder = { SUBMITTED: 0, REJECTED: 1, UNKNOWN: 2, CONFIRMED: 3 };
+    merged.sort((a, b) => (a.ts - b.ts) ||
+      (a.operationId && a.operationId === b.operationId ? phaseOrder[a.phase] - phaseOrder[b.phase] : 0) ||
+      String(a.pageId).localeCompare(String(b.pageId)) || (a.sequence - b.sequence));
     const unique = new Map();
     for (const event of merged) {
       if (!event || typeof event.eventId !== 'string' || !Number.isFinite(event.ts)) continue;
@@ -199,9 +214,8 @@
     cancel(flushTimer); flushTimer = null;
     sync();
     if (!dirty) return true;
-    if (!set(shardKey, JSON.stringify({ epoch, events }))) { render(); return false; }
+    if (!set(shardKey(), JSON.stringify({ epoch, events }))) { render(); return false; }
     dirty = false;
-    storeError = '';
     set(REVISION, uid());
     render();
     return true;
@@ -210,8 +224,9 @@
   function record(type, data = {}, owner = {}) {
     if (!running) return;
     sync();
+    const seq = ++sequence;
     const event = {
-      eventId: owner.eventId || pageId + ':' + (++sequence),
+      eventId: owner.eventId || pageId + ':' + seq, sequence: seq,
       ts: Date.now(), pageId, type, script: owner.script || 'OBS', version: owner.version || VERSION,
       route: safeUrl(location.href), data: sanitize(data)
     };
@@ -230,12 +245,13 @@
     if (typeof event.detail !== 'string' || event.detail.length > 40000) return;
     let owner;
     try { owner = JSON.parse(event.detail); } catch (error) { return; }
-    if (!owner || !/^[a-zA-Z0-9_.-]{1,80}$/.test(owner.type) ||
+    if (!owner || typeof owner.type !== 'string' || typeof owner.script !== 'string' || typeof owner.version !== 'string' ||
+        !/^[a-zA-Z0-9_.-]{1,80}$/.test(owner.type) ||
         !/^[a-zA-Z0-9_. -]{1,64}$/.test(owner.script) ||
         !/^[a-zA-Z0-9_.-]{1,40}$/.test(owner.version)) return;
-    if (owner.eventId != null && !/^[a-zA-Z0-9_.:-]{1,160}$/.test(owner.eventId)) return;
+    if (owner.eventId != null && (typeof owner.eventId !== 'string' || !/^[a-zA-Z0-9_.:-]{1,160}$/.test(owner.eventId))) return;
     if (owner.phase != null || owner.intent === 'mutation') {
-      if (owner.type !== 'operation' || owner.intent !== 'mutation' || !PHASES.has(owner.phase) ||
+      if (owner.type !== 'operation' || owner.intent !== 'mutation' || !PHASES.has(owner.phase) || typeof owner.operationId !== 'string' ||
           !/^[a-zA-Z0-9_.:-]{1,160}$/.test(owner.operationId)) return;
     }
     record(owner.type, owner.data || {}, owner);
@@ -262,7 +278,9 @@
   function networkInterest(url) {
     try {
       const parsed = new URL(url, location.href);
-      return parsed.origin === location.origin && !/(?:pendo|telemetry|analytics|logger)(?:[/.]|$)/i.test(parsed.href);
+      const poRead = /\.execute-api\.(?:us-east-1|us-west-2)\.amazonaws\.com$/i.test(parsed.hostname) &&
+        /^\/beta\/(?:getPoHeaders|getEmidFromPolReadService|getInboundRecordsForShipmentByFnsku|getShipmentItems)\/?$/i.test(parsed.pathname);
+      return (parsed.origin === location.origin || poRead) && !/(?:pendo|telemetry|analytics|logger)(?:[/.]|$)/i.test(parsed.href);
     } catch (error) { return false; }
   }
 
@@ -302,7 +320,7 @@
         const part = await reader.read();
         if (part.done) break;
         bytes += part.value.byteLength;
-        if (bytes > 32768) { await reader.cancel(); return; }
+        if (bytes > 32768) { void reader.cancel().catch(() => {}); return; }
         parts.push(part.value);
       }
       if (!running) return;
@@ -320,7 +338,7 @@
     if (typeof original !== 'function') return;
     const wrapped = function (...args) {
       const request = args[0];
-      const rawUrl = typeof request === 'string' || request instanceof URL ? String(request) : request?.url;
+      const rawUrl = typeof request === 'string' || request instanceof PAGE.URL ? String(request) : request?.url;
       if (!networkInterest(rawUrl)) return Reflect.apply(original, this, args);
       const started = performance.now();
       const method = String(args[1]?.method || request?.method || 'GET').toUpperCase();
@@ -386,7 +404,9 @@
     if (!flush()) { exportError = 'Evidence has not been persisted'; render(); return; }
     const current = readSession();
     const transcript = snapshot();
-    if (storeError) { exportError = 'Evidence could not be read'; render(); return; }
+    if ([...storageErrors.keys()].some(key => key === 'list' || key.startsWith('get:') || key.startsWith('parse:'))) {
+      exportError = 'Evidence could not be read'; render(); return;
+    }
     const text = [
       'TAMPERMONKEY V4 OBS', 'Version: ' + VERSION, 'Session: ' + epoch,
       'Started: ' + new Date(current.startedAt || transcript[0]?.ts || Date.now()).toISOString(),
@@ -398,35 +418,36 @@
     let url;
     try {
       url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+      objectUrls.add(url);
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = 'V4_OBS_' + new Date().toISOString().replace(/[:.]/g, '-') + '_' + transcript.length + 'events.txt';
       anchor.hidden = true;
       document.body.append(anchor);
       try { anchor.click(); } finally { anchor.remove(); }
-      later(() => URL.revokeObjectURL(url), 1500);
+      later(() => { URL.revokeObjectURL(url); objectUrls.delete(url); }, 1500);
       reset('download');
     } catch (error) {
-      if (url) URL.revokeObjectURL(url);
+      if (url) { URL.revokeObjectURL(url); objectUrls.delete(url); }
       exportError = 'Browser download could not be initiated'; render();
     }
   }
 
-  function reset(reason) {
-    const fresh = { id: uid(), startedAt: Date.now() };
+  function reset(reason, mode = readSession().mode) {
+    const fresh = { id: uid(), startedAt: Date.now(), mode };
     if (!set(META, JSON.stringify(fresh))) { render(); return false; }
     sync();
     for (const key of list()) {
-      if (!key.startsWith(SHARDS)) continue;
+      if (!key.startsWith(SHARDS) || key.startsWith(SHARDS + fresh.id + '.')) continue;
       try {
-        const value = JSON.parse(get(key, 'null'));
-        if (value?.epoch !== fresh.id) GM_deleteValue(key);
-      } catch (error) { storeError = 'Obsolete evidence could not be deleted'; }
+        GM_deleteValue(key);
+        storageErrors.delete('parse:' + key); storageErrors.delete('get:' + key); storageErrors.delete('delete:' + key);
+      } catch (error) { storageErrors.set('delete:' + key, 'Obsolete evidence could not be deleted'); }
     }
     exportError = '';
     record('session.start', { reason });
     flush();
-    return !storeError;
+    return true;
   }
 
   function anchor() {
@@ -454,7 +475,21 @@
         location.hash.startsWith('#iss-console') || !document.querySelector('.warehouse-id')) return;
     if (!ownedStyle) {
       ownedStyle = document.createElement('style'); ownedStyle.dataset.tmV4Style = 'OBS';
-      ownedStyle.textContent = '[data-tm-v4-obs-header]{position:relative}[data-tm-v4-script="OBS"]{position:absolute;z-index:20;display:inline-flex;gap:5px;align-items:center;white-space:nowrap;font:700 11px Arial;color:#374151}[data-tm-v4-script="OBS"] button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:1px 3px}[data-tm-v4-script="OBS"] button:hover{text-decoration:underline}[data-tm-v4-script="OBS"][data-level="warn"] button:first-child{background:#ffea00;color:#7f1d1d}[data-tm-v4-script="OBS"][data-level="full"] button:first-child,[data-tm-v4-script="OBS"][data-level="error"] button:first-child{background:#b91c1c;color:#fff}[data-tm-v4-script="OBS"] [data-action="fat"][data-on="true"]{background:#7f1d1d;color:#fff}';
+      ownedStyle.textContent = `
+        [data-tm-v4-obs-header] { position:relative }
+        [data-tm-v4-script="OBS"] { position:absolute; z-index:20; display:inline-flex; gap:5px;
+          align-items:center; white-space:nowrap; font:700 11px Arial; color:#374151 }
+        [data-tm-v4-script="OBS"] button { border:0; background:transparent; color:inherit;
+          font:inherit; cursor:pointer; padding:1px 3px }
+        [data-tm-v4-script="OBS"] button:hover { text-decoration:underline }
+        [data-tm-v4-script="OBS"][data-level="warn"] button:first-child {
+          background:#ffea00; color:#7f1d1d; animation:tmV4ObsAttention .32s steps(1,end) infinite }
+        [data-tm-v4-script="OBS"][data-level="full"] button:first-child {
+          background:#b91c1c; color:#fff; animation:tmV4ObsAttention .16s steps(1,end) infinite }
+        [data-tm-v4-script="OBS"][data-level="error"] button:first-child,
+        [data-tm-v4-script="OBS"] [data-action="fat"][data-on="true"] { background:#7f1d1d; color:#fff }
+        @keyframes tmV4ObsAttention { 0%,49% { opacity:1 } 50%,100% { opacity:.12 } }
+      `;
       (document.head || document.documentElement).append(ownedStyle);
     }
     if (!ui) {
@@ -465,8 +500,7 @@
       ui.querySelector('[data-action="clear"]').addEventListener('click', () => reset('clear'), { signal: controller.signal });
       ui.querySelector('[data-action="fat"]').addEventListener('click', () => {
         const next = !fat();
-        if (!set(FAT, next)) { render(); return; }
-        if (reset(next ? 'fat-on' : 'fat-off')) location.reload();
+        if (reset(next ? 'fat-on' : 'fat-off', next ? 'fat' : 'normal')) location.reload();
       }, { signal: controller.signal });
     }
     anchor();
@@ -481,9 +515,9 @@
     snapshot();
     const max = limit();
     const button = ui.querySelector('[data-action="export"]');
-    button.textContent = storeError ? 'OBS STORAGE ERROR' : exportError ? 'OBS EXPORT ERROR' : 'OBS ' + Math.min(total, max) + '/' + max;
-    button.title = storeError || exportError || (total >= max ? 'FULL — click to download and start fresh' : total >= max * 0.8 ? '80%+ — click to download and start fresh' : 'Click to download current log and start fresh');
-    ui.dataset.level = storeError || exportError ? 'error' : total >= max ? 'full' : total >= max * 0.8 ? 'warn' : 'normal';
+    button.textContent = storeError() ? 'OBS STORAGE ERROR' : exportError ? 'OBS EXPORT ERROR' : 'OBS ' + Math.min(total, max) + '/' + max;
+    button.title = [storeError(), exportError].filter(Boolean).join('; ') || (total >= max ? 'FULL — click to download and start fresh' : total >= max * 0.8 ? '80%+ — click to download and start fresh' : 'Click to download current log and start fresh');
+    ui.dataset.level = storeError() || exportError ? 'error' : total >= max ? 'full' : total >= max * 0.8 ? 'warn' : 'normal';
     const toggle = ui.querySelector('[data-action="fat"]');
     toggle.dataset.on = String(fat()); toggle.textContent = 'FAT ' + (fat() ? 'ON' : 'OFF');
     toggle.title = 'Toggle high-detail logging; start a fresh session and reload';
@@ -506,7 +540,8 @@
     try {
       metaListener = GM_addValueChangeListener(META, changed);
       revisionListener = GM_addValueChangeListener(REVISION, changed);
-    } catch (error) { storeError = 'Cross-page storage notifications unavailable'; }
+      storageErrors.delete('notification');
+    } catch (error) { storageErrors.set('notification', 'Cross-page storage notifications unavailable'); }
     hookFetch(); hookXhr();
     record(restored ? 'page.restore' : 'page.start', { version: VERSION, url: safeUrl(location.href) });
     render();
@@ -522,6 +557,8 @@
     timers.clear(); flushTimer = routineTimer = null;
     for (const reader of readers) { void reader.cancel().catch(() => {}); }
     readers.clear();
+    for (const url of objectUrls) URL.revokeObjectURL(url);
+    objectUrls.clear();
     headerObserver?.disconnect(); headerObserver = null; headerParent = null;
     headerRow?.removeAttribute('data-tm-v4-obs-header'); headerRow = null;
     ui?.remove(); ui = null; ownedStyle?.remove(); ownedStyle = null;

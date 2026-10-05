@@ -19,8 +19,8 @@ Reference: V2 `BWU2_Observability_Core.user.js` 0.1.37 at `e4399d8`; audit F14/F
 
 ## STATE
 
-- The OBS installer owns collector state; each document owns one bounded event shard in V4-only GM storage. GM storage belongs to this V4 installer and is shared across its pages/frames. No V2/V3 state is read.
-- A session epoch changes only on Clear/download/FAT reset. Initial epoch is deterministic, avoiding competing first-page session creation. Every record/flush reads the current epoch. An old frame cannot bring old events into the new session.
+- The OBS installer owns collector state; each document owns one bounded event shard per session in V4-only GM storage. Session IDs are part of shard keys, so deleting old shards cannot race with new-session writes. GM storage belongs to this V4 installer and is shared across its pages/frames. No V2/V3 state is read.
+- A session epoch and mode live in one atomic metadata value and change only on Clear/download/FAT reset. Initial epoch is deterministic, avoiding competing first-page session creation. Every record/flush reads the current epoch. An old frame cannot bring old events into the new session; a failed mode reset cannot leave a partially changed FAT preference.
 - Export merges current-epoch shards in time order, deduplicates, and observes the current mode's capacity. Each shard also has a hard bound; limit/full status is honest. Writes coalesce after activity, never poll while idle.
 - Cross-page count changes use GM value-change notification; pagehide flushes then cleans listeners, hooks, timers and the header observer. Restore a hook only if it is still ours.
 - UI and styles use explicit V4 ownership markers for future Screenshot Mode. Observe only the native header parent once located; use DOMContentLoaded/load for bootstrap, no body-subtree observer.

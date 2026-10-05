@@ -10,8 +10,13 @@ const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve()
 
 class Storage {
   values = new Map(); listeners = new Map(); sequence = 0; reads = [];
-  failWrites = false; failMeta = false; failLists = false;
-  get(key, fallback) { this.reads.push(key); return this.values.has(key) ? this.values.get(key) : fallback; }
+  beforeDelete = null;
+  failWrites = false; failMeta = false; failLists = false; failNotifications = false; failMetaReads = false;
+  get(key, fallback) {
+    this.reads.push(key);
+    if (this.failMetaReads && key === 'tm-v4.obs.session') throw new Error('metadata read unavailable');
+    return this.values.has(key) ? this.values.get(key) : fallback;
+  }
   set(key, value, page) {
     if (this.failWrites || (this.failMeta && key === 'tm-v4.obs.session')) throw new Error('write unavailable');
     const old = this.values.get(key); this.values.set(key, value);
@@ -23,6 +28,7 @@ class Storage {
   }
   list() { if (this.failLists) throw new Error('list unavailable'); return [...this.values.keys()]; }
   listen(key, callback, page) {
+    if (this.failNotifications) throw new Error('notifications unavailable');
     const id = ++this.sequence; this.listeners.set(id, { id, key, callback, page }); return id;
   }
 }
@@ -50,14 +56,15 @@ function clock(window) {
   };
 }
 
-function fixture({ store = new Storage(), url = fcr, html, fetch, fat = false } = {}) {
-  if (fat) store.values.set('tm-v4.obs.fat', true);
+function fixture({ store = new Storage(), url = fcr, html, fetch, fat = false, randomUUID = true } = {}) {
+  if (fat) store.values.set('tm-v4.obs.session', JSON.stringify({ id: 'fixture-fat', startedAt: 1791200000000, mode: 'fat' }));
   const console = new VirtualConsole(), warnings = [], downloads = [];
   console.on('jsdomError', error => warnings.push(error.message));
   const dom = new JSDOM(html ?? '<!doctype html><html><head></head><body><header><div class="a-row"><span class="warehouse-id">BWU2</span><input type="search"></div></header></body></html>', {
     url, runScripts: 'outside-only', virtualConsole: console
   });
   const window = dom.window, time = clock(window);
+  if (!randomUUID) Object.defineProperty(window.crypto, 'randomUUID', { value: undefined });
   let failDownload = false, fetchCalls = 0;
   const blobs = new Map();
   window.Blob = Blob; window.TextDecoder = TextDecoder;
@@ -85,7 +92,7 @@ function fixture({ store = new Storage(), url = fcr, html, fetch, fat = false } 
   window.unsafeWindow = window;
   window.GM_getValue = (key, fallback) => store.get(key, fallback);
   window.GM_setValue = (key, value) => store.set(key, value, window);
-  window.GM_deleteValue = key => store.values.delete(key);
+  window.GM_deleteValue = key => { store.beforeDelete?.(key); return store.values.delete(key); };
   window.GM_listValues = () => store.list();
   window.GM_addValueChangeListener = (key, fn) => store.listen(key, fn, window);
   window.GM_removeValueChangeListener = id => store.listeners.delete(id);
@@ -116,8 +123,8 @@ test('installs alone with the familiar FCR header controls and explicit build id
   const app = fixture(); t.after(() => app.dispose());
   assert.equal(app.ui.parentElement.querySelector('.warehouse-id').textContent, 'BWU2');
   assert.deepEqual([...app.ui.querySelectorAll('button')].map(x => x.textContent), ['OBS 1/6000', 'FAT OFF', 'Clear']);
-  assert.match(app.ui.textContent, /V4 0\.1\.0/);
-  assert.equal(app.ui.dataset.tmV4Version, '0.1.0');
+  assert.match(app.ui.textContent, /V4 0\.1\.1/);
+  assert.equal(app.ui.dataset.tmV4Version, '0.1.1');
   assert.equal(app.window.BWU2Fleet, undefined);
   assert.equal(app.fetchCalls, 0);
   app.time.tick(2000); await settle();
@@ -211,7 +218,8 @@ test('failed Clear or browser download does not erase the session', async t => {
   app.store.failMeta = true; app.click('clear');
   app.store.failMeta = false; app.downloadFailure(true); app.click('export');
   assert.equal(app.downloads.length, 0);
-  assert.equal(app.ui.querySelector('button').textContent, 'OBS EXPORT ERROR');
+  assert.equal(app.ui.querySelector('button').textContent, 'OBS STORAGE ERROR');
+  assert.match(app.ui.querySelector('button').title, /download could not be initiated/);
   app.downloadFailure(false);
   const transcript = await app.export();
   assert(transcript.events.some(x => x.operationId === 'keep-this'));
@@ -274,4 +282,121 @@ test('normal mode summarizes successful native reads without background polling 
   assert(!transcript.events.some(x => x.phase));
   app.time.tick(5000); await settle();
   assert.equal(app.time.timers, 0); assert.equal(app.fetchCalls, 2);
+});
+
+test('missing operation identity or required protocol strings cannot create a submitted/confirmed event', async t => {
+  const app = fixture(); t.after(() => app.dispose());
+  app.emit({ type: 'operation', script: 'AFT', version: '4.0.1', intent: 'mutation', phase: 'SUBMITTED' });
+  app.emit({ type: 'operation', script: 'AFT', intent: 'mutation', operationId: 'bad-version', phase: 'CONFIRMED' });
+  app.emit({ script: 'AFT', version: '4.0.1' });
+  app.emit({});
+  const transcript = await app.export();
+  assert(transcript.events.every(event => event.type && event.script && event.version));
+  assert(!transcript.events.some(event => event.type === 'operation'));
+});
+
+test('failed FAT reset retains the old mode and all existing evidence', async t => {
+  const app = fixture(); t.after(() => app.dispose());
+  app.operation('mode-reset-held', 'UNKNOWN');
+  app.store.failMeta = true; app.click('fat'); await settle();
+  assert.match(app.ui.textContent, /FAT OFF/);
+  assert(!app.warnings.some(x => x.includes('navigation')));
+  app.store.failMeta = false;
+  const transcript = await app.export();
+  assert.match(transcript.text, /Mode: NORMAL/);
+  assert(transcript.events.some(event => event.operationId === 'mode-reset-held'));
+});
+
+test('an unrelated successful flush cannot hide unavailable cross-page storage notifications', async t => {
+  const store = new Storage(); store.failNotifications = true;
+  const app = fixture({ store }); t.after(() => app.dispose());
+  assert.equal(app.ui.querySelector('button').textContent, 'OBS STORAGE ERROR');
+  app.operation('notification-failed', 'SUBMITTED'); app.time.tick(300); await settle();
+  assert.equal(app.ui.querySelector('button').textContent, 'OBS STORAGE ERROR');
+  assert.match(app.ui.querySelector('button').title, /notifications/);
+  const transcript = await app.export();
+  assert(transcript.events.some(event => event.operationId === 'notification-failed'));
+});
+
+test('unreadable session metadata cannot reset the active buffer to a guessed initial session', async t => {
+  const app = fixture({ fat: true }); t.after(() => app.dispose());
+  app.operation('before-read-failure', 'SUBMITTED');
+  app.store.failMetaReads = true;
+  app.operation('during-read-failure', 'UNKNOWN'); app.time.tick(300); await settle();
+  app.click('export'); assert.equal(app.downloads.length, 0);
+  assert.equal(app.ui.querySelector('button').textContent, 'OBS STORAGE ERROR');
+  app.store.failMetaReads = false;
+  const transcript = await app.export();
+  assert(transcript.events.some(event => event.operationId === 'before-read-failure'));
+  assert(transcript.events.some(event => event.operationId === 'during-read-failure'));
+  assert.match(transcript.text, /FULL FAT/);
+});
+
+test('oversized FAT sampling cancels its branch once without waiting for the native consumer', async t => {
+  let reads = 0, cancels = 0;
+  const response = { status: 200, url: fcr + '/status', headers: { get: () => 'application/json' },
+    clone: () => ({ body: { getReader: () => ({
+      read: async () => { reads++; return { done: false, value: new Uint8Array(40000) }; },
+      cancel: () => { cancels++; return new Promise(() => {}); }
+    }) } })
+  };
+  const app = fixture({ fat: true, fetch: () => Promise.resolve(response) }); t.after(() => app.dispose());
+  assert.equal(await app.window.fetch('/status'), response); await settle();
+  assert.equal(reads, 1); assert.equal(cancels, 1);
+  app.hide(); await settle();
+  assert.equal(cancels, 1);
+});
+
+test('export object URLs are released on pagehide before their delayed release timer fires', async t => {
+  const app = fixture(); t.after(() => app.dispose());
+  await app.export(); assert.equal(app.blobs, 1);
+  app.hide(); assert.equal(app.blobs, 0); assert.equal(app.time.timers, 0);
+});
+
+test('HTTP native pages can collect with secure random values when randomUUID is unavailable', t => {
+  const app = fixture({ url: 'http://fcmenu-nrt-regionalized.corp.amazon.com/BWU2/calmCode', randomUUID: false });
+  t.after(() => app.dispose());
+  app.operation('http-page', 'SUBMITTED'); app.time.tick(300);
+  assert.equal(app.time.intervals, 0);
+  assert([...app.store.values.values()].some(x => typeof x === 'string' && x.includes('http-page')));
+});
+
+test('known native cross-origin PO reads retain network evidence without mutation phases', async t => {
+  const app = fixture({ fat: true, url: 'https://console.harmony.a2z.com/poportal/fe' }); t.after(() => app.dispose());
+  await app.window.fetch('https://example.execute-api.us-east-1.amazonaws.com/beta/getPoHeaders', { method: 'POST' });
+  const exporter = fixture({ store: app.store }); t.after(() => exporter.dispose());
+  app.time.tick(300); await settle();
+  const transcript = await exporter.export();
+  assert(transcript.events.some(x => x.type === 'network.response' && x.data.url.includes('/getPoHeaders')));
+  assert(!transcript.events.some(x => x.phase));
+});
+
+test('Clear cleanup cannot delete a new-session worker write interleaved with deleting old shards', async t => {
+  const store = new Storage(), app = fixture({ store }), worker = fixture({ store });
+  t.after(() => { app.dispose(); worker.dispose(); });
+  app.time.tick(300); worker.time.tick(300); await settle();
+  let interleaved = false;
+  store.beforeDelete = () => {
+    if (interleaved) return;
+    interleaved = true;
+    worker.operation('written-during-clear', 'SUBMITTED'); worker.time.tick(300);
+  };
+  app.click('clear'); await settle(); store.beforeDelete = null;
+  assert(interleaved);
+  const transcript = await app.export();
+  assert(transcript.events.some(event => event.operationId === 'written-during-clear'));
+});
+
+test('a corrupted stored event cannot become a silent partial export; Clear restores collection', async t => {
+  const app = fixture(); t.after(() => app.dispose());
+  app.time.tick(300); await settle();
+  const [key, raw] = [...app.store.values].find(([key]) => key.startsWith('tm-v4.obs.page.'));
+  const damaged = JSON.parse(raw); damaged.events = [null];
+  app.store.values.set(key.replace(/[^.]+$/, 'damaged-page'), JSON.stringify(damaged));
+  app.click('export'); await settle();
+  assert.equal(app.downloads.length, 0);
+  assert.equal(app.ui.querySelector('button').textContent, 'OBS STORAGE ERROR');
+  app.click('clear'); app.operation('after-cleanup', 'SUBMITTED');
+  const transcript = await app.export();
+  assert(transcript.events.some(event => event.operationId === 'after-cleanup'));
 });
