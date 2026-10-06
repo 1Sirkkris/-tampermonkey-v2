@@ -87,7 +87,7 @@ test('native search Submit/Clear cancels prior owners before any replacement req
   input.value = ''; input.dispatchEvent(new app.window.Event('input', { bubbles: true })); assert.equal(app.runtime.current().query, ''); assert.equal(app.calls.length, 0);
 });
 
-test('retry after a completed native render retains original content and exposes the missing renderer contract', async t => {
+test('unidentified renderer preserves original content and exposes its integration error', async t => {
   const app = setup(t); const section = app.window.document.querySelector('[data-section-type="inventory"]');
   await resolved(app.native('inventory', undefined, { success: html => { section.innerHTML = html; } }));
   const nativeTable = section.querySelector('table'); await app.runtime.load('inventory', { force: true }); await tick();
@@ -122,13 +122,13 @@ test('incomplete inventory remains visibly partial and deliberately retryable', 
   assert.match(app.window.document.querySelector('[data-tm-v4-read-status]').textContent, /Retry Inventory/);
 });
 
-test('native auth/schema failure preserves retry callbacks and does not produce a successful read', async t => {
+test('native auth/schema failure settles its native request once and does not fabricate a successful callback', async t => {
   let valid = false;
   const app = setup(t, { fetch: async () => new Response(valid ? product() : '<form><input type="password"></form>') });
-  const xhr = app.native('product'); let successes = 0; xhr.done(() => successes++); await tick();
+  const xhr = app.native('product'); let successes = 0, failures = 0; xhr.done(() => successes++).fail(() => failures++); await tick();
   assert.equal(successes, 0); assert.match(app.window.document.querySelector('[data-tm-v4-read-status]').textContent, /authentication/);
   valid = true; app.window.document.querySelector('[data-tm-v4-read-status] button').click();
-  await resolved(xhr); assert.equal(successes, 1); assert.equal(app.calls.length, 2);
+  await tick(); assert.equal(successes, 0); assert.equal(failures, 1); assert.equal(app.jq.active, 0); assert.equal(app.calls.length, 2);
 });
 
 test('native table/navigation replacement and repeated refresh retain one control and no extra reads', async t => {

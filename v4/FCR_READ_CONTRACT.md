@@ -11,6 +11,7 @@ Evidence: pinned V2 `FCR_Data_Core.user.js` 0.2.41 and `FCResearch_Master.user.j
 - An inventory first-page preview is available promptly, but carries `complete: false`, `totalQuantity: null` and a warning while pages remain. Full inventory is fresh, never served from a stale tote cache.
 - Exact product identifiers/aliases and titles must belong to the requested item. A substring, unrelated table/image or a previous query cannot prove identity.
 - Native Inventory History accepts `MM/dd/yyyy` dates using `startSearchDateString`, `endSearchDateString` and `dateStringFormat`; continuation uses `inventory-history-more` with `token`.
+- The user's 6 October native loader capture establishes the same `{section}-more`/token protocol for other native sections. Master reads those pages under its own cancellation and page/row limits. Match the first exact native table and row width; keep an honest partial result on an invalid later page. Strip continuation markers before native rendering so the callback cannot launch unowned follow-up reads. Generic section semantic completeness remains unknown even when all validated native pages were received.
 - FCR Master also needs external Pandash hazmat, Poirot exact binDescription and authenticated Item Measurement/MADCAT enrichment. Their independent source contract/fixtures and auth acquisition source are now available; native consumer integration and live acceptance remain required. Native FCR reads alone do not finish the entire capability.
 
 ## FAILURES
@@ -49,7 +50,7 @@ Evidence: pinned V2 `FCR_Data_Core.user.js` 0.2.41 and `FCResearch_Master.user.j
 ## DEPENDENCIES
 
 - Authenticated native FCR origin/warehouse; native fetch, AbortController, DOMParser and form encoding. Supported section allowlist comes from the pinned Master controls, not arbitrary caller URL construction.
-- Known pagination marker: `.pagination-token` containing a JSON object/array; explicit empty/false/null/done ends pagination. Unknown nonempty formats remain incomplete. Fixtures cannot assert live undocumented formats.
+- Known pagination marker: `.pagination-token` containing a JSON object/array; explicit empty/true/false/null/done ends pagination. The user's 6 October native page-script capture establishes literal true as terminal; mixed terminal/continuation markers are contradictory. Unknown nonempty formats remain incomplete. Fixtures cannot assert live undocumented formats.
 - External enrichment/authentication source is governed by `FCR_ENRICHMENT_CONTRACT.md`; native installer integration/live acceptance remains required before FCR Master is called ready.
 
 ## VERIFY

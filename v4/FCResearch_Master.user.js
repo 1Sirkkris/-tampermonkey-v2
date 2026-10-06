@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.1
+// @version      0.1.2
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -27,7 +27,7 @@
 // ==/UserScript==
 (() => {
   // fcr-read.mjs
-  var FCR_READ_VERSION = "0.1.0";
+  var FCR_READ_VERSION = "0.1.1";
   var FcrReadError = class extends Error {
     constructor(code, message, { status, cause, partial } = {}) {
       super(message, cause ? { cause } : void 0);
@@ -53,8 +53,8 @@
     "sscc-info",
     "carton-ambiguities",
     "vision-tunnel",
-    "problems",
     "problem",
+    "problems",
     "event",
     "authenticity-item"
   ]);
@@ -92,8 +92,10 @@
   }
   function pagination(document) {
     const markers = [...document.querySelectorAll(".pagination-token")].map((node) => node.textContent.trim());
-    const tokens = markers.filter((value) => value && !/^(?:false|null|done)$/i.test(value));
+    const terminal = (value) => /^(?:true|false|null|done)$/i.test(value);
+    const tokens = markers.filter((value) => value && !terminal(value));
     if (!tokens.length) return "";
+    if (markers.some(terminal)) throw failure("PAGINATION", "Contradictory pagination markers");
     if (new Set(tokens).size !== 1 || tokens[0].length > 16384) throw failure("PAGINATION", "Ambiguous pagination token");
     try {
       const parsed = JSON.parse(tokens[0]);
@@ -160,7 +162,7 @@
     const allowedHost = /^(?:fcresearch-fe\.aka\.amazon\.com|qi-fcresearch-(?:fe|jp)\.corp\.amazon\.com|qifcr\.fe\.aftx\.amazonoperations\.app)$/i;
     if (!/^https?:$/.test(site.protocol) || !allowedHost.test(site.hostname) || site.username || site.password || !/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof nativeFetch !== "function" || typeof Parser !== "function" || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 200 || !Number.isInteger(maxRows) || maxRows < 1 || maxRows > 1e5 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4 || !Array.isArray(retryDelays) || retryDelays.length > 3 || retryDelays.some((ms) => !Number.isFinite(ms) || ms < 0 || ms > 5e3)) throw failure("INPUT", "FCR reader configuration is invalid");
     const base = `${site.origin}/${encodeURIComponent(warehouse)}/results/`;
-    const endpoints = /* @__PURE__ */ new Set([...FCR_SECTIONS, "inventory-more", "inventory-history-more"]);
+    const endpoints = /* @__PURE__ */ new Set([...FCR_SECTIONS, ...FCR_SECTIONS.map((endpoint) => endpoint + "-more")]);
     function evidence2(data) {
       try {
         onEvidence({ type: "fcr.read", script: "FCR READ", version: FCR_READ_VERSION, intent: "read", data });
@@ -422,13 +424,56 @@
       active(options.signal);
       const recognized = document.querySelector('table, [data-section-type="' + endpoint + '"]');
       if (!recognized) throw failure("SCHEMA", "Native section markup was not returned");
-      const token = pagination(document);
+      let pages = 1, records = 0, paginationComplete = false, error;
+      const table = document.getElementById("table-" + endpoint), body = table?.tBodies[0], width = table?.tHead?.rows[0]?.cells.length;
+      const validate = (candidate) => [...candidate?.tBodies[0]?.rows || []].filter((node) => !node.querySelector("td.dataTables_empty")).map((node) => {
+        if (node.cells.length !== width) throw failure("SCHEMA", endpoint + ": continuation row has unexpected columns");
+        return node;
+      });
+      if (body && width) records = validate(table).length;
+      if (records > maxRows) throw failure("LIMIT", endpoint + ": native row limit reached");
+      try {
+        let token = pagination(document);
+        if (token && (!body || !width)) throw failure("SCHEMA", endpoint + ": paginated native table was not returned");
+        const seen = /* @__PURE__ */ new Set();
+        if (records > maxRows || token && !records) throw failure("PAGINATION", endpoint + ": nonterminal page is empty or exceeds the row limit");
+        while (token) {
+          if (seen.has(token) || pages >= maxPages) throw failure("PAGINATION", endpoint + ": continuation cycle/limit");
+          seen.add(token);
+          const page2 = await request(endpoint + "-more", { token }, options.signal);
+          active(options.signal);
+          const nextTable = page2.getElementById("table-" + endpoint) || page2.querySelector("table:not([id])");
+          if (!nextTable?.tBodies[0]) throw failure("SCHEMA", endpoint + ": continuation table was not returned");
+          const headers = [...nextTable.tHead?.rows[0]?.cells || []];
+          if (headers.length && (headers.length !== width || headers.some((header, index) => text(header.textContent) !== text(table.tHead.rows[0].cells[index].textContent)))) {
+            throw failure("SCHEMA", endpoint + ": continuation columns changed");
+          }
+          const nodes = validate(nextTable), next = pagination(page2);
+          if (!nodes.length && next || records + nodes.length > maxRows) throw failure("PAGINATION", endpoint + ": continuation is empty or exceeds the row limit");
+          for (const marker of page2.querySelectorAll(".show-message")) document.getElementById(text(marker.textContent))?.classList.remove("aok-hidden");
+          for (const node of nodes) body.appendChild(document.importNode(node, true));
+          records += nodes.length;
+          pages++;
+          token = next;
+        }
+        paginationComplete = true;
+      } catch (cause) {
+        active(options.signal);
+        if (!(cause instanceof FcrReadError) || cause.code === "CANCELLED" || !options.allowPartial) throw cause;
+        error = cause;
+      }
+      document.querySelectorAll(".pagination-token").forEach((node) => node.remove());
+      active(options.signal);
       return {
         endpoint,
         query: search,
         html: document.body.innerHTML,
         complete: false,
-        warning: token ? "More native section pages remain" : "Native section completeness has not been validated",
+        paginationComplete,
+        pages,
+        records,
+        warning: error?.message || "Native section completeness has not been validated",
+        ...error ? { code: error.code } : {},
         source: "network"
       };
     }
@@ -436,7 +481,7 @@
   }
 
   // master-runtime.mjs
-  var MASTER_VERSION = "0.1.1";
+  var MASTER_VERSION = "0.1.2";
   var MASTER_LABELS = Object.freeze([
     "Product",
     "Inventory",
@@ -469,19 +514,19 @@
       registry.watch();
       return registry;
     }
-    registry = { getRuntime, attached: /* @__PURE__ */ new WeakSet(), restore: null };
+    registry = { getRuntime, attached: /* @__PURE__ */ new WeakSet(), loaders: /* @__PURE__ */ new WeakSet(), restorers: /* @__PURE__ */ new Set(), renderers: /* @__PURE__ */ new Map() };
     page2[registryKey] = registry;
     const identify = (options) => registry.getRuntime()?.nativeRequest(options);
     function attach(jq) {
       if (typeof jq?.ajaxTransport !== "function" || typeof jq.ajaxPrefilter !== "function") return false;
-      if (registry.attached.has(jq)) {
-        registry.restore?.();
-        return true;
-      }
+      if (registry.attached.has(jq)) return true;
       registry.attached.add(jq);
-      jq.ajaxPrefilter((options) => {
+      registry.jq = jq;
+      jq.ajaxPrefilter((options, original, xhr) => {
         const request = identify(options);
-        if (request && !registry.getRuntime().automatic(request.endpoint, request.query)) {
+        if (!request) return;
+        registry.getRuntime().captureRenderer(request, jq, xhr, original);
+        if (!registry.getRuntime().automatic(request.endpoint, request.query)) {
           options.global = false;
           options.timeout = 0;
         }
@@ -500,27 +545,59 @@
           }
         };
       });
-      registry.restore?.();
+      registry.restore();
       return true;
     }
+    function attachLoader(loader) {
+      if (typeof loader?.when !== "function") return false;
+      if (typeof loader.now === "function") loader.now("jQuery").execute(attach);
+      if (!registry.loaders.has(loader)) {
+        registry.loaders.add(loader);
+        loader.when("jQuery").execute("tampermonkey-v4-master-native", attach);
+      }
+      return true;
+    }
+    function watchProperty(key, accept) {
+      if (accept(page2[key])) return;
+      const descriptor = Object.getOwnPropertyDescriptor(page2, key);
+      if (!descriptor || descriptor.configurable && "value" in descriptor) {
+        let value = descriptor?.value;
+        const getter = () => value;
+        const setter = (next) => {
+          value = next;
+          accept(next);
+        };
+        Object.defineProperty(page2, key, { configurable: true, enumerable: descriptor?.enumerable ?? true, get: getter, set: setter });
+        const restore = () => {
+          if (Object.getOwnPropertyDescriptor(page2, key)?.get === getter) {
+            if (!descriptor && value === void 0) delete page2[key];
+            else Object.defineProperty(page2, key, { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: descriptor?.writable ?? true, value });
+          }
+          registry.restorers.delete(restore);
+        };
+        registry.restorers.add(restore);
+      }
+    }
+    registry.restore = () => {
+      for (const restore of [...registry.restorers]) restore();
+      if (registry.domReady) page2.document.removeEventListener("DOMContentLoaded", registry.domReady);
+      registry.domReady = null;
+    };
     registry.watch = () => {
-      if (!attach(page2.jQuery)) {
-        const descriptor = Object.getOwnPropertyDescriptor(page2, "jQuery");
-        if (!descriptor || descriptor.configurable && "value" in descriptor) {
-          let value = descriptor?.value;
-          const getter = () => value;
-          const setter = (next) => {
-            value = next;
-            attach(next);
-          };
-          Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, get: getter, set: setter });
-          registry.restore = () => {
-            if (Object.getOwnPropertyDescriptor(page2, "jQuery")?.get === getter) {
-              Object.defineProperty(page2, "jQuery", { configurable: true, enumerable: descriptor?.enumerable ?? true, writable: descriptor?.writable ?? true, value });
-            }
-            registry.restore = null;
-          };
-        }
+      if (attach(page2.jQuery || registry.jq)) {
+        registry.restore();
+        return;
+      }
+      watchProperty("jQuery", attach);
+      attachLoader(page2.AmazonUIPageJS || page2.P);
+      if (registry.jq) {
+        registry.restore();
+        return;
+      }
+      if (!registry.domReady && !registry.jq) {
+        registry.domReady = () => attachLoader(page2.AmazonUIPageJS || page2.P);
+        if (page2.document.readyState === "loading") page2.document.addEventListener("DOMContentLoaded", registry.domReady, { once: true });
+        else registry.domReady();
       }
     };
     registry.watch();
@@ -573,12 +650,25 @@
         onReset();
       }
       generation = { query, controller: new window2.AbortController(), sections: /* @__PURE__ */ new Map(), automatic: new Map(FCR_SECTIONS.map((endpoint) => [endpoint, preferred(endpoint)])) };
+      const templates = page2[registryKey]?.renderers;
+      for (const [endpoint, record] of templates || []) {
+        if (record.request.query !== query || !record.node.isConnected || placeholder(endpoint) !== record.node) {
+          templates.delete(endpoint);
+          continue;
+        }
+        const section = state(endpoint, generation);
+        section.options = record.request.options;
+        section.renderer = bindRenderer(record, section, generation);
+        generation.recovered = true;
+      }
       return generation;
     }
     function state(endpoint, gen = generation) {
       if (!gen.sections.has(endpoint)) gen.sections.set(endpoint, { endpoint, visible: false, status: "idle", result: null, error: null, promise: null, waiters: /* @__PURE__ */ new Set(), options: {} });
       return gen.sections.get(endpoint);
     }
+    const placeholder = (endpoint) => document.querySelector('.section-placeholder[data-section-type="' + endpoint + '"]') || document.querySelector('[data-section-type="' + endpoint + '"]');
+    const nativeStatus = (endpoint) => document.querySelector("#sections-list > #" + endpoint + "-status");
     function nativeRequest(options) {
       if (!life || life.signal.aborted || !route() || String(options.type || options.method || "GET").toUpperCase() !== "POST" || options.async === false) return null;
       let url;
@@ -597,6 +687,48 @@
       const optionsForRead = fields.has("startSearchDateString") || fields.has("endSearchDateString") ? { startDate: fields.get("startSearchDateString"), endDate: fields.get("endSearchDateString") } : {};
       return { endpoint: match[1], query, options: optionsForRead };
     }
+    function captureRenderer(request, jq, xhr, original) {
+      const node = placeholder(request.endpoint);
+      const keys = Object.keys(original || {}).sort().join(",");
+      if (keys !== "data,dataType,type,url" || original.type !== "POST" || original.dataType !== "html" || !node?.matches(".section-placeholder") || !nativeStatus(request.endpoint) || typeof xhr.done !== "function") return;
+      const gen = begin(request.query), section = state(request.endpoint, gen), done = xhr.done;
+      const signature = JSON.stringify(request.options);
+      const restore = () => {
+        if (xhr.done === capture) xhr.done = done;
+      };
+      function capture(...callbacks) {
+        if (!callbacks.some((callback2) => typeof callback2 === "function" || Array.isArray(callback2))) return done.apply(this, callbacks);
+        restore();
+        if (callbacks.length !== 1 || typeof callbacks[0] !== "function") return done.apply(this, callbacks);
+        const callback = callbacks[0];
+        const record = { request, jq, node, callback, context: original, signature };
+        page2[registryKey]?.renderers.set(request.endpoint, record);
+        const renderer = bindRenderer(record, section, gen);
+        section.renderer = renderer;
+        return done.call(this, function(...args) {
+          if (renderer.valid()) callback.apply(this, args);
+        });
+      }
+      xhr.done = capture;
+      window2.queueMicrotask(restore);
+    }
+    function bindRenderer({ request, jq, node, callback, context, signature }, section, gen) {
+      const renderer = {
+        valid: () => active3(gen) && section.renderer === renderer && JSON.stringify(section.options) === signature && placeholder(request.endpoint) === node && node.isConnected,
+        render(html) {
+          if (!renderer.valid()) throw new Error("Native section changed — repeat the native search");
+          for (const table of node.querySelectorAll("table[id]")) {
+            if (jq.fn.dataTable?.fnIsDataTable?.(table)) jq(table).dataTable().fnDestroy();
+          }
+          const status = nativeStatus(request.endpoint);
+          for (const link of [...status?.querySelectorAll("a") || []].reverse()) {
+            if (link.getAttribute("href") === "#" + request.endpoint + "-nav") link.replaceWith(...link.childNodes);
+          }
+          callback.call(context, html);
+        }
+      };
+      return renderer;
+    }
     function subscribe(request, complete) {
       const gen = begin(request.query), section = state(request.endpoint, gen);
       if (JSON.stringify(section.options) !== JSON.stringify(request.options)) {
@@ -604,6 +736,9 @@
         section.result = null;
         section.status = "idle";
         section.promise = null;
+        section.renderer = null;
+        section.renderedResult = null;
+        page2[registryKey]?.renderers.delete(request.endpoint);
         for (const waiter2 of [...section.waiters]) waiter2.finish(0, "abort");
       }
       section.options = request.options;
@@ -612,29 +747,37 @@
         try {
           complete(status, statusText, responses, "Content-Type: text/html; charset=UTF-8\r\n");
         } catch (error) {
-          if (active3(gen)) notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(request.endpoint)] + " rendering failed: " + clean(error.message));
+          if (active3(gen)) {
+            section.status = "error";
+            section.error = error;
+            notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(request.endpoint)] + " rendering failed: " + clean(error.message));
+          }
         }
       } };
       section.waiters.add(waiter);
       if (automatic(request.endpoint) || section.visible) void load(request.endpoint, { gen });
       schedule();
       return () => {
-        section.waiters.delete(waiter);
+        if (section.waiters.delete(waiter) && !section.waiters.size && active3(gen)) {
+          section.nativeAborted = true;
+          section.status = "error";
+          section.error = new Error("Native read cancelled — retry this section");
+          schedule();
+        }
       };
     }
     async function load(endpoint, { gen = generation, force = false, render = true } = {}) {
       if (!gen || !active3(gen)) return null;
       const section = state(endpoint, gen);
-      if (render) section.visible = true;
+      if (render) {
+        section.visible = true;
+        section.nativeAborted = false;
+      }
       if (section.promise) return section.promise;
       if (!force && section.result) {
-        if (section.visible) {
-          if (section.waiters.size) {
-            section.status = section.result.complete ? "ready" : "partial";
-            section.error = null;
-          }
-          for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: section.result.html });
-          onRender({ endpoint, result: section.result, generation: gen, signal: gen.controller.signal, reader, runtime: api });
+        if (section.visible && !section.nativeAborted) {
+          deliver(section, section.result);
+          if (section.status !== "error") onRender({ endpoint, result: section.result, generation: gen, signal: gen.controller.signal, reader, runtime: api });
           schedule();
         }
         return section.result;
@@ -652,19 +795,19 @@
           if (!active3(gen) || controller.signal.aborted) return null;
           section.result = result;
           section.status = result.complete ? "ready" : "partial";
-          if (section.visible) {
-            if (section.waiters.size) for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: result.html });
-            else if (!paint(endpoint)) {
-              section.status = "error";
-              section.error = new Error("Native rendering callback unavailable — repeat the native search");
-            }
+          if (section.visible && !section.nativeAborted) {
+            deliver(section, result);
             if (section.status !== "error") onRender({ endpoint, result, generation: gen, signal: controller.signal, reader, runtime: api });
+          } else if (section.nativeAborted) {
+            section.status = "error";
+            section.error = new Error("Native read cancelled — retry this section");
           }
           return result;
         } catch (error) {
           if (!active3(gen) || controller.signal.aborted || error.code === "CANCELLED") return null;
           section.error = error;
           section.status = "error";
+          for (const waiter of [...section.waiters]) waiter.finish(error.status || 502, error.code || "error");
           return null;
         } finally {
           gen.controller.signal.removeEventListener("abort", cancel);
@@ -677,9 +820,23 @@
       section.promise = work;
       return work;
     }
-    function paint(endpoint) {
-      notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + " rendering callback unavailable — repeat the native search");
-      return false;
+    function deliver(section, result) {
+      section.status = result.complete ? "ready" : "partial";
+      section.error = null;
+      if (section.waiters.size) {
+        for (const waiter of [...section.waiters]) waiter.finish(200, "success", { text: result.html });
+      } else if (section.renderedResult !== result) paint(section.endpoint, section);
+      if (section.status !== "error") section.renderedResult = result;
+    }
+    function paint(endpoint, section) {
+      try {
+        if (!section.renderer) throw new Error("Native rendering callback unavailable — repeat the native search");
+        section.renderer.render(section.result.html);
+      } catch (error) {
+        section.status = "error";
+        section.error = error;
+        notify("Native " + MASTER_LABELS[FCR_SECTIONS.indexOf(endpoint)] + ": " + clean(error.message));
+      }
     }
     function schedule() {
       if (!life || life.signal.aborted || !ready || scheduled) return;
@@ -690,10 +847,12 @@
       });
     }
     function findNavigation() {
+      const native = document.querySelector("#sections-list");
+      if (native) return native;
       const heading = [...document.querySelectorAll("h1,h2,h3,h4,h5,h6,strong,span")].find((node) => clean(node.textContent).toLowerCase() === "sections");
       for (let host = heading?.parentElement; host && host !== document.body; host = host.parentElement) {
         const texts = [...host.querySelectorAll("a,button,li,span")].filter((node) => !node.closest(UI)).map((node) => clean(node.textContent));
-        if (MASTER_LABELS.filter((label) => texts.includes(label)).length >= 8) return host;
+        if (MASTER_LABELS.filter((label) => texts.some((text2) => text2.toLowerCase() === label.toLowerCase())).length >= 8) return host;
       }
       return null;
     }
@@ -714,8 +873,9 @@
         const endpoint = FCR_SECTIONS[index];
         let toggle = nav.querySelector('[data-tm-v4-section="' + endpoint + '"]');
         if (!toggle) {
-          const labels = [...nav.querySelectorAll("a,li,span,button")].filter((node) => !node.closest(UI) && clean(node.textContent) === label);
-          const anchor = labels.find((node) => ![...node.children].some((child) => clean(child.textContent) === label));
+          const labels = [...nav.querySelectorAll("a,li,span,button")].filter((node) => !node.closest(UI) && clean(node.textContent).toLowerCase() === label.toLowerCase());
+          const row = nativeStatus(endpoint);
+          const anchor = row || labels.find((node) => ![...node.children].some((child) => clean(child.textContent).toLowerCase() === label.toLowerCase()));
           if (!anchor) {
             problem = "Native section label missing: " + label;
             continue;
@@ -735,9 +895,10 @@
             refresh();
           });
           toggle.setAttribute("data-tm-v4-section", endpoint);
-          anchor.insertAdjacentElement("afterend", toggle);
-          anchor.addEventListener("click", () => {
-            if (generation) void load(endpoint);
+          if (row) row.append(toggle);
+          else anchor.insertAdjacentElement("afterend", toggle);
+          anchor.addEventListener("click", (event) => {
+            if (!event.target.closest(UI) && generation) void load(endpoint);
           }, { signal: life.signal });
         }
         const failed = saveErrors.has(endpoint);
@@ -745,11 +906,16 @@
         toggle.setAttribute("aria-pressed", String(preferred(endpoint)));
         toggle.title = label + ": " + (failed ? "SAVE FAILED — selection unchanged" : preferred(endpoint) ? "AUTO — loads every search" : "LAZY — click section to load");
         toggle.setAttribute("aria-label", toggle.title);
-        const container = document.querySelector('[data-section-type="' + endpoint + '"]');
+        const container = placeholder(endpoint);
         const section = generation?.sections.get(endpoint);
         if (!container) continue;
         if (!hidden.has(container)) hidden.set(container, container.hidden);
         container.hidden = !automatic(endpoint) && !section?.visible;
+        const native = nativeStatus(endpoint);
+        if (native && section) {
+          native.classList.toggle("loading", section.status === "loading" && section.visible);
+          native.classList.toggle("failure", section.status === "error");
+        }
         let note = container.querySelector(":scope > [data-tm-v4-read-status]");
         if (!note && section) {
           note = mark(document.createElement("div"));
@@ -770,7 +936,7 @@
       onRefresh(api);
     }
     function observeNative() {
-      const roots = new Set([findNavigation(), ...document.querySelectorAll("[data-section-type]")].filter(Boolean));
+      const roots = new Set([findNavigation(), ...FCR_SECTIONS.map(placeholder)].filter(Boolean));
       const replacementRoots = new Set([...roots].map((node) => node.parentElement).filter(Boolean));
       const meaningful = (records) => records.some((record) => !record.target.closest?.(UI) && [...record.addedNodes, ...record.removedNodes].some((node) => !node.matches?.(UI)));
       for (const root of roots) {
@@ -826,6 +992,9 @@
         ready = true;
         refresh();
         observeNative();
+        if (generation?.recovered) {
+          for (const endpoint of generation.sections.keys()) if (automatic(endpoint)) void load(endpoint);
+        }
       };
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true, signal: life.signal });
       else mount();
@@ -851,6 +1020,7 @@
       dispose,
       automatic,
       nativeRequest,
+      captureRenderer,
       subscribe,
       load,
       mark,
@@ -1942,7 +2112,7 @@
   }
 
   // master-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var storage = {
     get: (key, fallback) => GM_getValue(key, fallback),
@@ -2019,13 +2189,16 @@
     window.addEventListener("pageshow", (event) => {
       if (event.persisted) start();
     });
-    window.addEventListener("hashchange", () => {
+    const context = () => location.origin + location.pathname + location.search + (location.hash.match(/^#(?:fcr-tote-checker|iss-console)/)?.[0] || "");
+    let currentContext = context();
+    const navigate = () => {
+      const next = context();
+      if (next === currentContext) return;
+      currentContext = next;
       stop();
       start();
-    });
-    window.addEventListener("popstate", () => {
-      stop();
-      start();
-    });
+    };
+    window.addEventListener("hashchange", navigate);
+    window.addEventListener("popstate", navigate);
   }
 })();

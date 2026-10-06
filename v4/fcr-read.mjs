@@ -1,5 +1,5 @@
 // Independent native FCR reads. Consumers own UI, authentication and cancellation.
-export const FCR_READ_VERSION = '0.1.0';
+export const FCR_READ_VERSION = '0.1.1';
 export class FcrReadError extends Error {
   constructor(code, message, { status, cause, partial } = {}) {
     super(message, cause ? { cause } : undefined);
@@ -14,7 +14,7 @@ export const FCR_SECTIONS = Object.freeze([
   'product', 'inventory', 'inventory-history', 'container-history', 'purchase-order-item',
   'purchase-order', 'receive-history', 'shipment', 'container-hierarchy', 'employee',
   'carton-general-info', 'carton-contents', 'sscc-info', 'carton-ambiguities',
-  'vision-tunnel', 'problems', 'problem', 'event', 'authenticity-item'
+  'vision-tunnel', 'problem', 'problems', 'event', 'authenticity-item'
 ]);
 
 const text = value => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -47,8 +47,12 @@ function quantity(value) {
 
 function pagination(document) {
   const markers = [...document.querySelectorAll('.pagination-token')].map(node => node.textContent.trim());
-  const tokens = markers.filter(value => value && !/^(?:false|null|done)$/i.test(value));
+  // The captured native loader explicitly treats literal true as terminal.
+  // A prefix such as true-truncated is not a validated terminal marker.
+  const terminal = value => /^(?:true|false|null|done)$/i.test(value);
+  const tokens = markers.filter(value => value && !terminal(value));
   if (!tokens.length) return '';
+  if (markers.some(terminal)) throw failure('PAGINATION', 'Contradictory pagination markers');
   if (new Set(tokens).size !== 1 || tokens[0].length > 16384) throw failure('PAGINATION', 'Ambiguous pagination token');
   try {
     const parsed = JSON.parse(tokens[0]);
@@ -111,7 +115,7 @@ export function createFcrReader({
       !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000 || !Array.isArray(retryDelays) || retryDelays.length > 3 ||
       retryDelays.some(ms => !Number.isFinite(ms) || ms < 0 || ms > 5000)) throw failure('INPUT', 'FCR reader configuration is invalid');
   const base = `${site.origin}/${encodeURIComponent(warehouse)}/results/`;
-  const endpoints = new Set([...FCR_SECTIONS, 'inventory-more', 'inventory-history-more']);
+  const endpoints = new Set([...FCR_SECTIONS, ...FCR_SECTIONS.map(endpoint => endpoint + '-more')]);
 
   function evidence(data) {
     try { onEvidence({ type: 'fcr.read', script: 'FCR READ', version: FCR_READ_VERSION, intent: 'read', data }); }
@@ -337,9 +341,46 @@ export function createFcrReader({
     active(options.signal);
     const recognized = document.querySelector('table, [data-section-type="' + endpoint + '"]');
     if (!recognized) throw failure('SCHEMA', 'Native section markup was not returned');
-    const token = pagination(document);
-    return { endpoint, query: search, html: document.body.innerHTML, complete: false,
-      warning: token ? 'More native section pages remain' : 'Native section completeness has not been validated', source: 'network' };
+    let pages = 1, records = 0, paginationComplete = false, error;
+    const table = document.getElementById('table-' + endpoint), body = table?.tBodies[0], width = table?.tHead?.rows[0]?.cells.length;
+    const validate = candidate => [...(candidate?.tBodies[0]?.rows || [])].filter(node => !node.querySelector('td.dataTables_empty')).map(node => {
+      if (node.cells.length !== width) throw failure('SCHEMA', endpoint + ': continuation row has unexpected columns');
+      return node;
+    });
+    if (body && width) records = validate(table).length;
+    if (records > maxRows) throw failure('LIMIT', endpoint + ': native row limit reached');
+    try {
+      let token = pagination(document);
+      if (token && (!body || !width)) throw failure('SCHEMA', endpoint + ': paginated native table was not returned');
+      const seen = new Set();
+      if (records > maxRows || (token && !records)) throw failure('PAGINATION', endpoint + ': nonterminal page is empty or exceeds the row limit');
+      while (token) {
+        if (seen.has(token) || pages >= maxPages) throw failure('PAGINATION', endpoint + ': continuation cycle/limit');
+        seen.add(token);
+        const page = await request(endpoint + '-more', { token }, options.signal);
+        active(options.signal);
+        const nextTable = page.getElementById('table-' + endpoint) || page.querySelector('table:not([id])');
+        if (!nextTable?.tBodies[0]) throw failure('SCHEMA', endpoint + ': continuation table was not returned');
+        const headers = [...(nextTable.tHead?.rows[0]?.cells || [])];
+        if (headers.length && (headers.length !== width || headers.some((header, index) => text(header.textContent) !== text(table.tHead.rows[0].cells[index].textContent)))) {
+          throw failure('SCHEMA', endpoint + ': continuation columns changed');
+        }
+        const nodes = validate(nextTable), next = pagination(page);
+        if ((!nodes.length && next) || records + nodes.length > maxRows) throw failure('PAGINATION', endpoint + ': continuation is empty or exceeds the row limit');
+        for (const marker of page.querySelectorAll('.show-message')) document.getElementById(text(marker.textContent))?.classList.remove('aok-hidden');
+        for (const node of nodes) body.appendChild(document.importNode(node, true));
+        records += nodes.length; pages++; token = next;
+      }
+      paginationComplete = true;
+    } catch (cause) {
+      active(options.signal);
+      if (!(cause instanceof FcrReadError) || cause.code === 'CANCELLED' || !options.allowPartial) throw cause;
+      error = cause;
+    }
+    document.querySelectorAll('.pagination-token').forEach(node => node.remove());
+    active(options.signal);
+    return { endpoint, query: search, html: document.body.innerHTML, complete: false, paginationComplete, pages, records,
+      warning: error?.message || 'Native section completeness has not been validated', ...(error ? { code: error.code } : {}), source: 'network' };
   }
 
   return Object.freeze({ product, inventory, history, section });

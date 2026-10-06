@@ -131,8 +131,17 @@ test('invalid quantity or missing item identity fails; comma quantities are vali
   assert.equal((await fixture(t, [inventory({ rows: [big], total: 1234 })]).reader.inventory('tsX111')).totalQuantity, 1234);
 });
 
+test('captured native true terminal marker ends pagination but conflicting markers stay incomplete', async t => {
+  const app = fixture(t, [inventory({ next: 'true' })]);
+  const result = await app.reader.inventory('tsX111');
+  assert.equal(result.complete, true); assert.equal(result.totalQuantity, 2); assert.equal(app.calls.length, 1);
+  assert(!result.html.includes('pagination-token'));
+  const conflicting = fixture(t, [inventory({ next: 'true' }) + token('{"page":2}')]);
+  await rejectsCode(conflicting.reader.inventory('tsX111'), 'PAGINATION');
+});
+
 test('unknown/malformed tokens, continuation login/missing table and repeated token stay incomplete', async t => {
-  for (const next of ['opaque-unknown', '{not-json', 'true']) {
+  for (const next of ['opaque-unknown', '{not-json', 'true-truncated']) {
     const app = fixture(t, [inventory({ next })]);
     await rejectsCode(app.reader.inventory('tsX111'), 'PAGINATION');
   }
@@ -239,10 +248,36 @@ test('invalid dates and reversed ranges are rejected before requests; malformed 
   assert.equal(result.complete, false); assert.equal(result.code, 'SCHEMA'); assert.equal(result.records, 1);
 });
 
-test('generic section reads preserve markup and mark continuation partial; mutation/arbitrary endpoints are absent', async t => {
+test('generic section reads preserve honest partial markup without releasing native continuation; arbitrary endpoints are absent', async t => {
   const app = fixture(t, ['<div data-section-type="container-hierarchy"><table><tbody></tbody></table></div>' + token('{"page":2}')]);
-  const result = await app.reader.section('container-hierarchy', 'tsX111'); assert.equal(result.complete, false); assert.match(result.html, /container-hierarchy/);
+  const result = await app.reader.section('container-hierarchy', 'tsX111', { allowPartial: true }); assert.equal(result.complete, false); assert.match(result.html, /container-hierarchy/);
+  assert(!result.html.includes('pagination-token')); assert.equal(result.paginationComplete, false);
   await rejectsCode(app.reader.section('movecontainer', 'tsX111'), 'INPUT');
   await rejectsCode(app.reader.section('../product', 'tsX111'), 'INPUT');
   assert.equal(app.calls.length, 1);
+});
+
+test('captured generic section continuation is bounded, validates rows and owns all native follow-up reads', async t => {
+  const first = '<div id="notice" class="aok-hidden">Native notice</div><table id="table-container-hierarchy"><thead><tr><th>Container</th></tr></thead><tbody><tr><td>tsX111</td></tr></tbody></table>' + token('{"page":2}');
+  const last = '<div class="show-message">notice</div><table><tbody><tr><td>tsX222</td></tr></tbody></table>' + token('true');
+  const app = fixture(t, [first, last]);
+  const result = await app.reader.section('container-hierarchy', 'tsXparent');
+  assert.equal(result.complete, false); assert.equal(result.paginationComplete, true); assert.equal(result.records, 2);
+  assert.equal(app.calls[1].url, origin + '/BWU2/results/container-hierarchy-more');
+  assert.equal(new URLSearchParams(app.calls[1].body).get('token'), '{"page":2}');
+  assert.match(result.html, /tsX222/); assert(!result.html.includes('pagination-token')); assert(!result.html.includes('aok-hidden'));
+  const partial = fixture(t, [first, '<table><tbody><tr><td>Wrong</td><td>Width</td></tr></tbody></table>']);
+  const bad = await partial.reader.section('container-hierarchy', 'tsXparent', { allowPartial: true });
+  assert.equal(bad.paginationComplete, false); assert.equal(bad.code, 'SCHEMA'); assert(!bad.html.includes('Wrong'));
+});
+
+test('generic native section continuation cancellation and cycles cannot escape its owner', async t => {
+  const first = '<table id="table-shipment"><thead><tr><th>Shipment</th></tr></thead><tbody><tr><td>One</td></tr></tbody></table>' + token('{"page":2}');
+  const loop = '<table><tbody><tr><td>Two</td></tr></tbody></table>' + token('{"page":2}');
+  const app = fixture(t, [first, loop]);
+  await rejectsCode(app.reader.section('shipment', 'X012345678'), 'PAGINATION'); assert.equal(app.calls.length, 2);
+  const controller = new AbortController();
+  const cancelled = fixture(t, [first, () => { controller.abort(); return new Response(loop); }]);
+  await rejectsCode(cancelled.reader.section('shipment', 'X012345678', { signal: controller.signal, allowPartial: true }), 'CANCELLED');
+  assert.equal(cancelled.calls.length, 2);
 });

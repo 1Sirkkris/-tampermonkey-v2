@@ -1,36 +1,37 @@
 # FCR Master milestone verification
 
-6 October 2026 (Australia/Sydney). Development installer 0.1.1; **PARTIAL / BLOCKED, not a replacement candidate**.
+6 October 2026 (Australia/Sydney). Development installer 0.1.2; **PARTIAL — captured native retry gap repaired, live acceptance pending**.
 
-- Governing brief, baseline, active Master/read/enrichment/auth contracts and both recovery notes read. Latest remote was `fe597914f8f9d8404ea0da8ab162e9d36af929ca`, ahead of the screenshot's native-read checkpoint `977fe33`. Existing 79 fixtures preserved.
-- V2 main remains `e4399d89ff11551ec1afb132d67c448da1e43568`; frozen V3 remains `77ff9f7818ea8d2d53422654a7e6b7ca51b6db13`. New source/installers/tests stay under `v4/`.
-- `npm test`: **120 passed**, including 17 Master, 11 feature, 10 action and 3 diagnostic cases. The actual pinned jQuery implementation and generated installer are exercised alone; generated-installer composition includes canonical native/enrichment/auth source and the native Measurement branch.
-- `npm run check`: both installers' metadata/syntax/independence, source syntax and byte-exact source/installer consistency pass. `git diff --check` passes.
+- `npm test`: **133 passed**, including 27 native reads, 17 Master, 10 native-integration, 11 feature, 10 action, 3 capture, 16 enrichment, 13 auth and 26 OBS cases.
+- `npm run check`: three installers' metadata/syntax/independence, source syntax and byte-exact source/installer consistency pass. `git diff --check` passes. Source, tests and installers stay under `v4/`; inherited root code is unchanged.
+- V2 main remains `e4399d89ff11551ec1afb132d67c448da1e43568`; frozen V3 remains `77ff9f7818ea8d2d53422654a7e6b7ca51b6db13`.
 
-## Native section milestone
+## Captured native evidence
 
-All 19 inline A/L choices and defaults; exact preference readback/failure; lazy unsent request/global-loading behavior; native success/done/complete callbacks and headers; same-query deduplication; full inventory continuation and honest partial retry; native auth/schema failure and deliberate retry; stale query cancellation; native table/navigation replacement; disposal/restart; excluded ISS route; generated-installer duplicate start and BFCache restoration.
+The user's `FCR_native_capture_2026-10-06T03-15-08-111Z.json` contains the native inline FCR bundle and results markup. Capture SHA-256: `465b72366f0129727daae5147aaebf32fc5ac3b85654032e77cd7ec6b051a808`. Native bundle SHA-256: `901a3ab47a763f9c66a722b578d20bafcb919c2097dc2051640867806023eaf7`. The raw capture and internal application source are not published in this repository.
 
-The native jQuery transport handles only exact same-origin section POSTs with supported native form fields. It supplies canonical validated read HTML through the native application's callbacks rather than fabricating XHR state. Lazy requests have no network or deadline until clicked, and are excluded from native global loading. Page/search disposal aborts their owned jqXHR callbacks. Unsupported requests remain native.
+The bundle establishes private AUI jQuery 1.6.4, DataTables 1.9.4, the bare section POST followed by synchronous native `.done` registration, the rendering function's independent HTML argument, native advanced filters/totals/scrolling, endpoint-specific status/nav rows and `{section}-more` pagination. AUI defines its globals rather than assigning them: the old window-jQuery watcher alone did not attach on this bootstrap. The document-ready dependency hook now attaches before native results execution.
 
-API basis: official [jQuery ajaxTransport](https://api.jquery.com/jQuery.ajaxTransport/) and [ajaxPrefilter](https://api.jquery.com/jQuery.ajaxPrefilter/) documentation; positional completion is supported by the tested native library. This choice is an inference from native HTML/XHR evidence and V2 native section behavior. It is **not proof of the deployed FCR application's library/bootstrap/markup**. Those must be checked in a read-only live acceptance run.
+`node verify-native-capture.mjs /path/to/capture.json` executes the relevant captured native bootstrap, jQuery, rendering, DataTables and advancedFilter modules in an isolated JSDOM page with synthetic data and blocked native XHR. This separately passed initial partial inventory, three completed-render retries, a functional native input filter after retry, native scrolling/page length, one table instance/nav link/control, settled global Ajax and fresh-read restart. Analytics, original captured result data and operational actions are not executed. This is captured-code integration evidence, **not live Tampermonkey proof**. The script fails explicitly if the expected capture layout changes.
 
-## Feature and action milestone
+The committed tests additionally exercise official test-only jQuery 1.6.4 with an independently authored native loader model. No test library or captured application implementation is bundled in Master.
 
-Exact FNSKU Size identity and container priorities/three-attempt bound; private fresh inventory reuse without opening lazy UI; grouped exact-ASIN hazmat/four-worker cancellation/RIVER; raw/history/unknown MADCAT distinctions; positive Sydney cutoff across both DST transitions and five-minute negative cache; partial/stale product barriers; PO split headers/age/numeric inputs; native label click/keyboard and four-digit quantities; exact native row/current-product/fresh-lookup title association; explicit LPN confirmation; code-only fallback; no automatic print repeat; disposal/timeout UNKNOWN transcript; selected native rows/hyperlinks/partial Title/Firefox multi-range copy; ISS Weight-label route and cleanup. Auto/lazy choices apply to future searches; native Submit/Clear cancels earlier query owners.
+## Section and lifecycle verification
 
-Printmon's known query fields and numeric sequence are preserved. A response is reported as response received with unverified acknowledgement; physical output/job acceptance is not confirmed. Tests submit no real printer request.
+All 19 native A/L choices/defaults/readback failure; case and singular/plural endpoint labels from deployed markup; lazy unsent requests with no global/native spinner; native success/done/complete and headers; completed partial retry through the identified renderer with no repeated unrelated callbacks; failed read settles once then deliberately recovers; native external abort cannot paint late; stale query/dates and replaced-placeholder barriers; old native DataTables disposal; exactly one nav link/control; normal section hashes keep the current owner; disposal/BFCache restarts use fresh data. The generated installer composes exact badges with private jQuery 1.6.4 and restores them after BFCache.
 
-## Exact blocker and required evidence
+Canonical read 0.1.1 accepts the captured literal `true` terminal marker, rejects conflicting/truncated markers and owns bounded generic section continuation. It validates table/row shape, follows exact native token POSTs, preserves show-message signals, and strips pagination markers before rendering so the native function cannot launch unowned later pages. Generic semantic completeness stays explicitly unknown; invalid later data remains partial. Query/disposal cancels those continuations.
 
-The deployed FCR library/bootstrap and native render callback are unseen. A specific offline reproduction now confirms that a retry after the original native jqXHR has completed/been externally aborted cannot reuse its callback. **Retry Inventory parity is therefore incomplete.** The previous generic DataTables fallback was removed before this checkpoint; original native content is retained with an explicit integration error. No alternate table configuration is invented.
+API basis: official [jQuery ajaxTransport](https://api.jquery.com/jQuery.ajaxTransport/) and [ajaxPrefilter](https://api.jquery.com/jQuery.ajaxPrefilter/) documentation, verified against both the deployed-version fixture and the actual captured library. The captured native rendering function is replayed only for its exact document placeholder/query/options. A completed jqXHR is never re-resolved and native global completion is never fabricated.
 
-The next required evidence is native FCR HTML and loaded page JavaScript. The manual [capture helper](diagnostics/FCR_Native_Capture.user.js) downloads those into JSON, with missing/CORS-blocked assets explicit. Its tests prove idle installation, GET-only asset reads, common credential redaction, no script evaluation, no duplicate capture and pagehide cancellation. Run it on a normal FCR result page via the Tampermonkey menu and provide the downloaded JSON.
+## Feature and action verification
 
-From that evidence, establish the native section render/retry/global-loading lifecycle and complete this contract. Do not progress to Tote Audit or label this installer ready while the reproduced native retry gap remains.
+Exact FNSKU Size identity and container priorities/three-attempt bound; private fresh inventory reuse; grouped exact-ASIN hazmat/four-worker cancellation/RIVER; raw/history/auth/unknown MADCAT provenance and Sydney cutoff/DST/five-minute caches; partial/stale product barriers; PO split headers/age/numeric inputs; label click/keyboard/four-digit quantities; exact row/current-product/fresh-lookup title association; explicit LPN confirmation; code-only fallback; no automatic print repeat; timeout/disposal UNKNOWN evidence; selected rows/links/partial Title/Firefox multi-range copy; ISS Weight-label entry and cleanup.
 
-## Live limits
+Printmon fields and numeric sequence are preserved. Response received is not confirmed job acceptance or physical output; its acknowledgement contract remains undocumented. No real printer request was submitted.
 
-Real native FCR/Measurement browser-world access, deployed markup/table settings, long idle/repeated use and local printer acceptance remain unverified. Pure/source/installer fixtures do not establish them.
+## Remaining live acceptance
 
-No Amazon mutation, live auth acquisition or local printer operation was performed. No fixture is live evidence.
+The reproduced Retry Inventory source blocker is resolved. The next gate is the standalone V4 installer in Tampermonkey with V2/V3 disabled: read-only native searches, A/L click/navigation, table/filter/date controls, exact Size/MADCAT/hazmat, replacement and BFCache/repeated use, and OBS evidence. Actual browser-world hooks, cross-origin Measurement auth/framing, native date-filter state after repeated rendering, long idle and local printer acceptance remain live requirements. Do not call Master a proven V2 replacement yet or treat the uploaded V2 page as a live V4 run.
+
+No live Amazon service request, inventory mutation, auth acquisition or printer operation succeeded during this verification. All captured-code responses were synthetic and native XHR was blocked in the successful harness run.
