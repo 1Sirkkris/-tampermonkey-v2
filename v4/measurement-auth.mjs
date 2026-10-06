@@ -1,7 +1,7 @@
 import { FcrReadError } from './fcr-read.mjs';
 import { MEASUREMENT_ORIGIN } from './fcr-enrichment.mjs';
 
-export const MEASUREMENT_AUTH_VERSION = '0.1.0';
+export const MEASUREMENT_AUTH_VERSION = '0.1.1';
 export const MEASUREMENT_AUTH_KEY = 'tm-v4.measurement.auth';
 const SITE = 'https://jp.item-measurement.aft.a2z.com';
 const GUARD = Symbol.for('tampermonkey.v4.measurement.capture');
@@ -30,7 +30,7 @@ function authHeader(headers) {
 function nativeMeasurementUrl(value, page) {
   try {
     const url = new URL(value, page.location.href);
-    return url.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\//.test(url.pathname);
+    return url.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\/[A-Z0-9]{10}\/(?:FNSKU|ASIN)$/.test(url.pathname);
   } catch { return false; }
 }
 
@@ -54,7 +54,8 @@ export function installMeasurementCapture({ page, storage, now = Date.now }) {
       const input = args[0], url = typeof input === 'string' || input instanceof page.URL ? String(input) : input?.url;
       if (nativeMeasurementUrl(url, page)) raw = args[1]?.headers !== undefined ? authHeader(args[1].headers) : authHeader(input?.headers);
     });
-    return result.then(response => { observe(() => { if (response.status >= 200 && response.status < 300) save(raw); }); return response; });
+    observe(() => save(raw));
+    return result;
   };
   const wrappedOpen = function (...args) {
     const result = Reflect.apply(originalOpen, this, args);
@@ -68,10 +69,9 @@ export function installMeasurementCapture({ page, storage, now = Date.now }) {
   };
   const wrappedSend = function (...args) {
     const detail = details.get(this);
-    const done = () => observe(() => { if (this.status >= 200 && this.status < 300) save(detail.token); });
-    if (detail?.wanted) this.addEventListener('loadend', done, { once: true, signal: controller.signal });
-    try { return Reflect.apply(originalSend, this, args); }
-    catch (error) { this.removeEventListener('loadend', done); throw error; }
+    const result = Reflect.apply(originalSend, this, args);
+    if (detail?.wanted) observe(() => save(detail.token));
+    return result;
   };
   function dispose() {
     if (controller.signal.aborted) return;
@@ -90,9 +90,13 @@ export function installMeasurementCapture({ page, storage, now = Date.now }) {
   return dispose;
 }
 
-export function createMeasurementAuth({ window, storage, now = Date.now, timeoutMs = 10000 }) {
+export function createMeasurementAuth({ window, storage, now = Date.now, timeoutMs = 10000, onEvidence = () => {} }) {
   if (!window?.document || !storage || !['get', 'listen', 'remove'].every(key => typeof storage[key] === 'function') ||
       !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw failure('INPUT', 'Measurement auth configuration is invalid');
+  function evidence(data) {
+    try { onEvidence({ type: 'fcr.auth', script: 'MEASUREMENT AUTH', version: MEASUREMENT_AUTH_VERSION, intent: 'read', data: { endpoint: 'measurement-auth', ...data } }); }
+    catch { /* OBS is optional; never include credential or item values. */ }
+  }
   function read() {
     try {
       const raw = storage.get(MEASUREMENT_AUTH_KEY, 'null');
@@ -111,7 +115,7 @@ export function createMeasurementAuth({ window, storage, now = Date.now, timeout
     const url = loginUrl(identifier);
     if (signal?.aborted) throw failure('CANCELLED', 'Measurement acquisition cancelled', signal.reason);
     const cached = read();
-    if (!force && cached && cached.token !== previousToken) return cached;
+    if (!force && cached && cached.token !== previousToken) { evidence({ outcome: 'cached' }); return cached; }
     let baseline;
     try { baseline = force ? storage.get(MEASUREMENT_AUTH_KEY, 'null') : null; }
     catch (cause) { throw failure('STORAGE', 'Measurement auth storage cannot be read', cause); }
@@ -126,6 +130,7 @@ export function createMeasurementAuth({ window, storage, now = Date.now, timeout
       const finish = (error, value = null) => {
         if (settled) return;
         settled = true; cleanup();
+        evidence({ outcome: error ? 'failed' : value ? 'acquired' : 'unavailable', code: error?.code, stage: 'native-frame', elapsedMs: Math.max(0, now() - started) });
         if (error) reject(error); else resolve(value);
       };
       const cancelled = () => finish(failure('CANCELLED', 'Measurement acquisition cancelled', signal.reason));
@@ -137,6 +142,7 @@ export function createMeasurementAuth({ window, storage, now = Date.now, timeout
         }
         catch (error) { finish(error); }
       };
+      const started = now();
       signal?.addEventListener('abort', cancelled, { once: true });
       try {
         listener = storage.listen(MEASUREMENT_AUTH_KEY, changed);
@@ -151,9 +157,33 @@ export function createMeasurementAuth({ window, storage, now = Date.now, timeout
         frame.setAttribute('aria-hidden', 'true'); frame.setAttribute('inert', '');
         frame.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0';
         frame.src = url;
+        if (force) frame.src = url + '&tmV4MeasurementRefresh=' + encodeURIComponent(now());
+        evidence({ outcome: 'started', stage: 'native-frame', renewal: force });
         (window.document.body || window.document.documentElement).append(frame);
       } catch (cause) { finish(cause instanceof FcrReadError ? cause : failure('AUTH_REQUIRED', 'Measurement acquisition could not start', cause)); }
     });
   }
-  return Object.freeze({ read, acquire, loginUrl });
+  function watch(callback, { signal } = {}) {
+    if (typeof callback !== 'function') throw failure('INPUT', 'Measurement auth callback is invalid');
+    if (signal?.aborted) return () => {};
+    let listener = null, stopped = false;
+    const stop = () => {
+      stopped = true;
+      if (listener != null) { try { storage.remove(listener); } catch {} }
+      signal?.removeEventListener('abort', stop);
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+    try {
+      listener = storage.listen(MEASUREMENT_AUTH_KEY, () => {
+        if (stopped) return;
+        try {
+          if (!read()) return;
+          stop(); callback();
+        } catch { stop(); }
+      });
+      if (stopped || signal?.aborted) stop();
+    } catch { stop(); }
+    return stop;
+  }
+  return Object.freeze({ read, acquire, loginUrl, watch });
 }

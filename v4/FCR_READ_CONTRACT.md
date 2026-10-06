@@ -31,6 +31,7 @@ Evidence: pinned V2 `FCR_Data_Core.user.js` 0.2.41 and `FCResearch_Master.user.j
 ## SUCCESS
 
 - Product: a validated native key/value product table containing the exact requested identifier and its aliases; optional data stays optional.
+- Native Product section display also accepts an empty successful response (`product:null`), as expected for containers. It creates no product badges or title aliases. The programmatic exact-item `product()` lookup remains strict; mismatched identities, malformed nonempty markup and login responses remain failures.
 - Inventory: recognized schema and valid quantity/identity rows on every page, explicit valid pagination termination, no continuation cycle and (when returned) header quantity agreeing with the accumulated quantity. `totalQuantity` is reported only for a complete result.
 - An explicit native empty table is valid; an absent table, malformed row or empty nonterminal page is not proof of no stock. Physical/container and differing-disposition rows are retained individually, not deduplicated by SKU.
 - Generic sections retain native markup; completeness stays unverified until that section's pagination contract is implemented, whether or not a continuation marker appears. No generic table is silently promoted to complete inventory/history.

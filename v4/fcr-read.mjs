@@ -1,5 +1,5 @@
 // Independent native FCR reads. Consumers own UI, authentication and cancellation.
-export const FCR_READ_VERSION = '0.1.1';
+export const FCR_READ_VERSION = '0.1.2';
 export class FcrReadError extends Error {
   constructor(code, message, { status, cause, partial } = {}) {
     super(message, cause ? { cause } : undefined);
@@ -185,7 +185,7 @@ export function createFcrReader({
     }
   }
 
-  async function product(queryValue, { signal } = {}) {
+  async function readProduct(queryValue, { signal } = {}, allowEmpty = false) {
     const query = searchValue(queryValue), document = await request('product', { s: query }, signal);
     active(signal);
     let recognized = false;
@@ -217,8 +217,13 @@ export function createFcrReader({
       active(signal);
       return { query, product: matches[0], html: document.body.innerHTML, complete: true, source: 'network' };
     }
+    if (allowEmpty && !recognized && !text(document.body.textContent) && !document.body.querySelector('table,img,form,input,iframe')) {
+      evidence({ endpoint: 'product', outcome: 'empty' });
+      return { query, product: null, html: document.body.innerHTML, complete: true, source: 'network' };
+    }
     throw failure(recognized ? 'IDENTITY' : 'SCHEMA', recognized ? 'Product does not match the requested identifier' : 'Product table was not returned');
   }
+  const product = (query, options) => readProduct(query, options);
 
   async function inventory(queryValue, { signal, allowPartial = false, onPreview } = {}) {
     const query = searchValue(queryValue);
@@ -335,7 +340,7 @@ export function createFcrReader({
   async function section(endpoint, query, options = {}) {
     if (!FCR_SECTIONS.includes(endpoint)) throw failure('INPUT', 'Unsupported native FCR section');
     if (endpoint === 'inventory') return inventory(query, options);
-    if (endpoint === 'product') return product(query, options);
+    if (endpoint === 'product') return readProduct(query, options, true);
     if (endpoint === 'inventory-history' && (options.startDate || options.endDate)) return history(query, options);
     const search = searchValue(query), document = await request(endpoint, { s: search }, options.signal);
     active(options.signal);

@@ -24,6 +24,7 @@ Next consumer after the pushed FCR read capability. Evidence: pinned V2 Master 0
 - Earlier V3 drift: retain native controls, locations, section choices and keyboard interaction. Do not centralize/reduce UI for implementation convenience.
 - Search/navigation/clear/disposal must invalidate outstanding reads and queued renders. A late response cannot overwrite another product, print the wrong description or start the next stale request.
 - Native authentication errors remain retryable and visible; rejected/malformed/unknown enrichment does not become green/safe/NO. No recurring reconciliation observer or old core daemon is rebuilt.
+- Reported container empty Product is ready with no item features, rather than a spurious Retry Product. Pandash transient reads recover within bounded retries. MADCAT acquires native credentials at request time and automatically upgrades an auth-required history fallback once on a new token notification; raw/history evidence stays distinct. A manual recheck does not force login when current auth can be reused; blocked visible login is reported.
 - Read-only POST is not a mutation. Print and handoff evidence is owned by Master; supplementary native traffic does not assert inventory movement or physical printer completion.
 
 ## STATE

@@ -40,7 +40,7 @@ test('missing/invalid/ambiguous exact hazmat never becomes level zero or a safe 
 });
 
 test('restriction fallback stays explicit, while authentication and caller cancellation prevent the POST', async () => {
-  const app = fixture([error('NETWORK'), { rows: [{ asin: 'B012345678', level: 1, message: 'Native' }] }]);
+  const app = fixture([error('NETWORK'), { rows: [{ asin: 'B012345678', level: 1, message: 'Native' }] }], { pandashRetryDelays: [] });
   const result = await app.reader.hazmat('B012345678'); assert.match(result.warning, /default restriction/);
   assert.equal(new URLSearchParams(app.calls[1].body).get('source'), 'default-hazmat-FC');
   const authFail = fixture([error('AUTH_REQUIRED')]); await rejects(authFail.reader.hazmat('B012345678'), 'AUTH_REQUIRED'); assert.equal(authFail.calls.length, 1);
@@ -173,4 +173,59 @@ test('GM timeout/network/start errors have typed outcomes and preserve an idle c
     assert.equal(calls, 0); await rejects(read({ url: 'https://pandash.amazon.com/GridServlet' }), code); assert.equal(calls, 1);
   }
   await rejects(createGmJsonReader(() => { throw new Error('native failure'); })({ url: 'https://pandash.amazon.com/GridServlet' }), 'NETWORK');
+});
+
+
+test('Pandash retries transient GET/POST failures with exact payload and sanitized stage evidence', async () => {
+  const app = fixture([error('HTTP', 503), { restriction: 'AU' }, error('HTTP', 429), error('TIMEOUT'),
+    { rows: [{ asin: 'B012345678', level: '1' }] }], { pandashRetryDelays: [0, 0] });
+  const result = await app.reader.hazmat('B012345678');
+  assert.deepEqual(result.hazmat, { level: 1, message: '' });
+  assert.equal(app.calls.length, 5);
+  assert.equal(app.calls[2].body, app.calls[3].body); assert.equal(app.calls[3].body, app.calls[4].body);
+  const failures = app.evidence.filter(value => value.data.outcome === 'failed').map(value => value.data);
+  assert.deepEqual(failures.map(value => [value.stage, value.method, value.status, value.attempt, value.retry]),
+    [['restriction', 'GET', 503, 1, true], ['hazmat', 'POST', 429, 1, true], ['hazmat', 'POST', undefined, 2, true]]);
+  assert(!JSON.stringify(app.evidence).includes('B012345678'));
+});
+
+test('Pandash bounds retries and never retries authentication, permanent HTTP or malformed JSON', async () => {
+  const exhausted = fixture([{ restriction: 'AU' }, error('NETWORK'), error('NETWORK'), error('NETWORK')], { pandashRetryDelays: [0, 0] });
+  await rejects(exhausted.reader.hazmat('B012345678'), 'NETWORK'); assert.equal(exhausted.calls.length, 4);
+  assert.equal(exhausted.evidence.at(-1).data.retry, false);
+  for (const value of [error('AUTH_REQUIRED', 403), error('HTTP', 400), error('SCHEMA')]) {
+    const app = fixture([{ restriction: 'AU' }, value], { pandashRetryDelays: [0, 0] });
+    await rejects(app.reader.hazmat('B012345678'), value.code); assert.equal(app.calls.length, 2);
+  }
+});
+
+test('Pandash restriction is shared within one owner and cached only when validated until its deadline', async () => {
+  let release, time = now; const controller = new AbortController();
+  const app = fixture([() => new Promise(resolve => { release = resolve; }),
+    { rows: [{ asin: 'B012345678', level: 0, message: null }] }, { rows: [{ asin: 'B099999999', level: 2 }] },
+    { rows: [{ asin: 'B012345678', level: 1 }] }, { restriction: 'AU2' }, { rows: [{ asin: 'B012345678', level: 1 }] }], { now: () => time });
+  const first = app.reader.hazmat('B012345678', { signal: controller.signal });
+  const second = app.reader.hazmat('B099999999', { signal: controller.signal });
+  assert.equal(app.calls.length, 1); release({ restriction: 'AU' });
+  const results = await Promise.all([first, second]); assert.equal(results[0].hazmat.level, 0); assert.equal(results[1].hazmat.level, 2);
+  await app.reader.hazmat('B012345678'); assert.equal(app.calls.length, 4);
+  time += 1800000;
+  await app.reader.hazmat('B012345678'); assert.equal(app.calls.length, 6);
+  assert.equal(new URLSearchParams(app.calls.at(-1).body).get('source'), 'AU2-hazmat-FC');
+});
+
+test('cancelled Pandash retry and another cancellation owner cannot poison subsequent reads', async () => {
+  const controller = new AbortController();
+  const app = fixture([error('HTTP', 503), { restriction: 'AU' }, { rows: [{ asin: 'B012345678', level: 1 }] }]);
+  const pending = app.reader.hazmat('B012345678', { signal: controller.signal });
+  await new Promise(resolve => setImmediate(resolve)); controller.abort();
+  await rejects(pending, 'CANCELLED'); assert.equal(app.calls.length, 1);
+  assert.equal((await app.reader.hazmat('B012345678')).hazmat.level, 1);
+});
+
+test('Pandash never interprets boolean, array, fractional or unsafe levels as valid L0', async () => {
+  for (const level of [false, true, [], [0], '', null, undefined, 1.5, '1.5', Number.MAX_SAFE_INTEGER + 1]) {
+    const app = fixture([{ restriction: 'AU' }, { rows: [{ asin: 'B012345678', level }] }]);
+    await rejects(app.reader.hazmat('B012345678'), 'SCHEMA');
+  }
 });

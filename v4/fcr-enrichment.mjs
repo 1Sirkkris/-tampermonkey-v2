@@ -1,6 +1,6 @@
 import { FcrReadError } from './fcr-read.mjs';
 
-export const FCR_ENRICHMENT_VERSION = '0.1.0';
+export const FCR_ENRICHMENT_VERSION = '0.1.1';
 export const MEASUREMENT_ORIGIN = 'https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
 const BIN_URL = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
 const PANDASH_URL = 'https://pandash.amazon.com/GridServlet';
@@ -8,6 +8,15 @@ const clean = value => String(value ?? '').trim();
 const upper = value => clean(value).toUpperCase();
 const fail = (code, message, options) => new FcrReadError(code, message, options);
 function active(signal) { if (signal?.aborted) throw fail('CANCELLED', 'Enrichment read cancelled', { cause: signal.reason }); }
+function wait(ms, signal) {
+  active(signal);
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); };
+    const cancelled = () => { cleanup(); reject(fail('CANCELLED', 'Enrichment retry cancelled', { cause: signal.reason })); };
+    const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+    signal?.addEventListener('abort', cancelled, { once: true });
+  });
+}
 
 function allowed(url, method) {
   const value = new URL(url);
@@ -65,47 +74,73 @@ export function createGmJsonReader(gmRequest, { timeoutMs = 15000 } = {}) {
 
 export function createFcrEnrichment({
   warehouse, readJson, getMeasurementAuth = async () => null, historyFallback,
-  now = Date.now, uuid = () => crypto.randomUUID(), maxMeasurementPages = 10, onEvidence = () => {}
+  now = Date.now, uuid = () => crypto.randomUUID(), maxMeasurementPages = 10, pandashRetryDelays = [500, 1500], onEvidence = () => {}
 }) {
   if (!/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof readJson !== 'function' ||
-      !Number.isInteger(maxMeasurementPages) || maxMeasurementPages < 1 || maxMeasurementPages > 100) throw fail('INPUT', 'Enrichment configuration is invalid');
+      !Number.isInteger(maxMeasurementPages) || maxMeasurementPages < 1 || maxMeasurementPages > 100 ||
+      !Array.isArray(pandashRetryDelays) || pandashRetryDelays.length > 2 || pandashRetryDelays.some(ms => !Number.isFinite(ms) || ms < 0 || ms > 5000)) throw fail('INPUT', 'Enrichment configuration is invalid');
+  const restrictionFlights = new WeakMap();
+  let restrictionCache, unscopedRestrictionFlight;
   function evidence(endpoint, data) {
     try { onEvidence({ type: 'fcr.read', script: 'FCR ENRICHMENT', version: FCR_ENRICHMENT_VERSION, intent: 'read', data: { endpoint, ...data } }); }
     catch { /* OBS is optional. */ }
   }
   async function read(options) {
-    active(options.signal);
-    try { const result = await readJson(options); active(options.signal); return result; }
-    catch (error) {
+    const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
+    const endpoint = parsed.pathname.startsWith('/prod/measurementEvents/') ? 'measurementEvents' : parsed.pathname.split('/').at(-1);
+    for (let attempt = 0; ; attempt++) {
       active(options.signal);
-      const path = new URL(options.url).pathname;
-      evidence(path.startsWith('/prod/measurementEvents/') ? 'measurementEvents' : path.split('/').at(-1), { outcome: 'failed', code: error.code || 'NETWORK' });
-      throw error;
+      try { const result = await readJson(options); active(options.signal); return result; }
+      catch (error) {
+        active(options.signal);
+        const retry = pandash && attempt < pandashRetryDelays.length &&
+          (['NETWORK', 'TIMEOUT'].includes(error.code) || (error.code === 'HTTP' && (error.status === 429 || (error.status >= 500 && error.status < 600))));
+        evidence(endpoint, { outcome: 'failed', code: error.code || 'NETWORK', status: error.status, method: options.method || 'GET',
+          stage: options.stage, attempt: attempt + 1, retry });
+        if (!retry) throw error;
+      }
+      await wait(pandashRetryDelays[attempt], options.signal);
     }
+  }
+
+  async function restriction(signal) {
+    active(signal);
+    if (restrictionCache?.expiresAt > now()) return restrictionCache.value;
+    const pending = signal ? restrictionFlights.get(signal) : unscopedRestrictionFlight;
+    if (pending) return pending;
+    const work = (async () => {
+      const settings = await read({ url: PANDASH_URL + '?fc=' + encodeURIComponent(warehouse), signal, stage: 'restriction' });
+      if (typeof settings.restriction !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(settings.restriction)) throw fail('SCHEMA', 'Native restriction is invalid');
+      active(signal);
+      restrictionCache = { value: settings.restriction, expiresAt: now() + 1800000 };
+      return settings.restriction;
+    })();
+    if (signal) restrictionFlights.set(signal, work); else unscopedRestrictionFlight = work;
+    try { return await work; }
+    finally { if (signal) restrictionFlights.delete(signal); else unscopedRestrictionFlight = null; }
   }
 
   async function hazmat(asinValue, { signal } = {}) {
     const asin = upper(asinValue);
     if (!/^B[A-Z0-9]{9}$/.test(asin)) throw fail('INPUT', 'An exact ASIN is required');
-    let restriction = 'default', restrictionWarning = '';
+    let sourceRestriction = 'default', restrictionWarning = '';
     try {
-      const settings = await read({ url: PANDASH_URL + '?fc=' + encodeURIComponent(warehouse), signal });
-      if (typeof settings.restriction === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(settings.restriction)) restriction = settings.restriction;
-      else restrictionWarning = 'Native restriction unavailable; default restriction used';
+      sourceRestriction = await restriction(signal);
     } catch (error) {
       active(signal);
       if (error.code === 'AUTH_REQUIRED') throw error;
       restrictionWarning = 'Restriction lookup failed; default restriction used';
     }
-    const payload = await read({ url: PANDASH_URL, method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ language: 'default', source: restriction + '-hazmat-FC', marketPlaces: 'AU', asins: asin, rows: '1', page: '1', fc: warehouse }).toString(), signal });
+    const payload = await read({ url: PANDASH_URL, method: 'POST', stage: 'hazmat', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ language: 'default', source: sourceRestriction + '-hazmat-FC', marketPlaces: 'AU', asins: asin, rows: '1', page: '1', fc: warehouse }).toString(), signal });
     if (!Array.isArray(payload.rows)) throw fail('SCHEMA', 'Hazmat rows are missing');
     const matches = payload.rows.filter(row => upper(row?.asin) === asin);
     if (!matches.length) return { hazmat: null, complete: false, warning: 'No exact ASIN hazmat result', source: 'network' };
     const mapped = matches.map(row => {
       const level = Number(row.level);
-      if (row.level == null || clean(row.level) === '' || !Number.isInteger(level) || level < 0 || typeof row.message !== 'string') throw fail('SCHEMA', 'Hazmat level/message is invalid');
-      return { level, message: row.message };
+      if (!['number', 'string'].includes(typeof row.level) || !/^\d+$/.test(clean(row.level)) || !Number.isSafeInteger(level) || level < 0 ||
+          (row.message != null && typeof row.message !== 'string')) throw fail('SCHEMA', 'Hazmat level/message is invalid');
+      return { level, message: row.message ?? '' };
     });
     if (new Set(mapped.map(row => JSON.stringify(row))).size > 1) throw fail('IDENTITY', 'Conflicting exact ASIN hazmat rows');
     active(signal); evidence('hazmat', { outcome: 'complete', level: mapped[0].level });

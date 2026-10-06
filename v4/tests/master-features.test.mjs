@@ -12,7 +12,7 @@ const fields = { ASIN: 'B012345678', FNSKU: 'X012345678', FCSKU: 'FC12345678', T
 const product = (overrides = {}) => '<table>' + Object.entries({ ...fields, ...overrides }).map(([key, value]) => '<tr><th>' + key + '</th><td>' + value + '</td></tr>').join('') + '</table>';
 const inventory = (rows = [['tsX111', 'B012345678', 'X012345678', 2]]) => '<table id="table-inventory"><thead><tr><th>Container</th><th>ASIN</th><th>FNSKU</th><th>Quantity</th></tr></thead><tbody>' + rows.map(row => '<tr>' + row.map(value => '<td>' + value + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
 const markup = '<aside><h2>Sections</h2>' + MASTER_LABELS.map(label => '<div><a>' + label + '</a></div>').join('') + '</aside><main>' + FCR_SECTIONS.map(endpoint => '<div data-section-type="' + endpoint + '"></div>').join('') + '</main>';
-function setup(t, { enrichment: overrides = {}, rows, stored = new Map(), now = () => Date.parse('2026-10-05T02:00:00Z') } = {}) {
+function setup(t, { enrichment: overrides = {}, auth = {}, rows, stored = new Map(), now = () => Date.parse('2026-10-05T02:00:00Z') } = {}) {
   const dom = new JSDOM(markup, { url: 'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=B012345678' }); const w = dom.window;
   const storage = { get: (key, fallback) => stored.get(key) ?? fallback, set: (key, value) => stored.set(key, value) };
   const calls = { reads: [], bin: [], haz: [], madcat: [] }; let features;
@@ -23,7 +23,7 @@ function setup(t, { enrichment: overrides = {}, rows, stored = new Map(), now = 
     hazmat: async (...args) => { calls.haz.push(args); return overrides.hazmat ? overrides.hazmat(...args) : { hazmat: { level: 0, message: 'None' }, complete: true }; },
     recentMadcat: async (...args) => { calls.madcat.push(args); return overrides.recentMadcat ? overrides.recentMadcat(...args) : raw(true); }
   };
-  features = createMasterFeatures({ window: w, runtime, enrichment, auth: { loginUrl: code => 'https://jp.item-measurement.aft.a2z.com/item/' + code }, storage, now });
+  features = createMasterFeatures({ window: w, runtime, enrichment, auth: { loginUrl: code => 'https://jp.item-measurement.aft.a2z.com/item/' + code, ...auth }, storage, now });
   const jq = jquery(w); runtime.start(); watchNativeAjax(w, () => runtime); w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
   t.after(() => { runtime.dispose(); w.close(); });
   function native(endpoint) {
@@ -129,4 +129,53 @@ test('PO indicators preserve split native headers, numeric inputs and both date 
   app.runtime.refresh(); const cells = app.w.document.querySelector('#table-purchase-order-item').rows[0].cells;
   assert.match(cells[0].getAttribute('data-tm-v4-po'), /unfilled.*band/); assert.match(cells[1].getAttribute('data-tm-v4-po'), /cancelled.*band/); assert.match(cells[2].getAttribute('data-tm-v4-po'), /band.*old/);
   app.runtime.dispose(); assert.equal(cells[0].hasAttribute('data-tm-v4-po'), false);
+});
+
+
+test('MADCAT automatically upgrades auth-required history once on a native notification without forcing auth', async t => {
+  let callback, ready = false, stops = 0;
+  const app = setup(t, { auth: { read: () => ready ? { token: 'fresh' } : null, watch: (fn, { signal }) => {
+    callback = fn; const stop = () => { stops++; }; signal.addEventListener('abort', stop, { once: true }); return stop;
+  } }, enrichment: { recentMadcat: async () => ready ? raw(true) : { madcat: null, madcatSource: 'history', authRequired: true, fallbackReason: 'measurement-login-required' } } });
+  await app.show(); assert.equal(app.w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: NO?');
+  ready = true; callback(); await tick(); await tick();
+  assert.equal(app.w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: YES');
+  assert.equal(app.calls.madcat.length, 2); assert.equal(app.calls.madcat[1][1].forceAuth, undefined); assert(stops > 0);
+  callback(); await tick(); assert.equal(app.calls.madcat.length, 2);
+});
+
+test('MADCAT notices auth arriving during history and bounds automatic recovery', async t => {
+  let ready = false, count = 0;
+  const app = setup(t, { auth: { read: () => ready ? { token: 'fresh' } : null }, enrichment: { recentMadcat: async () => {
+    count++; ready = true; return { madcat: null, madcatSource: 'history', authRequired: true, fallbackReason: 'measurement-login-required' };
+  } } });
+  await app.show(); await tick(); assert.equal(count, 2);
+  app.runtime.refresh(); await tick(); assert.equal(count, 2);
+});
+
+test('MADCAT auth updates cannot revive a disposed query and cached raw results need no auth', async t => {
+  let callback;
+  const app = setup(t, { auth: { watch: fn => { callback = fn; return () => {}; } }, enrichment: {
+    recentMadcat: async () => ({ madcat: null, madcatSource: 'history', authRequired: true })
+  } });
+  await app.show(); app.runtime.dispose(); callback(); await tick(); assert.equal(app.calls.madcat.length, 1);
+  const stored = new Map(), cache = createMadcatCache({ storage: { get: (key, fallback) => stored.get(key) ?? fallback, set: (key, value) => stored.set(key, value) }, now: () => Date.parse('2026-10-05T02:00:00Z') });
+  cache.put('FNSKU:X012345678', raw(false));
+  const cached = setup(t, { stored, auth: { read: () => { throw new Error('Cache must not depend on auth'); } } });
+  await cached.show(); assert.equal(cached.calls.madcat.length, 0);
+  assert.equal(cached.w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: NO');
+});
+
+test('MADCAT manual transport recheck reuses auth and a blocked login remains visibly retryable', async t => {
+  let fail = true;
+  const app = setup(t, { auth: { read: () => ({ token: 'fresh' }) }, enrichment: { recentMadcat: async () => {
+    if (fail) throw new Error('Temporary transport failure'); return raw(false);
+  } } });
+  await app.show(); fail = false; app.w.document.querySelector('[data-tm-v4-badge="madcat"]').click(); await tick(); await tick();
+  assert.equal(app.calls.madcat[1][1].forceAuth, undefined);
+  assert.equal(app.w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: NO');
+  const blocked = setup(t, { auth: { read: () => null }, enrichment: { recentMadcat: async () => ({ madcat: null, madcatSource: 'history', authRequired: true }) } });
+  blocked.w.open = () => null; await blocked.show();
+  blocked.w.document.querySelector('[data-tm-v4-badge="madcat"]').click(); await tick(); assert.equal(blocked.calls.madcat.length, 1);
+  assert.match(blocked.w.document.body.textContent, /Measurement login popup blocked/);
 });

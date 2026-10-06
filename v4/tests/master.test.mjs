@@ -27,6 +27,17 @@ function setup(t, { fetch = async url => new Response(url.endsWith('/product') ?
 }
 const resolved = xhr => new Promise((resolve, reject) => xhr.done(resolve).fail((_xhr, status) => reject(new Error(status))));
 
+test('native empty container Product settles ready without Retry Product or a fabricated item', async t => {
+  const app = setup(t, { fetch: async () => new Response('') });
+  await resolved(app.native('product', 'tsX111', { success: html => { app.window.document.querySelector('[data-section-type="product"]').innerHTML = html; } }));
+  await tick();
+  const section = app.runtime.current().sections.get('product');
+  assert.equal(section.status, 'ready'); assert.equal(section.result.product, null);
+  assert(!app.window.document.body.textContent.includes('Retry Product'));
+  assert(!app.window.document.body.textContent.includes('Product table was not returned'));
+  assert.equal(app.window.document.querySelector('[data-tm-v4-badge]'), null);
+});
+
 test('native installer startup is independent and idle; all nineteen inline choices/defaults are preserved', async t => {
   const app = setup(t); await tick();
   const buttons = [...app.window.document.querySelectorAll('[data-tm-v4-section]')];
@@ -207,4 +218,40 @@ test('generated native Measurement branch captures successful auth and restores 
   await w.fetch('https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com/prod/measurementEvents/B012345678/ASIN', { headers: { Authorization: token } });
   assert.equal(JSON.parse(stored.get('tm-v4.measurement.auth')).token, token); w.dispatchEvent(new w.PageTransitionEvent('pagehide')); assert.equal(w.fetch, original);
   assert.equal(w.document.querySelectorAll('[data-tm-v4-master]').length, 0);
+});
+
+test('generated cold MADCAT flow reaches raw YES from request-time capture without a login click', async t => {
+  const fcr = new JSDOM(markup(), { url: 'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=B012345678', runScripts: 'outside-only' });
+  const native = new JSDOM('', { url: 'https://jp.item-measurement.aft.a2z.com/item/B012345678', runScripts: 'outside-only' });
+  const w = fcr.window, m = native.window, stored = new Map(), listeners = new Map(), events = []; let sequence = 0, rawReads = 0;
+  const token = 'head.' + Buffer.from(JSON.stringify({ token_use: 'id', exp: Math.floor(Date.now() / 1000) + 600 })).toString('base64url') + '.sig';
+  const installer = readFileSync(new URL('../FCResearch_Master.user.js', import.meta.url), 'utf8');
+  for (const page of [w, m]) {
+    page.TextDecoder = TextDecoder;
+    page.GM_getValue = (key, fallback) => stored.get(key) ?? fallback;
+    page.GM_setValue = (key, value) => { const old = stored.get(key); stored.set(key, value); for (const [watched, callback] of [...listeners.values()]) if (watched === key) callback(key, old, value, true); };
+    page.GM_addValueChangeListener = (key, callback) => { const id = ++sequence; listeners.set(id, [key, callback]); return id; };
+    page.GM_removeValueChangeListener = id => listeners.delete(id);
+    t.after(() => { page.dispatchEvent(new page.PageTransitionEvent('pagehide')); page.close(); });
+  }
+  w.fetch = async url => { assert(!url.includes('localhost')); return new Response(url.endsWith('/product') ? product() : inventory); };
+  w.open = () => { throw new Error('Cold auth must not open a login popup'); };
+  w.GM_xmlhttpRequest = request => {
+    let payload;
+    if (request.url.includes('/measurementEvents/')) { rawReads++; assert.equal(request.headers.Authorization, token); payload = { measurementEvents: [{ measurementSource: 'MADCAT', measurementInstant: new Date(Date.now() - 1000).toISOString() }] }; }
+    else if (request.url.includes('/api/scanitem')) payload = { items: [{ skuDetail: { asin: 'B012345678' }, binDescription: 'MEDIUM' }] };
+    else payload = request.method === 'POST' ? { rows: [{ asin: 'B012345678', level: 1 }] } : { restriction: 'AU' };
+    request.onload({ status: 200, finalUrl: request.url, responseText: JSON.stringify(payload) }); return { abort() {} };
+  };
+  m.fetch = async () => new Response('{}', { status: 400 }); m.eval(installer);
+  const jq = jquery(w); w.addEventListener('tampermonkey-v4:evidence', event => events.push(JSON.parse(event.detail))); w.eval(installer);
+  w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+  await Promise.all(['product', 'inventory'].map(endpoint => resolved(jq.ajax({ url: '/BWU2/results/' + endpoint, method: 'POST', data: { s: 'B012345678' }, dataType: 'html', success: html => { w.document.querySelector('[data-section-type="' + endpoint + '"]').innerHTML = html; } }))));
+  await tick(); assert.equal(w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: AUTH…');
+  assert.equal(w.document.querySelectorAll('iframe[data-tm-v4-auth]').length, 1);
+  await m.fetch('https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com/prod/measurementEvents/B012345678/ASIN', { headers: { Authorization: token } });
+  await tick(); await tick();
+  assert.equal(rawReads, 1); assert.equal(w.document.querySelector('[data-tm-v4-badge="madcat"]').textContent, 'Madcat: YES');
+  assert.equal(w.document.querySelectorAll('iframe[data-tm-v4-auth]').length, 0); assert.equal(listeners.size, 0);
+  assert(events.some(value => value.type === 'fcr.auth' && value.data.outcome === 'acquired')); assert(!JSON.stringify(events).includes(token));
 });

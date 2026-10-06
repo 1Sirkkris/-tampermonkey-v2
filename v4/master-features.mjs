@@ -1,3 +1,4 @@
+import { MASTER_VERSION } from './master-runtime.mjs';
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const upper = value => clean(value).toUpperCase();
 const UI = '[data-tm-v4-master]';
@@ -138,15 +139,27 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
     if (!product || !isCurrent(gen)) return;
     const current = state(gen).madcat;
     if (current.status === 'loading' || (!force && current.status !== 'idle')) return;
+    current.stopAuth?.(); current.stopAuth = null;
     const code = upper(product.fnsku || product.asin || product.isbn), identity = (product.fnsku ? 'FNSKU:' : 'ASIN:') + code;
     const serial = ++current.serial; current.status = 'loading'; current.error = ''; runtime.schedule();
     try {
-      current.authPending = force || (typeof auth.read === 'function' && !auth.read());
-      const result = (!force && cache.get(identity)) || await enrichment.recentMadcat({ fnsku: product.fnsku, asin: product.asin || product.isbn }, { signal: gen.controller.signal, forceAuth: force });
+      const cached = !force && cache.get(identity);
+      current.authPending = !cached && typeof auth.read === 'function' && !auth.read();
+      const result = cached || await enrichment.recentMadcat({ fnsku: product.fnsku, asin: product.asin || product.isbn }, { signal: gen.controller.signal });
       if (!isCurrent(gen) || current.serial !== serial) return;
       if (result.madcatSource === 'raw' && (result.complete !== true || result.windowDays !== 30 || typeof result.madcat !== 'boolean')) throw new Error('Incomplete raw Measurement result');
       if (!['raw', 'history'].includes(result.madcatSource) || (result.madcatSource === 'history' && result.madcat !== null && typeof result.madcat !== 'boolean')) throw new Error('Unrecognized Measurement provenance');
       current.result = result; current.status = 'ready'; cache.put(identity, result);
+      if (result.madcatSource === 'history' && result.authRequired && !current.autoAuthRetried) {
+        const recover = () => {
+          if (!isCurrent(gen) || current.serial !== serial || current.autoAuthRetried) return;
+          current.autoAuthRetried = true; current.stopAuth?.(); current.stopAuth = null;
+          void madcat(gen, true);
+        };
+        current.stopAuth = auth.watch?.(recover, { signal: gen.controller.signal });
+        // A token arriving during the history read must not require a click.
+        if (result.fallbackReason === 'measurement-login-required' && auth.read?.()) recover();
+      }
     } catch (error) { if (!isCurrent(gen) || current.serial !== serial) return; current.status = 'error'; current.error = clean(error.message); }
     if (isCurrent(gen)) runtime.schedule();
   }
@@ -180,7 +193,7 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
     const url = new URL('https://river.amazon.com/' + runtime.warehouse + '/workflows');
     for (const [key, value] of Object.entries({ buildingType: 'fc', workflowId: 'undefined', q0: '3654ec14-7232-4f65-84c3-87927cdb4d0c', q1: 'f2738dec-7f6f-4c2e-a85a-db7228de25f1', id: 'f2738dec-7f6f-4c2e-a85a-db7228de25f1' })) url.searchParams.set(key, value);
     const tab = window.open(url.href, '_blank'); if (tab) tab.opener = null; else runtime.notify('RIVER popup blocked — allow popups and retry');
-    try { onEvidence({ type: 'fcr.handoff', script: 'FCR MASTER', version: '0.1.1', intent: 'read', data: { action: 'river.open', warehouse: runtime.warehouse } }); } catch {}
+    try { onEvidence({ type: 'fcr.handoff', script: 'FCR MASTER', version: MASTER_VERSION, intent: 'read', data: { action: 'river.open', warehouse: runtime.warehouse } }); } catch {}
   }
   function paintHaz(host, asin, gen, product = false) {
     queueHaz(gen, asin); const status = state(gen).haz.get(asin);
@@ -241,7 +254,11 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
         const label = group.madcat.status === 'error' ? 'Madcat: ERROR ↻' : group.madcat.status !== 'ready' ? group.madcat.authPending ? 'Madcat: AUTH…' : 'Madcat: CHECK…' : result.madcat === true ? 'Madcat: YES' : history ? 'Madcat: NO?' : 'Madcat: NO';
         const mad = ownButton(host, 'madcat', label, () => {
           if (group.madcat.status === 'ready' && history && result.authRequired) {
-            const tab = window.open(auth.loginUrl(product.fnsku || product.asin || product.isbn), '_blank'); if (tab) tab.opener = null;
+            if (result.fallbackReason === 'measurement-token-expired' || !auth.read?.()) {
+              const tab = window.open(auth.loginUrl(product.fnsku || product.asin || product.isbn), 'tm-v4-measurement-login');
+              if (tab) tab.opener = null;
+              else { runtime.notify('Measurement login popup blocked — allow popups and retry'); return; }
+            }
           }
           void madcat(gen, true);
         });

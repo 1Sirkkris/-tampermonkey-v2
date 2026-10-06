@@ -21,9 +21,11 @@ This is the next slice of the FCR read capability, before Master integration. Ev
 
 - Each call owns its signal and pagination window. Native authenticated GM requests are injected through a validated read-only JSON adapter. There is no daemon, shared old storage, competing owner or idle polling.
 - The Measurement auth provider returns current native `{token, expiresAt}` and supports one renewal after auth rejection. Authentication capture must be implemented independently in the same eventual installer on both native origins.
-- V4 capture observes only successful native Measurement API responses and the effective request Authorization header. A rejected request, overridden unused header, expired/access/malformed JWT, disposed collector or unrelated origin cannot seed auth. Decoded JWT expiry is a freshness check; the native API response supplies acceptance evidence, not local signature verification.
+- Measurement capture observes the effective outgoing Authorization header on the native API request, preserving V2's request-time acquisition. It does not wait for the native item's response: an item error is not evidence that its credential is unusable. Only fresh ID tokens are stored; unused overridden headers, unrelated endpoints and disposed collectors cannot seed auth. This is an observed credential, not acceptance or signature proof. The subsequent raw API read validates authentication and owns one renewal after rejection.
 - V4-only `tm-v4.measurement.auth` stores the observed token with a unique capture record. Acquisition uses a temporary inert native item frame, GM value-change notification and one deadline. It reuses a current token when permitted, requires a distinct token after auth rejection, and removes frame/listener/timer on every exit. No poller or hidden automatic login popup is introduced; visible login remains a deliberate consumer action.
 - Source capabilities are included in the eventual self-contained Master; they are not separately installed dependencies.
+- Pandash retries only read-only restriction/hazmat requests after network/timeouts, HTTP 429 or 5xx, at most twice (500/1500ms), with cancellation throughout. AUTH, permanent HTTP and invalid schema do not loop. Restriction reads share work only among callers with the same cancellation owner; validated restrictions expire after 30 minutes. Failed/default restrictions are not cached. Exact hazmat levels remain strict; an absent/null optional message is empty text, never a missing level converted to zero.
+- MADCAT rechecking bypasses its result cache without unconditionally renewing a usable token. An auth-required history fallback watches one native auth update for the current generation and can automatically recheck once. It never polls or retries indefinitely; manual login/retry remains available. Auth acquisition and Pandash attempts emit stage/outcome/status evidence without credentials, identifiers or response bodies.
 
 ## SUCCESS
 
@@ -39,7 +41,7 @@ This is the next slice of the FCR read capability, before Master integration. Ev
 
 ## RESET
 
-- Stop/Clear/navigation cancellation aborts native GM handles and prevents pagination/renewal/fallback/result publication. Each retry is a new read request. No timer, listener or request remains while idle.
+- Stop/Clear/navigation cancellation aborts native GM handles and prevents pagination/renewal/fallback/result publication. Each retry is a new read request. No timer or request runs while idle. The sole auth-required recovery listener waits for one native update and is removed by that update, manual retry or generation reset.
 - No cross-call inventory cache. Master cache/performance behaviour and user-triggered force rechecks remain integration requirements.
 
 ## DEPENDENCIES

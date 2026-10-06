@@ -1,8 +1,8 @@
 # FCR Master milestone verification
 
-6 October 2026 (Australia/Sydney). Development installer 0.1.2; **PARTIAL — captured native retry gap repaired, live acceptance pending**.
+6 October 2026 (Australia/Sydney). Development installer 0.1.3; **PARTIAL — reported container/Pandash/MADCAT gaps corrected in source, live acceptance pending**.
 
-- `npm test`: **133 passed**, including 27 native reads, 17 Master, 10 native-integration, 11 feature, 10 action, 3 capture, 16 enrichment, 13 auth and 26 OBS cases.
+- `npm test`: **148 passed**, including 28 native reads, 19 Master, 10 native-integration, 15 feature, 10 action, 3 capture, 21 enrichment, 16 auth and 26 OBS cases.
 - `npm run check`: three installers' metadata/syntax/independence, source syntax and byte-exact source/installer consistency pass. `git diff --check` passes. Source, tests and installers stay under `v4/`; inherited root code is unchanged.
 - V2 main remains `e4399d89ff11551ec1afb132d67c448da1e43568`; frozen V3 remains `77ff9f7818ea8d2d53422654a7e6b7ca51b6db13`.
 
@@ -30,8 +30,19 @@ Exact FNSKU Size identity and container priorities/three-attempt bound; private 
 
 Printmon fields and numeric sequence are preserved. Response received is not confirmed job acceptance or physical output; its acknowledgement contract remains undocumented. No real printer request was submitted.
 
+## Reported live failures and source recovery
+
+The 47-event `V4_OBS_2026-10-06T04-52-47-605Z_47events.txt` has SHA-256 `280008c38044b606e5c373365d69942ab8a3172bb2acb7924a5eb073e1089d17`. It records two `GridServlet` HTTP failures (04:51:56.442 and 04:52:01.399 UTC) before a later exact hazmat success, and a terminal raw Measurement negative with zero events. It does not include HTTP status/method/stage, auth acquisition outcomes, query values or response bodies. The user additionally reports normal container Product absence and MADCAT initially requiring a click. These reports are live evidence of problems; source/fixture corrections below still require a new live run.
+
+- Native empty Product display now settles ready with no product record, error, item badge or title alias. Strict programmatic `product()` and mismatched/malformed nonempty/login cases remain guarded. Both native callback/UI and reader cases pass.
+- Pandash now retries only transient network/timeouts/429/5xx, at most twice, with identical read-only POST fields and cancellable waits. Restriction reads share only one cancellation owner, cache valid settings for 30 minutes, and never cache failure/default fallback. Missing optional message no longer rejects a valid level; false/array/fractional/unsafe/missing levels never become zero. Tests cover exhaustion, non-retryable failures, deadline and cancellation. Errors include method/stage/status/attempt/retry evidence.
+- Pinned V2 captures outgoing native Measurement credentials. V4 previously required a 2xx item response, which could stall acquisition even with an available fresh credential. Capture now happens at request time and preserves native Promise/return semantics. The raw API supplies authentication acceptance/rejection; freshness decoding does not verify signatures. Existing one distinct-token renewal and raw/history provenance remain.
+- The generated cold installer fixture waits at AUTH, receives a native outgoing token on an HTTP 400 item request, then reaches one raw MADCAT YES without a login click and releases frame/listener/deadline. Further cases cover token arrival during/after fallback, one automatic upgrade maximum, stale-generation notifications, cached raw results without auth, manual transport recheck without forced renewal and blocked visible login. Auth acquisition now emits sanitized cache/start/acquired/unavailable/cancelled evidence. No polling was introduced.
+
+The exact reason for the user's initial live AUTH state is not established by the earlier OBS log; these are reproduced source defects and restored V2 behaviour, not a claim that live Measurement framing/session acceptance is proven.
+
 ## Remaining live acceptance
 
-The reproduced Retry Inventory source blocker is resolved. The next gate is the standalone V4 installer in Tampermonkey with V2/V3 disabled: read-only native searches, A/L click/navigation, table/filter/date controls, exact Size/MADCAT/hazmat, replacement and BFCache/repeated use, and OBS evidence. Actual browser-world hooks, cross-origin Measurement auth/framing, native date-filter state after repeated rendering, long idle and local printer acceptance remain live requirements. Do not call Master a proven V2 replacement yet or treat the uploaded V2 page as a live V4 run.
+The reproduced Retry Inventory source blocker is resolved. The next gate is the standalone V4 installer in Tampermonkey with V2/V3 disabled: read-only native searches, A/L click/navigation, table/filter/date controls, exact Size/MADCAT/hazmat, replacement and BFCache/repeated use, and OBS evidence. Actual browser-world hooks, cross-origin Measurement auth/framing, native date-filter state after repeated rendering, long idle and local printer acceptance remain live requirements. Do not call Master a proven V2 replacement yet. The separate V2 native capture is captured-code evidence; the later V4 OBS log is limited live read evidence, not acceptance of these new changes.
 
 No live Amazon service request, inventory mutation, auth acquisition or printer operation succeeded during this verification. All captured-code responses were synthetic and native XHR was blocked in the successful harness run.

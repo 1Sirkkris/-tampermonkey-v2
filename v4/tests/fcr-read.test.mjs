@@ -70,6 +70,18 @@ test('contradictory exact product records are unresolved rather than taking the 
   await rejectsCode(app.reader.product('X012345678'), 'IDENTITY');
 });
 
+test('container Product section accepts native empty content while exact-item lookup stays strict', async t => {
+  const app = fixture(t, ['', '<div data-section-type="product"> </div>', '', product(), '<div>Unexpected server response</div>', '<form action="/login"><input type="password"></form>']);
+  for (const query of ['tsX111', 'P-1-A001']) {
+    const result = await app.reader.section('product', query);
+    assert.equal(result.product, null); assert.equal(result.complete, true); assert.equal(result.query, query);
+  }
+  await rejectsCode(app.reader.product('X012345678'), 'SCHEMA');
+  await rejectsCode(app.reader.section('product', 'tsX111'), 'IDENTITY');
+  await rejectsCode(app.reader.section('product', 'tsX111'), 'SCHEMA');
+  await rejectsCode(app.reader.section('product', 'tsX111'), 'AUTH_REQUIRED');
+});
+
 test('inventory preserves all twelve fields when native columns are reordered', async t => {
   const app = fixture(t, [inventory({ order: [5, 2, 0, 3, 1, 4, 11, 6, 7, 8, 9, 10] })]);
   const result = await app.reader.inventory('tsX111');

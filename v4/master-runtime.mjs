@@ -1,6 +1,6 @@
 import { createFcrReader, FCR_SECTIONS } from './fcr-read.mjs';
 
-export const MASTER_VERSION = '0.1.2';
+export const MASTER_VERSION = '0.1.3';
 export const MASTER_LABELS = Object.freeze([
   'Product', 'Inventory', 'Inventory History', 'Container History', 'Purchase Order Items',
   'Purchase Order', 'Receive History', 'Shipment', 'Container Details', 'Employee',

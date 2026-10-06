@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.2
+// @version      0.1.3
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -27,7 +27,7 @@
 // ==/UserScript==
 (() => {
   // fcr-read.mjs
-  var FCR_READ_VERSION = "0.1.1";
+  var FCR_READ_VERSION = "0.1.2";
   var FcrReadError = class extends Error {
     constructor(code, message, { status, cause, partial } = {}) {
       super(message, cause ? { cause } : void 0);
@@ -179,7 +179,7 @@
       }
       return document;
     }
-    function wait(ms, signal) {
+    function wait2(ms, signal) {
       active(signal);
       return new Promise((resolve, reject) => {
         const cleanup = () => {
@@ -241,10 +241,10 @@
           clearTimeout(timer);
           signal?.removeEventListener("abort", cancelled);
         }
-        if (retry) await wait(retryDelays[attempt], signal);
+        if (retry) await wait2(retryDelays[attempt], signal);
       }
     }
-    async function product(queryValue, { signal } = {}) {
+    async function readProduct(queryValue, { signal } = {}, allowEmpty = false) {
       const query = searchValue(queryValue), document = await request("product", { s: query }, signal);
       active(signal);
       let recognized = false;
@@ -284,8 +284,13 @@
         active(signal);
         return { query, product: matches[0], html: document.body.innerHTML, complete: true, source: "network" };
       }
+      if (allowEmpty && !recognized && !text(document.body.textContent) && !document.body.querySelector("table,img,form,input,iframe")) {
+        evidence2({ endpoint: "product", outcome: "empty" });
+        return { query, product: null, html: document.body.innerHTML, complete: true, source: "network" };
+      }
       throw failure(recognized ? "IDENTITY" : "SCHEMA", recognized ? "Product does not match the requested identifier" : "Product table was not returned");
     }
+    const product = (query, options) => readProduct(query, options);
     async function inventory(queryValue, { signal, allowPartial = false, onPreview } = {}) {
       const query = searchValue(queryValue);
       const document = await request("inventory", { s: query }, signal);
@@ -418,7 +423,7 @@
     async function section(endpoint, query, options = {}) {
       if (!FCR_SECTIONS.includes(endpoint)) throw failure("INPUT", "Unsupported native FCR section");
       if (endpoint === "inventory") return inventory(query, options);
-      if (endpoint === "product") return product(query, options);
+      if (endpoint === "product") return readProduct(query, options, true);
       if (endpoint === "inventory-history" && (options.startDate || options.endDate)) return history(query, options);
       const search = searchValue(query), document = await request(endpoint, { s: search }, options.signal);
       active(options.signal);
@@ -481,7 +486,7 @@
   }
 
   // master-runtime.mjs
-  var MASTER_VERSION = "0.1.2";
+  var MASTER_VERSION = "0.1.3";
   var MASTER_LABELS = Object.freeze([
     "Product",
     "Inventory",
@@ -1036,7 +1041,7 @@
   }
 
   // fcr-enrichment.mjs
-  var FCR_ENRICHMENT_VERSION = "0.1.0";
+  var FCR_ENRICHMENT_VERSION = "0.1.1";
   var MEASUREMENT_ORIGIN = "https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com";
   var BIN_URL = "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem";
   var PANDASH_URL = "https://pandash.amazon.com/GridServlet";
@@ -1045,6 +1050,24 @@
   var fail = (code, message, options) => new FcrReadError(code, message, options);
   function active2(signal) {
     if (signal?.aborted) throw fail("CANCELLED", "Enrichment read cancelled", { cause: signal.reason });
+  }
+  function wait(ms, signal) {
+    active2(signal);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", cancelled);
+      };
+      const cancelled = () => {
+        cleanup();
+        reject(fail("CANCELLED", "Enrichment retry cancelled", { cause: signal.reason }));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      signal?.addEventListener("abort", cancelled, { once: true });
+    });
   }
   function allowed(url, method) {
     const value = new URL(url);
@@ -1124,10 +1147,13 @@
     now = Date.now,
     uuid: uuid2 = () => crypto.randomUUID(),
     maxMeasurementPages = 10,
+    pandashRetryDelays = [500, 1500],
     onEvidence = () => {
     }
   }) {
-    if (!/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof readJson !== "function" || !Number.isInteger(maxMeasurementPages) || maxMeasurementPages < 1 || maxMeasurementPages > 100) throw fail("INPUT", "Enrichment configuration is invalid");
+    if (!/^[A-Z0-9-]{2,12}$/.test(warehouse) || typeof readJson !== "function" || !Number.isInteger(maxMeasurementPages) || maxMeasurementPages < 1 || maxMeasurementPages > 100 || !Array.isArray(pandashRetryDelays) || pandashRetryDelays.length > 2 || pandashRetryDelays.some((ms) => !Number.isFinite(ms) || ms < 0 || ms > 5e3)) throw fail("INPUT", "Enrichment configuration is invalid");
+    const restrictionFlights = /* @__PURE__ */ new WeakMap();
+    let restrictionCache, unscopedRestrictionFlight;
     function evidence2(endpoint, data) {
       try {
         onEvidence({ type: "fcr.read", script: "FCR ENRICHMENT", version: FCR_ENRICHMENT_VERSION, intent: "read", data: { endpoint, ...data } });
@@ -1135,26 +1161,58 @@
       }
     }
     async function read(options) {
-      active2(options.signal);
+      const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
+      const endpoint = parsed.pathname.startsWith("/prod/measurementEvents/") ? "measurementEvents" : parsed.pathname.split("/").at(-1);
+      for (let attempt = 0; ; attempt++) {
+        active2(options.signal);
+        try {
+          const result = await readJson(options);
+          active2(options.signal);
+          return result;
+        } catch (error) {
+          active2(options.signal);
+          const retry = pandash && attempt < pandashRetryDelays.length && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
+          evidence2(endpoint, {
+            outcome: "failed",
+            code: error.code || "NETWORK",
+            status: error.status,
+            method: options.method || "GET",
+            stage: options.stage,
+            attempt: attempt + 1,
+            retry
+          });
+          if (!retry) throw error;
+        }
+        await wait(pandashRetryDelays[attempt], options.signal);
+      }
+    }
+    async function restriction(signal) {
+      active2(signal);
+      if (restrictionCache?.expiresAt > now()) return restrictionCache.value;
+      const pending = signal ? restrictionFlights.get(signal) : unscopedRestrictionFlight;
+      if (pending) return pending;
+      const work = (async () => {
+        const settings = await read({ url: PANDASH_URL + "?fc=" + encodeURIComponent(warehouse), signal, stage: "restriction" });
+        if (typeof settings.restriction !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(settings.restriction)) throw fail("SCHEMA", "Native restriction is invalid");
+        active2(signal);
+        restrictionCache = { value: settings.restriction, expiresAt: now() + 18e5 };
+        return settings.restriction;
+      })();
+      if (signal) restrictionFlights.set(signal, work);
+      else unscopedRestrictionFlight = work;
       try {
-        const result = await readJson(options);
-        active2(options.signal);
-        return result;
-      } catch (error) {
-        active2(options.signal);
-        const path = new URL(options.url).pathname;
-        evidence2(path.startsWith("/prod/measurementEvents/") ? "measurementEvents" : path.split("/").at(-1), { outcome: "failed", code: error.code || "NETWORK" });
-        throw error;
+        return await work;
+      } finally {
+        if (signal) restrictionFlights.delete(signal);
+        else unscopedRestrictionFlight = null;
       }
     }
     async function hazmat(asinValue, { signal } = {}) {
       const asin = upper(asinValue);
       if (!/^B[A-Z0-9]{9}$/.test(asin)) throw fail("INPUT", "An exact ASIN is required");
-      let restriction = "default", restrictionWarning = "";
+      let sourceRestriction = "default", restrictionWarning = "";
       try {
-        const settings = await read({ url: PANDASH_URL + "?fc=" + encodeURIComponent(warehouse), signal });
-        if (typeof settings.restriction === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(settings.restriction)) restriction = settings.restriction;
-        else restrictionWarning = "Native restriction unavailable; default restriction used";
+        sourceRestriction = await restriction(signal);
       } catch (error) {
         active2(signal);
         if (error.code === "AUTH_REQUIRED") throw error;
@@ -1163,8 +1221,9 @@
       const payload = await read({
         url: PANDASH_URL,
         method: "POST",
+        stage: "hazmat",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ language: "default", source: restriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
+        body: new URLSearchParams({ language: "default", source: sourceRestriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
         signal
       });
       if (!Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are missing");
@@ -1172,8 +1231,8 @@
       if (!matches.length) return { hazmat: null, complete: false, warning: "No exact ASIN hazmat result", source: "network" };
       const mapped = matches.map((row) => {
         const level = Number(row.level);
-        if (row.level == null || clean2(row.level) === "" || !Number.isInteger(level) || level < 0 || typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
-        return { level, message: row.message };
+        if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean2(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
+        return { level, message: row.message ?? "" };
       });
       if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
       active2(signal);
@@ -1299,6 +1358,7 @@
   }
 
   // measurement-auth.mjs
+  var MEASUREMENT_AUTH_VERSION = "0.1.1";
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
   var SITE = "https://jp.item-measurement.aft.a2z.com";
   var GUARD = Symbol.for("tampermonkey.v4.measurement.capture");
@@ -1326,7 +1386,7 @@
   function nativeMeasurementUrl(value, page2) {
     try {
       const url = new URL(value, page2.location.href);
-      return url.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\//.test(url.pathname);
+      return url.origin === MEASUREMENT_ORIGIN && /^\/prod\/measurementEvents\/[A-Z0-9]{10}\/(?:FNSKU|ASIN)$/.test(url.pathname);
     } catch {
       return false;
     }
@@ -1355,12 +1415,8 @@
         const input = args[0], url = typeof input === "string" || input instanceof page2.URL ? String(input) : input?.url;
         if (nativeMeasurementUrl(url, page2)) raw = args[1]?.headers !== void 0 ? authHeader(args[1].headers) : authHeader(input?.headers);
       });
-      return result.then((response) => {
-        observe(() => {
-          if (response.status >= 200 && response.status < 300) save(raw);
-        });
-        return response;
-      });
+      observe(() => save(raw));
+      return result;
     };
     const wrappedOpen = function(...args) {
       const result = Reflect.apply(originalOpen, this, args);
@@ -1377,16 +1433,9 @@
     };
     const wrappedSend = function(...args) {
       const detail = details.get(this);
-      const done = () => observe(() => {
-        if (this.status >= 200 && this.status < 300) save(detail.token);
-      });
-      if (detail?.wanted) this.addEventListener("loadend", done, { once: true, signal: controller.signal });
-      try {
-        return Reflect.apply(originalSend, this, args);
-      } catch (error) {
-        this.removeEventListener("loadend", done);
-        throw error;
-      }
+      const result = Reflect.apply(originalSend, this, args);
+      if (detail?.wanted) observe(() => save(detail.token));
+      return result;
     };
     function dispose() {
       if (controller.signal.aborted) return;
@@ -1406,8 +1455,15 @@
     page2[GUARD] = dispose;
     return dispose;
   }
-  function createMeasurementAuth({ window: window2, storage: storage2, now = Date.now, timeoutMs = 1e4 }) {
+  function createMeasurementAuth({ window: window2, storage: storage2, now = Date.now, timeoutMs = 1e4, onEvidence = () => {
+  } }) {
     if (!window2?.document || !storage2 || !["get", "listen", "remove"].every((key) => typeof storage2[key] === "function") || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4) throw failure2("INPUT", "Measurement auth configuration is invalid");
+    function evidence2(data) {
+      try {
+        onEvidence({ type: "fcr.auth", script: "MEASUREMENT AUTH", version: MEASUREMENT_AUTH_VERSION, intent: "read", data: { endpoint: "measurement-auth", ...data } });
+      } catch {
+      }
+    }
     function read() {
       try {
         const raw = storage2.get(MEASUREMENT_AUTH_KEY, "null");
@@ -1428,7 +1484,10 @@
       const url = loginUrl(identifier2);
       if (signal?.aborted) throw failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason);
       const cached = read();
-      if (!force && cached && cached.token !== previousToken) return cached;
+      if (!force && cached && cached.token !== previousToken) {
+        evidence2({ outcome: "cached" });
+        return cached;
+      }
       let baseline;
       try {
         baseline = force ? storage2.get(MEASUREMENT_AUTH_KEY, "null") : null;
@@ -1452,6 +1511,7 @@
           if (settled) return;
           settled = true;
           cleanup();
+          evidence2({ outcome: error ? "failed" : value ? "acquired" : "unavailable", code: error?.code, stage: "native-frame", elapsedMs: Math.max(0, now() - started) });
           if (error) reject(error);
           else resolve(value);
         };
@@ -1466,6 +1526,7 @@
             finish(error);
           }
         };
+        const started = now();
         signal?.addEventListener("abort", cancelled, { once: true });
         try {
           listener = storage2.listen(MEASUREMENT_AUTH_KEY, changed);
@@ -1487,13 +1548,48 @@
           frame.setAttribute("inert", "");
           frame.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0";
           frame.src = url;
+          if (force) frame.src = url + "&tmV4MeasurementRefresh=" + encodeURIComponent(now());
+          evidence2({ outcome: "started", stage: "native-frame", renewal: force });
           (window2.document.body || window2.document.documentElement).append(frame);
         } catch (cause) {
           finish(cause instanceof FcrReadError ? cause : failure2("AUTH_REQUIRED", "Measurement acquisition could not start", cause));
         }
       });
     }
-    return Object.freeze({ read, acquire, loginUrl });
+    function watch(callback, { signal } = {}) {
+      if (typeof callback !== "function") throw failure2("INPUT", "Measurement auth callback is invalid");
+      if (signal?.aborted) return () => {
+      };
+      let listener = null, stopped = false;
+      const stop = () => {
+        stopped = true;
+        if (listener != null) {
+          try {
+            storage2.remove(listener);
+          } catch {
+          }
+        }
+        signal?.removeEventListener("abort", stop);
+      };
+      signal?.addEventListener("abort", stop, { once: true });
+      try {
+        listener = storage2.listen(MEASUREMENT_AUTH_KEY, () => {
+          if (stopped) return;
+          try {
+            if (!read()) return;
+            stop();
+            callback();
+          } catch {
+            stop();
+          }
+        });
+        if (stopped || signal?.aborted) stop();
+      } catch {
+        stop();
+      }
+      return stop;
+    }
+    return Object.freeze({ read, acquire, loginUrl, watch });
   }
 
   // master-features.mjs
@@ -1667,20 +1763,34 @@
       if (!product || !isCurrent(gen)) return;
       const current = state(gen).madcat;
       if (current.status === "loading" || !force && current.status !== "idle") return;
+      current.stopAuth?.();
+      current.stopAuth = null;
       const code = upper2(product.fnsku || product.asin || product.isbn), identity = (product.fnsku ? "FNSKU:" : "ASIN:") + code;
       const serial = ++current.serial;
       current.status = "loading";
       current.error = "";
       runtime.schedule();
       try {
-        current.authPending = force || typeof auth.read === "function" && !auth.read();
-        const result = !force && cache.get(identity) || await enrichment.recentMadcat({ fnsku: product.fnsku, asin: product.asin || product.isbn }, { signal: gen.controller.signal, forceAuth: force });
+        const cached = !force && cache.get(identity);
+        current.authPending = !cached && typeof auth.read === "function" && !auth.read();
+        const result = cached || await enrichment.recentMadcat({ fnsku: product.fnsku, asin: product.asin || product.isbn }, { signal: gen.controller.signal });
         if (!isCurrent(gen) || current.serial !== serial) return;
         if (result.madcatSource === "raw" && (result.complete !== true || result.windowDays !== 30 || typeof result.madcat !== "boolean")) throw new Error("Incomplete raw Measurement result");
         if (!["raw", "history"].includes(result.madcatSource) || result.madcatSource === "history" && result.madcat !== null && typeof result.madcat !== "boolean") throw new Error("Unrecognized Measurement provenance");
         current.result = result;
         current.status = "ready";
         cache.put(identity, result);
+        if (result.madcatSource === "history" && result.authRequired && !current.autoAuthRetried) {
+          const recover = () => {
+            if (!isCurrent(gen) || current.serial !== serial || current.autoAuthRetried) return;
+            current.autoAuthRetried = true;
+            current.stopAuth?.();
+            current.stopAuth = null;
+            void madcat(gen, true);
+          };
+          current.stopAuth = auth.watch?.(recover, { signal: gen.controller.signal });
+          if (result.fallbackReason === "measurement-login-required" && auth.read?.()) recover();
+        }
       } catch (error) {
         if (!isCurrent(gen) || current.serial !== serial) return;
         current.status = "error";
@@ -1734,7 +1844,7 @@
       if (tab) tab.opener = null;
       else runtime.notify("RIVER popup blocked — allow popups and retry");
       try {
-        onEvidence({ type: "fcr.handoff", script: "FCR MASTER", version: "0.1.1", intent: "read", data: { action: "river.open", warehouse: runtime.warehouse } });
+        onEvidence({ type: "fcr.handoff", script: "FCR MASTER", version: MASTER_VERSION, intent: "read", data: { action: "river.open", warehouse: runtime.warehouse } });
       } catch {
       }
     }
@@ -1819,8 +1929,14 @@
           const label = group.madcat.status === "error" ? "Madcat: ERROR ↻" : group.madcat.status !== "ready" ? group.madcat.authPending ? "Madcat: AUTH…" : "Madcat: CHECK…" : result.madcat === true ? "Madcat: YES" : history ? "Madcat: NO?" : "Madcat: NO";
           const mad = ownButton(host, "madcat", label, () => {
             if (group.madcat.status === "ready" && history && result.authRequired) {
-              const tab = window2.open(auth.loginUrl(product.fnsku || product.asin || product.isbn), "_blank");
-              if (tab) tab.opener = null;
+              if (result.fallbackReason === "measurement-token-expired" || !auth.read?.()) {
+                const tab = window2.open(auth.loginUrl(product.fnsku || product.asin || product.isbn), "tm-v4-measurement-login");
+                if (tab) tab.opener = null;
+                else {
+                  runtime.notify("Measurement login popup blocked — allow popups and retry");
+                  return;
+                }
+              }
             }
             void madcat(gen, true);
           });
@@ -1951,7 +2067,7 @@
     }
     function emit(operationId, phase, data) {
       try {
-        onEvidence({ type: "operation", script: "FCR MASTER", version: "0.1.1", intent: "mutation", operationId, phase, data: { kind: "label-print", endpoint: "Printmon", ...data } });
+        onEvidence({ type: "operation", script: "FCR MASTER", version: MASTER_VERSION, intent: "mutation", operationId, phase, data: { kind: "label-print", endpoint: "Printmon", ...data } });
       } catch {
       }
     }
@@ -2112,7 +2228,7 @@
   }
 
   // master-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.3";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var storage = {
     get: (key, fallback) => GM_getValue(key, fallback),
@@ -2156,7 +2272,7 @@
           actions?.dispose();
         }
       });
-      const auth = createMeasurementAuth({ window, storage });
+      const auth = createMeasurementAuth({ window, storage, onEvidence: evidence });
       const enrichment = createFcrEnrichment({
         warehouse: runtime.warehouse,
         readJson: createGmJsonReader(GM_xmlhttpRequest),

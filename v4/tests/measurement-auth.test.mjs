@@ -20,7 +20,7 @@ class Storage {
   remove(id) { this.listeners.delete(id); }
   save(value = token, captureId = 'fresh') { this.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ token: value, capturedAt: now, captureId })); }
 }
-function fixture(t, { native = false, storage = new Storage(), fetch } = {}) {
+function fixture(t, { native = false, storage = new Storage(), fetch, onEvidence } = {}) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: native ? 'https://jp.item-measurement.aft.a2z.com/item/X012345678' : 'https://fcresearch-fe.aka.amazon.com/BWU2/results' });
   t.after(() => dom.window.close()); const page = dom.window;
   const tasks = new Map(); let sequence = 0;
@@ -37,7 +37,7 @@ function fixture(t, { native = false, storage = new Storage(), fetch } = {}) {
   }
   page.XMLHttpRequest = Xhr;
   const originals = { open: Xhr.prototype.open, header: Xhr.prototype.setRequestHeader, send: Xhr.prototype.send };
-  const auth = createMeasurementAuth({ window: page, storage, now: () => now });
+  const auth = createMeasurementAuth({ window: page, storage, now: () => now, onEvidence });
   return { page, storage, auth, tasks, originalFetch, originals, get fetchCalls() { return fetchCalls; },
     frames: () => [...page.document.querySelectorAll('iframe')], timeout() { for (const [id, callback] of [...tasks]) { tasks.delete(id); callback(); } } };
 }
@@ -98,7 +98,7 @@ test('token update during listener registration cannot be missed or leak a synch
   assert.equal(storage.listeners.size, 0); assert.equal(app.tasks.size, 0); assert.equal(app.frames().length, 0);
 });
 
-test('native fetch capture only stores a valid token from a successful Measurement response and keeps response identity', async t => {
+test('native fetch capture stores the outgoing fresh credential and keeps response identity', async t => {
   const response = new Response('{}', { status: 200 }), app = fixture(t, { native: true, fetch: () => Promise.resolve(response) });
   const dispose = installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now }); t.after(dispose);
   assert.equal(installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now }), dispose);
@@ -108,12 +108,13 @@ test('native fetch capture only stores a valid token from a successful Measureme
   dispose(); assert.equal(app.page.fetch, app.originalFetch);
 });
 
-test('unrelated hosts, rejected native authentication and storage errors cannot change native calls', async t => {
+test('native API failures do not block credential observation; unrelated hosts and storage errors cannot change native calls', async t => {
   const response = new Response('{}', { status: 401 }), failure = new Error('exact native rejection');
   const app = fixture(t, { native: true, fetch: url => url.endsWith('/failure') ? Promise.reject(failure) : Promise.resolve(response) });
   const dispose = installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now }); t.after(dispose);
   assert.equal(await app.page.fetch(MEASUREMENT_ORIGIN + '/prod/measurementEvents/X012345678/FNSKU', { headers: { Authorization: token } }), response);
-  assert.equal(app.auth.read(), null);
+  assert.equal(app.auth.read().token, token);
+  app.storage.data.clear();
   await assert.rejects(app.page.fetch(MEASUREMENT_ORIGIN + '/prod/measurementEvents/failure', { headers: { Authorization: token } }), caught => caught === failure);
   app.storage.failSet = true;
   assert.equal(await app.page.fetch('https://example.test/other', { headers: { Authorization: token } }), response);
@@ -147,6 +148,7 @@ test('late native capture after disposal cannot revive auth state, and hooks ins
   const app = fixture(t, { native: true, fetch: () => new Promise(done => { resolve = done; }) });
   const dispose = installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now });
   const pending = app.page.fetch(MEASUREMENT_ORIGIN + '/prod/measurementEvents/X012345678/FNSKU', { headers: { Authorization: token } });
+  assert.equal(app.auth.read().token, token); app.storage.data.clear();
   const otherOwner = () => Promise.resolve(new Response('{}')); app.page.fetch = otherOwner; dispose();
   const response = new Response('{}'); resolve(response); assert.equal(await pending, response);
   assert.equal(app.page.fetch, otherOwner); assert.equal(app.auth.read(), null);
@@ -163,4 +165,38 @@ test('real source capabilities compose: native token capture feeds acquisition a
   await native.page.fetch(MEASUREMENT_ORIGIN + '/prod/measurementEvents/X012345678/FNSKU', { headers: { Authorization: token } });
   const result = await pending; assert.equal(result.madcat, false); assert.equal(result.madcatSource, 'raw');
   assert.equal(fcr.frames().length, 0); assert.equal(storage.listeners.size, 0); assert.equal(fcr.tasks.size, 0);
+});
+
+
+test('native request-time acquisition does not wait for a pending or HTTP 400 item response', async t => {
+  let release;
+  const promise = new Promise(resolve => { release = resolve; });
+  const app = fixture(t, { native: true, fetch: () => promise });
+  const stop = installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now }); t.after(stop);
+  const result = app.page.fetch(MEASUREMENT_ORIGIN + '/prod/measurementEvents/X012345678/FNSKU', { headers: { Authorization: token } });
+  assert.equal(result, promise); assert.equal(app.auth.read().token, token);
+  release(new Response('{}', { status: 400 })); assert.equal((await result).status, 400);
+});
+
+test('auth recovery watches one valid update and cleans up cancellation and synchronous notification', t => {
+  const app = fixture(t), controller = new AbortController(); let calls = 0;
+  const stop = app.auth.watch(() => { calls++; }, { signal: controller.signal });
+  app.storage.save(jwt({ token_use: 'access' })); assert.equal(calls, 0);
+  app.storage.save(); app.storage.save(otherToken); assert.equal(calls, 1); assert.equal(app.storage.listeners.size, 0); stop();
+  app.auth.watch(() => { calls++; }, { signal: controller.signal }); controller.abort(); app.storage.save(token, 'late');
+  assert.equal(calls, 1); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0); assert.equal(app.frames().length, 0);
+  const original = app.storage.listen.bind(app.storage);
+  app.storage.listen = (key, callback) => { const id = original(key, callback); app.storage.save(otherToken, 'sync'); return id; };
+  app.auth.watch(() => { calls++; }); assert.equal(calls, 2); assert.equal(app.storage.listeners.size, 0);
+});
+
+test('auth diagnostics distinguish cache/frame/deadline/cancellation without credentials or identifiers', async t => {
+  const evidence = [], app = fixture(t, { onEvidence: value => evidence.push(value) });
+  const pending = app.auth.acquire('X012345678'); app.timeout(); assert.equal(await pending, null);
+  const controller = new AbortController(), cancelled = app.auth.acquire('X012345678', { signal: controller.signal });
+  controller.abort(); await assert.rejects(cancelled, { code: 'CANCELLED' });
+  app.storage.save(); await app.auth.acquire('X012345678');
+  assert.deepEqual(evidence.map(value => value.data.outcome), ['started', 'unavailable', 'started', 'failed', 'cached']);
+  const serialized = JSON.stringify(evidence);
+  assert(!serialized.includes(token)); assert(!serialized.includes('X012345678')); assert(!serialized.includes('Authorization'));
 });

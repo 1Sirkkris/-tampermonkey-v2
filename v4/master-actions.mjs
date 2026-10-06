@@ -1,4 +1,5 @@
 import { productPanel } from './master-features.mjs';
+import { MASTER_VERSION } from './master-runtime.mjs';
 
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const upper = value => clean(value).toUpperCase();
@@ -59,7 +60,7 @@ export function createMasterActions({ window, runtime, fetch = window.fetch.bind
   }
   function panel() { return productPanel(document, runtime.current()?.sections.get('product')?.result?.product); }
   function emit(operationId, phase, data) {
-    try { onEvidence({ type: 'operation', script: 'FCR MASTER', version: '0.1.1', intent: 'mutation', operationId, phase, data: { kind: 'label-print', endpoint: 'Printmon', ...data } }); }
+    try { onEvidence({ type: 'operation', script: 'FCR MASTER', version: MASTER_VERSION, intent: 'mutation', operationId, phase, data: { kind: 'label-print', endpoint: 'Printmon', ...data } }); }
     catch { /* Printing cannot require OBS. */ }
   }
   function clickedDescription(code, target, currentPanel) {
