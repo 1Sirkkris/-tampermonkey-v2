@@ -1,6 +1,6 @@
 # FCR Master milestone verification
 
-6 October 2026 (Australia/Sydney). Development installer 0.1.3; **PARTIAL — reported container/Pandash/MADCAT gaps corrected in source, live acceptance pending**.
+6 October 2026 (Australia/Sydney). Development installer 0.1.3; **PARTIAL — corrected paths pass the supplied live sample; full replacement acceptance remains pending**.
 
 - `npm test`: **148 passed**, including 28 native reads, 19 Master, 10 native-integration, 15 feature, 10 action, 3 capture, 21 enrichment, 16 auth and 26 OBS cases.
 - `npm run check`: three installers' metadata/syntax/independence, source syntax and byte-exact source/installer consistency pass. `git diff --check` passes. Source, tests and installers stay under `v4/`; inherited root code is unchanged.
@@ -41,8 +41,21 @@ The 47-event `V4_OBS_2026-10-06T04-52-47-605Z_47events.txt` has SHA-256 `280008c
 
 The exact reason for the user's initial live AUTH state is not established by the earlier OBS log; these are reproduced source defects and restored V2 behaviour, not a claim that live Measurement framing/session acceptance is proven.
 
+## Live follow-up after Master 0.1.3
+
+User reports “much better”. The 98-event `V4_OBS_2026-10-06T05-13-17-635Z_98events.txt` has SHA-256 `e22b311f3d7b2656d6a766689463dbb398d16c98624383d2fa17ada777aa0b73`. Its module versions are native read 0.1.2/enrichment 0.1.1/auth 0.1.1, consistent with Master 0.1.3; no Master-start version event is present. Read activity spans 05:11:58.671–05:13:06.566 UTC, 6 October 2026 (16:11–16:13 Sydney). The raw log remains outside the repository.
+
+- No recorded failed, incomplete, unavailable, error-code or error-type events.
+- Six Product responses correctly conclude empty, rather than producing the prior missing-table failure.
+- Twelve inventories conclude complete, each one page, from 1 to 140 rows.
+- Fourteen exact hazmat and six scanitem reads conclude complete.
+- Four raw Measurement reads conclude with two positive results (one checked event each) and two terminal negative results (zero events each). All four auth outcomes are cached; this proves reuse, not native-frame cold acquisition or renewal.
+- Inventory History and one continuation return HTTP 200. There is no final complete-history assertion, so completeness is not inferred. One unrelated native MoveItems status POST is HTTP 200; it is observation, not V4 mutation confirmation.
+
+This is live success evidence for these specific read paths and supports the user's improvement report. Pandash transient retries, cold/expired auth and fallback upgrades, multi-page inventory, section/date/keyboard controls, BFCache and long idle are not exercised here. Source remains 0.1.3; no additional behaviour change was justified by this clean run.
+
 ## Remaining live acceptance
 
 The reproduced Retry Inventory source blocker is resolved. The next gate is the standalone V4 installer in Tampermonkey with V2/V3 disabled: read-only native searches, A/L click/navigation, table/filter/date controls, exact Size/MADCAT/hazmat, replacement and BFCache/repeated use, and OBS evidence. Actual browser-world hooks, cross-origin Measurement auth/framing, native date-filter state after repeated rendering, long idle and local printer acceptance remain live requirements. Do not call Master a proven V2 replacement yet. The separate V2 native capture is captured-code evidence; the later V4 OBS log is limited live read evidence, not acceptance of these new changes.
 
-No live Amazon service request, inventory mutation, auth acquisition or printer operation succeeded during this verification. All captured-code responses were synthetic and native XHR was blocked in the successful harness run.
+Offline tests and the captured-code harness made no live Amazon service, mutation, auth acquisition or printer requests. Their responses were synthetic and native XHR was blocked. The separate uploaded 98-event user run supplies the limited live read evidence listed above; it does not establish printer or V4 mutation acceptance.

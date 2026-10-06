@@ -5,7 +5,7 @@ Active branch: `v4-cleanroom`. [Scope and rebuild order](BASELINE.md). [Recovery
 | Installer | Version | Verification |
 |---|---|---|
 | [V4 OBS](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/OBS.user.js) | 0.1.2 | 26 offline installer fixtures and metadata/syntax/independence checks pass. Live Tampermonkey acceptance pending. |
-| [FCR Master test candidate](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FCResearch_Master.user.js) | 0.1.3 | 54 Master/native/feature/action fixtures and captured native-code integration pass. Read-only standalone acceptance pending; not a proven V2 replacement. |
+| [FCR Master test candidate](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FCResearch_Master.user.js) | 0.1.3 | 54 Master/native/feature/action fixtures and captured native-code integration pass. Clean live sample: empty Product, inventory, Pandash, Size and cached-auth MADCAT succeed; full V2 replacement acceptance remains pending. |
 | [FCR capture helper](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/diagnostics/FCR_Native_Capture.user.js) | 0.1.0 | Manual read-only diagnostic; 3 fixtures. In FCR, use Tampermonkey menu → Capture native FCR → upload the JSON. No automatic collection or inventory action. |
 
 V4 installers are self-contained. Inherited root scripts remain V2 reference files. The remaining V4 workflows are planned in the baseline and still require implementation.
