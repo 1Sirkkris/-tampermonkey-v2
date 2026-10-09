@@ -1,0 +1,3 @@
+# PO Portal contract
+
+V2 0.1.2: /poportal shell redirects to /poportal/fe preserving query/hash; sticky dark native controls, ASIN/FNSKu, ordered-from/to, explicit calendar month/year/previous/next/day, 6M/12M/Today, Search/Enter, AU/all six conditions/removeZeroFilter=false, native PO ID/status/FC/ordered/shipped/first-last receive/expected/received/discrepancy columns, Full Portal restores search and all columns. V4 never fetches/mutates inventory, does not rebuild result tables, preserves native styling/state via owned attributes and removes masks on disposal. Unknown/missing table schema remains native, not fabricated empty results. Native results/hydration/date/navigation remain read-only live gates; includes Ctrl+Q via V4 ownership markers.

@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Calm Code 0.1.0.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: native toolbox beside login, exact 11 ISS/Damages/Etc roles, native setter/input/change/form submission, one submit per helper, original inline styles preserved. Scoped owned layout replaces V2 global reset/poll; deferred hydration and lifecycle cleanup. Carton/AFT checkpoints preserved.
-- Files modified: calm-runtime/entry.mjs, Calm_Code.user.js, CALM_CONTRACT.md, build.mjs, tests/calm.test.mjs, README/CHECKPOINT.
-- Verification: 256 tests passed / 0 failed, 3 Calm source/generated fixtures; 14 installers, deterministic build/metadata/syntax/independence checks pass. No live form submission.
-- Known gates: native labor form/auth/result. Submission evidence is SUBMITTED then UNKNOWN, never HTTP/DOM click success. AFT remains PARTIAL with documented parity gaps; ISS not built.
-- NEXT: build PO Portal, Screenshot Mode, SIM and RIVER independently; then finish AFT/ISS parity as safely achievable.
-- Pending approval: none for code; live operations/printing/production require explicit approval. No agents.
-- Recovery: source/tests local commit and non-force expected-parent GitHub push/readback. Existing installers preserved.
+- Unit: PO Portal Lite 0.1.0.
+- Status: READY FOR READ-ONLY TEST.
+- Completed: native shell redirect, familiar sticky ASIN/date controls, month/year/day calendar, month-clamped 6M/12M/Today, Search/Enter with exact AU/six conditions, reversible known-column Lite masks and Full Portal; DOM-ready hydration/disposal. Native results are preserved. No inventory action.
+- Files modified: po-runtime/entry.mjs, PO_Portal_Lite.user.js, PO_CONTRACT.md, build.mjs, tests/po.test.mjs, README/CHECKPOINT.
+- Verification: 259 tests passed / 0 failed, 3 PO source/generated fixtures; 15 installers, deterministic metadata/syntax/independence checks pass.
+- Gates: actual authenticated native PO results/date/navigation/markup acceptance. AFT PARTIAL gaps and ISS dependency remain explicit; RIVER/SIM/Screenshot not yet built.
+- NEXT: implement Screenshot Ctrl+Q including PO and new owned styles, then SIM/RIVER; finish AFT/ISS parity.
+- Pending approval: none for safe code/read-only tests; live operational changes/printing/production require explicit approval. No agents.
+- Recovery: source/tests local checkpoint, non-force GitHub expected-parent push and readback.
 
 ## Preserved previous verification and evidence
 

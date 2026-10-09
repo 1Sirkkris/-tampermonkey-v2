@@ -1,0 +1,3 @@
+import{registerWatermark}from'./watermark.mjs';import{createPoPortal}from'./po-runtime.mjs';import{installRouteLifecycle}from'./ui-tools.mjs';
+const VERSION = '0.1.0';
+const guard=Symbol.for('tampermonkey.v4.po.installer');if(!window[guard]){window[guard]={version:VERSION};if(/^\/poportal\/?$/i.test(location.pathname))location.replace('/poportal/fe'+location.search+location.hash);else installRouteLifecycle(window,()=>{if(window.top!==window.self||!/^\/poportal(?:\/|$)/i.test(location.pathname))return;const release=registerWatermark(window,'POP',VERSION),helper=createPoPortal({window});return()=>{helper.dispose();release();};},()=>location.pathname,{waitForDom:true});}
