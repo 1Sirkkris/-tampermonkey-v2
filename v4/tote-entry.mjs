@@ -4,7 +4,7 @@ import { createFcrEnrichment, createGmJsonReader } from './fcr-enrichment.mjs';
 import { createMeasurementAuth, installMeasurementCapture } from './measurement-auth.mjs';
 import { createToteAudit } from './tote-runtime.mjs';
 import { evidence, clean } from './ui-tools.mjs';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const page = typeof unsafeWindow === 'object' ? unsafeWindow : window;
 const guard = Symbol.for('tampermonkey.v4.tote.installer');
 if (!page[guard]) {

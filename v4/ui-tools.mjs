@@ -2,7 +2,7 @@ export const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const upper = value => clean(value).toUpperCase();
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 export function evidence(window, script, version, data) {
-  try { window.dispatchEvent(new window.CustomEvent('tampermonkey-v4:evidence', { detail: JSON.stringify({ script, version, ...data }) })); } catch {}
+  try { const record={ script, version, ...data };if(record.intent==='mutation'&&['SUBMITTED','CONFIRMED','REJECTED','UNKNOWN'].includes(record.phase)&&typeof record.operationId==='string'){record.data={...record.data,stage:record.type};record.type='operation';}window.dispatchEvent(new window.CustomEvent('tampermonkey-v4:evidence', { detail: JSON.stringify(record) })); } catch {}
 }
 export function createReadPool(limit = 4) {
   let running = 0; const jobs = [];
@@ -23,25 +23,27 @@ export function suspiciousDimensions(value) {
   return sizes.some((size, i) => sizes.some((other, j) => i !== j && Math.abs(size - other) < .001)) || rounded === 3 || (Math.min(...sizes) <= 2.001 && rounded >= 2);
 }
 export function printBarcode(window, fetch, code, title, script, version) {
-  const raw = clean(code).replace(/[\s-]/g, '');
-  if (!/^[A-Za-z0-9]+$/.test(raw)) return Promise.reject(new Error('Invalid printable code'));
+  const raw = clean(code).replace(/\s/g, '');
+  if (!/^[A-Za-z0-9_-]+$/.test(raw)) return Promise.reject(new Error('Invalid printable code'));
   const hex = value => [...String(value)].map(char => char.charCodeAt(0).toString(16)).join('');
   const badge = window.document.cookie.split('; ').find(row => row.startsWith('fcmenu-employeeId='))?.slice(18) || '';
   const params = new URLSearchParams({ action: 'print', type: 'barcode', data: hex(raw), text: hex(raw), quantity: '1', desc: hex(title || ''), badgeid: badge, seq: String(Date.now()) });
-  evidence(window, script, version, { type: 'print.submit', intent: 'print', phase: 'SUBMITTED', data: { quantity: 1 } });
+  const operationId=window.crypto.randomUUID();evidence(window, script, version, { type: 'operation', intent: 'mutation', operationId,phase: 'SUBMITTED', data: { kind:'print',quantity: 1 } });
   return fetch('http://localhost:5965/printer?' + params).then(response => {
+    evidence(window, script, version, { type: 'operation', intent: 'mutation',operationId,phase: 'UNKNOWN', data: { status: response.status, physicalOutput: 'unverified' } });
     if (!response.ok) throw new Error('Printmon rejected request');
-    evidence(window, script, version, { type: 'print.response', intent: 'print', phase: 'UNKNOWN', data: { status: response.status, physicalOutput: 'unverified' } });
     return 'Print request sent — verify output';
-  }, error => { evidence(window, script, version, { type: 'print.response', intent: 'print', phase: 'UNKNOWN', data: { outcome: 'network-error' } }); throw error; });
+  }, error => { evidence(window, script, version, { type: 'operation', intent: 'mutation',operationId,phase: 'UNKNOWN', data: { outcome: 'network-error' } }); throw error; });
 }
-export function installRouteLifecycle(window, start, context = () => window.location.pathname + window.location.search + window.location.hash) {
-  let dispose=()=>{}, current=context(), hidden=false;
-  const run=()=>{dispose();dispose=start()||(()=>{});};
+export function installRouteLifecycle(window, start, context = () => window.location.pathname + window.location.search + window.location.hash, { waitForDom = false } = {}) {
+  let dispose=()=>{}, current=context(), hidden=false, ready=!waitForDom||window.document.readyState!=='loading';
+  const run=()=>{dispose();dispose=ready&&!hidden?(start()||(()=>{})):(()=>{});};
+  const domReady=()=>{ready=true;if(!hidden)run();};
+  if(!ready)window.document.addEventListener('DOMContentLoaded',domReady,{once:true});
   run();
   const navigate=()=>{const next=context();if(next!==current){current=next;if(!hidden)run();}};
   const hide=()=>{hidden=true;dispose();dispose=()=>{};};
   const show=event=>{if(event.persisted){hidden=false;current=context();run();}};
   window.addEventListener('hashchange',navigate);window.addEventListener('popstate',navigate);window.addEventListener('pagehide',hide);window.addEventListener('pageshow',show);
-  return()=>{hide();window.removeEventListener('hashchange',navigate);window.removeEventListener('popstate',navigate);window.removeEventListener('pagehide',hide);window.removeEventListener('pageshow',show);};
+  return()=>{hide();window.document.removeEventListener('DOMContentLoaded',domReady);window.removeEventListener('hashchange',navigate);window.removeEventListener('popstate',navigate);window.removeEventListener('pagehide',hide);window.removeEventListener('pageshow',show);};
 }

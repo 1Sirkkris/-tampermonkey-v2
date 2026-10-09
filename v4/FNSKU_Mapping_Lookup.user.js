@@ -73,18 +73,29 @@
   var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   function evidence(window2, script, version, data) {
     try {
-      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify({ script, version, ...data }) }));
+      const record = { script, version, ...data };
+      if (record.intent === "mutation" && ["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(record.phase) && typeof record.operationId === "string") {
+        record.data = { ...record.data, stage: record.type };
+        record.type = "operation";
+      }
+      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify(record) }));
     } catch {
     }
   }
-  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash) {
+  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash, { waitForDom = false } = {}) {
     let dispose = () => {
-    }, current = context(), hidden = false;
+    }, current = context(), hidden = false, ready = !waitForDom || window2.document.readyState !== "loading";
     const run = () => {
       dispose();
-      dispose = start() || (() => {
+      dispose = ready && !hidden ? start() || (() => {
+      }) : (() => {
       });
     };
+    const domReady = () => {
+      ready = true;
+      if (!hidden) run();
+    };
+    if (!ready) window2.document.addEventListener("DOMContentLoaded", domReady, { once: true });
     run();
     const navigate = () => {
       const next = context();
@@ -112,6 +123,7 @@
     window2.addEventListener("pageshow", show);
     return () => {
       hide();
+      window2.document.removeEventListener("DOMContentLoaded", domReady);
       window2.removeEventListener("hashchange", navigate);
       window2.removeEventListener("popstate", navigate);
       window2.removeEventListener("pagehide", hide);

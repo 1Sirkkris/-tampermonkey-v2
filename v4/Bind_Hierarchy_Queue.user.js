@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Bind Hierarchy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native hierarchy queue with durable submission barriers and one batch owner.
 // @match https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
 // @grant unsafeWindow
@@ -68,18 +68,29 @@
   var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   function evidence(window2, script, version, data) {
     try {
-      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify({ script, version, ...data }) }));
+      const record = { script, version, ...data };
+      if (record.intent === "mutation" && ["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(record.phase) && typeof record.operationId === "string") {
+        record.data = { ...record.data, stage: record.type };
+        record.type = "operation";
+      }
+      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify(record) }));
     } catch {
     }
   }
-  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash) {
+  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash, { waitForDom = false } = {}) {
     let dispose = () => {
-    }, current = context(), hidden = false;
+    }, current = context(), hidden = false, ready = !waitForDom || window2.document.readyState !== "loading";
     const run = () => {
       dispose();
-      dispose = start() || (() => {
+      dispose = ready && !hidden ? start() || (() => {
+      }) : (() => {
       });
     };
+    const domReady = () => {
+      ready = true;
+      if (!hidden) run();
+    };
+    if (!ready) window2.document.addEventListener("DOMContentLoaded", domReady, { once: true });
     run();
     const navigate = () => {
       const next = context();
@@ -107,6 +118,7 @@
     window2.addEventListener("pageshow", show);
     return () => {
       hide();
+      window2.document.removeEventListener("DOMContentLoaded", domReady);
       window2.removeEventListener("hashchange", navigate);
       window2.removeEventListener("popstate", navigate);
       window2.removeEventListener("pagehide", hide);
@@ -475,7 +487,7 @@
     function transition(row, state, message = "", details = {}) {
       if (!phases.has(state) || !rows.includes(row)) throw new Error("Invalid operation state");
       if (row.state === "UNKNOWN" && state !== "UNKNOWN") throw new Error("UNKNOWN cannot be automatically replayed");
-      if (row.state === "SUBMITTED" && !["CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
+      if (row.state === "SUBMITTED" && !["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
       const old = { ...row };
       Object.assign(row, details, { state, message });
       try {
@@ -485,6 +497,10 @@
         throw error;
       }
       return row;
+    }
+    function clearKnown() {
+      rows = rows.filter((row) => !["CONFIRMED", "REJECTED"].includes(row.state));
+      save();
     }
     function clearConfirmed() {
       rows = rows.filter((row) => row.state !== "CONFIRMED");
@@ -502,7 +518,7 @@
     }, setDraft(value) {
       draft = String(value);
       save();
-    }, add, transition, clear, clearConfirmed, save, next: () => rows.find((row) => row.state === "QUEUED") };
+    }, add, transition, clear, clearConfirmed, clearKnown, save, next: () => rows.find((row) => row.state === "QUEUED") };
   }
   async function withOperationLock(window2, name, work) {
     if (typeof window2.navigator.locks?.request !== "function") throw new Error("Browser Web Locks unavailable — operation blocked");
@@ -770,6 +786,6 @@
   }
 
   // bind-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   installHierarchy(window, typeof unsafeWindow === "object" ? unsafeWindow : window, "bind", VERSION);
 })();

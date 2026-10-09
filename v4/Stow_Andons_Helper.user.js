@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Stow Andons Helper
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native inline drop controls, product warnings and origin-owned operation workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -598,7 +598,12 @@
   var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   function evidence(window2, script, version, data) {
     try {
-      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify({ script, version, ...data }) }));
+      const record = { script, version, ...data };
+      if (record.intent === "mutation" && ["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(record.phase) && typeof record.operationId === "string") {
+        record.data = { ...record.data, stage: record.type };
+        record.type = "operation";
+      }
+      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify(record) }));
     } catch {
     }
   }
@@ -630,14 +635,20 @@
     const sizes = parts.map(Number), rounded = parts.filter((part) => /\.00$/.test(part)).length;
     return sizes.some((size, i) => sizes.some((other, j) => i !== j && Math.abs(size - other) < 1e-3)) || rounded === 3 || Math.min(...sizes) <= 2.001 && rounded >= 2;
   }
-  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash) {
+  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash, { waitForDom = false } = {}) {
     let dispose = () => {
-    }, current = context(), hidden = false;
+    }, current = context(), hidden = false, ready = !waitForDom || window2.document.readyState !== "loading";
     const run = () => {
       dispose();
-      dispose = start() || (() => {
+      dispose = ready && !hidden ? start() || (() => {
+      }) : (() => {
       });
     };
+    const domReady = () => {
+      ready = true;
+      if (!hidden) run();
+    };
+    if (!ready) window2.document.addEventListener("DOMContentLoaded", domReady, { once: true });
     run();
     const navigate = () => {
       const next = context();
@@ -665,6 +676,7 @@
     window2.addEventListener("pageshow", show);
     return () => {
       hide();
+      window2.document.removeEventListener("DOMContentLoaded", domReady);
       window2.removeEventListener("hashchange", navigate);
       window2.removeEventListener("popstate", navigate);
       window2.removeEventListener("pagehide", hide);
@@ -898,7 +910,7 @@
     function transition(row, state, message = "", details = {}) {
       if (!phases.has(state) || !rows.includes(row)) throw new Error("Invalid operation state");
       if (row.state === "UNKNOWN" && state !== "UNKNOWN") throw new Error("UNKNOWN cannot be automatically replayed");
-      if (row.state === "SUBMITTED" && !["CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
+      if (row.state === "SUBMITTED" && !["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
       const old = { ...row };
       Object.assign(row, details, { state, message });
       try {
@@ -908,6 +920,10 @@
         throw error;
       }
       return row;
+    }
+    function clearKnown() {
+      rows = rows.filter((row) => !["CONFIRMED", "REJECTED"].includes(row.state));
+      save();
     }
     function clearConfirmed() {
       rows = rows.filter((row) => row.state !== "CONFIRMED");
@@ -925,7 +941,7 @@
     }, setDraft(value) {
       draft = String(value);
       save();
-    }, add, transition, clear, clearConfirmed, save, next: () => rows.find((row) => row.state === "QUEUED") };
+    }, add, transition, clear, clearConfirmed, clearKnown, save, next: () => rows.find((row) => row.state === "QUEUED") };
   }
   async function withOperationLock(window2, name, work) {
     if (typeof window2.navigator.locks?.request !== "function") throw new Error("Browser Web Locks unavailable — operation blocked");
@@ -983,10 +999,12 @@
           }, beforeMutation: () => {
             if (disposed || controller.signal.aborted) throw new Error("Native preflight cancelled");
             identity();
-            journal.transition(row, "SUBMITTED", "Submitted — native outcome pending");
+            journal.transition(row, "SUBMITTED", "Submitted — native outcome pending", { operationId: row.id });
+            onEvidence({ type: "operation", intent: "mutation", phase: "SUBMITTED", operationId: row.id, data: { mode } });
             reply("submitted");
           }, onPhase: (phase) => reply("phase", { phase }) });
           journal.transition(row, "CONFIRMED", "Native result confirmed");
+          onEvidence({ type: "operation", intent: "mutation", phase: "CONFIRMED", operationId: row.id, data: { mode } });
           reply("result", { outcome: "CONFIRMED", verifiedBy: result?.verifiedBy || "native-hierarchy-acknowledgement" });
         });
       } catch (error) {
@@ -997,9 +1015,10 @@
         } catch {
           outcome = "UNKNOWN";
         }
+        if (row?.operationId) onEvidence({ type: "operation", intent: "mutation", phase: outcome, operationId: row.operationId, data: { mode } });
         reply("result", { outcome, message: clean(error.message) });
       } finally {
-        onEvidence({ type: "operation.worker", intent: "mutation", data: { mode, state: row?.state || "blocked" } });
+        onEvidence({ type: "operation.worker", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
       }
     };
     window2.addEventListener("message", handle);
@@ -1008,8 +1027,10 @@
       if (disposed) return;
       disposed = true;
       try {
-        if (row?.state === "SUBMITTED") journal.transition(row, "UNKNOWN", "Native worker disposed after submission");
-        else if (row?.state === "READING") journal.transition(row, "REJECTED", "Native preflight disposed");
+        if (row?.state === "SUBMITTED") {
+          journal.transition(row, "UNKNOWN", "Native worker disposed after submission");
+          onEvidence({ type: "operation", intent: "mutation", phase: "UNKNOWN", operationId: row.operationId, data: { mode } });
+        } else if (row?.state === "READING") journal.transition(row, "REJECTED", "Native preflight disposed");
       } catch {
       }
       controller.abort();
@@ -1213,7 +1234,7 @@
       } finally {
         busy = false;
         renderControls();
-        onEvidence({ type: "stow.operation", intent: "mutation", data: { mode, state: row?.state || "blocked" } });
+        onEvidence({ type: "stow.handoff", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
         focus();
       }
     }
@@ -1403,7 +1424,7 @@
   }
 
   // stow-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.stow.installer");
   if (!page[guard]) {
@@ -1431,18 +1452,23 @@
       if (!warehouse || location.hash.startsWith("#iss-console")) return;
       const reader = createFcrReader({ origin: location.origin, warehouse, DOMParser: window.DOMParser, fetch: page.fetch.bind(page), onEvidence: emit });
       const print = (code, qty) => new Promise((resolve, reject) => {
+        const operationId = window.crypto.randomUUID();
+        const completed = (error, status) => {
+          emit({ type: "operation", intent: "mutation", phase: "UNKNOWN", operationId, data: { kind: "print", status: status || 0, physicalOutput: "unverified" } });
+          error ? reject(error) : resolve({ outcome: "UNKNOWN" });
+        };
         const hex = [...new TextEncoder().encode(code)].map((b) => b.toString(16).padStart(2, "0")).join("");
         const url = new URL("http://localhost:5965/printer");
         const count = Math.min(99, Math.max(1, Math.trunc(qty) || 2));
         for (const [k, v] of Object.entries({ action: "print", type: "barcode", data: hex, text: hex, quantity: String(count), desc: "", seq: window.crypto.randomUUID() })) url.searchParams.set(k, v);
-        emit({ type: "stow.print", intent: "print", data: { state: "SUBMITTED", quantity: count } });
-        GM_xmlhttpRequest({ method: "GET", url: url.href, timeout: 15e3, onload: (r) => r.status >= 200 && r.status < 300 ? resolve({ outcome: "UNKNOWN" }) : reject(new Error("Printer HTTP " + r.status)), onerror: () => reject(new Error("Printer network outcome unknown")), ontimeout: () => reject(new Error("Printer timeout outcome unknown")) });
+        emit({ type: "operation", intent: "mutation", phase: "SUBMITTED", operationId, data: { kind: "print", quantity: count } });
+        GM_xmlhttpRequest({ method: "GET", url: url.href, timeout: 15e3, onload: (r) => completed(r.status >= 200 && r.status < 300 ? null : new Error("Printer HTTP " + r.status), r.status), onerror: () => completed(new Error("Printer network outcome unknown")), ontimeout: () => completed(new Error("Printer timeout outcome unknown")) });
       });
       const release = registerWatermark(window, "STOW", VERSION), helper = createStowHelper({ window, reader, operate: createOperationBridge({ window }), print, version: VERSION, onEvidence: emit });
       return () => {
         helper.dispose();
         release();
       };
-    }, () => location.pathname + "|" + (location.hash.startsWith("#iss-console") ? "iss" : location.hash.startsWith("#fcr-tote-checker") ? "tote" : location.hash.startsWith("#tm-v4-worker=") ? "worker" : "native"));
+    }, () => location.pathname + "|" + (location.hash.startsWith("#iss-console") ? "iss" : location.hash.startsWith("#fcr-tote-checker") ? "tote" : location.hash.startsWith("#tm-v4-worker=") ? "worker" : "native"), { waitForDom: true });
   }
 })();

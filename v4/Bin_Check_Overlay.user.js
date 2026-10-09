@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Bin Check Overlay
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native filtered inventory snapshot and P-level floor overlay.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -542,34 +542,46 @@
   var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   function evidence(window2, script, version, data) {
     try {
-      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify({ script, version, ...data }) }));
+      const record = { script, version, ...data };
+      if (record.intent === "mutation" && ["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(record.phase) && typeof record.operationId === "string") {
+        record.data = { ...record.data, stage: record.type };
+        record.type = "operation";
+      }
+      window2.dispatchEvent(new window2.CustomEvent("tampermonkey-v4:evidence", { detail: JSON.stringify(record) }));
     } catch {
     }
   }
   function printBarcode(window2, fetch, code, title, script, version) {
-    const raw = clean(code).replace(/[\s-]/g, "");
-    if (!/^[A-Za-z0-9]+$/.test(raw)) return Promise.reject(new Error("Invalid printable code"));
+    const raw = clean(code).replace(/\s/g, "");
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) return Promise.reject(new Error("Invalid printable code"));
     const hex = (value) => [...String(value)].map((char) => char.charCodeAt(0).toString(16)).join("");
     const badge = window2.document.cookie.split("; ").find((row) => row.startsWith("fcmenu-employeeId="))?.slice(18) || "";
     const params = new URLSearchParams({ action: "print", type: "barcode", data: hex(raw), text: hex(raw), quantity: "1", desc: hex(title || ""), badgeid: badge, seq: String(Date.now()) });
-    evidence(window2, script, version, { type: "print.submit", intent: "print", phase: "SUBMITTED", data: { quantity: 1 } });
+    const operationId = window2.crypto.randomUUID();
+    evidence(window2, script, version, { type: "operation", intent: "mutation", operationId, phase: "SUBMITTED", data: { kind: "print", quantity: 1 } });
     return fetch("http://localhost:5965/printer?" + params).then((response) => {
+      evidence(window2, script, version, { type: "operation", intent: "mutation", operationId, phase: "UNKNOWN", data: { status: response.status, physicalOutput: "unverified" } });
       if (!response.ok) throw new Error("Printmon rejected request");
-      evidence(window2, script, version, { type: "print.response", intent: "print", phase: "UNKNOWN", data: { status: response.status, physicalOutput: "unverified" } });
       return "Print request sent — verify output";
     }, (error) => {
-      evidence(window2, script, version, { type: "print.response", intent: "print", phase: "UNKNOWN", data: { outcome: "network-error" } });
+      evidence(window2, script, version, { type: "operation", intent: "mutation", operationId, phase: "UNKNOWN", data: { outcome: "network-error" } });
       throw error;
     });
   }
-  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash) {
+  function installRouteLifecycle(window2, start, context = () => window2.location.pathname + window2.location.search + window2.location.hash, { waitForDom = false } = {}) {
     let dispose = () => {
-    }, current = context(), hidden = false;
+    }, current = context(), hidden = false, ready = !waitForDom || window2.document.readyState !== "loading";
     const run = () => {
       dispose();
-      dispose = start() || (() => {
+      dispose = ready && !hidden ? start() || (() => {
+      }) : (() => {
       });
     };
+    const domReady = () => {
+      ready = true;
+      if (!hidden) run();
+    };
+    if (!ready) window2.document.addEventListener("DOMContentLoaded", domReady, { once: true });
     run();
     const navigate = () => {
       const next = context();
@@ -597,6 +609,7 @@
     window2.addEventListener("pageshow", show);
     return () => {
       hide();
+      window2.document.removeEventListener("DOMContentLoaded", domReady);
       window2.removeEventListener("hashchange", navigate);
       window2.removeEventListener("popstate", navigate);
       window2.removeEventListener("pagehide", hide);
@@ -827,7 +840,7 @@
   }
 
   // bin-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.bin.installer");
   if (!page[guard]) {

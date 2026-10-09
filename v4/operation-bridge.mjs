@@ -24,16 +24,16 @@ export function serveOperationBridge({window,mode,driver,identity,onEvidence=()=
    if(journal.rows.some(r=>r.requestId===input.id||upper(r.container)===upper(input.container)&&['SUBMITTED','UNKNOWN','QUEUED','READING'].includes(r.state)))throw new Error('Native recovery ledger already owns this container — verify unresolved work');
    row=journal.add([input.container],{mode:mode==='move'?'drop':'unbind',destination:clean(input.destination),requestId:input.id})[0];
    journal.transition(row,'READING','Native preflight');
-   const result=await driver(row,{mode:'unbind',signal:controller.signal,checkRunning:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');},beforeMutation:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');identity();journal.transition(row,'SUBMITTED','Submitted — native outcome pending');reply('submitted');},onPhase:phase=>reply('phase',{phase})});
-   journal.transition(row,'CONFIRMED','Native result confirmed');reply('result',{outcome:'CONFIRMED',verifiedBy:result?.verifiedBy||'native-hierarchy-acknowledgement'});
+   const result=await driver(row,{mode:'unbind',signal:controller.signal,checkRunning:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');},beforeMutation:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');identity();journal.transition(row,'SUBMITTED','Submitted — native outcome pending',{operationId:row.id});onEvidence({type:'operation',intent:'mutation',phase:'SUBMITTED',operationId:row.id,data:{mode}});reply('submitted');},onPhase:phase=>reply('phase',{phase})});
+   journal.transition(row,'CONFIRMED','Native result confirmed');onEvidence({type:'operation',intent:'mutation',phase:'CONFIRMED',operationId:row.id,data:{mode}});reply('result',{outcome:'CONFIRMED',verifiedBy:result?.verifiedBy||'native-hierarchy-acknowledgement'});
   });}catch(error){
    let outcome=row?.state==='SUBMITTED'||row?.state==='UNKNOWN'?'UNKNOWN':'REJECTED';if(row?.state==='SUBMITTED'&&error.outcome==='REJECTED')outcome='REJECTED';
    try{if(row)journal.transition(row,outcome,error.message);}catch{outcome='UNKNOWN';}
-   reply('result',{outcome,message:clean(error.message)});
-  }finally{onEvidence({type:'operation.worker',intent:'mutation',data:{mode,state:row?.state||'blocked'}});}
+   if(row?.operationId)onEvidence({type:'operation',intent:'mutation',phase:outcome,operationId:row.operationId,data:{mode}});reply('result',{outcome,message:clean(error.message)});
+  }finally{onEvidence({type:'operation.worker',intent:'workflow',data:{mode,state:row?.state||'blocked'}});}
  };
  window.addEventListener('message',handle);reply('ready');
- const dispose=()=>{if(disposed)return;disposed=true;try{if(row?.state==='SUBMITTED')journal.transition(row,'UNKNOWN','Native worker disposed after submission');else if(row?.state==='READING')journal.transition(row,'REJECTED','Native preflight disposed');}catch{}controller.abort();window.removeEventListener('message',handle);};
+ const dispose=()=>{if(disposed)return;disposed=true;try{if(row?.state==='SUBMITTED'){journal.transition(row,'UNKNOWN','Native worker disposed after submission');onEvidence({type:'operation',intent:'mutation',phase:'UNKNOWN',operationId:row.operationId,data:{mode}});}else if(row?.state==='READING')journal.transition(row,'REJECTED','Native preflight disposed');}catch{}controller.abort();window.removeEventListener('message',handle);};
  window.addEventListener('pagehide',dispose,{once:true});return dispose;
 }
 export function createOperationBridge({window,timeoutMs=120000,readyMs=25000}){
