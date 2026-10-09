@@ -1,0 +1,4 @@
+import{registerWatermark}from'./watermark.mjs';import{createMappingUI,createMappingTransport}from'./fnsku-runtime.mjs';import{evidence,installRouteLifecycle}from'./ui-tools.mjs';
+const VERSION = '0.1.0';
+const guard='data-tm-v4-fnsku-installer';
+if(!document.documentElement.hasAttribute(guard)){document.documentElement.setAttribute(guard,VERSION);installRouteLifecycle(window,()=>{if(!location.pathname.startsWith('/tool/fnsku-mappings-tool'))return;const release=registerWatermark(window,'FNSKU',VERSION);const ui=createMappingUI({window,read:createMappingTransport(window,GM_xmlhttpRequest),version:VERSION,onEvidence:data=>evidence(window,'FNSKU',VERSION,data),getToken:()=>document.querySelector('input[name="anti-csrftoken-a2z"],textarea[name="anti-csrftoken-a2z"]')?.value||new URL(location.href).searchParams.get('anti-csrftoken-a2z')||''});return()=>{ui.dispose();release();};},()=>location.pathname+location.search);}

@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Bin Check Overlay.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING. Bin 0.1.0 added; Tote 0.1.0, Master 0.1.5 and OBS 0.1.3 remain candidates.
-- Completed: native Inventory-nav start, exact applied-filter/visible-DOM snapshot provenance, P-level floor resolution, All/P1–P4/quantity sorts, pause/resume/hide/fresh snapshot, Copy visible TSV, Lazy highest-count P2/P3/P4 bins per FNSKU, Alt-print. One 660px bottom-right scoped CSS owner; targeted native observer; four active reads maximum, no polling. Private native jQuery stays in a local adapter, not written into page globals.
-- Files modified: BIN_CONTRACT.md, bin-entry.mjs, bin-runtime.mjs, tests/bin.test.mjs, ui-tools.mjs, build.mjs, Bin_Check_Overlay.user.js, generated bundled consumers, README.md, CHECKPOINT.md.
-- Verification: 170 tests passed / 0 failed; 7 Bin source/installer fixtures, including filtered snapshots, floor conflicts/login, pause/cleanup, TSV and independent startup. Build/check/whitespace pass; inherited V2/V3 unchanged.
-- Known live gates: native DataTables applied-filter access and floor schema, Tampermonkey watermark, optional Printmon output. Read-only snapshot does not assert complete unfiltered inventory. Master/Tote gates remain as recorded. All remaining BASELINE tools unbuilt.
-- NEXT: FNSKU Mapping exact regional lookup/partial results/native handoff, contract → implementation → fixtures → pushed checkpoint.
-- Pending approval: none for source. No live inventory/hierarchy/edit/print action or production rollout authorised/performed.
-- Recovery: remote checkpoint is authoritative; GitHub connector commit + non-force expected-parent ref update + HEAD readback. Save approx. 10 minutes, before script switches; WIP if unfinished; no sub-agents.
+- Unit: FNSKU Mapping.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING. FNSKU 0.1.0 added; all preceding candidates retained.
+- Completed: exact NA/EU source lookup + JP fallback/direct ASIN/candidates; source six-column and candidate tables with BOTH/MSKU/MERCHANT rankings; native partial-page handoff per region; visible failures/ambiguity; Enter, Clear cancellation, per-field copy, sanitized Debug, minimize and region navigation. Fresh current native token, bounded cancellable GM reads; no idle requests or V2/V3 dependency. One familiar top-right CSS owner and real footer.
+- Files modified: FNSKU_CONTRACT.md, fnsku-runtime.mjs, fnsku-entry.mjs, tests/fnsku.test.mjs, build.mjs, FNSKU_Mapping_Lookup.user.js, README.md, CHECKPOINT.md.
+- Verification: full suite 180 tests pass / 0 fail; 10 FNSKU fixtures exercise exact identity, ambiguous ASIN, region failures, native pagination, GM cancellation/redirect validation, stale Clear, standalone Enter/minimize/BFCache. Build/check/whitespace pass.
+- Known live gates: native regional auth/CSRF/results schema, real browser navigation/copy. First page remains explicit PARTIAL with native continuation, preserving V2 handoff. No complete cross-region claim when a region fails.
+- NEXT: native Bind + Unbind contract; implement one canonical hierarchy engine/owner with separate native installers, persisted SUBMITTED/UNKNOWN barriers and current identity. Validate native template requirements before mutation.
+- Pending approval: none for code. Live mutations/printing and production deployment require approval and have not occurred.
+- Recovery: save via connector commit and non-force expected-SHA update, then read remote HEAD; retry stale readback only, never replay a write. Approx. 10-minute save discipline; no agents.
 
 ## Preserved previous verification and evidence
 

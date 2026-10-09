@@ -38,3 +38,7 @@ Current full suite: 163 offline tests. Tote keeps all twelve system columns and 
 | [V4 Bin Check](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bin_Check_Overlay.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 7 Bin | Native filter/floor schema, optional printer |
 
 Current full suite: 170 offline tests; generated installers + source checks pass.
+
+| [V4 FNSKU Mapping](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FNSKU_Mapping_Lookup.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 10 FNSKU | Native regional auth/results |
+
+Current full suite: 180 offline tests. Read-only candidate testing order: OBS + Master, Tote, Bin, FNSKU. Optional printing remains separately approved.

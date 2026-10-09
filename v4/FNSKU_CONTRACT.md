@@ -1,0 +1,7 @@
+# FNSKU Mapping contract
+
+Evidence: V2 FNSKU_Mapping_Lookup 0.1.17/current source, BASELINE F07 and Sep 30 exact-mapping failure. PRESERVE: native console fixed top-right lookup, scanner Enter, NA/EU/JP navigation, Clear, minimize, Copy Debug, per-value copy, source-region six-column table, JP candidates ranked BOTH/MSKU/MERCHANT, ASIN-direct JP search, JP source fallback and native More Results handoff. Partial regional results stay visibly partial.
+
+STATE: one cancellable lookup generation; per-region exact rows and completion provenance; no cached identity/token. SUCCESS: exact FNSKU→ASIN/ASIN→FNSKU row equality from the native result table. Multiple distinct source ASINs remain ambiguous; merchant/MSKU similarity never proves identity. UNKNOWN: login/redirect/malformed schema/transport failure is a region error; retained successes are partial. Native Next means first-page-only, never a complete result. RESET: Clear aborts active GM requests and stale results cannot write; new scan replaces lookup; pagehide disposes UI/readers; BFCache creates fresh owner. DEPENDENCIES: authenticated regional native GETs and current native CSRF token, GM transport bundled in installer; OBS optional.
+
+Canonical scoped CSS, stable script identity, V4 footer, no polling. Native forms/results/cross-region auth are live gates. No mutation. Tokens/URLs/response bodies are excluded from debug and OBS.
