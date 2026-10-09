@@ -486,6 +486,10 @@
       }
       return row;
     }
+    function clearConfirmed() {
+      rows = rows.filter((row) => row.state !== "CONFIRMED");
+      save();
+    }
     function clear() {
       rows = rows.filter((row) => ["SUBMITTED", "UNKNOWN"].includes(row.state));
       draft = "";
@@ -498,7 +502,7 @@
     }, setDraft(value) {
       draft = String(value);
       save();
-    }, add, transition, clear, save, next: () => rows.find((row) => row.state === "QUEUED") };
+    }, add, transition, clear, clearConfirmed, save, next: () => rows.find((row) => row.state === "QUEUED") };
   }
   async function withOperationLock(window2, name, work) {
     if (typeof window2.navigator.locks?.request !== "function") throw new Error("Browser Web Locks unavailable — operation blocked");

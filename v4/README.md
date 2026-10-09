@@ -47,3 +47,7 @@ Current full suite: 180 offline tests. Read-only candidate testing order: OBS + 
 | [V4 Unbind](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Unbind_Hierarchy_Queue.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 14 shared hierarchy | Native identity/acknowledgement + controlled approval |
 
 194 offline tests. Hierarchy fixtures prove source state/recovery and request composition, not real inventory outcomes. Do not run mutations without approval; unknown rows remain visible and non-runnable.
+
+| [V4 Dropzone](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Dropzone_Selector_Queue.user.js) | 0.1.0 | PARTIAL | 8 Drop | Empty-container native location evidence; authenticated exact destination readback |
+
+202 offline tests. Dropzone refuses to submit containers whose location cannot be safely verified. HTTP 200 never marks a move complete. This empty-container gate is an explicit V2 parity limitation, not test readiness for that case.
