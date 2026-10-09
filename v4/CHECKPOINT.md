@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Dropzone native submission ownership correction, 0.1.2.
-- Status: PARTIAL — empty-container location evidence remains missing. Native Enter and queue now share durable ownership, preflight, SUBMITTED-before-send and exact destination readback.
-- Completed: native fetch/async XHR guard, dynamic authenticated FCR origin, queue selection freeze, Pause cancels only preflight, Clear waits for native settlement, UNKNOWN blocks replay and survives Clear/reload. Existing native destination autofill and original response objects preserved. No live operations.
-- Files modified: drop-native/entry/runtime.mjs, move-container.mjs, generated Dropzone and Stow installers, tests/drop.test.mjs, MOVE_CONTAINER_CONTRACT.md, README.md, CHECKPOINT.md.
-- Verification: 240 tests passed / 0 failed, including 14 Drop fixtures; 11 deterministic installers / 42 source modules, metadata/syntax/independence and whitespace pass. Native fetch/XHR, empty preflight, wrong 200 destination, Pause before/after submission and Clear settlement covered.
-- Known gates: empty containers fail before send until reliable native location evidence exists. Native-world attachment, identity/auth/outerLocation semantics, response/native scanner markup and long batches remain live-only. Stow native framing/auth gate remains. Sideline 0.1.0 preserved at previous checkpoint.
-- NEXT: implement AFT Edit EACH/SKU, Move and FCSKU Flip from V2 behavioral reference; retain native interfaces and explicit unresolved mutation barriers. Then ISS and independent remaining tools. Preserve existing installers.
-- Pending approval: none for internal implementation. Live inventory/hierarchy/editing/printing and rollout require explicit approval.
-- Recovery: non-force GitHub expected-parent commit/ref plus remote readback, local source/test recovery commit, no subagents. Read AGENTS.md, BRIEF.txt, BASELINE.md and this file. Continue from NEXT.
+- Unit: AFT native client/state extraction.
+- Status: PARTIAL — WIP / NOT VERIFIED installer. Existing 11 installers remain built/verified; no AFT installer yet.
+- Completed: AFT native object/instruction identity parsing, hidden native step exclusion, owner/state/quantity radio extraction, exact action/status/end/fresh workflow protocol, bounded active-only native status polling and response/auth validation. Seven proven native mode definitions retained. AFT_CONTRACT.md derives requirements from V2 0.9.46.
+- Files modified: aft-client.mjs, tests/aft.test.mjs, AFT_CONTRACT.md, README.md, CHECKPOINT.md.
+- Verification: 245 tests passed / 0 failed; 5 new actual AFT client/parser fixtures. Existing 11 installer build/check preserved. No live operations.
+- Known unfinished: durable AFT runner, EACH/SKU/Date/Move/Flip UI and queue, native mode switching, mutation/readback recovery, generated installer and behavior fixtures. Native markup/auth/outcomes remain live gates.
+- NEXT: implement durable AFT workflow runner, then familiar native UI/installer and integration tests; checkpoint WIP if deadline arrives. Then ISS and remaining independent tools.
+- Pending approval: none for internal implementation. Live operations/printing/production require explicit approval. No subagents.
+- Recovery: pushed expected-parent GitHub commit/ref, local source/tests checkpoint. Existing installers are untouched during source WIP.
 
 ## Preserved previous verification and evidence
 

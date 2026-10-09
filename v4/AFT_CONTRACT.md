@@ -1,0 +1,13 @@
+# AFT native contract
+
+PRESERVE: V2 0.9.46 native AFT host and left-side Edit EACH/SKU/Date, Move EACH/ALL/QTY, FCSKU Flip helpers; top-right seven mode choices; source/disposition controls, structured S/P/U quantities, scanner/Enter/123START, queue rows, Stop/Clear/minimise, expiration helpers.
+
+FAILURES: F04/F05/F09 uncertain action replay, stale workflow IDs, mode/submission conflicts; V2 recovery loops are not permission to replay UNKNOWN. V3 is not a code base.
+
+STATE: native objectId/instructionId, one browser owner for native /action batch, durable rows and explicit submitted outcomes. Persist before each inventory-changing Confirm/destination or date removal. Status polling only while an explicit native operation is PROCESSING, bounded and cancelled appropriately. Stop prevents later inventory submissions but settles an accepted one. Clear/reload retain unresolved state.
+
+SUCCESS: exact native workflow identity, valid READY/COMPLETE status and explicit successful native workflow state. Move additionally requires exact complete source/destination quantity readback; HTTP 200, READY or disappearance alone is not movement proof. Inventory states and opaque source-radio values come from exact native labels. Quantity/owner ambiguity fails closed.
+
+UNKNOWN: lost/malformed/redirected/status timeout or mismatched workflow; no automatic replay, no automatic /end that could erase uncertainty. Date removal and replacement are distinct mutations. Production acceptance requires native schema, scanner and authenticated readback evidence.
+
+RESET: known completed/rejected work may end and acquire a different native workflow ID. UNKNOWN blocks mode changes and later runs until native outcome is reviewed. Ordinary native UI remains at its proven host. All implementations bundled; OBS optional; no V2/V3 globals/storage/CSS imports.
