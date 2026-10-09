@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Tote Audit / FC Lite.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING. New self-contained FC_Lite 0.1.0; Master 0.1.5 contains the additive native barcode-read capability, original exact product reads unchanged; OBS 0.1.3 unchanged.
-- Completed: standalone native route/Dimensions launcher, full twelve-column system inventory, pending scanner queue and failed-load retry, duplicate physical quantities/overcount display, exact X0/ZZ labels, Finish/new tote/Reset cancellation, bounded four-worker reads, hazmat recheck, suspicious dimensions/hover, bin/MADCAT recheck, print click, Copy Stats and Full FCResearch. Canonical scoped CSS; no old runtime/core. Build computes all outputs before replacing installers.
-- Files modified: TOTE_CONTRACT.md, tote-entry.mjs, tote-runtime.mjs, ui-tools.mjs, tests/tote.test.mjs, tests/fcr-read.test.mjs, fcr-read.mjs, master-entry.mjs, build.mjs, generated Master + FC_Lite, README.md, CHECKPOINT.md.
-- Verification: 163 tests pass / 0 fail; 9 Tote source/installer fixtures + 2 barcode-read fixtures added. Build/check/whitespace pass. No live request made by tests.
-- Known unfinished/live gates: native barcode search provenance/deployed markup, scanner pace, Measurement/Pandash auth and print output. Captured schemas/fixtures are not live proof. All other BASELINE operational scripts still unbuilt; Master historical live gates below.
-- NEXT: Bin Check Overlay contract and clean native Inventory-nav snapshot/filter/floor UI. Do not block independent workflows on Master live acceptance.
-- Pending approval: none for ordinary V4 code. Live print/inventory and rollout remain unauthorised.
-- Recovery saves: GitHub connector tree/commit, non-force expected-parent ref update, read back HEAD. Local source preserved; remote checkpoint authoritative. Approx. 10-minute saves, WIP if unfinished; no agents.
+- Unit: Bin Check Overlay.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING. Bin 0.1.0 added; Tote 0.1.0, Master 0.1.5 and OBS 0.1.3 remain candidates.
+- Completed: native Inventory-nav start, exact applied-filter/visible-DOM snapshot provenance, P-level floor resolution, All/P1–P4/quantity sorts, pause/resume/hide/fresh snapshot, Copy visible TSV, Lazy highest-count P2/P3/P4 bins per FNSKU, Alt-print. One 660px bottom-right scoped CSS owner; targeted native observer; four active reads maximum, no polling. Private native jQuery stays in a local adapter, not written into page globals.
+- Files modified: BIN_CONTRACT.md, bin-entry.mjs, bin-runtime.mjs, tests/bin.test.mjs, ui-tools.mjs, build.mjs, Bin_Check_Overlay.user.js, generated bundled consumers, README.md, CHECKPOINT.md.
+- Verification: 170 tests passed / 0 failed; 7 Bin source/installer fixtures, including filtered snapshots, floor conflicts/login, pause/cleanup, TSV and independent startup. Build/check/whitespace pass; inherited V2/V3 unchanged.
+- Known live gates: native DataTables applied-filter access and floor schema, Tampermonkey watermark, optional Printmon output. Read-only snapshot does not assert complete unfiltered inventory. Master/Tote gates remain as recorded. All remaining BASELINE tools unbuilt.
+- NEXT: FNSKU Mapping exact regional lookup/partial results/native handoff, contract → implementation → fixtures → pushed checkpoint.
+- Pending approval: none for source. No live inventory/hierarchy/edit/print action or production rollout authorised/performed.
+- Recovery: remote checkpoint is authoritative; GitHub connector commit + non-force expected-parent ref update + HEAD readback. Save approx. 10 minutes, before script switches; WIP if unfinished; no sub-agents.
 
 ## Preserved previous verification and evidence
 

@@ -34,3 +34,7 @@ Shared V4 active runtime footer is included in Master/OBS; 4 source lifecycle fi
 | [V4 Tote Audit](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FC_Lite.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 9 Tote + 2 barcode | Scanner pace, deployed barcode schema, auth, optional printer |
 
 Current full suite: 163 offline tests. Tote keeps all twelve system columns and queued scans after inventory failure. No live mutations performed.
+
+| [V4 Bin Check](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bin_Check_Overlay.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 7 Bin | Native filter/floor schema, optional printer |
+
+Current full suite: 170 offline tests; generated installers + source checks pass.

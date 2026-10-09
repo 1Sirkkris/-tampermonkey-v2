@@ -35,3 +35,13 @@ export function printBarcode(window, fetch, code, title, script, version) {
     return 'Print request sent — verify output';
   }, error => { evidence(window, script, version, { type: 'print.response', intent: 'print', phase: 'UNKNOWN', data: { outcome: 'network-error' } }); throw error; });
 }
+export function installRouteLifecycle(window, start, context = () => window.location.pathname + window.location.search + window.location.hash) {
+  let dispose=()=>{}, current=context(), hidden=false;
+  const run=()=>{dispose();dispose=start()||(()=>{});};
+  run();
+  const navigate=()=>{const next=context();if(next!==current){current=next;if(!hidden)run();}};
+  const hide=()=>{hidden=true;dispose();dispose=()=>{};};
+  const show=event=>{if(event.persisted){hidden=false;current=context();run();}};
+  window.addEventListener('hashchange',navigate);window.addEventListener('popstate',navigate);window.addEventListener('pagehide',hide);window.addEventListener('pageshow',show);
+  return()=>{hide();window.removeEventListener('hashchange',navigate);window.removeEventListener('popstate',navigate);window.removeEventListener('pagehide',hide);window.removeEventListener('pageshow',show);};
+}

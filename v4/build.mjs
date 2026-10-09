@@ -43,7 +43,9 @@ export function obsBuild() {
   const banner = readFileSync(root + '/obs-metadata.txt', 'utf8').replace('${version}', version);
   return buildSync({ entryPoints: [root + '/obs-entry.mjs'], bundle: true, write: false, format: 'iife', target: 'es2022', legalComments: 'none', banner: { js: banner }, charset: 'utf8' }).outputFiles[0].text;
 }
+const fcrMatches = ['http://fcresearch-fe.aka.amazon.com/*','https://fcresearch-fe.aka.amazon.com/*','http://qi-fcresearch-fe.corp.amazon.com/*','https://qi-fcresearch-fe.corp.amazon.com/*','http://qi-fcresearch-jp.corp.amazon.com/*','https://qi-fcresearch-jp.corp.amazon.com/*','http://qifcr.fe.aftx.amazonoperations.app/*','https://qifcr.fe.aftx.amazonoperations.app/*'].map(url=>'@match '+url);
 const additional = [
+  {file:'Bin_Check_Overlay.user.js',entry:'bin-entry.mjs',name:'V4 Bin Check Overlay',description:'Native filtered inventory snapshot and P-level floor overlay.',extra:[...fcrMatches,'@grant unsafeWindow']},
   { file: 'FC_Lite.user.js', entry: 'tote-entry.mjs', name: 'V4 Tote Audit', description: 'Independent FC-Lite Tote Audit; complete inventory and physical scans.', extra: [
     '@match http://fcresearch-fe.aka.amazon.com/*', '@match https://fcresearch-fe.aka.amazon.com/*',
     '@match http://qi-fcresearch-fe.corp.amazon.com/*', '@match https://qi-fcresearch-fe.corp.amazon.com/*',

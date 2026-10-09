@@ -1,0 +1,7 @@
+# Bin Check Overlay contract
+
+Evidence: V2 Bin_Check_Overlay 7.4.11 and native FCR section/read contracts. PRESERVE: Inventory-nav orange start button; snapshot the current applied filter (DataTables all filtered pages, otherwise visible DOM only); P-level containers; fixed 660px bottom-right overlay; All/P1–P4, floor/quantity sort, pause/resume, hide/reopen, summaries, Lazy Bin Check (highest-quantity P2/P3/P4 bin per FNSKU). Retain requested Copy visible TSV and Alt+click printing for bin/FNSKU; normal container click opens FCR.
+
+FAILURES: do not fetch an unfiltered replacement inventory; do not guess floor from arbitrary body numbers; do not treat partial snapshot as full inventory; errors remain unknown. STATE: one snapshot/run generation and bounded four-worker hierarchy reads. SUCCESS: source snapshot is labelled, hierarchy floor is taken from the native label or V2's exact first-card fourth-row location field. UNKNOWN: show P- and warning, retain row; no false floor. RESET: opening takes a fresh snapshot, aborts prior reads; Pause allows already-started reads to settle but starts no later jobs; Hide retains ongoing read-only work; route/pagehide disposal cancels it. DEPENDENCIES: native FCR/DataTables, bundled read capability; optional explicit Printmon; OBS optional.
+
+Live gates: deployed DataTables filter/snapshot, native hierarchy floor markup, hover/Alt-print and printer output. No inventory movement. CSS has one scoped owner; ignores Tote and ISS routes.
