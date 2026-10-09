@@ -1,15 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: mutation/scanner regression hardening — AFT 0.1.3, Sideline 0.1.2, ISS 0.1.1.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: AFT does not automatically repeat an inventory Confirm when native confirmation remains; UNKNOWN blocks Run/end/replay. Standalone Move destination rescan starts item-only batch, control containers/START excluded by canonical parser. Scanner caret/newline handling preserved. Sideline lost-response/disposal now emits one terminal UNKNOWN with the original request identity; late success cannot erase it. Bundled ISS gets these source fixes. No live operation.
-- Files modified: AFT workflow/runtime/entry/installer/tests/contract, Sideline workflow/entry/installer/tests/contract, ISS entry/installer/contract, README/CHECKPOINT.
-- Verification: 300 tests passed / 0 failed; AFT 19, Sideline 23, ISS 13; all 19 deterministic installer and 66 module syntax/metadata/independence checks pass; whitespace pass.
-- Material safety difference: V2 repeated native Confirm up to ten times while a confirmation persisted. V4 sends one then retains UNKNOWN for native outcome review. Additional legitimate native confirmation stages require captured acceptance evidence before automation; this follows the explicit no-unknown-repeat requirement. Known ERRORED recovery remains bounded to three fresh-workflow checks. No UI relocation.
-- Gates: actual frame/auth/browser-world/locks/native controls/accepted operations; AFT additional-confirmation stage, date/Flip/mode batches; Sideline native hazard/expiry/Predicant/scanner pace. Drop/Stow PARTIAL empty-container location proof. Existing FCR gates preserved.
-- NEXT: bring the existing read-only FCR capture helper into deterministic source/build, add its active-script watermark and enforce watermark coverage for every installer. Then suite integration/F01–F16 test-readiness matrix, explicit remaining gaps and final pushed delivery checkpoint.
+- Unit: deterministic diagnostic + full installer watermark coverage.
+- Status: READY FOR READ-ONLY TEST (capture helper); operational candidates retain README labels.
+- Completed: native capture source extracted to canonical entry and deterministic atomic build, version 0.1.1/FCAP footer, duplicate startup and BFCache handling. Captures exclude owned V4 UI/styles. All 19 installers now require footer coverage and true source/metadata versions. Actual separate Tote/ISS/Screenshot/capture bundles pass shared footer/route exclusion/Ctrl+Q/BFCache/zero idle API fixtures.
+- Files modified: native-capture-entry, diagnostic installer, build/checks, native-capture tests, suite tests, README/CHECKPOINT.
+- Verification: 303 tests passed / 0 failed; 19 deterministic installer checks and 67 source module checks pass; whitespace pass. No live request/action performed.
+- Known gates: real Tampermonkey auth/worlds/native controls/visual/scanner pace; Drop/Stow PARTIAL empty-container location. AFT additional confirmation remains UNKNOWN/manual native outcome gate. Source review found Sideline idle Reset/second Stop can write a stale journal without the native workflow lock; no fixture reproducer yet, NEXT must address before final delivery.
+- NEXT: reproduce competing Sideline Reset against submitted/queued owner; acquire canonical native lock/reload current ledger for all idle clears; ensure local Stop does not write while another owner holds workflow. Add actual source fixture, rebuild both native Sideline and bundled ISS, checkpoint. Then final staged testing matrix.
 - Pending approval: none for code; live operational/ticket/printing/production actions require explicit approval. No agents.
-- Recovery: local source/tests checkpoint and expected-parent non-force GitHub push/readback. All continuation instructions in repository; preserve main/V3.
+- Recovery: source/tests local checkpoint, non-force expected-parent GitHub commit/tree verification. Preserve main/V3; source changes exclusively v4/.
 
 ## Preserved previous verification and evidence
 

@@ -18,7 +18,7 @@ for (const name of files) {
   assert(field('name').startsWith('V4 '), name + ': wrong identity');
   const identity = field('namespace') + '|' + field('name');
   assert(!identities.has(identity), name + ': duplicate script identity'); identities.add(identity);
-  if (!name.startsWith('diagnostics/')) assert(source.includes('tm-v4-runtime-watermark'), name + ': missing watermark');
+  assert(source.includes('tm-v4-runtime-watermark'), name + ': missing watermark');
   assert.equal(field('downloadURL'), 'https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/' + name);
   assert.equal(field('updateURL'), field('downloadURL'));
   assert.equal(source.match(/(?:const|var|let) VERSION\s*=\s*(['"])([^'"]+)\1/)?.[2], field('version'));

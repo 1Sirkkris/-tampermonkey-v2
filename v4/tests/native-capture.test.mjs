@@ -22,7 +22,7 @@ test('capture is inert until the menu action; downloads native HTML/JS without e
   assert.equal(app.calls.length, 1); assert.equal(app.calls[0].method, 'GET'); assert.equal(app.calls[0].credentials, 'same-origin');
   assert.equal(app.downloads(), 1); assert.equal(app.w.shouldNeverRun, undefined); assert.equal(app.w.nativeRenderer, undefined);
   assert.match(result.scripts[0].source, /nativeRenderer/); assert(!JSON.stringify(result).includes(jwt)); assert(!JSON.stringify(result).includes('private'));
-  assert.match(result.html, /B012345678/); assert.equal(result.version, '0.1.0');
+  assert.match(result.html, /B012345678/); assert.equal(result.version, '0.1.1');
 });
 test('missing native script source is explicit and concurrent menu actions do not duplicate the capture', async t => {
   let answer; const app = setup(t, { fetch: () => new Promise(resolve => { answer = resolve; }) });
@@ -35,3 +35,5 @@ test('pagehide cancels owned read-only capture and suppresses a late download', 
   const first = app.menu(); app.w.dispatchEvent(new app.w.Event('pagehide')); assert.equal(app.calls[0].signal.aborted, true);
   answer(new Response('native source')); await first; assert.equal(app.downloads(), 0);
 });
+
+test('diagnostic has one true-version shared footer, deduplicates startup and restores after BFCache without background reads',t=>{const app=setup(t);app.w.eval(source);assert.equal(app.calls.length,0);assert.equal(app.w.document.querySelectorAll('#tm-v4-runtime-watermark').length,1);assert.match(app.w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 FCAP: 0.1.1/);app.w.dispatchEvent(new app.w.Event('pagehide'));assert.equal(app.w.document.querySelector('#tm-v4-runtime-watermark'),null);app.w.dispatchEvent(new app.w.PageTransitionEvent('pageshow',{persisted:true}));assert.match(app.w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 FCAP: 0.1.1/);assert.equal(app.calls.length,0);});
