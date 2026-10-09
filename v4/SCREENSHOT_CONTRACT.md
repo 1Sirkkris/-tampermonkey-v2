@@ -1,0 +1,3 @@
+# Screenshot contract
+
+V2 0.2.2 Ctrl+Q hides/restores suite controls and watermark without changing native operation state. V4 covers all supported suite hosts including Harmony PO Portal. Only explicit V4 ownership selectors are hidden; only explicit owned styles are temporarily disabled, with exact media values restored. Native content/form values, pending operations and focus stay unchanged. Added owned styles are disabled through a temporary observer only while mode is active, no polling. Ctrl+Q ignores repeats/modifier conflicts, restored cleanup/BFCache lifecycle. No V2 legacy selectors, native global reset or communication dependency. Actual page visual/keyboard behavior remains read-only acceptance.

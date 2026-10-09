@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: PO Portal Lite 0.1.0.
+- Unit: Screenshot Mode 0.1.0.
 - Status: READY FOR READ-ONLY TEST.
-- Completed: native shell redirect, familiar sticky ASIN/date controls, month/year/day calendar, month-clamped 6M/12M/Today, Search/Enter with exact AU/six conditions, reversible known-column Lite masks and Full Portal; DOM-ready hydration/disposal. Native results are preserved. No inventory action.
-- Files modified: po-runtime/entry.mjs, PO_Portal_Lite.user.js, PO_CONTRACT.md, build.mjs, tests/po.test.mjs, README/CHECKPOINT.
-- Verification: 259 tests passed / 0 failed, 3 PO source/generated fixtures; 15 installers, deterministic metadata/syntax/independence checks pass.
-- Gates: actual authenticated native PO results/date/navigation/markup acceptance. AFT PARTIAL gaps and ISS dependency remain explicit; RIVER/SIM/Screenshot not yet built.
-- NEXT: implement Screenshot Ctrl+Q including PO and new owned styles, then SIM/RIVER; finish AFT/ISS parity.
-- Pending approval: none for safe code/read-only tests; live operational changes/printing/production require explicit approval. No agents.
-- Recovery: source/tests local checkpoint, non-force GitHub expected-parent push and readback.
+- Completed: Ctrl+Q on all suite hosts including PO, single active runtime footer, explicit V4-only UI/style ownership, exact media restore, native focus/value preserved, new owned-style observation only while enabled, no timer/legacy selectors. Disposal restores mode before removing owner.
+- Files modified: screenshot-runtime/entry.mjs, Screenshot_Mode.user.js, SCREENSHOT_CONTRACT.md, build.mjs, tests/screenshot.test.mjs, README/CHECKPOINT.
+- Verification: 261 tests passed / 0 failed, 2 source/generated Screenshot fixtures; 16 installers, deterministic metadata/syntax/independence checks pass. No live page mutation.
+- Gates: actual supported-page visual/keyboard/BFCache acceptance. RIVER/SIM not built; AFT PARTIAL parity gaps and ISS dependency remain documented.
+- NEXT: build full SIM native toolbar/presets/attachments, then RIVER native capture/step assistant. Finish AFT recovery/date-row parity and ISS.
+- Pending approval: none for code/read-only tests; live operations/printing/production require explicit approval. No agents.
+- Recovery: local source/test commit and non-force GitHub expected-parent push/readback.
 
 ## Preserved previous verification and evidence
 
