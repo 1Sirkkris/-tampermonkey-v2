@@ -55,3 +55,5 @@ Current full suite: 180 offline tests. Read-only candidate testing order: OBS + 
 | [V4 Stow](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Stow_Andons_Helper.user.js) | 0.1.0 | PARTIAL | 9 Stow/bridge | Native frame/auth/ownership, exact location evidence and empty containers |
 
 211 offline tests. Stow preserves its inline native controls and product warnings. Its self-contained native-origin workers provide a common operation lock and ledger; deployed browser authentication/framing remains a live gate. No live operation/printing performed.
+
+Sideline WIP source is now preserved with 12 behavioural fixtures (223 total tests). **PARTIAL: no Sideline installer yet.** Native QTY/expiry integration and complete entry/installer verification are next; do not treat the source-only checkpoint as a test candidate.
