@@ -1,0 +1,5 @@
+# Carton PrEditor contract
+
+V2 7.7: native barcode/count controls, two beeps, dark bottom-right ON/OFF; one completion after valid barcode AND count >=2. F10 requires readiness before dedup: a barcode first seen at count 1 can complete when count reaches 2. V4 observes hydrated native changes and interactions without a recovery poll.
+
+Exact valid barcode, single scanned-count label, present enabled native Complete are required. Missing/disabled Complete does not fall back to a global keypress. Durable submission precedes one native click sequence; same barcode cannot replay after refresh, repeated mutations or toggle. This is SUBMITTED then UNKNOWN: a clicked control is not backend/physical confirmation. Rows stay in V4 storage for evidence; no automatic uncertain retry. Toggle is persisted; sound/node/observer cleanup on disposal. Native count/Complete markup, browser locks/audio and output remain live gates. Controlled live approval is required before testing on a ready carton. No production action performed.

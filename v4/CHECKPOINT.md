@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: AFT native runner/UI installer 0.1.0.
-- Status: PARTIAL — WIP candidate, not controlled-live ready. Preserve all previously verified installers.
-- Completed: native left-side EACH/SKU/Date/Move/FCSKU helpers, seven top-right mode actions, opaque structured source choices/S-P-U, distinct date removal/replacement, scanner Enter/123START, expiry calendar, durable whole-batch owner/rows, Stop settles submitted Confirm, Clear/reload retain UNKNOWN. Move EACH/ALL/QTY requires complete exact source/destination quantity delta plus native workflow advancement. No live operations.
-- Files modified: aft-client/workflow/runtime/entry.mjs, AFT installer, build.mjs, tests/aft.test.mjs, AFT_CONTRACT.md, README/CHECKPOINT.
-- Verification: 250 tests passed / 0 failed, 10 AFT fixtures including source runner uncertainty/Stop, exact quantities and generated DOM-ready installer; 12 installer metadata/build checks pass.
-- Unfinished parity: V2 known-rejected consumer-type recovery and native rendered quantity fallback are not yet rebuilt; conservative failure leaves visible recovery rows. Mode container uses native form, helper Run disabled as V2. Date queue uses CODE YYYY-MM-DD plus calendar rather than V2 individual row editor; restore individual row controls before parity signoff. Unknown outcomes never auto-end/replay. Native-world/identity/schema/long-batch testing pending.
-- NEXT: continue independent RIVER/SIM/Carton/Calm/PO/Screenshot tools while AFT parity gaps and ISS dependency remain explicit. Then finish AFT recovery/date UI and independently owned ISS native-origin workers/familiar FCR three areas. Do not claim complete suite yet.
-- Pending approval: none for internal implementation; live operations/printing/production require explicit approval. No subagents.
-- Recovery: local source/tests committed and expected-parent GitHub ref update verified. Frequent WIP checkpoints required.
+- Unit: Carton PrEditor 0.1.0.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
+- Completed: familiar bottom-right ON/OFF toggle, persisted preference, exact barcode/count >=2/enabled Complete readiness, two beeps, durable pre-click SUBMITTED then UNKNOWN, no same-barcode replay after refresh/toggle; event-driven hydrated readiness, no watchdog polling. Prior AFT 0.1.0 remains PARTIAL (known-rejected recovery/rendered quantity/date-row editor gaps).
+- Files modified: carton-runtime/entry.mjs, Carton_PrEditor.user.js, CARTON_CONTRACT.md, build.mjs, tests/carton.test.mjs, README/CHECKPOINT.
+- Verification: 253 tests passed / 0 failed, 3 Carton source/generated fixtures; 13 installers and deterministic metadata/syntax/independence checks pass. No live completion or printing.
+- Known gates: native markup/audio/locks and actual backend result; Complete click is UNKNOWN, not confirmed physical completion. Missing/disabled native Complete never sends a global shortcut.
+- NEXT: build Calm Code, PO Portal and Screenshot, then SIM/RIVER; restore AFT remaining parity and implement familiar ISS areas when capabilities are complete. Save before each switch.
+- Pending approval: none for code; live completion/operational changes/printing/production require explicit approval. No agents.
+- Recovery: local source/test commit plus non-force expected-parent GitHub push/readback; existing working installers preserved.
 
 ## Preserved previous verification and evidence
 
