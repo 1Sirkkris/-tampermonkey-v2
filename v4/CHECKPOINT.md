@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: FNSKU Mapping.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING. FNSKU 0.1.0 added; all preceding candidates retained.
-- Completed: exact NA/EU source lookup + JP fallback/direct ASIN/candidates; source six-column and candidate tables with BOTH/MSKU/MERCHANT rankings; native partial-page handoff per region; visible failures/ambiguity; Enter, Clear cancellation, per-field copy, sanitized Debug, minimize and region navigation. Fresh current native token, bounded cancellable GM reads; no idle requests or V2/V3 dependency. One familiar top-right CSS owner and real footer.
-- Files modified: FNSKU_CONTRACT.md, fnsku-runtime.mjs, fnsku-entry.mjs, tests/fnsku.test.mjs, build.mjs, FNSKU_Mapping_Lookup.user.js, README.md, CHECKPOINT.md.
-- Verification: full suite 180 tests pass / 0 fail; 10 FNSKU fixtures exercise exact identity, ambiguous ASIN, region failures, native pagination, GM cancellation/redirect validation, stale Clear, standalone Enter/minimize/BFCache. Build/check/whitespace pass.
-- Known live gates: native regional auth/CSRF/results schema, real browser navigation/copy. First page remains explicit PARTIAL with native continuation, preserving V2 handoff. No complete cross-region claim when a region fails.
-- NEXT: native Bind + Unbind contract; implement one canonical hierarchy engine/owner with separate native installers, persisted SUBMITTED/UNKNOWN barriers and current identity. Validate native template requirements before mutation.
-- Pending approval: none for code. Live mutations/printing and production deployment require approval and have not occurred.
-- Recovery: save via connector commit and non-force expected-SHA update, then read remote HEAD; retry stale readback only, never replay a write. Approx. 10-minute save discipline; no agents.
+- Unit: native Bind + Unbind.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING. Separate Bind 0.1.0 and Unbind 0.1.0 installers share one clean hierarchy engine, not competing Unbind implementations.
+- Completed: scanner/paste/endless queue additions, START/PAUSE/CLEAR/minimize/hide; explicit native destination/first double-scan template capture; BWU2→BWU1 token validation; direct native JSON flows and fresh identity; one browser-owned batch lock, durable SUBMITTED-before-send, reload UNKNOWN barriers, safe preflight cancellation, visible unresolved rows retained by Clear. No expiring leases or idle polling. Canonical scoped native-page UI.
+- Files modified: HIERARCHY_CONTRACT.md, identity.mjs, operation-journal.mjs, native-json.mjs, hierarchy-driver/native/runtime/entry.mjs, bind-entry.mjs, unbind-entry.mjs, tests/hierarchy.test.mjs, build.mjs, generated Bind/Unbind, README.md, CHECKPOINT.md.
+- Verification: full suite 194 passed / 0 failed, including 14 actual hierarchy source/installer fixtures. Native scanner fixture captures genuine synthetic opaque tokens through wrapped requests; no IDs guessed. Unbind fixture exercises actual generated installer. Build/check/whitespace pass.
+- Known live gates: native identity/markup, first Bind scanner/template behaviour, backend acknowledgement semantics, long idle/repeated batches, Web Locks/Tampermonkey cross-tab behaviour. hostName is the specific V2 hierarchy API acknowledgement contract, not physical readback or generic HTTP 200 success. No live mutation performed. UNKNOWN remains quarantined; a verified manual resolution workflow is not implemented yet.
+- NEXT: Dropzone Selector Queue. Recover its native MoveContainer confirmation contract and destination/scan controls; do not accept arbitrary 2xx as moved. Reuse durable journal/identity/locks only where responsibility matches.
+- Pending approval: none for internal code. Live hierarchy/movement/printing and rollout require approval.
+- Recovery: connector checkpoint commit + non-force expected-parent ref update + remote HEAD readback. Approx. 10-minute saves including WIP, before workflow changes. No agents.
 
 ## Preserved previous verification and evidence
 

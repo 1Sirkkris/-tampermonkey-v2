@@ -1,0 +1,39 @@
+import{clean,upper}from'./ui-tools.mjs';import{NativeRequestError}from'./native-json.mjs';import{validateHierarchy,validateSummary,validateHierarchyAcknowledgement}from'./hierarchy-driver.mjs';
+const endpoints=new Set(['/validateDestination','/validateContainer','/getTransshipmentBindingSummary','/forceBind']);
+export function createHierarchyNative({window,page=window,onMutation=()=>{},onTemplate=()=>{}}){
+ let sequence=0,records=[],waiters=new Set(),disposed=false,seed=null;const details=new WeakMap();
+ function begin(url,body){let path,payload;try{const target=new window.URL(url,window.location.href);if(target.origin!==window.location.origin||!endpoints.has(target.pathname))return;path=target.pathname;payload=typeof body==='string'?JSON.parse(body):null;}catch{return;}
+  const record={seq:++sequence,path,request:payload};
+  if(path==='/forceBind'&&seed){if(!seed.allow||upper(payload?.scannableId)!==upper(seed.container)||payload?.destinationWarehouseId!==seed.destination)throw new Error('V4 blocked unexpected native Bind submission');seed.beforeMutation();onMutation(record);}
+  return record;
+ }
+ function finish(record,status,raw,finalUrl=''){if(!record||disposed)return;let data;try{data=JSON.parse(raw);}catch{data=raw;}
+  let redirected=false;try{redirected=!!finalUrl&&new window.URL(finalUrl,window.location.href).pathname!==record.path;}catch{redirected=true;}
+  const entry={...record,status,data,redirected};records.push(entry);records=records.slice(-40);for(const waiter of [...waiters])waiter.check(entry);
+  if(record.path==='/forceBind'&&status===200&&!redirected&&typeof data?.hostName==='string'&&data.hostName&&record.request?.sourceWarehouseId&&record.request?.destinationWarehouseId){onTemplate({sourceWarehouseId:record.request.sourceWarehouseId,destinationWarehouseId:record.request.destinationWarehouseId});}
+ }
+ const originalFetch=page.fetch;
+ const wrappedFetch=function(input,init={}){const url=typeof input==='string'||input instanceof window.URL?String(input):input?.url;const record=begin(url,init.body);const promise=originalFetch.apply(this,arguments);if(record)void promise.then(async response=>{try{finish(record,response.status,await response.clone().text(),response.url);}catch{finish(record,0,'');}},()=>finish(record,0,''));return promise;};
+ page.fetch=wrappedFetch;
+ const prototype=page.XMLHttpRequest?.prototype,originalOpen=prototype?.open,originalSend=prototype?.send;
+ function open(method,url){details.set(this,{url,method});return originalOpen.apply(this,arguments);}
+ function send(body){const detail=details.get(this),record=detail?.method?.toUpperCase()==='POST'?begin(detail.url,body):null;if(record)this.addEventListener('loadend',()=>{let raw='';try{raw=this.responseType==='json'?JSON.stringify(this.response):this.responseText;}catch{}finish(record,this.status,raw,this.responseURL);},{once:true});return originalSend.apply(this,arguments);}
+ if(prototype){prototype.open=open;prototype.send=send;}
+ function wait(path,after,predicate,signal){const promise=new Promise((resolve,reject)=>{if(signal?.aborted){reject(new NativeRequestError('Native scan cancelled'));return;}let timer;const cancel=()=>done(new NativeRequestError('Native scan cancelled'));function done(error,entry){window.clearTimeout(timer);signal?.removeEventListener('abort',cancel);waiters.delete(job);error?reject(error):resolve(entry);}const job={check(entry){if(entry.seq>after&&entry.path===path&&predicate(entry)){if(entry.status!==200||entry.redirected){done(new NativeRequestError('Native scan response unverified',{outcome:path==='/forceBind'?'UNKNOWN':'REJECTED'}));return;}done(null,entry);}},cancel};waiters.add(job);signal?.addEventListener('abort',cancel,{once:true});timer=window.setTimeout(()=>done(new NativeRequestError('Native scan response timed out',{outcome:path==='/forceBind'?'UNKNOWN':'REJECTED'})),25000);for(const entry of records)job.check(entry);});void promise.catch(()=>{});return promise;}
+ function key(target,type,value){const event=new window.KeyboardEvent(type,{key:value,code:value==='Enter'?'Enter':'',bubbles:true,cancelable:true,shiftKey:/^[A-Z]$/.test(value)});const number=value==='Enter'?13:type==='keypress'?value.charCodeAt(0):value.toUpperCase().charCodeAt(0);for(const property of ['keyCode','which','charCode'])Object.defineProperty(event,property,{get:()=>number});target.dispatchEvent(event);}
+ function fields(kind){return[...window.document.querySelectorAll('input[type=text],input:not([type]),textarea,[role=combobox]')].filter(node=>!node.closest('[data-tm-v4-script]')&&!node.hidden&&window.getComputedStyle(node).display!=='none').map(node=>{const descriptor=[node.id,node.name,node.placeholder,node.getAttribute('aria-label'),node.closest('label')?.textContent,node.id?[...window.document.querySelectorAll('label')].find(label=>label.htmlFor===node.id)?.textContent:''].join(' ').toLowerCase();return{node,descriptor};}).filter(row=>kind==='destination'?/destination/.test(row.descriptor):/container|scannable|scan|tote/.test(row.descriptor)&&!/destination/.test(row.descriptor));}
+ async function scanner(value,kind,signal){const candidates=fields(kind);if(candidates.length>1)throw new NativeRequestError('Native '+kind+' fields are ambiguous');const field=candidates[0]?.node;
+  if(field){const prototype=field.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value').set.call(field,value);field.dispatchEvent(new window.Event('input',{bubbles:true}));field.dispatchEvent(new window.Event('change',{bubbles:true}));field.focus();for(const type of ['keydown','keypress','keyup'])key(field,type,'Enter');return;}
+  if(kind==='destination')throw new NativeRequestError('Native BWU1 destination field unavailable');
+  const body=window.document.body;for(const char of value){if(signal.aborted)throw new NativeRequestError('Native scan cancelled');for(const type of ['keydown','keypress','keyup'])key(body,type,char);await new Promise(resolve=>window.setTimeout(resolve,2));}for(const type of ['keydown','keypress','keyup'])key(body,type,'Enter');
+ }
+ async function seedBind(row,{signal,beforeMutation,checkRunning,onPhase}){
+  seed={container:row.container,beforeMutation,allow:false,destination:''};
+  try{
+   onPhase('destination');let mark=sequence;const destination=wait('/validateDestination',mark,record=>upper(record.data)==='BWU1',signal);await scanner('BWU1','destination',signal);const dest=await destination;seed.destination=clean(dest.request?.destinationWarehouseId);if(!seed.destination)throw new NativeRequestError('Native destination token not captured');
+   onPhase('native-validate');mark=sequence;const match=record=>upper(record.request?.scannableId)===upper(row.container);const valid=wait('/validateContainer',mark,match,signal),summary=wait('/getTransshipmentBindingSummary',mark,match,signal);await scanner(row.container,'container',signal);const[v,s]=await Promise.all([valid,summary]);validateHierarchy(v.data,row.container);validateSummary(s.data);checkRunning();
+   onPhase('native-bind');seed.allow=true;mark=sequence;const bound=wait('/forceBind',mark,match,signal);await scanner(row.container,'container',signal);const result=await bound;validateHierarchyAcknowledgement(result.data);if(result.request?.destinationWarehouseId!==seed.destination||!result.request.sourceWarehouseId)throw new NativeRequestError('Native Bind destination/source tokens unverified',{outcome:'UNKNOWN'});onTemplate({sourceWarehouseId:result.request.sourceWarehouseId,destinationWarehouseId:seed.destination});return result;
+  }finally{seed=null;}
+ }
+ return{seedBind,dispose(){disposed=true;for(const job of [...waiters])job.cancel();if(page.fetch===wrappedFetch)page.fetch=originalFetch;if(prototype?.open===open)prototype.open=originalOpen;if(prototype?.send===send)prototype.send=originalSend;}};
+}

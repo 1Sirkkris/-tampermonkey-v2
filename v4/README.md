@@ -42,3 +42,8 @@ Current full suite: 170 offline tests; generated installers + source checks pass
 | [V4 FNSKU Mapping](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FNSKU_Mapping_Lookup.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 10 FNSKU | Native regional auth/results |
 
 Current full suite: 180 offline tests. Read-only candidate testing order: OBS + Master, Tote, Bin, FNSKU. Optional printing remains separately approved.
+
+| [V4 Bind](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bind_Hierarchy_Queue.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 14 shared hierarchy | Native seed/identity/acknowledgement + controlled approval |
+| [V4 Unbind](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Unbind_Hierarchy_Queue.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 14 shared hierarchy | Native identity/acknowledgement + controlled approval |
+
+194 offline tests. Hierarchy fixtures prove source state/recovery and request composition, not real inventory outcomes. Do not run mutations without approval; unknown rows remain visible and non-runnable.
