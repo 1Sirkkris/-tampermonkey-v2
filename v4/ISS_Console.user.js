@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -841,7 +841,7 @@
   }, onEvidence = () => {
   } }) {
     const key = "tm-v4.sideline.rows", uuid = () => window2.crypto.randomUUID();
-    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, paused = false, disposed = false, active3 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), sourceMeta = null;
+    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, owns = false, clearAfterSettled = false, paused = false, disposed = false, active3 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), sourceMeta = null;
     const notify = () => onChange({ running, busy, paused, attention, message, rows: journal.rows, stopStage });
     const signal = () => {
       readController = new window2.AbortController();
@@ -967,106 +967,119 @@
       message = "";
       try {
         await withOperationLock(window2, "tm-v4.sideline.owner", async () => {
-          journal = createOperationJournal({ storage: window2.localStorage, key, uuid });
-          if (journal.rows.some((r) => ["SUBMITTED", "UNKNOWN"].includes(r.state))) throw new Error("UNKNOWN recovery rows require native verification before another run");
-          journal.clearKnown();
-          if (mode === "lazy" && (!validSidelineContainer(options.source) || !validSidelineContainer(options.destination) || upper(options.source) === upper(options.destination))) throw new Error("Valid different source and destination required");
-          if (mode === "lazy" && journal.rows.some((r) => r.mode === "lazy" && r.state === "QUEUED" && (upper(r.source) !== upper(options.source) || upper(r.destination) !== upper(options.destination)))) throw new Error("Saved unsubmitted batch uses another source/destination — Reset explicitly before changing it");
-          let list = mode === "queue" ? [...new Set((options.containers || []).filter(validSidelineContainer))].map((code) => ({ code, quantity: 0 })) : options.items || [];
-          if (!list.length && !journal.rows.some((r) => r.mode === mode && r.state === "QUEUED")) throw new Error(mode === "queue" ? "No containers" : "No item barcodes");
-          for (const item of list) {
-            if (!item.code || !Number.isInteger(item.quantity) || item.quantity < 0) throw new Error("Invalid queue item");
-            journal.add([item.code], { mode, kind: mode === "queue" ? "queue-close" : "move", source: options.source || "", destination: options.destination || "", quantity: item.quantity });
-          }
-          running = true;
-          paused = false;
-          attention = "";
-          notify();
-          await client.bootstrap({ signal: signal() });
-          if (!await control()) return;
-          if (mode === "lazy") {
-            sourceMeta = await client.source(options.source, { signal: signal() });
-            if (!await control()) return;
-          }
-          while (running && !disposed) {
-            if (!await control()) break;
-            const row = journal.rows.find((r) => r.mode === mode && r.state === "QUEUED");
-            if (!row) break;
-            active3 = row;
-            journal.transition(row, "READING", "Preflight");
-            notify();
-            try {
-              if (mode === "queue") {
-                await client.source(row.container, { signal: signal() });
-                if (!await control()) break;
-                const result = await client.close(row.container, { signal: readController.signal, beforeMutation: (id) => submit(row, id) });
-                settle(row, result);
-              } else {
-                const result = await preflight(row.source, row.container, { signal: signal() });
-                if (!await control()) break;
-                if (result.kind === "red") {
-                  journal.transition(row, "REJECTED", "ASIDE • " + result.reason);
-                  notify();
-                  continue;
-                }
-                if (result.kind === "retry" || !result.ctx) throw new Error(result.reason || "Preflight failed");
-                let date = dates.get(upper(row.container)) ?? null;
-                if (result.kind === "yellow" && date === null) {
-                  attention = "date";
-                  notify();
-                  date = await pickDate({ code: row.container, ctx: result.ctx, signal: readController.signal });
-                  if (date === null || !running) {
-                    journal.transition(row, "QUEUED", "Date cancelled — not submitted");
-                    if (paused) continue;
-                    running = false;
-                    break;
-                  }
-                  dates.set(upper(row.container), date);
-                  attention = "";
-                }
-                if (!await control()) break;
-                await move(row, sourceMeta, result.ctx, date);
-                if (running && row.state === "CONFIRMED" && options.delay) {
-                  const ms = 2e3 + window2.crypto.getRandomValues(new Uint32Array(1))[0] % 6001;
-                  message = "Delay " + Math.ceil(ms / 1e3) + "s";
-                  notify();
-                  await new Promise((resolve) => {
-                    const timer = window2.setTimeout(resolve, ms);
-                    readController = new window2.AbortController();
-                    readController.signal.addEventListener("abort", () => {
-                      window2.clearTimeout(timer);
-                      resolve();
-                    }, { once: true });
-                  });
-                }
-              }
-            } catch (error) {
-              const target = active3 || row;
-              if (target.state === "SUBMITTED") {
-                terminal(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
-                if (target.state === "UNKNOWN") {
-                  running = false;
-                  message = "UNKNOWN — verify before retry";
-                }
-              } else if (target.state === "READING") {
-                if (!running || paused) {
-                  journal.transition(target, "QUEUED", "Stopped before submission");
-                } else journal.transition(target, "REJECTED", error.message);
-              }
-              notify();
+          owns = true;
+          try {
+            if (stopStage > 0 || disposed) return;
+            journal = createOperationJournal({ storage: window2.localStorage, key, uuid });
+            if (journal.rows.some((r) => ["SUBMITTED", "UNKNOWN"].includes(r.state))) throw new Error("UNKNOWN recovery rows require native verification before another run");
+            journal.clearKnown();
+            if (mode === "lazy" && (!validSidelineContainer(options.source) || !validSidelineContainer(options.destination) || upper(options.source) === upper(options.destination))) throw new Error("Valid different source and destination required");
+            if (mode === "lazy" && journal.rows.some((r) => r.mode === "lazy" && r.state === "QUEUED" && (upper(r.source) !== upper(options.source) || upper(r.destination) !== upper(options.destination)))) throw new Error("Saved unsubmitted batch uses another source/destination — Reset explicitly before changing it");
+            let list = mode === "queue" ? [...new Set((options.containers || []).filter(validSidelineContainer))].map((code) => ({ code, quantity: 0 })) : options.items || [];
+            if (!list.length && !journal.rows.some((r) => r.mode === mode && r.state === "QUEUED")) throw new Error(mode === "queue" ? "No containers" : "No item barcodes");
+            for (const item of list) {
+              if (!item.code || !Number.isInteger(item.quantity) || item.quantity < 0) throw new Error("Invalid queue item");
+              journal.add([item.code], { mode, kind: mode === "queue" ? "queue-close" : "move", source: options.source || "", destination: options.destination || "", quantity: item.quantity });
             }
-          }
-          if (running && mode === "lazy" && options.clearSource) {
-            const batch = journal.rows.filter((r) => r.mode === "lazy" && r.source === options.source);
-            if (batch.length && batch.every((r) => r.state === "CONFIRMED")) {
+            running = true;
+            paused = false;
+            attention = "";
+            notify();
+            await client.bootstrap({ signal: signal() });
+            if (!await control()) return;
+            if (mode === "lazy") {
+              sourceMeta = await client.source(options.source, { signal: signal() });
+              if (!await control()) return;
+            }
+            while (running && !disposed) {
+              if (!await control()) break;
+              const row = journal.rows.find((r) => r.mode === mode && r.state === "QUEUED");
+              if (!row) break;
+              active3 = row;
+              journal.transition(row, "READING", "Preflight");
+              notify();
               try {
-                await close(options.source, "source-clear");
+                if (mode === "queue") {
+                  await client.source(row.container, { signal: signal() });
+                  if (!await control()) break;
+                  const result = await client.close(row.container, { signal: readController.signal, beforeMutation: (id) => submit(row, id) });
+                  settle(row, result);
+                } else {
+                  const result = await preflight(row.source, row.container, { signal: signal() });
+                  if (!await control()) break;
+                  if (result.kind === "red") {
+                    journal.transition(row, "REJECTED", "ASIDE • " + result.reason);
+                    notify();
+                    continue;
+                  }
+                  if (result.kind === "retry" || !result.ctx) throw new Error(result.reason || "Preflight failed");
+                  let date = dates.get(upper(row.container)) ?? null;
+                  if (result.kind === "yellow" && date === null) {
+                    attention = "date";
+                    notify();
+                    date = await pickDate({ code: row.container, ctx: result.ctx, signal: readController.signal });
+                    if (date === null || !running) {
+                      journal.transition(row, "QUEUED", "Date cancelled — not submitted");
+                      if (paused) continue;
+                      running = false;
+                      break;
+                    }
+                    dates.set(upper(row.container), date);
+                    attention = "";
+                  }
+                  if (!await control()) break;
+                  await move(row, sourceMeta, result.ctx, date);
+                  if (running && row.state === "CONFIRMED" && options.delay) {
+                    const ms = 2e3 + window2.crypto.getRandomValues(new Uint32Array(1))[0] % 6001;
+                    message = "Delay " + Math.ceil(ms / 1e3) + "s";
+                    notify();
+                    await new Promise((resolve) => {
+                      const timer = window2.setTimeout(resolve, ms);
+                      readController = new window2.AbortController();
+                      readController.signal.addEventListener("abort", () => {
+                        window2.clearTimeout(timer);
+                        resolve();
+                      }, { once: true });
+                    });
+                  }
+                }
               } catch (error) {
-                if (active3?.state === "SUBMITTED") terminal(active3, "UNKNOWN", error.message);
-                else if (active3?.state === "READING") journal.transition(active3, "REJECTED", error.message);
-                message = error.message;
+                const target = active3 || row;
+                if (target.state === "SUBMITTED") {
+                  terminal(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
+                  if (target.state === "UNKNOWN") {
+                    running = false;
+                    message = "UNKNOWN — verify before retry";
+                  }
+                } else if (target.state === "READING") {
+                  if (!running || paused) {
+                    journal.transition(target, "QUEUED", "Stopped before submission");
+                  } else journal.transition(target, "REJECTED", error.message);
+                }
+                notify();
               }
-            } else message = "Source retained: some items were not confirmed";
+            }
+            if (running && mode === "lazy" && options.clearSource) {
+              const batch = journal.rows.filter((r) => r.mode === "lazy" && r.source === options.source);
+              if (batch.length && batch.every((r) => r.state === "CONFIRMED")) {
+                try {
+                  await close(options.source, "source-clear");
+                } catch (error) {
+                  if (active3?.state === "SUBMITTED") terminal(active3, "UNKNOWN", error.message);
+                  else if (active3?.state === "READING") journal.transition(active3, "REJECTED", error.message);
+                  message = error.message;
+                }
+              } else message = "Source retained: some items were not confirmed";
+            }
+          } finally {
+            try {
+              if (clearAfterSettled) {
+                journal.clear();
+                clearAfterSettled = false;
+              }
+            } finally {
+              owns = false;
+            }
           }
         });
       } catch (error) {
@@ -1129,26 +1142,48 @@
         return;
       }
       if (stopStage >= 2) {
-        try {
-          journal.clear();
-        } catch (error) {
-          message = error.message;
+        if (owns) {
+          if (active3?.state === "READING") clearAfterSettled = true;
+          else try {
+            journal.clear();
+          } catch (error) {
+            message = error.message;
+            notify();
+            return;
+          }
+          dates.clear();
+          message = "Reset safe rows; submitted/UNKNOWN retained";
+          notify();
+          return;
         }
-        dates.clear();
-        message = "Reset unsubmitted/known rows; UNKNOWN retained";
-        notify();
+        if (busy) {
+          message = "Stopped before ownership; recovery retained";
+          notify();
+          return;
+        }
+        return reset();
       }
     }
-    function reset() {
-      if (running) {
+    async function reset() {
+      if (busy) {
         stop();
-        return;
+        return false;
       }
-      journal.clear();
-      dates.clear();
-      stopStage = 0;
-      message = "Reset — UNKNOWN retained";
-      notify();
+      try {
+        await withOperationLock(window2, "tm-v4.sideline.owner", () => {
+          journal = createOperationJournal({ storage: window2.localStorage, key, uuid });
+          journal.clear();
+          dates.clear();
+          stopStage = 0;
+          message = "Reset — UNKNOWN retained";
+        });
+        notify();
+        return true;
+      } catch (error) {
+        message = error.message;
+        notify();
+        return false;
+      }
     }
     function dispose() {
       if (disposed) return;
@@ -2907,13 +2942,13 @@
         if (!rows.length) throw Object.assign(new Error(state.message || "No native Sideline rows"), { outcome: "REJECTED" });
         return { rows, outcome: rows.some((row) => ["UNKNOWN", "SUBMITTED"].includes(row.state)) ? "UNKNOWN" : rows.every((row) => row.state === "CONFIRMED") ? "CONFIRMED" : "REJECTED", message: state.message };
       }, scan: (data) => workflow.scan(data.code), pause: () => workflow.pause(), stop: () => workflow.stop(), clear: () => {
-        if (!workflow.getState().busy) workflow.reset();
+        if (!workflow.getState().busy) void workflow.reset();
       }, rows: () => workflow.getRows(), dispose: () => workflow.dispose() };
     } });
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

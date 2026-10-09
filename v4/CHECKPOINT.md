@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: deterministic diagnostic + full installer watermark coverage.
-- Status: READY FOR READ-ONLY TEST (capture helper); operational candidates retain README labels.
-- Completed: native capture source extracted to canonical entry and deterministic atomic build, version 0.1.1/FCAP footer, duplicate startup and BFCache handling. Captures exclude owned V4 UI/styles. All 19 installers now require footer coverage and true source/metadata versions. Actual separate Tote/ISS/Screenshot/capture bundles pass shared footer/route exclusion/Ctrl+Q/BFCache/zero idle API fixtures.
-- Files modified: native-capture-entry, diagnostic installer, build/checks, native-capture tests, suite tests, README/CHECKPOINT.
-- Verification: 303 tests passed / 0 failed; 19 deterministic installer checks and 67 source module checks pass; whitespace pass. No live request/action performed.
-- Known gates: real Tampermonkey auth/worlds/native controls/visual/scanner pace; Drop/Stow PARTIAL empty-container location. AFT additional confirmation remains UNKNOWN/manual native outcome gate. Source review found Sideline idle Reset/second Stop can write a stale journal without the native workflow lock; no fixture reproducer yet, NEXT must address before final delivery.
-- NEXT: reproduce competing Sideline Reset against submitted/queued owner; acquire canonical native lock/reload current ledger for all idle clears; ensure local Stop does not write while another owner holds workflow. Add actual source fixture, rebuild both native Sideline and bundled ISS, checkpoint. Then final staged testing matrix.
-- Pending approval: none for code; live operational/ticket/printing/production actions require explicit approval. No agents.
-- Recovery: source/tests local checkpoint, non-force expected-parent GitHub commit/tree verification. Preserve main/V3; source changes exclusively v4/.
+- Unit: Sideline shared-owner recovery correction; native 0.1.3 / ISS 0.1.2.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
+- Completed: reproduced second-instance Reset/second Stop overwriting another submitted owner and deleting queued rows. Idle clears now acquire the canonical native workflow lock and reload the current journal. Own busy preflight second Stop clears only after settling; own submitted result retained. Stop/disposal before delayed Web Lock grant perform zero reads/mutations/writes. UI waits for clear outcome before discarding local draft. ISS bundles the same corrected native engine.
+- Files modified: sideline workflow/runtime/entry/installer/tests/contract; ISS worker/entry/installer/tests and suite expected version; README/CHECKPOINT.
+- Verification: 307 tests passed / 0 failed (Sideline 27; ISS 13; suite 2); 19 deterministic installers and 67 source module checks pass; whitespace pass. Reproducer failed before fix and passes after. No live operation.
+- Known gates: native Tampermonkey/auth/frame/locks/scanner/expiry acceptance, actual readbacks; Drop/Stow PARTIAL empty-container location proof. AFT additional-confirmation native outcome gate. Carton readiness is read before asynchronous ownership; NEXT will reproduce a native DOM change before lock grant and revalidate readiness before Complete.
+- NEXT: reproduce/fix Carton stale barcode/count/button after asynchronous owner acquisition; add real-source fixture and rebuild candidate. Then final README staged testing/F01–F16 matrix and end-of-session pushed checkpoint.
+- Pending approval: none for code; live operations, Carton auto-completion, Calm labor submission, ticket/printing/production actions require explicit approval. No agents.
+- Recovery: source/tests local checkpoint and expected-parent non-force GitHub push/readback. Source changes only v4/; main/V3 preserved.
 
 ## Preserved previous verification and evidence
 

@@ -2,7 +2,7 @@ import{createOperationJournal,withOperationLock}from'./operation-journal.mjs';im
 export const validSidelineContainer=value=>/^(?:csX|tsX)[A-Za-z0-9_-]+$/i.test(clean(value));
 export function parseSidelineItems(text,source,destination){const map=new Map();for(const raw of String(text).split(/\r?\n/)){const value=clean(raw),key=upper(value);if(!value||['123START',upper(source),upper(destination)].includes(key))continue;if(validSidelineContainer(value))continue;const row=map.get(key);if(row)row.quantity++;else map.set(key,{code:value,quantity:1});}return[...map.values()];}
 export function createSidelineWorkflow({window,client,preflight,pickDate,onChange=()=>{},onEvidence=()=>{}}){
- const key='tm-v4.sideline.rows',uuid=()=>window.crypto.randomUUID();let journal=createOperationJournal({storage:window.localStorage,key,uuid}),running=false,busy=false,paused=false,disposed=false,active=null,attentionRow=null,readController,wake,scanResolve,attention='',message='',stopStage=0,dates=new Map(),sourceMeta=null;
+ const key='tm-v4.sideline.rows',uuid=()=>window.crypto.randomUUID();let journal=createOperationJournal({storage:window.localStorage,key,uuid}),running=false,busy=false,owns=false,clearAfterSettled=false,paused=false,disposed=false,active=null,attentionRow=null,readController,wake,scanResolve,attention='',message='',stopStage=0,dates=new Map(),sourceMeta=null;
  const notify=()=>onChange({running,busy,paused,attention,message,rows:journal.rows,stopStage});
  const signal=()=>{readController=new window.AbortController();return readController.signal;};
  function check(){if(disposed||!running||paused)throw new Error('Workflow halted before submission');}
@@ -30,7 +30,7 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
   }
  }
  async function run(mode,options={}){if(busy||disposed)return;busy=true;stopStage=0;message='';
-  try{await withOperationLock(window,'tm-v4.sideline.owner',async()=>{
+  try{await withOperationLock(window,'tm-v4.sideline.owner',async()=>{owns=true;try{if(stopStage>0||disposed)return;
    journal=createOperationJournal({storage:window.localStorage,key,uuid});if(journal.rows.some(r=>['SUBMITTED','UNKNOWN'].includes(r.state)))throw new Error('UNKNOWN recovery rows require native verification before another run');
    journal.clearKnown();
    if(mode==='lazy'&&(!validSidelineContainer(options.source)||!validSidelineContainer(options.destination)||upper(options.source)===upper(options.destination)))throw new Error('Valid different source and destination required');
@@ -52,12 +52,24 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
     }catch(error){const target=active||row;if(target.state==='SUBMITTED'){terminal(target,error.outcome==='REJECTED'?'REJECTED':'UNKNOWN',error.message);if(target.state==='UNKNOWN'){running=false;message='UNKNOWN — verify before retry';}}else if(target.state==='READING'){if(!running||paused){journal.transition(target,'QUEUED','Stopped before submission');}else journal.transition(target,'REJECTED',error.message);}notify();}
    }
    if(running&&mode==='lazy'&&options.clearSource){const batch=journal.rows.filter(r=>r.mode==='lazy'&&r.source===options.source);if(batch.length&&batch.every(r=>r.state==='CONFIRMED')){try{await close(options.source,'source-clear');}catch(error){if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN',error.message);else if(active?.state==='READING')journal.transition(active,'REJECTED',error.message);message=error.message;}}else message='Source retained: some items were not confirmed';}
-  });}catch(error){message=error.message;}finally{if(active?.state==='READING')try{journal.transition(active,'QUEUED','Stopped before submission');}catch{}running=false;busy=false;paused=false;attention='';active=null;readController=null;dates.clear();notify();}
+  }finally{try{if(clearAfterSettled){journal.clear();clearAfterSettled=false;}}finally{owns=false;}}});}catch(error){message=error.message;}finally{if(active?.state==='READING')try{journal.transition(active,'QUEUED','Stopped before submission');}catch{}running=false;busy=false;paused=false;attention='';active=null;readController=null;dates.clear();notify();}
  }
  function scan(code){const value=clean(code);if(attention==='predicant'){if(upper(value)===upper(attentionRow?.destination)&&scanResolve){const resolve=scanResolve;scanResolve=null;resolve(value);return true;}return validSidelineContainer(value);}if(attention==='damaged'){if(validSidelineContainer(value)&&upper(value)!==upper(attentionRow?.source)&&upper(value)!==upper(attentionRow?.destination)&&scanResolve){const resolve=scanResolve;scanResolve=null;resolve(value);return true;}return validSidelineContainer(value);}return false;}
  function pause(){if(!running||attention==='predicant'||attention==='damaged'||attention==='recovery')return;paused=!paused;if(paused&&active?.state!=='SUBMITTED')readController?.abort();if(!paused)wake?.();notify();}
- function stop(){stopStage++;if(running){running=false;paused=false;attention='';if(active?.state!=='SUBMITTED')readController?.abort();wake?.();scanResolve?.(null);message='Stopped — submitted request settles; recovery rows retained';notify();return;}if(stopStage>=2){try{journal.clear();}catch(error){message=error.message;}dates.clear();message='Reset unsubmitted/known rows; UNKNOWN retained';notify();}}
- function reset(){if(running){stop();return;}journal.clear();dates.clear();stopStage=0;message='Reset — UNKNOWN retained';notify();}
+ function stop(){
+  stopStage++;
+  if(running){running=false;paused=false;attention='';if(active?.state!=='SUBMITTED')readController?.abort();wake?.();scanResolve?.(null);message='Stopped — submitted request settles; recovery rows retained';notify();return;}
+  if(stopStage>=2){
+   if(owns){if(active?.state==='READING')clearAfterSettled=true;else try{journal.clear();}catch(error){message=error.message;notify();return;}dates.clear();message='Reset safe rows; submitted/UNKNOWN retained';notify();return;}
+   if(busy){message='Stopped before ownership; recovery retained';notify();return;}
+   return reset();
+  }
+ }
+ async function reset(){
+  if(busy){stop();return false;}
+  try{await withOperationLock(window,'tm-v4.sideline.owner',()=>{journal=createOperationJournal({storage:window.localStorage,key,uuid});journal.clear();dates.clear();stopStage=0;message='Reset — UNKNOWN retained';});notify();return true;}
+  catch(error){message=error.message;notify();return false;}
+ }
  function dispose(){if(disposed)return;disposed=true;running=false;paused=false;try{if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN','Page disposed after submission');else if(active?.state==='READING')journal.transition(active,'QUEUED','Page disposed before submission');}catch{}readController?.abort();wake?.();scanResolve?.(null);}
  return{run,scan,pause,stop,reset,dispose,getRows:()=>journal.rows,getState:()=>({running,busy,paused,attention,message,stopStage}),setDate:(code,value)=>dates.set(upper(code),value)};
 }
