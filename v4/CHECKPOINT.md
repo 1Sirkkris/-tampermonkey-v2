@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Carton PrEditor 0.1.0.
+- Unit: Calm Code 0.1.0.
 - Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: familiar bottom-right ON/OFF toggle, persisted preference, exact barcode/count >=2/enabled Complete readiness, two beeps, durable pre-click SUBMITTED then UNKNOWN, no same-barcode replay after refresh/toggle; event-driven hydrated readiness, no watchdog polling. Prior AFT 0.1.0 remains PARTIAL (known-rejected recovery/rendered quantity/date-row editor gaps).
-- Files modified: carton-runtime/entry.mjs, Carton_PrEditor.user.js, CARTON_CONTRACT.md, build.mjs, tests/carton.test.mjs, README/CHECKPOINT.
-- Verification: 253 tests passed / 0 failed, 3 Carton source/generated fixtures; 13 installers and deterministic metadata/syntax/independence checks pass. No live completion or printing.
-- Known gates: native markup/audio/locks and actual backend result; Complete click is UNKNOWN, not confirmed physical completion. Missing/disabled native Complete never sends a global shortcut.
-- NEXT: build Calm Code, PO Portal and Screenshot, then SIM/RIVER; restore AFT remaining parity and implement familiar ISS areas when capabilities are complete. Save before each switch.
-- Pending approval: none for code; live completion/operational changes/printing/production require explicit approval. No agents.
-- Recovery: local source/test commit plus non-force expected-parent GitHub push/readback; existing working installers preserved.
+- Completed: native toolbox beside login, exact 11 ISS/Damages/Etc roles, native setter/input/change/form submission, one submit per helper, original inline styles preserved. Scoped owned layout replaces V2 global reset/poll; deferred hydration and lifecycle cleanup. Carton/AFT checkpoints preserved.
+- Files modified: calm-runtime/entry.mjs, Calm_Code.user.js, CALM_CONTRACT.md, build.mjs, tests/calm.test.mjs, README/CHECKPOINT.
+- Verification: 256 tests passed / 0 failed, 3 Calm source/generated fixtures; 14 installers, deterministic build/metadata/syntax/independence checks pass. No live form submission.
+- Known gates: native labor form/auth/result. Submission evidence is SUBMITTED then UNKNOWN, never HTTP/DOM click success. AFT remains PARTIAL with documented parity gaps; ISS not built.
+- NEXT: build PO Portal, Screenshot Mode, SIM and RIVER independently; then finish AFT/ISS parity as safely achievable.
+- Pending approval: none for code; live operations/printing/production require explicit approval. No agents.
+- Recovery: source/tests local commit and non-force expected-parent GitHub push/readback. Existing installers preserved.
 
 ## Preserved previous verification and evidence
 

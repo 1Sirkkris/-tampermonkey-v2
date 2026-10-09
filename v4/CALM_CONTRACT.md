@@ -1,0 +1,3 @@
+# Calm Code contract
+
+V2 1.3.4: native #body toolbox beside .login, exact ISS/Damages/Etc codes (11 buttons), role fill and native form submit. V4 scopes the flex layout to an owned attribute, preserves existing native inline styles, dispatches input/change through the native setter, requires the actual calmCode input/form, and performs one form submit per mounted helper. A submitted native form is UNKNOWN until native navigation/result; no click retry or false confirmation. No global reset, logger or hydration poll. Native form/markup/auth and labor result remain controlled-live gates. V2/V3 unchanged.
