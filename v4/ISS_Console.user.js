@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -543,14 +543,11 @@
       return snap;
     }
     async function confirm(row, definition, id) {
-      let snap;
-      for (let n = 0; n < 10; n++) {
-        await action(row, definition, id, "Confirm", "Confirm", { mutation: true });
-        snap = await snapshot(definition, id);
-        if (snap.state !== "confirm") return snap;
-        if (stopped) throw new Error("Additional confirmation remains after Stop — verify native outcome");
-      }
-      throw new Error("Native confirmation limit reached");
+      expect(await snapshot(definition, id), "confirm");
+      await action(row, definition, id, "Confirm", "Confirm", { mutation: true });
+      const snap = await snapshot(definition, id);
+      if (snap.state === "confirm") throw new Error("Additional native confirmation requires review — UNKNOWN; no automatic repeat");
+      return snap;
     }
     async function closeKnown(definition, id) {
       await client.end(definition, id);
@@ -870,6 +867,10 @@
       scanResolve = null;
       return running && !disposed ? dest : null;
     }
+    function terminal(row, phase, reason) {
+      journal.transition(row, phase, reason);
+      onEvidence({ type: "sideline.result", intent: "mutation", phase, operationId: row.requestId, data: { kind: row.kind, state: phase } });
+    }
     function submit(row, id) {
       check();
       journal.transition(row, "SUBMITTED", "Submitted — awaiting native result", { requestId: id, attempts: (row.attempts || 0) + 1 });
@@ -923,7 +924,7 @@
               cleared = await close(dest, "predicant-close");
             } catch (error) {
               if (active3?.state === "SUBMITTED") {
-                journal.transition(active3, "UNKNOWN", error.message);
+                terminal(active3, "UNKNOWN", error.message);
                 running = false;
                 message = "UNKNOWN close — verify destination; item NOT retried";
                 notify();
@@ -1042,7 +1043,7 @@
             } catch (error) {
               const target = active3 || row;
               if (target.state === "SUBMITTED") {
-                journal.transition(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
+                terminal(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
                 if (target.state === "UNKNOWN") {
                   running = false;
                   message = "UNKNOWN — verify before retry";
@@ -1061,7 +1062,7 @@
               try {
                 await close(options.source, "source-clear");
               } catch (error) {
-                if (active3?.state === "SUBMITTED") journal.transition(active3, "UNKNOWN", error.message);
+                if (active3?.state === "SUBMITTED") terminal(active3, "UNKNOWN", error.message);
                 else if (active3?.state === "READING") journal.transition(active3, "REJECTED", error.message);
                 message = error.message;
               }
@@ -1155,7 +1156,7 @@
       running = false;
       paused = false;
       try {
-        if (active3?.state === "SUBMITTED") journal.transition(active3, "UNKNOWN", "Page disposed after submission");
+        if (active3?.state === "SUBMITTED") terminal(active3, "UNKNOWN", "Page disposed after submission");
         else if (active3?.state === "READING") journal.transition(active3, "QUEUED", "Page disposed before submission");
       } catch {
       }
@@ -2912,7 +2913,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Sideline Queue + Lazy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Native Queue/Lazy/QTY scanners, preflight, expiry and durable outcome recovery.
 // @match https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @grant unsafeWindow
@@ -444,6 +444,10 @@
       scanResolve = null;
       return running && !disposed ? dest : null;
     }
+    function terminal(row, phase, reason) {
+      journal.transition(row, phase, reason);
+      onEvidence({ type: "sideline.result", intent: "mutation", phase, operationId: row.requestId, data: { kind: row.kind, state: phase } });
+    }
     function submit(row, id) {
       check();
       journal.transition(row, "SUBMITTED", "Submitted — awaiting native result", { requestId: id, attempts: (row.attempts || 0) + 1 });
@@ -497,7 +501,7 @@
               cleared = await close(dest, "predicant-close");
             } catch (error) {
               if (active2?.state === "SUBMITTED") {
-                journal.transition(active2, "UNKNOWN", error.message);
+                terminal(active2, "UNKNOWN", error.message);
                 running = false;
                 message = "UNKNOWN close — verify destination; item NOT retried";
                 notify();
@@ -616,7 +620,7 @@
             } catch (error) {
               const target = active2 || row;
               if (target.state === "SUBMITTED") {
-                journal.transition(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
+                terminal(target, error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN", error.message);
                 if (target.state === "UNKNOWN") {
                   running = false;
                   message = "UNKNOWN — verify before retry";
@@ -635,7 +639,7 @@
               try {
                 await close(options.source, "source-clear");
               } catch (error) {
-                if (active2?.state === "SUBMITTED") journal.transition(active2, "UNKNOWN", error.message);
+                if (active2?.state === "SUBMITTED") terminal(active2, "UNKNOWN", error.message);
                 else if (active2?.state === "READING") journal.transition(active2, "REJECTED", error.message);
                 message = error.message;
               }
@@ -729,7 +733,7 @@
       running = false;
       paused = false;
       try {
-        if (active2?.state === "SUBMITTED") journal.transition(active2, "UNKNOWN", "Page disposed after submission");
+        if (active2?.state === "SUBMITTED") terminal(active2, "UNKNOWN", "Page disposed after submission");
         else if (active2?.state === "READING") journal.transition(active2, "QUEUED", "Page disposed before submission");
       } catch {
       }
@@ -1931,7 +1935,7 @@
   }
 
   // sideline-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.sideline.installer");
   if (!page[guard]) {

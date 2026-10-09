@@ -1,14 +1,15 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: ISS Console 0.1.0 offline completion; AFT 0.1.2 worker/scanner integration; Sideline 0.1.1.
+- Unit: mutation/scanner regression hardening — AFT 0.1.3, Sideline 0.1.2, ISS 0.1.1.
 - Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: all BASELINE workflow installers implemented. ISS familiar three areas, per-SKU quantity rows, V2 Lazy clear-source OFF/delay ON defaults, native workers and date RPC, scanner Enter/123START/source/destination controls, Stop/Clear, durable handoff/native ownership. Stop before late worker health cannot submit; reconnect cannot orphan health waiter. Real-source native EACH/Queue/Lazy/date/Stop execution fixtures pass. AFT parser excludes move control-container scans. No live operation.
-- Files modified: ISS bridge/runtime/worker/installer/contract/tests; AFT workflow/entry/installer/tests; README/CHECKPOINT.
-- Verification: 296 tests passed / 0 failed; 13 ISS fixtures include real bundled native clients plus installer mounting and lifecycle. All 19 deterministic installer metadata/syntax/independence checks and whitespace pass.
-- Gates: real deployed frame/auth/browser-world/locks and native controls; multi-mode/batch/scanner/Predicant/date acceptance. Drop/Stow remain PARTIAL for empty-container location proof/native framing. Existing FCR live gates preserved. No production readiness claimed.
-- NEXT: review mutation boundaries/evidence against F01–F16: same-confirm AFT advancement/repeat uncertainty, Sideline error terminal transcripts and standalone Move scanner parity. Fix demonstrated issues, add fixtures, checkpoint. Then final staged testing matrix/README and recoverable delivery checkpoint.
+- Completed: AFT does not automatically repeat an inventory Confirm when native confirmation remains; UNKNOWN blocks Run/end/replay. Standalone Move destination rescan starts item-only batch, control containers/START excluded by canonical parser. Scanner caret/newline handling preserved. Sideline lost-response/disposal now emits one terminal UNKNOWN with the original request identity; late success cannot erase it. Bundled ISS gets these source fixes. No live operation.
+- Files modified: AFT workflow/runtime/entry/installer/tests/contract, Sideline workflow/entry/installer/tests/contract, ISS entry/installer/contract, README/CHECKPOINT.
+- Verification: 300 tests passed / 0 failed; AFT 19, Sideline 23, ISS 13; all 19 deterministic installer and 66 module syntax/metadata/independence checks pass; whitespace pass.
+- Material safety difference: V2 repeated native Confirm up to ten times while a confirmation persisted. V4 sends one then retains UNKNOWN for native outcome review. Additional legitimate native confirmation stages require captured acceptance evidence before automation; this follows the explicit no-unknown-repeat requirement. Known ERRORED recovery remains bounded to three fresh-workflow checks. No UI relocation.
+- Gates: actual frame/auth/browser-world/locks/native controls/accepted operations; AFT additional-confirmation stage, date/Flip/mode batches; Sideline native hazard/expiry/Predicant/scanner pace. Drop/Stow PARTIAL empty-container location proof. Existing FCR gates preserved.
+- NEXT: bring the existing read-only FCR capture helper into deterministic source/build, add its active-script watermark and enforce watermark coverage for every installer. Then suite integration/F01–F16 test-readiness matrix, explicit remaining gaps and final pushed delivery checkpoint.
 - Pending approval: none for code; live operational/ticket/printing/production actions require explicit approval. No agents.
-- Recovery: local source/tests checkpoint plus non-force expected-parent GitHub push/readback. Preserve main/V3. All needed continuation is in repository.
+- Recovery: local source/tests checkpoint and expected-parent non-force GitHub push/readback. All continuation instructions in repository; preserve main/V3.
 
 ## Preserved previous verification and evidence
 

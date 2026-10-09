@@ -22,7 +22,13 @@ export function createAftRunner({window,client,identity,reader,onChange=()=>{},o
  function expect(snap,state){if(snap.state!==state){const error=new Error('Expected native '+state+', got '+snap.state);if(snap.state==='error'&&/failed to change consumer type/i.test(snap.text||''))error.outcome='REJECTED';throw error;}}
  async function finish(row,message){if(disposed||row.state==='UNKNOWN')throw new Error('Disposed submitted outcome remains UNKNOWN');const operationId=row.operationId;state(row,'CONFIRMED',message,{completedOperations:operationId?[...(row.completedOperations||[]),{operationId,phase:'CONFIRMED'}]:row.completedOperations||[],operationId:null});if(operationId)emit({...row,operationId},'CONFIRMED');}
  async function target(row,definition,id){const wanted=row.desiredState||'INVENTORY';if(!['INVENTORY','PENDING_RESEARCH','UNSELLABLE'].includes(wanted))throw new Error('Invalid target inventory state');await action(row,definition,id,'Input',wanted);let snap=await snapshot(definition,id);if(wanted==='UNSELLABLE'){expect(snap,'newDisp');if(!['AMAZON_DAMAGE','DEFECTIVE','DISTRIBUTOR_DAMAGE','EXPIRED'].includes(row.desiredDamage))throw new Error('Invalid target disposition');await action(row,definition,id,'Input',row.desiredDamage);snap=await snapshot(definition,id);}expect(snap,'confirm');return snap;}
- async function confirm(row,definition,id){let snap;for(let n=0;n<10;n++){await action(row,definition,id,'Confirm','Confirm',{mutation:true});snap=await snapshot(definition,id);if(snap.state!=='confirm')return snap;if(stopped)throw new Error('Additional confirmation remains after Stop — verify native outcome');}throw new Error('Native confirmation limit reached');}
+ async function confirm(row,definition,id){
+  expect(await snapshot(definition,id),'confirm');
+  await action(row,definition,id,'Confirm','Confirm',{mutation:true});
+  const snap=await snapshot(definition,id);
+  if(snap.state==='confirm')throw new Error('Additional native confirmation requires review — UNKNOWN; no automatic repeat');
+  return snap;
+ }
  async function closeKnown(definition,id){await client.end(definition,id);}
  async function prepare(row,definition,first){let snap=await client.fresh(definition,'',controller.signal);await client.wait(definition,snap.objectId,{signal:controller.signal});expect(snap,first);return snap;}
  async function editEach(row){const def=AFT_MODES.each,snap=await prepare(row,def,'location'),id=snap.objectId;await action(row,def,id,'Input',row.location);expect(await snapshot(def,id),'item');await action(row,def,id,'Input',row.code);expect(await snapshot(def,id),'newState');await target(row,def,id);const result=await confirm(row,def,id);if(!['success','item'].includes(result.state))throw new Error('Native EACH change not confirmed');await finish(row,'Native EACH change confirmed');if(result.state==='success')await action(row,def,id,'Done','Done',{complete:true,settle:true});await closeKnown(def,id);}

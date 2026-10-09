@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 AFT Edit SKU Move
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.2
+// @version 0.1.3
 // @description Native AFT EACH/SKU/Date/Move/Flip with durable unresolved action barriers.
 // @include /^https?:\/\/aft-qt-[^\/]+\.corp\.amazon\.com\/app\/(?:edititems|moveitems|fcskuflip)/
 // @grant unsafeWindow
@@ -533,14 +533,11 @@
       return snap;
     }
     async function confirm(row, definition, id) {
-      let snap;
-      for (let n = 0; n < 10; n++) {
-        await action(row, definition, id, "Confirm", "Confirm", { mutation: true });
-        snap = await snapshot(definition, id);
-        if (snap.state !== "confirm") return snap;
-        if (stopped) throw new Error("Additional confirmation remains after Stop — verify native outcome");
-      }
-      throw new Error("Native confirmation limit reached");
+      expect(await snapshot(definition, id), "confirm");
+      await action(row, definition, id, "Confirm", "Confirm", { mutation: true });
+      const snap = await snapshot(definition, id);
+      if (snap.state === "confirm") throw new Error("Additional native confirmation requires review — UNKNOWN; no automatic repeat");
+      return snap;
     }
     async function closeKnown(definition, id) {
       await client.end(definition, id);
@@ -974,7 +971,7 @@
       }
     }, { signal: events.signal });
     d.addEventListener("keydown", (event) => {
-      if (!root.contains(event.target) || event.key !== "Enter") return;
+      if (!root.contains(event.target) || event.key !== "Enter" || event.shiftKey) return;
       const field = event.target;
       if (field.matches("[data-field=source],[data-field=old]")) {
         event.preventDefault();
@@ -982,10 +979,22 @@
       } else if (field.matches("[data-field=destination],[data-field=newCode],[data-field=location]")) {
         event.preventDefault();
         root.querySelector("[data-field=text]")?.focus();
-      } else if (field.tagName === "TEXTAREA" && upper(field.value.trim().split(/\r?\n/).at(-1)) === "123START") {
+      } else if (field.tagName === "TEXTAREA") {
+        const pos = field.selectionStart ?? field.value.length, start = field.value.lastIndexOf("\n", Math.max(0, pos - 1)) + 1, next = field.value.indexOf("\n", pos), end = next < 0 ? field.value.length : next, code = clean(field.value.slice(start, end)), destination = root.querySelector("[data-field=destination]")?.value, source = root.querySelector("[data-field=source]")?.value, isStart = upper(code) === "123START", container = mode.startsWith("move") && /^(?:ts|cs)x[A-Za-z0-9_-]+$/i.test(code);
         event.preventDefault();
-        field.value = field.value.replace(/123START\s*$/i, "");
-        void run();
+        if (isStart || container) {
+          field.value = field.value.slice(0, start) + field.value.slice(end).replace(/^\r?\n/, "");
+          field.setSelectionRange(field.value.length, field.value.length);
+          save();
+          if (runner.busy && upper(code) === upper(source)) runner.stop();
+          else if (isStart || upper(code) === upper(destination)) void run();
+          else message("Container scan is a control — not an item");
+        } else {
+          const before = field.value.slice(0, pos).replace(/[\t ]+$/, ""), after = field.value.slice(field.selectionEnd ?? pos).replace(/^\r?\n+/, "");
+          field.value = before + "\n" + after;
+          field.setSelectionRange(before.length + 1, before.length + 1);
+          save();
+        }
       } else if (mode === "sku" && field.matches("[data-field=code]")) {
         event.preventDefault();
         void run();
@@ -1587,7 +1596,7 @@
   }
 
   // aft-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.3";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.aft.installer");
   if (!page[guard]) {
