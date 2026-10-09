@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: AFT parity completion 0.1.1.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: native final V2 state/disposition buttons and SKU same-route restrictions/defaults, individual four expiration rows/date inputs/Add/grow/persist, raw full-response quantity plus bounded event-driven native rendered fallback, known ERRORED/explicit consumer-type recovery bounded to three fresh workflow/quantity checks. EACH/SKU/Date/Move EACH/ALL/QTY/FCSKU Flip, mode/control/scanner/Stop/Clear remain. Confirmed operation history is separated from later workflow cleanup uncertainty. No live operation.
-- Files modified: aft-client/workflow/runtime/entry.mjs, AFT_Edit_SKU_Move.user.js, tests/aft.test.mjs, AFT_CONTRACT.md, README/CHECKPOINT.
-- Verification: 283 tests passed / 0 failed, 17 AFT fixtures including actual Move readback, Flip success/history, lost date removal, buttons/date UI, known recovery/render cancellation; 18 deterministic installer metadata/syntax/independence checks pass.
-- Gates: real native AFT object/status/form/opaque choices, mode/session behavior, rendered quantity auth, expiry/Flip/multiple batches, scanner pace, FCR readback freshness. Bounded known retries replace V2 unbounded recovery; UNKNOWN never retries. Drop/Stow remain PARTIAL for empty-container location/native framing; all independent remaining tools now built; ISS is last unbuilt workflow.
-- NEXT: implement ISS at FCR #iss-console with familiar Edit/Move/Sideline areas. Bundle AFT/Sideline native-origin workers, shared native ownership/journals, explicit health/auth gates, date prompts and scanner controls. Do not depend on another installer or relocate UI.
-- Pending approval: none for internal code; live operational/final ticket/printing/production actions require explicit approval. No agents.
-- Recovery: source/tests local checkpoint and non-force expected-parent GitHub push/readback. Existing verified installers preserved.
+- Unit: ISS Console 0.1.0, bundled AFT/Sideline native workers; Sideline 0.1.1 canonical preflight.
+- Status: PARTIAL — WIP / native engine roundtrip fixtures not yet complete.
+- Completed: familiar FCR #iss-console full viewport Edit/Move/Sideline areas, scanner/default controls, durable parent handoff ledger, exact origin/source/nonce native bridge, own bundled engines/native ownership, date RPC, explicit health and UNKNOWN timeout gates, Stop/Clear/reload retention. Shared Sideline preflight; standalone helper excludes native worker frames. AFT already-selected mode can run without reload. Removed iframe disposal exception. No live operation.
+- Files modified: iss bridge/worker/runtime/entry, ISS installer/contract/tests, sideline preflight/entry/installer/test, aft-workflow/installer, build, README/CHECKPOINT.
+- Verification: 289 tests passed / 0 failed (6 ISS fixtures); deterministic build and all 19 installer checks pass. Native engine roundtrip/cancel/date fixtures remain NEXT, so ISS is PARTIAL, not a ready installer.
+- Known gates: real deployed auth/framing/browser worlds/native controls and accepted operations. Drop/Stow PARTIAL empty-container location. Existing FCR live gates preserved. All BASELINE workflow installers now have implementation; no production readiness claimed.
+- NEXT: add real-source ISS AFT/Sideline engine execution, Stop-before-run and date RPC/cancel tests; fix any demonstrated issues; checkpoint verified ISS. Then suite parity review against BASELINE/F01–F16 and staged testing instructions.
+- Pending approval: none for code; live operational/ticket/printing/production actions require explicit approval. No agents.
+- Recovery: local source/tests checkpoint plus non-force expected-parent GitHub push/readback. Preserve main/V3.
 
 ## Preserved previous verification and evidence
 

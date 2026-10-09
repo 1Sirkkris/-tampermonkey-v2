@@ -757,6 +757,11 @@
           try {
             let snap = await client.page(definition);
             await client.wait(definition, snap.objectId);
+            const selected = snap.text?.match(/Mode\s*:\s*(Each|Sku|Datelot|Multi|Container)/i)?.[1]?.toUpperCase();
+            if (!snap.selector && (mode === "flip" || selected === definition.input)) {
+              state(row, "CONFIRMED", "Native mode already selected");
+              return;
+            }
             if (!snap.selector) {
               await action(row, definition, snap.objectId, "SelectMode", "SelectMode");
               snap = await client.page(definition, snap.objectId);

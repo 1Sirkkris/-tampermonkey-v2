@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Sideline Queue + Lazy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native Queue/Lazy/QTY scanners, preflight, expiry and durable outcome recovery.
 // @match https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @grant unsafeWindow
@@ -1911,29 +1911,36 @@
     return Object.freeze({ hazmat, binDescription, recentMadcat });
   }
 
+  // sideline-preflight.mjs
+  function createSidelinePreflight({ window: window2, client, gmRequest, onEvidence = () => {
+  } }) {
+    let enrichment;
+    return async (source, code, { signal } = {}) => {
+      const result = await client.item(source, code, { signal });
+      if (result.kind === "red" || !result.ctx?.hazmat) return result;
+      try {
+        const context = await client.bootstrap({ signal });
+        enrichment ||= createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
+        const hazard = await enrichment.hazmat(result.ctx.asin, { signal });
+        if (/can be processed/i.test(hazard.message) && !/cannot|can't|not be processed/i.test(hazard.message)) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + hazard.level + " — OK TO PROCESS" };
+        return { kind: "red", reason: "HAZMAT L" + hazard.level + " — NOT PROCESSABLE", ctx: result.ctx };
+      } catch (error) {
+        return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — " + error.message, ctx: result.ctx };
+      }
+    };
+  }
+
   // sideline-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.sideline.installer");
   if (!page[guard]) {
     page[guard] = { version: VERSION };
     installRouteLifecycle(window, () => {
-      if (location.hostname !== "aft-poirot-website-nrt.nrt.proxy.amazon.com") return;
+      if (window.top !== window.self || location.hostname !== "aft-poirot-website-nrt.nrt.proxy.amazon.com") return;
       const emit = (data) => evidence(window, "SIDE", VERSION, data), identity = () => resolveIdentity(window, page), client = createSidelineClient({ window, fetch: page.fetch.bind(page), identity, onEvidence: emit });
-      let enrichment, ui;
-      const preflight = async (source, code, { signal } = {}) => {
-        const result = await client.item(source, code, { signal });
-        if (result.kind === "red" || !result.ctx?.hazmat) return result;
-        try {
-          const context = await client.bootstrap({ signal });
-          enrichment ||= createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(GM_xmlhttpRequest), onEvidence: emit, uuid: () => window.crypto.randomUUID() });
-          const hazard = await enrichment.hazmat(result.ctx.asin, { signal });
-          if (/can be processed/i.test(hazard.message) && !/cannot|can't|not be processed/i.test(hazard.message)) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + hazard.level + " — OK TO PROCESS" };
-          return { kind: "red", reason: "HAZMAT L" + hazard.level + " — NOT PROCESSABLE", ctx: result.ctx };
-        } catch (error) {
-          return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — " + error.message, ctx: result.ctx };
-        }
-      };
+      let ui;
+      const preflight = createSidelinePreflight({ window, client, gmRequest: GM_xmlhttpRequest, onEvidence: emit });
       const native = createSidelineNative({ window, page, client, identity, canAssist: () => !ui?.workflow?.getState().busy, onEvidence: emit });
       const release = registerWatermark(window, "SIDE", VERSION);
       ui = createSidelineUi({ window, client, preflight, native, version: VERSION, onEvidence: emit });
