@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: shared active-script watermark.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING. Master 0.1.4 and OBS 0.1.3 preserve the verified implementation and add the active runtime footer.
-- Completed: one V4 DOM footer across isolated scripts; dedupe, real executing version, safe old-owner disposal, pagehide cleanup, pointer-events none; no periodic timer. OBS now builds from canonical source using the same pinned bundler as Master.
-- Files modified: v4/watermark.mjs, master-entry.mjs, obs-entry.mjs, obs-metadata.txt, build.mjs, checks.mjs, generated Master/OBS, tests/obs.test.mjs, tests/watermark.test.mjs, README.md, CHECKPOINT.md.
-- Verification: baseline 148 passes; watermark milestone full suite 152 passes / 0 failures; build/check/whitespace pass. Existing HTTP native-page randomUUID fallback retained; duplicate script metadata is checked.
-- Known unfinished: all other operational installers; actual cross-userscript Tampermonkey footer and Ctrl+Q acceptance pending. Master remaining gates are preserved below.
-- NEXT: implement Tote Audit on its existing standalone route; preserve all twelve inventory columns, queued physical scans and exact X0/ZZ matching. Shared read/enrichment/auth source is available, not a runtime dependency.
-- Pending approval: none for internal implementation. Live print/mutations and deployment require approval.
-- Save path: GitHub connector creates a commit with the verified current remote parent, then non-force expected-SHA ref update and readback. Local git push/fetch review stalled; all files remain local and remote checkpoint is authoritative. Never force push.
+- Unit: Tote Audit / FC Lite.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING. New self-contained FC_Lite 0.1.0; Master 0.1.5 contains the additive native barcode-read capability, original exact product reads unchanged; OBS 0.1.3 unchanged.
+- Completed: standalone native route/Dimensions launcher, full twelve-column system inventory, pending scanner queue and failed-load retry, duplicate physical quantities/overcount display, exact X0/ZZ labels, Finish/new tote/Reset cancellation, bounded four-worker reads, hazmat recheck, suspicious dimensions/hover, bin/MADCAT recheck, print click, Copy Stats and Full FCResearch. Canonical scoped CSS; no old runtime/core. Build computes all outputs before replacing installers.
+- Files modified: TOTE_CONTRACT.md, tote-entry.mjs, tote-runtime.mjs, ui-tools.mjs, tests/tote.test.mjs, tests/fcr-read.test.mjs, fcr-read.mjs, master-entry.mjs, build.mjs, generated Master + FC_Lite, README.md, CHECKPOINT.md.
+- Verification: 163 tests pass / 0 fail; 9 Tote source/installer fixtures + 2 barcode-read fixtures added. Build/check/whitespace pass. No live request made by tests.
+- Known unfinished/live gates: native barcode search provenance/deployed markup, scanner pace, Measurement/Pandash auth and print output. Captured schemas/fixtures are not live proof. All other BASELINE operational scripts still unbuilt; Master historical live gates below.
+- NEXT: Bin Check Overlay contract and clean native Inventory-nav snapshot/filter/floor UI. Do not block independent workflows on Master live acceptance.
+- Pending approval: none for ordinary V4 code. Live print/inventory and rollout remain unauthorised.
+- Recovery saves: GitHub connector tree/commit, non-force expected-parent ref update, read back HEAD. Local source preserved; remote checkpoint authoritative. Approx. 10-minute saves, WIP if unfinished; no agents.
 
 ## Preserved previous verification and evidence
 

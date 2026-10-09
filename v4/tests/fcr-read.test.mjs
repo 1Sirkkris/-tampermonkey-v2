@@ -293,3 +293,13 @@ test('generic native section continuation cancellation and cycles cannot escape 
   await rejectsCode(cancelled.reader.section('shipment', 'X012345678', { signal: controller.signal, allowPartial: true }), 'CANCELLED');
   assert.equal(cancelled.calls.length, 2);
 });
+
+test('numeric native barcode resolution is followed by an exact canonical read', async t => {
+  const app=fixture(t,[product(),product()]);const result=await app.reader.barcodeProduct('012345678905');
+  assert.equal(result.barcodeAlias,'012345678905');assert.equal(result.resolvedFrom,'native-barcode-search');assert.equal(result.product.fnsku,'X012345678');assert.equal(app.calls[1].body,'s=X012345678');
+});
+test('barcode resolution rejects ambiguous products, changed identities and nonnumeric control scans', async t => {
+  await rejectsCode(fixture(t,[product()+product({asin:'B099999999',fnsku:'X099999999'})]).reader.barcodeProduct('012345678905'),'IDENTITY');
+  await rejectsCode(fixture(t,[product(),product({fnsku:'X099999999'})]).reader.barcodeProduct('012345678905'),'IDENTITY');
+  await rejectsCode(fixture(t).reader.barcodeProduct('123START'),'INPUT');
+});

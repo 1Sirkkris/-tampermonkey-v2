@@ -1,5 +1,5 @@
 // Independent native FCR reads. Consumers own UI, authentication and cancellation.
-export const FCR_READ_VERSION = '0.1.2';
+export const FCR_READ_VERSION = '0.1.3';
 export class FcrReadError extends Error {
   constructor(code, message, { status, cause, partial } = {}) {
     super(message, cause ? { cause } : undefined);
@@ -185,7 +185,7 @@ export function createFcrReader({
     }
   }
 
-  async function readProduct(queryValue, { signal } = {}, allowEmpty = false) {
+  async function readProduct(queryValue, { signal, resolveBarcode = false } = {}, allowEmpty = false) {
     const query = searchValue(queryValue), document = await request('product', { s: query }, signal);
     active(signal);
     let recognized = false;
@@ -203,7 +203,7 @@ export function createFcrReader({
       const aliases = ['asin', 'isbn', 'fnsku', 'fcsku'].map(field => identifier(fields[field])).filter(Boolean);
       if (!aliases.length) continue;
       recognized = true;
-      if (!aliases.includes(identifier(query))) continue;
+      if (!aliases.includes(identifier(query)) && !(resolveBarcode && /^\d{8,14}$/.test(query))) continue;
       const sortable = /^(?:true|yes|1)$/i.test(fields.sortable) ? true : /^(?:false|no|0)$/i.test(fields.sortable) ? false : null;
       matches.push({
         asin: fields.asin || '', isbn: fields.isbn || '', fnsku: fields.fnsku || '', fcsku: fields.fcsku || '',
@@ -224,6 +224,14 @@ export function createFcrReader({
     throw failure(recognized ? 'IDENTITY' : 'SCHEMA', recognized ? 'Product does not match the requested identifier' : 'Product table was not returned');
   }
   const product = (query, options) => readProduct(query, options);
+  async function barcodeProduct(query, { signal } = {}) {
+    if (!/^\d{8,14}$/.test(text(query))) throw failure('INPUT', 'A numeric UPC/EAN/ISBN barcode is required');
+    const resolved = await readProduct(query, { signal, resolveBarcode: true });
+    const canonical = resolved.product.fnsku || resolved.product.asin || resolved.product.isbn || resolved.product.fcsku;
+    const checked = await product(canonical, { signal });
+    if (resolved.product.aliases.some(alias => !checked.product.aliases.includes(alias))) throw failure('IDENTITY', 'Barcode resolution changed canonical product');
+    return { ...checked, query, resolvedFrom: 'native-barcode-search', barcodeAlias: identifier(query) };
+  }
 
   async function inventory(queryValue, { signal, allowPartial = false, onPreview } = {}) {
     const query = searchValue(queryValue);
@@ -388,5 +396,5 @@ export function createFcrReader({
       warning: error?.message || 'Native section completeness has not been validated', ...(error ? { code: error.code } : {}), source: 'network' };
   }
 
-  return Object.freeze({ product, inventory, history, section });
+  return Object.freeze({ product, barcodeProduct, inventory, history, section });
 }
