@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Dropzone Selector Queue / MoveContainer.
-- Status: PARTIAL. Dropzone 0.1.0 is built and offline verified for nonempty containers; empty-container location proof is missing and blocks that operation before mutation.
-- Completed: familiar native dark bottom-right controls, exact P1–P4 zones/PRIME, auto-destination prompt, scanner/paste controls and 123START, immutable queued destinations, durable one-owner journal, pause/clear/reload UNKNOWN barriers. Native 2xx never means confirmed move: exact complete authenticated inventory location readback is required. No automatic mutation replay. Clear Done removes only confirmed rows.
-- Files modified: MOVE_CONTAINER_CONTRACT.md, gm-fetch.mjs, move-container.mjs, drop-runtime/entry.mjs, operation-journal.mjs, tests/drop.test.mjs, build.mjs, generated installers, README.md, CHECKPOINT.md.
-- Verification: full suite 202 passed / 0 failed, including 8 Drop source/installer fixtures. Build/check/whitespace pass. Fixtures verify one mutation call, exact destination readback, unknown/reload/clear safety, and native-field-only destination keys. No live operation performed.
-- Known failures/gates: empty containers cannot be located from inventory rows; obtain captured native hierarchy/location schema before enabling them. FCR authentication, outerLocation semantics, native field markup and scanner pace require controlled live evidence. Cross-origin hierarchy ownership remains a gate for future Stow/ISS integrations. Existing FCR/read-only and hierarchy gates remain.
-- NEXT: inspect supplied native capture for empty-container hierarchy/location evidence, then build Stow Andons Helper using self-contained existing read/auth and explicit move-state capabilities. Continue independent tools when live schema blocks an action.
-- Pending approval: none for internal implementation. Live hierarchy/movement/printing and rollout require approval.
-- Recovery: connector checkpoint commit + non-force expected-parent ref update + remote HEAD readback. Approx. 10-minute saves including WIP, before workflow changes. No agents.
+- Unit: Stow Andons Helper.
+- Status: PARTIAL. Stow 0.1.0 is built; inline/native controls, product warnings and origin-owned mutation workers are offline verified. Empty-container movement parity remains blocked by missing native location evidence.
+- Completed: native Inventory heading Floor/Drop/Prime/Unbind controls, Tote system MOVE bar, familiar bottom-left gear/hover preferences, optional label quantity, suspicious-dimensions and exact FNSKU/FCSKU conflict warnings, four bounded/coalesced product reads, redraw/stale/disposal guards and scoped canonical CSS. Self-contained authenticated native-origin workers use the SAME browser lock/recovery ledger as corresponding V4 native queues; frame/handshake failure blocks before handoff. Parent and native UNKNOWN barriers prevent replay; print happens only after a confirmed move and never claims physical output.
+- Files modified: STOW_CONTRACT.md, operation-bridge.mjs, stow-runtime/entry.mjs, tests/stow.test.mjs, build.mjs, generated Stow installer, README.md, CHECKPOINT.md.
+- Verification: full suite 211 passed / 0 failed, including 9 Stow/bridge actual source/generated installer fixtures; build/check/whitespace pass. Exact source/origin/nonce, unavailable-frame no-send, native lock/ledger, unknown reload/no-replay, one print after confirmation, coalesced duplicate products, redraw and route cleanup covered. No live mutation/printing.
+- Known gates: actual native authenticated frame/CSP/Tampermonkey-world worker handshake and shared origin ownership; fresh identity; physical hierarchy acknowledgement; FCR outerLocation semantics and empty containers; product hover/placement/scanner speed/long sessions. Read-only warning coverage is visible native inventory, matching V2, not all native pages. Native worker integration is fixture evidence only.
+- NEXT: Sideline Queue + Lazy Sideline. Recover the V2 scanner controls, preflight/hazards/Predicant recovery, expiry/duplicates, and two-stage Stop contract. Preserve its native Poirot page and unresolved outcome barriers. Continue independent tools if a native mutation schema gate blocks part of this workflow.
+- Pending approval: none for internal code. Live hierarchy/movement/editing/printing and rollout require approval.
+- Recovery: connector checkpoint commit + non-force expected-parent ref update + remote HEAD readback. Approx. 10-minute saves including WIP, before workflow changes. No agents. Dropzone 0.1.0 remains PARTIAL for empty-container location evidence; other prior candidate gates remain in their contracts.
 
 ## Preserved previous verification and evidence
 
