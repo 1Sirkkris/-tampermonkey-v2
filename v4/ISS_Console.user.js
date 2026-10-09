@@ -465,7 +465,7 @@
     } else {
       const values = String(text2).split(/[\s,;]+/).map(clean).filter(Boolean), seen = /* @__PURE__ */ new Set();
       for (const code of values) {
-        if (upper(code) === "123START") continue;
+        if (upper(code) === "123START" || mode.startsWith("move") && /^(?:ts|cs)x[A-Za-z0-9_-]+$/i.test(code)) continue;
         if (mode === "sku" || mode === "flip") {
           if (seen.has(upper(code))) continue;
           seen.add(upper(code));
@@ -586,7 +586,7 @@
         const source = await snapshot(def, id);
         expect(source, "sourceState");
         const choices = aftSourceChoices(source);
-        onInventory(choices);
+        onInventory(choices, row);
         const wanted = row.currentState === "INVENTORY" ? "SELLABLE" : row.currentState, matches = choices.filter((x) => x.state === wanted && !x.disabled);
         if (matches.length !== 1) throw new Error("Exact source owner/state missing or ambiguous");
         const choice = matches[0];
@@ -1279,16 +1279,16 @@
   // iss-runtime.mjs
   function createIssConsole({ window: window2, bridgeFactory, version, onEvidence = () => {
   } }) {
-    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {};
+    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {};
     let disposed = false, active3 = "edit", dateController = null, sideAttention = "", sideNativeMessage = "";
     const root = d.createElement("section");
     root.id = "tm-v4-iss";
     root.dataset.tmV4Script = "ISSC";
     const style = d.createElement("style");
     style.dataset.tmV4Style = "ISSC";
-    style.textContent = "#tm-v4-iss{position:fixed;inset:0;overflow:auto;z-index:999990;background:#eaeded;color:#172033;font:13px Arial;box-sizing:border-box}#tm-v4-iss *{box-sizing:border-box}#tm-v4-iss header{height:72px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:white;border-bottom:1px solid #c8d0d8;box-shadow:0 1px 2px #0002}#tm-v4-iss .brand{font-size:24px;font-weight:800;color:#17324d}#tm-v4-iss .site{font-size:18px;color:#ff9900;margin-right:10px}#tm-v4-iss .accent{height:3px;background:#ff9900}#tm-v4-iss .workers{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:bold}#tm-v4-iss .grid{display:grid;grid-template-columns:1.85fr 1fr 1fr;gap:14px;padding:18px 20px;min-height:calc(100vh - 75px)}#tm-v4-iss .grid[data-active=move]{grid-template-columns:1fr 1.85fr 1fr}#tm-v4-iss .grid[data-active=sideline]{grid-template-columns:1fr 1fr 1.85fr}#tm-v4-iss .panel{min-width:0;display:flex;flex-direction:column;background:white;border:1px solid #b8c2cc;border-radius:4px;box-shadow:0 1px 3px #0002}#tm-v4-iss .panel[data-active=true]{border-color:#4b789f;box-shadow:0 2px 8px #1d44662e}#tm-v4-iss h2{margin:0;padding:18px 14px;background:#f3f4f5;border-bottom:1px solid #cbd2d9;font-size:18px;color:#17324d}#tm-v4-iss .body{padding:12px;display:flex;flex-direction:column;gap:9px;flex:1}#tm-v4-iss .modes,#tm-v4-iss .choices,#tm-v4-iss .actions{display:flex;gap:5px;flex-wrap:wrap}#tm-v4-iss button{border:1px solid #8796a5;border-radius:3px;padding:7px;background:#f7f8fa;color:#21364a;font:800 12px Arial;cursor:pointer}#tm-v4-iss .modes button,#tm-v4-iss .choices button{flex:1}#tm-v4-iss button[data-selected=true]{background:#17324d;color:white}#tm-v4-iss button:disabled{opacity:.45;cursor:default}#tm-v4-iss label{display:flex;flex-direction:column;gap:5px;font-weight:bold}#tm-v4-iss input,#tm-v4-iss textarea{padding:8px;border:1px solid #8f9eac;border-radius:3px;width:100%;font:14px Arial;color:#172033;background:white}#tm-v4-iss textarea{height:180px;min-height:120px;resize:vertical;font:13px monospace}#tm-v4-iss .arrow{text-align:center;font-weight:bold;color:#81909f}#tm-v4-iss .actions button{flex:1}#tm-v4-iss [data-action=run]{background:#ff9900;border-color:#d87900;color:#1b2d3e}#tm-v4-iss [role=status]{padding:7px 0;font-weight:700;overflow-wrap:anywhere}#tm-v4-iss .rows{max-height:190px;overflow:auto;font:11px monospace;overflow-wrap:anywhere}#tm-v4-iss [data-state=CONFIRMED]{color:#176b35}#tm-v4-iss [data-state=REJECTED]{color:#a63520}#tm-v4-iss [data-state=UNKNOWN],#tm-v4-iss [data-state=SUBMITTED]{background:#fff0b3;color:#664b0a}#tm-v4-iss .metrics{display:flex;gap:8px;font-size:11px;font-weight:bold}#tm-v4-iss .aside{background:#fff0b3;padding:7px;border:1px solid #d3a753;font-weight:bold}#tm-v4-iss .qty-cards{display:flex;gap:10px;background:#f0f5f8;padding:6px;font-weight:bold}#tm-v4-iss [hidden]{display:none}@media(max-width:1100px){#tm-v4-iss .grid{padding:10px;gap:9px}#tm-v4-iss .body{padding:8px}#tm-v4-iss button{font-size:11px;padding:5px}}";
+    style.textContent = "#tm-v4-iss{position:fixed;inset:0;overflow:auto;z-index:999990;background:#eaeded;color:#172033;font:13px Arial;box-sizing:border-box}#tm-v4-iss *{box-sizing:border-box}#tm-v4-iss header{height:72px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:white;border-bottom:1px solid #c8d0d8;box-shadow:0 1px 2px #0002}#tm-v4-iss .brand{font-size:24px;font-weight:800;color:#17324d}#tm-v4-iss .site{font-size:18px;color:#ff9900;margin-right:10px}#tm-v4-iss .accent{height:3px;background:#ff9900}#tm-v4-iss .workers{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:bold}#tm-v4-iss .grid{display:grid;grid-template-columns:1.85fr 1fr 1fr;gap:14px;padding:18px 20px;min-height:calc(100vh - 75px)}#tm-v4-iss .grid[data-active=move]{grid-template-columns:1fr 1.85fr 1fr}#tm-v4-iss .grid[data-active=sideline]{grid-template-columns:1fr 1fr 1.85fr}#tm-v4-iss .panel{min-width:0;display:flex;flex-direction:column;background:white;border:1px solid #b8c2cc;border-radius:4px;box-shadow:0 1px 3px #0002}#tm-v4-iss .panel[data-active=true]{border-color:#4b789f;box-shadow:0 2px 8px #1d44662e}#tm-v4-iss h2{margin:0;min-height:68px;padding:18px 14px;background:#f3f4f5;border-bottom:1px solid #cbd2d9;font-size:23px;color:#17324d}#tm-v4-iss .body{padding:12px;display:flex;flex-direction:column;gap:9px;flex:1}#tm-v4-iss .modes,#tm-v4-iss .choices,#tm-v4-iss .actions{display:flex;gap:5px;flex-wrap:wrap}#tm-v4-iss button{border:1px solid #8796a5;border-radius:3px;padding:7px;background:#f7f8fa;color:#21364a;font:800 12px Arial;cursor:pointer}#tm-v4-iss .modes button,#tm-v4-iss .choices button{flex:1}#tm-v4-iss button[data-selected=true]{background:#17324d;color:white}#tm-v4-iss button:disabled{opacity:.45;cursor:default}#tm-v4-iss label{display:flex;flex-direction:column;gap:5px;font-weight:bold}#tm-v4-iss input,#tm-v4-iss textarea{padding:8px;border:1px solid #8f9eac;border-radius:3px;width:100%;font:14px Arial;color:#172033;background:white}#tm-v4-iss textarea{height:180px;min-height:120px;resize:vertical;font:13px monospace}#tm-v4-iss .arrow{text-align:center;font-weight:bold;color:#81909f}#tm-v4-iss .actions button{flex:1}#tm-v4-iss [data-action=run]{background:#146eb4;border-color:#0f5f9d;color:white}#tm-v4-iss [role=status]{padding:7px 0;font-weight:700;overflow-wrap:anywhere}#tm-v4-iss .rows{max-height:190px;overflow:auto;font:11px monospace;overflow-wrap:anywhere}#tm-v4-iss [data-state=CONFIRMED]{color:#176b35}#tm-v4-iss [data-state=REJECTED]{color:#a63520}#tm-v4-iss [data-state=UNKNOWN],#tm-v4-iss [data-state=SUBMITTED]{background:#fff0b3;color:#664b0a}#tm-v4-iss .metrics{display:flex;gap:8px;font-size:11px;font-weight:bold}#tm-v4-iss .aside{background:#fff0b3;padding:7px;border:1px solid #d3a753;font-weight:bold}#tm-v4-iss .qty-cards{display:grid;gap:5px;background:#f0f5f8;padding:7px;font-weight:bold;font-size:10px}#tm-v4-iss [data-qty-list]{display:grid;gap:4px;max-height:91px;overflow:auto}#tm-v4-iss .qty-row{display:grid;grid-template-columns:1.25fr repeat(3,1fr);gap:5px;background:white;padding:6px;border:1px solid #c5cfd6}#tm-v4-iss .qty-row code{overflow:hidden;text-overflow:ellipsis}#tm-v4-iss .qty-row b{text-align:center;font:800 17px monospace;color:#17324d}#tm-v4-iss [hidden]{display:none}@media(max-width:1100px){#tm-v4-iss .grid{padding:10px;gap:9px}#tm-v4-iss .body{padding:8px}#tm-v4-iss button{font-size:11px;padding:5px}}";
     const choices = (field, values) => `<input type="hidden" data-field="${field}" value="${values[0][0]}"><div class="choices">${values.map(([value2, label]) => `<button data-choice="${field}" data-value="${value2}">${label}</button>`).join("")}</div>`, states = [["INVENTORY", "Sellable"], ["PENDING_RESEARCH", "Pending"], ["UNSELLABLE", "Unsellable"]], damages = [["AMAZON_DAMAGE", "Amazon Damage"], ["DEFECTIVE", "Defective"], ["DISTRIBUTOR_DAMAGE", "Distributor Damage"], ["EXPIRED", "Expired"]], modes = (area, values) => `<div class="modes">${values.map((value2) => `<button data-mode="${value2}" data-area="${area}">${value2.toUpperCase()}</button>`).join("")}</div>`;
-    const edit = `${modes("edit", ["each", "sku"])}<div class="qty-cards" data-qty hidden>S: <span data-qty-s>—</span> P: <span data-qty-p>—</span> U: <span data-qty-u>—</span></div><label data-source-state>SOURCE ${choices("currentState", states)}</label><label data-source-damage>SOURCE DISPOSITION ${choices("currentDamage", damages)}</label><p data-auto-source hidden>AUTO-DETECT SOURCE FROM ITEM</p><div class="arrow">↓</div><label>DESTINATION ${choices("desiredState", states)}</label><label data-target-damage>DESTINATION DISPOSITION ${choices("desiredDamage", damages)}</label><div class="arrow">↓</div><label><span data-items-label>ITEM BARCODES / ASIN / FNSKU</span><textarea data-field="text" spellcheck="false"></textarea></label>`;
+    const edit = `${modes("edit", ["each", "sku"])}<div class="qty-cards" data-qty hidden><b>INVENTORY QTY • SELLABLE / PENDING / UNSELLABLE</b><div data-qty-list></div></div><label data-source-state>SOURCE ${choices("currentState", states)}</label><label data-source-damage>SOURCE DISPOSITION ${choices("currentDamage", damages)}</label><p data-auto-source hidden>AUTO-DETECT SOURCE FROM ITEM</p><div class="arrow">↓</div><label>DESTINATION ${choices("desiredState", states)}</label><label data-target-damage>DESTINATION DISPOSITION ${choices("desiredDamage", damages)}</label><div class="arrow">↓</div><label><span data-items-label>ITEM BARCODES / ASIN / FNSKU</span><textarea data-field="text" spellcheck="false"></textarea></label>`;
     const move = `${modes("move", ["all", "each", "qty"])}<label data-quantity>QTY<input data-field="quantity" type="number" min="1" step="1"></label><label>SOURCE<input data-field="source" autocomplete="off"></label><div class="arrow">↓</div><label>DESTINATION<input data-field="destination" autocomplete="off"></label><div class="arrow">↓</div><label>ITEM BARCODES<textarea data-field="text" spellcheck="false"></textarea></label>`;
     const side = `${modes("sideline", ["queue", "lazy"])}<label>SOURCE<input data-field="source" autocomplete="off"></label><div class="arrow">↓</div><label>DESTINATION<input data-field="destination" autocomplete="off"></label><div class="arrow">↓</div><label><span data-items-label>CONTAINERS</span><textarea data-field="text" spellcheck="false"></textarea></label><div class="metrics"></div><div class="aside" hidden></div><div class="modes" data-lazy-options><button data-option="clearSource">CLEAR SOURCE: ON</button><button data-option="delay">DELAY: OFF</button></div>`;
     const warehouse = window2.location.pathname.match(/^\/([^/]+)\/results/)?.[1] || "BWU2";
@@ -1302,14 +1302,14 @@
         value(area, "desiredState").value = "PENDING_RESEARCH";
         value(area, "currentDamage").value = value(area, "desiredDamage").value = "DEFECTIVE";
       }
-      panel.dataset.clearSource = "true";
-      panel.dataset.delay = "false";
+      panel.dataset.clearSource = "false";
+      panel.dataset.delay = "true";
       try {
         const saved = JSON.parse(window2.localStorage.getItem("tm-v4.iss.draft." + area) || "{}");
         for (const input of panel.querySelectorAll("[data-field]")) if (saved[input.dataset.field] != null) input.value = saved[input.dataset.field];
         if (saved.mode) panel.dataset.mode = saved.mode;
-        panel.dataset.clearSource = String(saved.clearSource !== false);
-        panel.dataset.delay = String(saved.delay === true);
+        panel.dataset.clearSource = String(saved.clearSource === true);
+        panel.dataset.delay = String(saved.delay !== false);
       } catch {
       }
       try {
@@ -1337,6 +1337,8 @@
       }
       if (area === "edit") {
         panel.querySelector("[data-qty]").hidden = mode !== "sku";
+        const codes = [...new Set(value(area, "text").value.split(/[\s,;]+/).map(upper).filter((code) => code && code !== "123START"))];
+        panel.querySelector("[data-qty-list]").innerHTML = codes.map((code) => '<div class="qty-row"><code>' + escapeHtml(code) + "</code>" + ["SELLABLE", "PENDING_RESEARCH", "UNSELLABLE"].map((state) => "<b>" + escapeHtml(quantityRows[code]?.[state] ?? "—") + "</b>").join("") + "</div>").join("");
         panel.querySelector("[data-source-state]").hidden = mode !== "sku";
         panel.querySelector("[data-source-damage]").hidden = mode !== "sku" || value(area, "currentState").value !== "UNSELLABLE";
         panel.querySelector("[data-auto-source]").hidden = mode !== "each";
@@ -1349,7 +1351,7 @@
         panel.querySelector("[data-items-label]").textContent = mode === "queue" ? "CONTAINERS" : "ITEM BARCODES";
         panel.querySelector("[data-lazy-options]").hidden = mode !== "lazy";
         const parsed = parseSidelineItems(value(area, "text").value, value(area, "source").value, value(area, "destination").value), rows2 = liveRows[area] || [];
-        panel.querySelector(".metrics").textContent = `${parsed.reduce((sum, row) => sum + row.quantity, 0)} units • ${parsed.length} unique • ${rows2.filter((row) => row.state === "CONFIRMED" && row.kind === "move").reduce((sum, row) => sum + (row.quantity || 0), 0)} moved`;
+        panel.querySelector(".metrics").textContent = `${parsed.reduce((sum, row) => sum + row.quantity, 0)} units • ${parsed.length} unique • ${rows2.filter((row) => row.state === "CONFIRMED" && row.kind === "move").reduce((sum, row) => sum + (row.quantity || 0), 0)} moved • ${rows2.filter((row) => ["QUEUED", "READING", "SUBMITTED", "UNKNOWN"].includes(row.state) && row.kind === "move").reduce((sum, row) => sum + (row.quantity || 0), 0)} remaining`;
         for (const button of panel.querySelectorAll("[data-option]")) button.textContent = (button.dataset.option === "clearSource" ? "CLEAR SOURCE" : "DELAY") + ": " + (panel.dataset[button.dataset.option] === "true" ? "ON" : "OFF");
         const alert = panel.querySelector(".aside");
         alert.hidden = !sideAttention;
@@ -1358,6 +1360,7 @@
       const rows = [...(journals[area]?.rows || []).map((row) => ({ ...row, code: "Console handoff" })), ...liveRows[area] || []];
       panel.querySelector(".rows").innerHTML = rows.map((row) => `<div data-state="${escapeHtml(row.state)}"><b>${escapeHtml(row.code || row.container)}</b> ${escapeHtml(row.state)} • ${escapeHtml(row.message || "")}</div>`).join("");
       root.querySelector(".grid").dataset.active = active3;
+      root.querySelector("[data-reconnect=" + kind(area) + "]").disabled = kind(area) === "aft" ? !!(busy.edit || busy.move) : !!busy.sideline;
     }
     const bridge = bridgeFactory({ onProgress: (data) => {
       if (disposed) return;
@@ -1371,10 +1374,11 @@
       if (!panels[area]) return;
       if (data.rows) liveRows[area] = data.rows;
       if (data.message) message(area, data.message);
-      if (data.choices) {
-        for (const [state, selector] of [["SELLABLE", "s"], ["PENDING_RESEARCH", "p"], ["UNSELLABLE", "u"]]) {
+      if (data.choices && data.code) {
+        quantityRows[upper(data.code)] = {};
+        for (const state of ["SELLABLE", "PENDING_RESEARCH", "UNSELLABLE"]) {
           const matches = data.choices.filter((row) => row.state === state);
-          panels.edit.querySelector("[data-qty-" + selector + "]").textContent = matches.length === 1 ? matches[0].qty : "—";
+          quantityRows[upper(data.code)][state] = matches.length === 1 ? matches[0].qty : "—";
         }
       }
       if (area === "sideline") {
@@ -1424,7 +1428,7 @@
         journals[area] = journal;
         if (journal.rows.some((row2) => ["UNKNOWN", "SUBMITTED"].includes(row2.state))) throw new Error("UNKNOWN console handoff retained — verify native outcome before retry");
         await bridge.ready(kind(area));
-        if (disposed) throw new Error("ISS disposed before handoff");
+        if (disposed || stopStages[area] > 0) throw new Error("Stopped before native handoff");
         const row = journal.add([area + " " + window2.crypto.randomUUID()], { area, kind: "native-handoff", payload: input })[0];
         activeRows[area] = row;
         journal.transition(row, "SUBMITTED", "Native workflow handoff pending", { requestId: row.id });
@@ -1474,7 +1478,7 @@
       if (stopStages[area] >= 2 && !busy[area]) void clear(area);
     }
     async function clear(area) {
-      bridge.control(kind(area), "stop", { area });
+      stop(area);
       if (area === "sideline") {
         dateController?.abort();
         picker.dispose();
@@ -1499,7 +1503,7 @@
       const area = event.target.closest("[data-panel]")?.dataset.panel;
       if (area) {
         save(area);
-        if (area === "sideline") paint(area);
+        if (area === "sideline" || area === "edit") paint(area);
       }
     }, { signal: events.signal });
     root.addEventListener("focusin", (event) => {
@@ -1545,37 +1549,41 @@
     }, { signal: events.signal });
     d.addEventListener("keydown", (event) => {
       const area = event.target.closest?.("[data-panel]")?.dataset.panel;
-      if (!area || event.key !== "Enter") return;
+      if (!area || event.key !== "Enter" || event.shiftKey) return;
       const input = event.target;
-      if (input.matches("[data-field=source]")) {
+      if (input.matches("[data-field=quantity]")) {
         event.preventDefault();
-        value(area, "destination").focus();
-      } else if (input.matches("[data-field=destination]")) {
+        if (!Number.isSafeInteger(Number(input.value)) || Number(input.value) < 1) {
+          message(area, "Enter valid QTY");
+          input.select();
+        } else value(area, "source").focus();
+      } else if (input.matches("[data-field=source],[data-field=destination]")) {
         event.preventDefault();
-        if (area === "sideline" && busy[area]) bridge.control("sideline", "scan", { area, code: input.value });
-        value(area, "text").focus();
+        if (!validSidelineContainer(input.value)) {
+          message(area, "Valid tsX/csX container required");
+          input.select();
+          return;
+        }
+        value(area, input.dataset.field === "source" ? "destination" : "text").focus();
       } else if (input.tagName === "TEXTAREA") {
-        const code = clean(input.value.split(/\r?\n/).at(-1));
-        if (upper(code) === "123START") {
+        const pos = input.selectionStart ?? input.value.length, start = input.value.lastIndexOf("\n", Math.max(0, pos - 1)) + 1, next = input.value.indexOf("\n", pos), end = next < 0 ? input.value.length : next, code = clean(input.value.slice(start, end)), isStart = upper(code) === "123START", source = value(area, "source"), dest = value(area, "destination"), isSource = source && upper(code) === upper(source.value), isDest = dest && upper(code) === upper(dest.value);
+        const control = isStart || area === "sideline" && panels[area].dataset.mode === "lazy" && validSidelineContainer(code) || area === "move" && validSidelineContainer(code);
+        if (control) {
           event.preventDefault();
-          input.value = input.value.replace(/123START\s*$/i, "");
+          input.value = input.value.slice(0, start) + input.value.slice(end).replace(/^\r?\n/, "");
+          input.setSelectionRange(input.value.length, input.value.length);
           save(area);
-          void run(area);
-        } else if (area === "sideline" && panels[area].dataset.mode === "lazy" && validSidelineContainer(code)) {
+          if (area === "sideline" && busy[area]) {
+            bridge.control("sideline", "scan", { area, code });
+            if (isSource && !["predicant", "damaged", "recovery"].includes(sideAttention)) stop(area);
+          } else if (isStart || area === "move" && isDest || area === "sideline" && (isSource || isDest)) void run(area);
+          else message(area, "Container scan is a control — not an item");
+        } else {
           event.preventDefault();
-          input.value = input.value.split(/\r?\n/).slice(0, -1).join("\n");
-          if (busy[area]) bridge.control("sideline", "scan", { area, code });
-          else if (upper(code) === upper(value(area, "source").value)) {
-            value(area, "destination").value = "";
-            value(area, "destination").focus();
-          } else if (upper(code) === upper(value(area, "destination").value)) value(area, "text").focus();
-          else {
-            value(area, "source").value = code;
-            value(area, "destination").value = "";
-            value(area, "destination").focus();
-          }
+          const endSelection = input.selectionEnd ?? pos, before = input.value.slice(0, pos).replace(/[\t ]+$/, ""), after = input.value.slice(endSelection).replace(/^\r?\n+/, "");
+          input.value = before + "\n" + after;
+          input.setSelectionRange(before.length + 1, before.length + 1);
           save(area);
-          paint(area);
         }
       }
       event.stopImmediatePropagation();
@@ -1727,7 +1735,7 @@
     window2.addEventListener("message", (event) => void message(event).catch((error) => onProgress({ stage: "error", message: error.message })), { signal: events.signal });
     function reconnect(kind) {
       const item = peers.get(kind);
-      if (item?.pending.size) throw new Error("Native workflow pending — reconnect would erase uncertainty");
+      if (item && (item.pending.size || !item.readyState && !item.unavailable)) throw new Error("Native workflow pending — reconnect would erase uncertainty");
       if (item) {
         window2.clearTimeout(item.timer);
         item.frame.remove();
@@ -2868,7 +2876,7 @@
     return serveIssWorker({ window: window2, kind: aft ? "aft" : "sideline", engine: ({ progress, evidence: evidence2, pickDate }) => {
       if (aft) {
         let cancelled = false;
-        const client2 = createAftClient({ window: window2, fetch: page2.fetch.bind(page2), onStage: (stage) => progress({ stage }) }), runner = createAftRunner({ window: window2, client: client2, identity, reader, onChange: (message, rows) => progress({ message, rows }), onInventory: (choices) => progress({ choices }), onEvidence: evidence2 });
+        const client2 = createAftClient({ window: window2, fetch: page2.fetch.bind(page2), onStage: (stage) => progress({ stage }) }), runner = createAftRunner({ window: window2, client: client2, identity, reader, onChange: (message, rows) => progress({ message, rows }), onInventory: (choices, row) => progress({ choices, code: row.code }), onEvidence: evidence2 });
         return { async run(payload) {
           cancelled = false;
           if (!["edit", "move"].includes(payload.area) || !Array.isArray(payload.items)) throw Object.assign(new Error("Invalid AFT worker command"), { outcome: "REJECTED" });

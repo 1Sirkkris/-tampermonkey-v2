@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 AFT Edit SKU Move
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Native AFT EACH/SKU/Date/Move/Flip with durable unresolved action barriers.
 // @include /^https?:\/\/aft-qt-[^\/]+\.corp\.amazon\.com\/app\/(?:edititems|moveitems|fcskuflip)/
 // @grant unsafeWindow
@@ -455,7 +455,7 @@
     } else {
       const values = String(text2).split(/[\s,;]+/).map(clean).filter(Boolean), seen = /* @__PURE__ */ new Set();
       for (const code of values) {
-        if (upper(code) === "123START") continue;
+        if (upper(code) === "123START" || mode.startsWith("move") && /^(?:ts|cs)x[A-Za-z0-9_-]+$/i.test(code)) continue;
         if (mode === "sku" || mode === "flip") {
           if (seen.has(upper(code))) continue;
           seen.add(upper(code));
@@ -576,7 +576,7 @@
         const source = await snapshot(def, id);
         expect(source, "sourceState");
         const choices = aftSourceChoices(source);
-        onInventory(choices);
+        onInventory(choices, row);
         const wanted = row.currentState === "INVENTORY" ? "SELLABLE" : row.currentState, matches = choices.filter((x) => x.state === wanted && !x.disabled);
         if (matches.length !== 1) throw new Error("Exact source owner/state missing or ambiguous");
         const choice = matches[0];
@@ -1587,7 +1587,7 @@
   }
 
   // aft-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.aft.installer");
   if (!page[guard]) {

@@ -14,8 +14,8 @@ Active branch: `v4-cleanroom`. Read [BRIEF](BRIEF.txt), [BASELINE](BASELINE.md),
 | [Dropzone](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Dropzone_Selector_Queue.user.js) | 0.1.2 | PARTIAL | 14 | Empty-container location proof; native browser/auth acceptance |
 | [Stow](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Stow_Andons_Helper.user.js) | 0.1.1 | PARTIAL | 9 | Native frames/auth/locks; empty-container movement |
 | [Sideline Queue + Lazy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Sideline_Queue_Lazy.user.js) | 0.1.1 | OFFLINE VERIFIED — LIVE GATE PENDING | 21 | Native identity/API/QTY/date/scanner acceptance; approval |
-| [AFT Edit/Move/FCSKU Flip](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/AFT_Edit_SKU_Move.user.js) | 0.1.1 | OFFLINE VERIFIED — LIVE GATE PENDING | 17 | Native workflow/modes/quantity/date/scanner/auth |
-| [ISS Console](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/ISS_Console.user.js) | 0.1.0 | PARTIAL | 6 | WIP native engine roundtrip/date/Stop fixtures; framing/auth/live |
+| [AFT Edit/Move/FCSKU Flip](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/AFT_Edit_SKU_Move.user.js) | 0.1.2 | OFFLINE VERIFIED — LIVE GATE PENDING | 17 | Native workflow/modes/quantity/date/scanner/auth |
+| [ISS Console](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/ISS_Console.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 13 | Native workers/framing/auth/locks/scanners/date/Predicant |
 | [Carton PrEditor](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Carton_PrEditor.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 3 | Native readiness/Complete/audio; approval |
 | [Calm Code](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Calm_Code.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 3 | Native form/labor result; approval |
 | [PO Portal](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/PO_Portal_Lite.user.js) | 0.1.0 | READY FOR READ-ONLY TEST | 3 | Native dates/results/navigation |
@@ -25,7 +25,7 @@ Active branch: `v4-cleanroom`. Read [BRIEF](BRIEF.txt), [BASELINE](BASELINE.md),
 
 [Native FCR capture helper](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/diagnostics/FCR_Native_Capture.user.js) 0.1.0 is a manual read-only diagnostic, with 3 fixtures. No automatic collection or operational action.
 
-Current verification: **289 passed / 0 failed**; deterministic generation, metadata/version/update URL/duplicate identity, syntax, no old runtime dependency or recurring polling checks pass. Internal FCR reads/enrichment/auth are bundled capabilities, not separate installers. Fixture evidence is not live proof. Shared footer shows only registered active scripts and real versions.
+Current verification: **296 passed / 0 failed**; deterministic generation, metadata/version/update URL/duplicate identity, syntax, no old runtime dependency or recurring polling checks pass. Internal FCR reads/enrichment/auth are bundled capabilities, not separate installers. Fixture evidence is not live proof. Shared footer shows only registered active scripts and real versions.
 
 Test in stages with corresponding V2/V3 installers disabled: OBS + Master read-only first; then Tote, Bin, Mapping; inspect hierarchy/Sideline native UI and scanner/date controls without submitting operations. Controlled hierarchy/movement/editing/printing requires explicit approval, one known test case at a time, native readback and OBS export. Dropzone native Enter and queue now share submission ownership; empty-container location evidence remains a parity gate. Production rollout is separate.
 
