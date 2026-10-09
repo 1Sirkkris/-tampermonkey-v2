@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Screenshot Mode 0.1.0.
-- Status: READY FOR READ-ONLY TEST.
-- Completed: Ctrl+Q on all suite hosts including PO, single active runtime footer, explicit V4-only UI/style ownership, exact media restore, native focus/value preserved, new owned-style observation only while enabled, no timer/legacy selectors. Disposal restores mode before removing owner.
-- Files modified: screenshot-runtime/entry.mjs, Screenshot_Mode.user.js, SCREENSHOT_CONTRACT.md, build.mjs, tests/screenshot.test.mjs, README/CHECKPOINT.
-- Verification: 261 tests passed / 0 failed, 2 source/generated Screenshot fixtures; 16 installers, deterministic metadata/syntax/independence checks pass. No live page mutation.
-- Gates: actual supported-page visual/keyboard/BFCache acceptance. RIVER/SIM not built; AFT PARTIAL parity gaps and ISS dependency remain documented.
-- NEXT: build full SIM native toolbar/presets/attachments, then RIVER native capture/step assistant. Finish AFT recovery/date-row parity and ISS.
-- Pending approval: none for code/read-only tests; live operations/printing/production require explicit approval. No agents.
-- Recovery: local source/test commit and non-force GitHub expected-parent push/readback.
+- Unit: SIM Markdown Toolbar 0.1.0.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
+- Completed: all 12 adjacent native editor controls, native setter/input/change/caret; lines/fences/TSV/table/HR; snippets add/edit/delete/manage/import/export/duplicate merge with corrupt data preserved; gallery/all image links/Ctrl-copy and authenticated sequential blob downloads with same-origin direct fallback honestly labelled. Exact Attachments scope, Audit Trail controls, synopsis/announcement collapse, editor replacement dedup and lifecycle cancellation/cleanup. No ticket submission.
+- Files modified: sim-markdown/runtime/entry.mjs, SIM_Markdown_Toolbar.user.js, SIM_CONTRACT.md, build.mjs, tests/sim.test.mjs, README/CHECKPOINT.
+- Verification: 270 tests passed / 0 failed, 9 SIM fixtures including gallery and failed download handoffs; 17 deterministic installers and metadata/syntax/independence checks pass. Cleanup observer bug reproduced and fixed before checkpoint.
+- Known gates: actual native editor controlled events/caret, popup/CSP/clipboard and attachment auth/downloads; old V2 presets require explicit JSON export/import into V4 storage. RIVER/ISS not built; AFT remains PARTIAL with recovery/rendered-quantity/date-row gaps.
+- NEXT: implement native FCR capture + RIVER step assistant, preserve quantity/manual final gates and Stop/Clear cancellation. Then restore AFT parity and implement independently owned ISS areas as safely achievable.
+- Pending approval: none for internal code; live ticket/operational submission/printing/production require explicit approval. No agents.
+- Recovery: local source/test checkpoint and non-force expected-parent GitHub push/readback.
 
 ## Preserved previous verification and evidence
 

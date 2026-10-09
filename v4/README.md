@@ -20,11 +20,12 @@ Active branch: `v4-cleanroom`. Read [BRIEF](BRIEF.txt), [BASELINE](BASELINE.md),
 | [Calm Code](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Calm_Code.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 3 | Native form/labor result; approval |
 | [PO Portal](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/PO_Portal_Lite.user.js) | 0.1.0 | READY FOR READ-ONLY TEST | 3 | Native dates/results/navigation |
 | [Screenshot](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Screenshot_Mode.user.js) | 0.1.0 | READY FOR READ-ONLY TEST | 2 | Actual visual/keyboard acceptance |
-| RIVER / SIM | — | NOT BUILT | — | Remaining independent units |
+| [SIM Toolbar](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/SIM_Markdown_Toolbar.user.js) | 0.1.0 | OFFLINE VERIFIED — LIVE GATE PENDING | 9 | Native editor/popup/attachment auth |
+| RIVER | — | NOT BUILT | — | Next independent unit |
 
 [Native FCR capture helper](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/diagnostics/FCR_Native_Capture.user.js) 0.1.0 is a manual read-only diagnostic, with 3 fixtures. No automatic collection or operational action.
 
-Current verification: **261 passed / 0 failed**; deterministic generation, metadata/version/update URL/duplicate identity, syntax, no old runtime dependency or recurring polling checks pass. Internal FCR reads/enrichment/auth are bundled capabilities, not separate installers. Fixture evidence is not live proof. Shared footer shows only registered active scripts and real versions.
+Current verification: **270 passed / 0 failed**; deterministic generation, metadata/version/update URL/duplicate identity, syntax, no old runtime dependency or recurring polling checks pass. Internal FCR reads/enrichment/auth are bundled capabilities, not separate installers. Fixture evidence is not live proof. Shared footer shows only registered active scripts and real versions.
 
 Test in stages with corresponding V2/V3 installers disabled: OBS + Master read-only first; then Tote, Bin, Mapping; inspect hierarchy/Sideline native UI and scanner/date controls without submitting operations. Controlled hierarchy/movement/editing/printing requires explicit approval, one known test case at a time, native readback and OBS export. Dropzone native Enter and queue now share submission ownership; empty-container location evidence remains a parity gate. Production rollout is separate.
 

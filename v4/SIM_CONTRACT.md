@@ -1,0 +1,5 @@
+# SIM native toolbar contract
+
+V2 5.1.9: adjacent toolbar for each native markdown textarea; Bold/Italics/BoldIT/Code/CodeBlk/Quote/bullets/numbers/Table/HR/Space/Strike; exact native setter/events and caret/selection preservation, TSV tables and empty starter. Snippets add/edit/delete/manage/import/export and insert; V4-only authoritative storage, malformed data preserved with visible failure. Existing V2 exports import manually; no legacy runtime migration framework.
+
+Attachments: familiar Open Images/Download Images beside Audit Trail, deduplicated exact attachment images, one scrollable popup, filename links/Ctrl-copy, sequential credentialed blob downloads and honest failures/cancellation. A download handed to browser is not physical success. Missing exact attachment section does not sweep unrelated ticket links; invalid/login/non-image data fails visibly. Native synopsis/announcements collapse once. Event-driven hydration removes old editor toolbars, no polling; scoped canonical styles, cleanup and Ctrl+Q ownership. Browser native editor/CSP/popup/attachment auth and download acceptance remain live gates. No ticket submission is automated.
