@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: RIVER Ticket Assistant 0.1.0.
+- Unit: AFT parity completion 0.1.1.
 - Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: independent exact FCR product/PO capture, latest dated exact SKU line/all three quantity components, missing/ambiguous quantity manual; capture indicator/badge handoff into native AU RIVER via V4-only GM payload. Native bottom-left Run/Stop-Clear and nine known steps, W1 composed field commit/title-space, native quantity choice, related-ticket/manual quantity/final Create gates, one Next per step with unknown transition barrier, cancellation before/after each awaited write and Next; no arbitrary title delay/polling. No live ticket/inventory action.
-- Files modified: river-capture/runtime/fcr/entry.mjs, FCResearch_RIVER_Ticket_Assistant.user.js, RIVER_CONTRACT.md, build.mjs, tests/river.test.mjs, README/CHECKPOINT.
-- Verification: 276 tests passed / 0 failed, 6 RIVER source/generated fixtures; 18 deterministic installers and metadata/syntax/independence checks pass. Stop during pending native frame produces zero later writes/Next. Product cancellation fails before publishing.
-- Gates: actual native FCR PO schema/global completeness, badge location, page-info/radios/dropdown/W1 native readiness, GM handoff and manual steps. Conservative exact identity/date handling replaces V2 title/substring guessing; unavailable stays manual. AFT remains PARTIAL; ISS not built.
-- NEXT: restore AFT known-rejected recovery, native rendered quantity and individual Date rows; then implement familiar ISS FCR three areas with independently bundled native workers. Preserve all other installers and evidence.
-- Pending approval: none for code; live operations/final ticket/printing/production require explicit approval. No agents.
-- Recovery: source/tests local commit and non-force expected-parent GitHub push/readback.
+- Completed: native final V2 state/disposition buttons and SKU same-route restrictions/defaults, individual four expiration rows/date inputs/Add/grow/persist, raw full-response quantity plus bounded event-driven native rendered fallback, known ERRORED/explicit consumer-type recovery bounded to three fresh workflow/quantity checks. EACH/SKU/Date/Move EACH/ALL/QTY/FCSKU Flip, mode/control/scanner/Stop/Clear remain. Confirmed operation history is separated from later workflow cleanup uncertainty. No live operation.
+- Files modified: aft-client/workflow/runtime/entry.mjs, AFT_Edit_SKU_Move.user.js, tests/aft.test.mjs, AFT_CONTRACT.md, README/CHECKPOINT.
+- Verification: 283 tests passed / 0 failed, 17 AFT fixtures including actual Move readback, Flip success/history, lost date removal, buttons/date UI, known recovery/render cancellation; 18 deterministic installer metadata/syntax/independence checks pass.
+- Gates: real native AFT object/status/form/opaque choices, mode/session behavior, rendered quantity auth, expiry/Flip/multiple batches, scanner pace, FCR readback freshness. Bounded known retries replace V2 unbounded recovery; UNKNOWN never retries. Drop/Stow remain PARTIAL for empty-container location/native framing; all independent remaining tools now built; ISS is last unbuilt workflow.
+- NEXT: implement ISS at FCR #iss-console with familiar Edit/Move/Sideline areas. Bundle AFT/Sideline native-origin workers, shared native ownership/journals, explicit health/auth gates, date prompts and scanner controls. Do not depend on another installer or relocate UI.
+- Pending approval: none for internal code; live operational/final ticket/printing/production actions require explicit approval. No agents.
+- Recovery: source/tests local checkpoint and non-force expected-parent GitHub push/readback. Existing verified installers preserved.
 
 ## Preserved previous verification and evidence
 

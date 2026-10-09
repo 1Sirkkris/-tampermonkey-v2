@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 AFT Edit SKU Move
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native AFT EACH/SKU/Date/Move/Flip with durable unresolved action barriers.
 // @include /^https?:\/\/aft-qt-[^\/]+\.corp\.amazon\.com\/app\/(?:edititems|moveitems|fcskuflip)/
 // @grant unsafeWindow
@@ -189,7 +189,7 @@
     if (!objectId || instructionId && instructionId !== definition.instructionId) throw new Error("Exact native workflow identity unavailable");
     for (const node of doc.querySelectorAll('script,style,noscript,template,[hidden],[aria-hidden=true],.aok-hidden,.a-hidden,[style*="display:none"],[style*="display: none"],[data-tm-v4-script]')) node.remove();
     const text2 = clean(doc.body.textContent);
-    return { objectId, doc, text: text2, state: classifyAft(text2, definition.tool), selector: !!doc.querySelector("input[name=options]") };
+    return { objectId, doc, text: text2, raw: html, state: classifyAft(text2, definition.tool), selector: !!doc.querySelector("input[name=options]") };
   }
   function aftSourceChoices(snapshot) {
     const rows = [];
@@ -204,6 +204,8 @@
   }
   function aftQuantity(snapshot) {
     if (snapshot.state === "verify") throw new Error("Native Verify Item requires manual review");
+    const rawValues = [...(snapshot.raw || "").matchAll(/(?:"|&quot;)quantity(?:"|&quot;)\s*:\s*(?:"|&quot;)?(\d{1,7})\b/gi)].map((m) => Number(m[1]));
+    if (rawValues.length && new Set(rawValues).size === 1 && rawValues[0] > 0) return rawValues[0];
     const values = [...snapshot.text.matchAll(/\bQuantity\s*[:=-]?\s*(\d{1,7})\b/gi)].map((m) => Number(m[1]));
     const unique = [...new Set(values)];
     if (unique.length !== 1 || unique[0] < 1) throw new Error("Exact native quantity unavailable/ambiguous");
@@ -291,6 +293,61 @@
       throw new Error("Fresh native workflow unavailable");
     }
     return { page: page2, wait, action, end, fresh, delay, id };
+  }
+  function renderedAftQuantity(window2, definition, expected, { signal, timeout = 3500 } = {}) {
+    return new Promise((resolve, reject) => {
+      const d = window2.document, frame = d.createElement("iframe");
+      frame.dataset.tmV4Script = "AFT";
+      frame.setAttribute("aria-hidden", "true");
+      frame.tabIndex = -1;
+      frame.style.cssText = "position:fixed;left:-12000px;top:0;width:1280px;height:900px;opacity:0;pointer-events:none;border:0";
+      let done = false, observer = null;
+      const finish = (value, error) => {
+        if (done) return;
+        done = true;
+        observer?.disconnect();
+        window2.clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
+        frame.remove();
+        if (error) reject(error);
+        else resolve(value);
+      }, cancel = () => finish(null, new Error("Quantity read cancelled"));
+      function assess() {
+        if (done) return;
+        try {
+          const doc = frame.contentDocument;
+          if (!doc?.body) return;
+          const snap = parseAftPage(window2, doc.documentElement.outerHTML, definition);
+          if (snap.objectId !== expected) return finish(null, new Error("Rendered native workflow changed"));
+          if (snap.state === "verify") return finish(null, new Error("Native Verify Item requires manual review"));
+          try {
+            finish(aftQuantity(snap));
+          } catch {
+          }
+        } catch {
+        }
+      }
+      const timer = window2.setTimeout(() => finish(null, new Error("Rendered native quantity unavailable")), timeout);
+      signal?.addEventListener("abort", cancel, { once: true });
+      frame.addEventListener("load", () => {
+        if (done) return;
+        try {
+          const doc = frame.contentDocument;
+          if (doc?.body) {
+            observer?.disconnect();
+            observer = new window2.MutationObserver(assess);
+            observer.observe(doc.body, { subtree: true, childList: true, characterData: true });
+          }
+        } catch {
+        }
+        assess();
+      });
+      const url = new window2.URL(definition.path + "?experience=Desktop", window2.location.origin);
+      url.hash = "tm-v4-aft-quantity";
+      frame.src = url.href;
+      d.documentElement.append(frame);
+      if (signal?.aborted) cancel();
+    });
   }
 
   // operation-journal.mjs
@@ -449,12 +506,17 @@
       return client.page(definition, id, active2?.state === "SUBMITTED" ? void 0 : controller.signal);
     }
     function expect(snap, state2) {
-      if (snap.state !== state2) throw new Error("Expected native " + state2 + ", got " + snap.state);
+      if (snap.state !== state2) {
+        const error = new Error("Expected native " + state2 + ", got " + snap.state);
+        if (snap.state === "error" && /failed to change consumer type/i.test(snap.text || "")) error.outcome = "REJECTED";
+        throw error;
+      }
     }
     async function finish(row, message) {
       if (disposed || row.state === "UNKNOWN") throw new Error("Disposed submitted outcome remains UNKNOWN");
-      state(row, "CONFIRMED", message);
-      if (row.operationId) emit(row, "CONFIRMED");
+      const operationId = row.operationId;
+      state(row, "CONFIRMED", message, { completedOperations: operationId ? [...row.completedOperations || [], { operationId, phase: "CONFIRMED" }] : row.completedOperations || [], operationId: null });
+      if (operationId) emit({ ...row, operationId }, "CONFIRMED");
     }
     async function target(row, definition, id) {
       const wanted = row.desiredState || "INVENTORY";
@@ -541,6 +603,20 @@
       }
       throw new Error("SKU iteration limit — remaining source quantity requires review");
     }
+    async function skuWithRecovery(row) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await editSku(row);
+        } catch (error) {
+          if (error.outcome !== "REJECTED" || stopped || disposed || !row.objectId || attempt === 2) throw error;
+          state(row, "REJECTED", "Known native rejection — bounded fresh-workflow recovery");
+          if (row.operationId) emit(row, "REJECTED");
+          await closeKnown(AFT_MODES.sku, row.objectId);
+          await client.fresh(AFT_MODES.sku, row.objectId, controller.signal);
+          state(row, "READING", "Fresh workflow; rechecking native source quantity", { prepared: false, operationId: null });
+        }
+      }
+    }
     async function flip(row) {
       const def = AFT_MODES.flip;
       if (!row.newCode || upper(row.code) === upper(row.newCode)) throw new Error("OLD and NEW must differ");
@@ -603,7 +679,13 @@
       if (row.mode === "moveAll") {
         const native = await snapshot(def, id);
         expect(native, "quantity");
-        const available = aftQuantity(native);
+        let available;
+        try {
+          available = aftQuantity(native);
+        } catch (error) {
+          if (native.state === "verify") throw error;
+          available = await renderedAftQuantity(window2, def, id, { signal: controller.signal });
+        }
         qty = row.quantityMode === "user" ? Number(row.quantity) : available;
         if (!Number.isInteger(qty) || qty < 1 || qty > available || qty > beforeSource) throw new Error("Requested native quantity unavailable");
         await action(row, def, id, "Input", String(qty));
@@ -627,7 +709,7 @@
         if (journal.rows.some((x) => ["UNKNOWN", "SUBMITTED"].includes(x.state))) throw new Error("Unresolved AFT submission blocks replay/mode change");
         journal.save();
         const queued = journal.rows.filter((row) => row.state === "QUEUED");
-        if (queued.length && items.some((item) => !queued.some((row) => row.mode === item.mode && row.code === item.code && row.location === item.location && row.source === item.source && row.destination === item.destination))) throw new Error("Saved queued work has different inputs — Clear safe rows first");
+        if (queued.length && items.some((item) => !journal.rows.some((row) => ["mode", "code", "location", "source", "destination", "desiredState", "desiredDamage", "currentState", "currentDamage", "date", "newCode", "quantity", "quantityMode"].every((key) => row[key] === item[key])))) throw new Error("Saved queued work has different inputs — Clear safe rows first");
         const added = queued.length ? queued : items.map((item) => journal.add([item.mode + " " + (item.location || item.source || "") + " " + item.code + " " + window2.crypto.randomUUID()], item)[0]);
         changed("Starting");
         for (const row of added) {
@@ -636,7 +718,7 @@
           controller = new window2.AbortController();
           state(row, "READING", "Native preflight");
           try {
-            await { each: editEach, sku: editSku, date, flip, moveEach: move, moveAll: move }[row.mode](row);
+            await { each: editEach, sku: skuWithRecovery, date, flip, moveEach: move, moveAll: move }[row.mode](row);
           } catch (error) {
             if (row.state !== "UNKNOWN") {
               const phase = row.state === "SUBMITTED" || row.prepared || row.removedDate ? "UNKNOWN" : "REJECTED";
@@ -656,13 +738,13 @@
       });
       await promise;
     }
-    async function switchMode(mode) {
+    async function switchMode(mode, { navigate = true } = {}) {
       if (busy || disposed) return;
       const definition = AFT_MODES[mode];
       if (!definition) throw new Error("Unsupported mode");
-      await runModeSwitch(definition, mode);
+      await runModeSwitch(definition, mode, navigate);
     }
-    async function runModeSwitch(definition, mode) {
+    async function runModeSwitch(definition, mode, navigate) {
       busy = true;
       try {
         await withOperationLock(window2, "tm-v4.aft.owner", async () => {
@@ -684,7 +766,7 @@
             await closeKnown(definition, snap.objectId);
             await client.fresh(definition, snap.objectId);
             state(row, "CONFIRMED", "Native mode selected");
-            window2.location.assign(definition.path + "?experience=Desktop");
+            if (navigate) window2.location.assign(definition.path + "?experience=Desktop");
           } catch (error) {
             state(row, row.prepared ? "UNKNOWN" : "REJECTED", error.message);
             throw error;
@@ -729,116 +811,6 @@
     } };
   }
 
-  // date-picker.mjs
-  function localDate(month, day, year) {
-    const date = new Date(year, month - 1, day);
-    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date.getTime() : null;
-  }
-  function chosenExpiration(ctx, entered, { native = false, now = Date.now() } = {}) {
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    if (!Number.isFinite(entered)) throw new Error("Invalid date");
-    if (ctx.dateType === "PRODUCTION_DATE") {
-      if (entered > today.getTime()) throw new Error("Production date must be today or earlier");
-      if (native) return entered;
-      const shelf = Number(ctx.dateDetail?.shelfLife);
-      if (!Number.isFinite(shelf) || shelf < 0 || ctx.dateDetail?.shelfLife === null || ctx.dateDetail?.shelfLife === void 0) throw new Error("Native shelf life missing — no guessed expiration");
-      const expires = entered + shelf;
-      return expires;
-    }
-    if (entered < today.getTime()) throw new Error("Expiration must be today or later");
-    return entered;
-  }
-  function createDatePicker(window2, { owner = "SIDE" } = {}) {
-    let cancelCurrent = () => {
-    };
-    const pick = ({ code, ctx, signal, native = false }) => new Promise((resolve) => {
-      const existing = window2.document.getElementById("tm-v4-date-picker");
-      existing?.dispatchEvent(new window2.Event("tm-v4-date:replace"));
-      cancelCurrent();
-      const d = window2.document, root = d.createElement("div"), style = d.createElement("style");
-      root.id = "tm-v4-date-picker";
-      root.dataset.tmV4Script = owner;
-      style.dataset.tmV4Script = owner;
-      style.textContent = `#tm-v4-date-picker{position:fixed;inset:0;z-index:1000010;display:flex;align-items:center;justify-content:center;background:#0008;font:14px Arial;color:#172033}#tm-v4-date-picker .wrap{max-width:1100px;width:96vw;padding:12px;background:#f8fafc;border:2px solid #334155;border-radius:8px}#tm-v4-date-picker .preview{display:flex;gap:12px;align-items:center;padding:8px;background:white;margin-bottom:10px}#tm-v4-date-picker img{width:90px;max-height:105px;object-fit:contain}#tm-v4-date-picker .panels{display:grid;grid-template-columns:1fr 2fr 1.5fr;gap:10px}#tm-v4-date-picker section{border:1px solid #94a3b8;border-radius:5px;overflow:hidden}#tm-v4-date-picker h3{margin:0;background:#e2e8f0;padding:8px;display:flex;justify-content:space-between}#tm-v4-date-picker .grid{display:grid;gap:5px;padding:7px;grid-template-columns:repeat(4,1fr)}#tm-v4-date-picker .days{grid-template-columns:repeat(7,1fr)}#tm-v4-date-picker button{padding:9px;border:1px solid #94a3b8;border-radius:4px;background:white;font-weight:800;cursor:pointer}#tm-v4-date-picker button.selected{background:#146eb4;color:white}#tm-v4-date-picker button:disabled{opacity:.35;cursor:default}#tm-v4-date-picker footer{display:flex;gap:10px;margin-top:10px}#tm-v4-date-picker [data-error]{color:#b91c1c;font-weight:bold}`;
-      d.head.append(style);
-      d.body.append(root);
-      let month = null, day = 1, year = null, done = false;
-      const production = ctx.dateType === "PRODUCTION_DATE", today = /* @__PURE__ */ new Date();
-      today.setHours(0, 0, 0, 0);
-      function finish(value) {
-        if (done) return;
-        done = true;
-        signal?.removeEventListener("abort", abort);
-        root.remove();
-        style.remove();
-        cancelCurrent = () => {
-        };
-        resolve(value);
-      }
-      const abort = () => finish(null);
-      cancelCurrent = abort;
-      root.addEventListener("tm-v4-date:replace", abort, { once: true });
-      signal?.addEventListener("abort", abort, { once: true });
-      const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-      function permitted(m, d2, y) {
-        const entered = localDate(m, d2, y);
-        if (entered === null) return false;
-        try {
-          chosenExpiration(ctx, entered, { native });
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      function render(error = "") {
-        const image = clean(ctx.sku?.imageUrl || ctx.sku?.img || ctx.sku?.image);
-        const safeImage = /^https?:\/\//i.test(image) ? image : "";
-        root.innerHTML = `<div class="wrap"><b>${escapeHtml(ctx.asin || "")} / ${escapeHtml(ctx.fnsku || code)} • REQUIRES ${production ? "PRODUCTION" : "EXPIRATION"} DATE</b><div class="preview">${safeImage ? `<img src="${escapeHtml(safeImage)}" alt="">` : ""}<section><strong>${escapeHtml(ctx.sku?.title || ctx.sku?.normalizedTitle || "Item title unavailable")}</strong><div>SCAN: ${escapeHtml(code)}</div></section></div><div class="panels"><section><h3>MONTH <b>${month ? months[month - 1] : "—"}</b></h3><div class="grid">${months.map((m, i) => `<button data-month="${i + 1}" class="${month === i + 1 ? "selected" : ""}">${m}</button>`).join("")}</div></section><section><h3>DAY <b>${day}</b></h3><div class="grid days">${Array.from({ length: 31 }, (_, i) => i + 1).map((v) => `<button data-day="${v}" class="${day === v ? "selected" : ""}" ${!month || v > new Date(2e3, month, 0).getDate() ? "disabled" : ""}>${v}</button>`).join("")}</div></section><section><h3>YEAR <b>${year || "—"}</b></h3><div class="grid">${Array.from({ length: 16 }, (_, i) => today.getFullYear() + (production ? -i : i)).map((v) => `<button data-year="${v}" class="${year === v ? "selected" : ""}" ${!month || !permitted(month, day, v) ? "disabled" : ""}>${v}</button>`).join("")}</div></section></div><footer>${production ? `<button data-apply ${year ? "" : "disabled"}>USE PRODUCTION DATE</button>` : "<button data-pao>PAO +900 DAYS</button>"}<button data-cancel>↩ RETURN TO SOURCE / CANCEL</button><span data-error>${escapeHtml(error)}</span></footer></div>`;
-      }
-      root.addEventListener("click", (event) => {
-        const b = event.target.closest("button");
-        if (!b || b.disabled) return;
-        if (b.dataset.month) {
-          month = Number(b.dataset.month);
-          day = 1;
-          year = null;
-          render();
-          return;
-        }
-        if (b.dataset.day) {
-          day = Number(b.dataset.day);
-          year = null;
-          render();
-          return;
-        }
-        if (b.dataset.year) {
-          year = Number(b.dataset.year);
-          if (production) {
-            render();
-            return;
-          }
-        } else if (b.hasAttribute("data-pao")) {
-          const date = new Date(today);
-          date.setDate(date.getDate() + 900);
-          finish(date.getTime());
-          return;
-        } else if (b.hasAttribute("data-cancel")) {
-          finish(null);
-          return;
-        } else if (!b.hasAttribute("data-apply")) return;
-        try {
-          finish(chosenExpiration(ctx, localDate(month, day, year), { native }));
-        } catch (error) {
-          render(error.message);
-        }
-      });
-      render();
-      if (signal?.aborted) abort();
-    });
-    return { pick, dispose: () => cancelCurrent() };
-  }
-
   // aft-runtime.mjs
   function detectAftMode(window2) {
     const text2 = clean(window2.document.querySelector("main,#aft-tool,#aft-tool-sub-main")?.textContent || [...window2.document.body.children].filter((node) => !node.dataset.tmV4Script).map((node) => node.textContent).join(" "));
@@ -848,7 +820,7 @@
   }
   function createAftUi({ window: window2, runner, version, onError = () => {
   } }) {
-    const d = window2.document, mode = detectAftMode(window2), events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "AFT" });
+    const d = window2.document, mode = detectAftMode(window2), events = new window2.AbortController();
     let minimized = false;
     const root = d.createElement("section");
     root.id = "tm-v4-aft";
@@ -858,7 +830,7 @@
     control.dataset.tmV4Script = "AFT";
     const style = d.createElement("style");
     style.dataset.tmV4Style = "AFT";
-    style.textContent = `#tm-v4-aft{position:fixed;top:125px;left:15px;width:368px;max-height:calc(100vh - 145px);overflow:auto;z-index:999990;background:#eff7fb;border:2px solid #52758e;border-radius:6px;box-shadow:0 2px 6px #0003;color:#152a3c;font:12px Arial}#tm-v4-aft[data-mode^=move]{width:318px}#tm-v4-aft[data-mode=flip]{top:86px;left:10px;width:320px}#tm-v4-aft[data-mode=date]{top:auto;left:auto;right:14px;bottom:14px;width:420px}#tm-v4-aft header{display:flex;align-items:center;justify-content:space-between;background:#294f6b;color:white;padding:7px;font-weight:bold}#tm-v4-aft[data-mode^=move] header{background:#256845}#tm-v4-aft .body{padding:9px}#tm-v4-aft input,#tm-v4-aft textarea,#tm-v4-aft select{box-sizing:border-box;max-width:100%;border:1px solid #9caec0;border-radius:4px;padding:5px;background:white;color:#152a3c}#tm-v4-aft input:not([type=checkbox]),#tm-v4-aft textarea{width:100%}#tm-v4-aft textarea{height:120px;resize:vertical;font:12px monospace}#tm-v4-aft button,#tm-v4-aft-control button{padding:6px;border:1px solid #8ba0af;border-radius:4px;cursor:pointer;font-weight:700;background:#ddeaf2;color:#173b56}#tm-v4-aft button:disabled,#tm-v4-aft-control button:disabled{opacity:.45;cursor:default}#tm-v4-aft .grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:7px 0}#tm-v4-aft [data-run]{background:#247045;color:white}#tm-v4-aft [data-stop]{background:#a33d2c;color:white}#tm-v4-aft .rows{max-height:170px;overflow:auto;margin-top:7px;font:11px monospace;white-space:pre-wrap;overflow-wrap:anywhere}#tm-v4-aft [data-state=UNKNOWN],#tm-v4-aft [data-state=SUBMITTED]{background:#fff2be}#tm-v4-aft [data-state=REJECTED]{background:#ffe2de}#tm-v4-aft [data-state=CONFIRMED]{background:#d9f5df}#tm-v4-aft-control{position:fixed;top:76px;right:10px;width:278px;padding:8px;z-index:999991;border:1px solid #7593a9;border-radius:7px;background:#f5fafc;color:#234154;font:12px Arial}#tm-v4-aft-control .modes{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:7px 0}#tm-v4-aft-control [data-current=true]{outline:2px solid #1d6fa8}#tm-v4-aft label{display:block;margin:6px 0}#tm-v4-aft .qty{display:flex;gap:8px;font-weight:bold}`;
+    style.textContent = `#tm-v4-aft{position:fixed;top:125px;left:15px;width:368px;max-height:calc(100vh - 145px);overflow:auto;z-index:999990;background:#eff7fb;border:2px solid #52758e;border-radius:6px;box-shadow:0 2px 6px #0003;color:#152a3c;font:12px Arial}#tm-v4-aft[data-mode^=move]{width:318px}#tm-v4-aft[data-mode=flip]{top:86px;left:10px;width:320px}#tm-v4-aft[data-mode=date]{top:auto;left:auto;right:14px;bottom:14px;width:420px}#tm-v4-aft header{display:flex;align-items:center;justify-content:space-between;background:#294f6b;color:white;padding:7px;font-weight:bold}#tm-v4-aft[data-mode^=move] header{background:#256845}#tm-v4-aft .body{padding:9px}#tm-v4-aft input,#tm-v4-aft textarea,#tm-v4-aft select{box-sizing:border-box;max-width:100%;border:1px solid #9caec0;border-radius:4px;padding:5px;background:white;color:#152a3c}#tm-v4-aft input:not([type=checkbox]),#tm-v4-aft textarea{width:100%}#tm-v4-aft textarea{height:120px;resize:vertical;font:12px monospace}#tm-v4-aft button,#tm-v4-aft-control button{padding:6px;border:1px solid #8ba0af;border-radius:4px;cursor:pointer;font-weight:700;background:#ddeaf2;color:#173b56}#tm-v4-aft button:disabled,#tm-v4-aft-control button:disabled{opacity:.45;cursor:default}#tm-v4-aft .grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:7px 0}#tm-v4-aft [data-run]{background:#247045;color:white}#tm-v4-aft [data-stop]{background:#a33d2c;color:white}#tm-v4-aft .rows{max-height:170px;overflow:auto;margin-top:7px;font:11px monospace;white-space:pre-wrap;overflow-wrap:anywhere}#tm-v4-aft [data-state=UNKNOWN],#tm-v4-aft [data-state=SUBMITTED]{background:#fff2be}#tm-v4-aft [data-state=REJECTED]{background:#ffe2de}#tm-v4-aft [data-state=CONFIRMED]{background:#d9f5df}#tm-v4-aft-control{position:fixed;top:76px;right:10px;width:278px;padding:8px;z-index:999991;border:1px solid #7593a9;border-radius:7px;background:#f5fafc;color:#234154;font:12px Arial}#tm-v4-aft-control .modes{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:7px 0}#tm-v4-aft-control [data-current=true]{outline:2px solid #1d6fa8}#tm-v4-aft .choices{display:flex;gap:4px;flex-wrap:wrap}#tm-v4-aft .choices button{flex:1;font-size:11px}#tm-v4-aft .choices [data-selected=true]{background:#176c96;color:white}#tm-v4-aft .date-row{display:grid;grid-template-columns:1.25fr 1fr;gap:6px;margin:6px 0}#tm-v4-aft .date-head{font-weight:bold;padding:7px 0}#tm-v4-aft label{display:block;margin:6px 0}#tm-v4-aft .qty{display:flex;gap:8px;font-weight:bold}`;
     root.dataset.mode = mode;
     root.innerHTML = `<header><span>AFT V4 ${escapeHtml(version)} • ${escapeHtml(AFT_MODES[mode]?.title || "Select native mode")}</span><button data-min>−</button></header><div class="body"><div role="status">Ready • native mode required</div><div class="entry"></div><div class="grid"><button data-run>RUN</button><button data-stop>STOP AFTER CURRENT ITEM</button></div><button data-clear>CLEAR</button><div class="rows"></div></div>`;
     control.innerHTML = `<b>AFT CONTROL</b><div class="modes">${Object.entries(AFT_MODES).map(([key, def]) => `<button data-mode="${key}" data-current="${mode === key}">${escapeHtml(def.title)}</button>`).join("")}</div><label><input type="checkbox" data-enable checked> ${mode.startsWith("move") ? "MoveItems" : "EditItems"} helper</label>${mode === "sku" ? '<label><input type="checkbox" data-batch> SKU batch queue</label>' : ""}<div data-mode-status>Native workflow modes</div>`;
@@ -867,26 +839,63 @@
     let content = "";
     if (mode === "each") content = `<label>TOTE ASIN [FNSKU]<textarea data-field="text" placeholder="tsX… B0… X0…"></textarea></label>${stateFields(false)}`;
     if (mode === "sku") content = `<div class="qty"><span data-qty="SELLABLE">S: —</span><span data-qty="PENDING_RESEARCH">P: —</span><span data-qty="UNSELLABLE">U: —</span></div><label data-single>SKU / ASIN / FNSKU / FCSKU<input data-field="code"></label><label data-batch-wrap hidden>One SKU per line<textarea data-field="text"></textarea></label>${stateFields(true)}`;
-    if (mode === "date") content = '<label>Container<input data-field="location"></label><label>CODE YYYY-MM-DD<textarea data-field="text"></textarea></label><button data-date>CALENDAR • append date to last code</button>';
+    if (mode === "date") content = '<label>Tote<input data-field="location"></label><div class="date-head">ASIN / FNSKU / UPC / EAN • Desired date</div><div data-date-rows></div><button data-add-row>+ ADD ROW</button>';
     if (mode === "flip") content = '<label>OLD FCSKU<input data-field="old"></label><label>NEW FCSKU<input data-field="newCode"></label><label>LOCATIONS / CONTAINERS<textarea data-field="text"></textarea></label>';
     if (mode.startsWith("move")) content = `<label>SOURCE<input data-field="source"></label><label>DESTINATION<input data-field="destination"></label>${mode === "moveAll" ? '<div class="grid"><label>Quantity<select data-field="quantityMode"><option value="all">ALL</option><option value="user">USER QTY</option></select></label><label>QTY<input type="number" min="1" step="1" data-field="quantity" value="1"></label></div>' : ""}<label>ITEM BARCODES<textarea data-field="text"></textarea></label>${mode === "moveContainer" ? "<p>Container mode uses the native form. V4 observes no container transfer proof here; helper Run is disabled.</p>" : ""}`;
     root.querySelector(".entry").innerHTML = content;
+    function addDateRow(code = "", date = "") {
+      const row = d.createElement("div");
+      row.className = "date-row";
+      row.innerHTML = '<input data-date-code autocomplete="off" placeholder="ASIN / FNSKU / UPC / EAN"><input data-date-value type="date">';
+      row.querySelector("[data-date-code]").value = code;
+      row.querySelector("[data-date-value]").value = date;
+      root.querySelector("[data-date-rows]").append(row);
+      return row;
+    }
+    if (mode === "date") for (let i = 0; i < 4; i++) addDateRow();
     const draftKey = "tm-v4.aft.draft." + mode;
     try {
       const saved = JSON.parse(window2.localStorage.getItem(draftKey) || "{}");
       for (const node of root.querySelectorAll("[data-field]")) if (saved[node.dataset.field] != null) node.value = saved[node.dataset.field];
       minimized = saved.minimized === true;
+      if (mode === "date" && Array.isArray(saved.dateRows)) {
+        root.querySelector("[data-date-rows]").replaceChildren();
+        for (const row of saved.dateRows) addDateRow(row.code, row.date);
+        if (!saved.dateRows.length) for (let i = 0; i < 4; i++) addDateRow();
+      }
     } catch {
     }
     const message = (text2) => root.querySelector("[role=status]").textContent = text2;
     function save() {
       const data = { minimized };
+      if (mode === "date") data.dateRows = [...root.querySelectorAll(".date-row")].map((row) => ({ code: row.querySelector("[data-date-code]").value, date: row.querySelector("[data-date-value]").value }));
       for (const node of root.querySelectorAll("[data-field]")) data[node.dataset.field] = node.value;
       window2.localStorage.setItem(draftKey, JSON.stringify(data));
+    }
+    function drawChoices() {
+      if (!["each", "sku"].includes(mode)) return;
+      const current = root.querySelector("[data-field=currentState]"), desired = root.querySelector("[data-field=desiredState]"), sourceDamage = root.querySelector("[data-field=currentDamage]"), targetDamage = root.querySelector("[data-field=desiredDamage]");
+      if (current) {
+        for (const option of desired.options) option.disabled = current.value !== "UNSELLABLE" && option.value === current.value;
+        if (desired.selectedOptions[0]?.disabled) desired.value = [...desired.options].find((option) => !option.disabled).value;
+      }
+      for (const option of targetDamage.options) option.disabled = current?.value === "UNSELLABLE" && desired.value === "UNSELLABLE" && option.value === sourceDamage.value;
+      if (targetDamage.selectedOptions[0]?.disabled) targetDamage.value = [...targetDamage.options].find((option) => !option.disabled).value;
+      for (const name of ["currentDamage", "desiredDamage"]) {
+        const field = root.querySelector("[data-field=" + name + "]");
+        if (field) field.closest("label").hidden = (name === "currentDamage" ? current?.value : desired.value) !== "UNSELLABLE";
+      }
+      for (const button of root.querySelectorAll("[data-choice]")) {
+        const field = root.querySelector("[data-field=" + button.dataset.choice + "]"), option = [...field.options].find((option2) => option2.value === button.dataset.value);
+        button.disabled = runner.busy || option?.disabled;
+        button.dataset.selected = String(field.value === button.dataset.value);
+        button.setAttribute("aria-pressed", String(field.value === button.dataset.value));
+      }
     }
     function paint(text2, rows = runner.rows) {
       if (text2) message(text2);
       root.querySelector(".body").hidden = minimized;
+      drawChoices();
       root.querySelector("[data-min]").textContent = minimized ? "+" : "−";
       root.querySelector("[data-run]").disabled = runner.busy || !mode || mode === "moveContainer";
       root.querySelectorAll("[data-field]").forEach((node) => node.disabled = runner.busy);
@@ -898,7 +907,7 @@
         const meta = {};
         for (const node of root.querySelectorAll("[data-field]")) meta[node.dataset.field] = clean(node.value);
         const batch = control.querySelector("[data-batch]")?.checked;
-        const text2 = mode === "sku" && !batch ? meta.code : root.querySelector("[data-field=text]")?.value || "";
+        const text2 = mode === "date" ? [...root.querySelectorAll(".date-row")].map((row) => ({ code: clean(row.querySelector("[data-date-code]").value), date: row.querySelector("[data-date-value]").value })).filter((row) => row.code || row.date).map((row) => row.code + " " + row.date).join("\n") : mode === "sku" && !batch ? meta.code : root.querySelector("[data-field=text]")?.value || "";
         save();
         const task = runner.run(parseAftRows(mode, text2, meta));
         paint();
@@ -914,17 +923,26 @@
         onError(error);
       }
     }
-    root.addEventListener("input", save, { signal: events.signal });
+    root.addEventListener("input", (event) => {
+      if (mode === "date" && event.target.matches("[data-date-code]") && event.target.value && event.target.closest(".date-row") === root.querySelector("[data-date-rows]").lastElementChild) addDateRow();
+      save();
+    }, { signal: events.signal });
     root.addEventListener("click", (event) => {
       const target = event.target.closest("button");
       if (!target) return;
+      if (target.hasAttribute("data-add-row")) addDateRow().querySelector("input").focus();
+      if (target.hasAttribute("data-choice")) {
+        const field = root.querySelector('[data-field="' + target.dataset.choice + '"]');
+        field.value = target.dataset.value;
+        field.dispatchEvent(new window2.Event("change", { bubbles: true }));
+        save();
+        drawChoices();
+      }
       if (target.hasAttribute("data-run")) void run();
       if (target.hasAttribute("data-stop")) {
         runner.stop();
-        picker.dispose();
       }
       if (target.hasAttribute("data-clear")) {
-        picker.dispose();
         void runner.clear().then(() => {
           for (const node of root.querySelectorAll("input:not([type=number]),textarea")) node.value = "";
           save();
@@ -935,19 +953,6 @@
         minimized = !minimized;
         save();
         paint();
-      }
-      if (target.hasAttribute("data-date")) {
-        const field = root.querySelector("[data-field=text]"), line = field.value.trim().split(/\r?\n/).at(-1), code = clean(line).split(/\s+/)[0];
-        if (!code) return message("Enter a code before CALENDAR");
-        void picker.pick({ code, ctx: { dateType: "EXPIRATION_DATE" }, signal: events.signal }).then((value) => {
-          if (value == null) return;
-          const date = new Date(value), iso = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
-          const lines = field.value.trim().split(/\r?\n/);
-          lines[lines.length - 1] = code + " " + iso;
-          field.value = lines.join("\n") + "\n";
-          save();
-          field.focus();
-        });
       }
     }, { signal: events.signal });
     control.addEventListener("click", (event) => {
@@ -982,6 +987,33 @@
       }
       event.stopImmediatePropagation();
     }, { capture: true, signal: events.signal });
+    if (["each", "sku"].includes(mode)) {
+      const labels = { INVENTORY: "Sellable", PENDING_RESEARCH: "Pending", UNSELLABLE: "Unsellable", AMAZON_DAMAGE: "Amazon Damage", DEFECTIVE: "Defective", DISTRIBUTOR_DAMAGE: "Distributor Damage", EXPIRED: "Expired" };
+      for (const select2 of root.querySelectorAll(".entry select[data-field]")) {
+        select2.hidden = true;
+        const group = d.createElement("span");
+        group.className = "choices";
+        for (const option of select2.options) {
+          const button = d.createElement("button");
+          button.type = "button";
+          button.dataset.choice = select2.dataset.field;
+          button.dataset.value = option.value;
+          button.textContent = labels[option.value] || option.value;
+          group.append(button);
+        }
+        select2.after(group);
+      }
+      const saved = window2.localStorage.getItem(draftKey);
+      if (!saved) {
+        root.querySelector("[data-field=desiredState]").value = "UNSELLABLE";
+        root.querySelector("[data-field=desiredDamage]").value = mode === "sku" ? "DEFECTIVE" : "AMAZON_DAMAGE";
+        if (mode === "sku") root.querySelector("[data-field=currentDamage]").value = "DEFECTIVE";
+      }
+      root.addEventListener("change", () => {
+        drawChoices();
+        save();
+      }, { signal: events.signal });
+    }
     d.body.append(style, root, control);
     paint();
     return { root, control, paint, inventory: (choices) => {
@@ -994,7 +1026,6 @@
       }
     }, dispose() {
       events.abort();
-      picker.dispose();
       root.remove();
       control.remove();
       style.remove();
@@ -1551,7 +1582,7 @@
   }
 
   // aft-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.aft.installer");
   if (!page[guard]) {
