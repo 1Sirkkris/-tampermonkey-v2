@@ -577,3 +577,27 @@ Priority order:
 V2 = reference.
 V3 = lessons.
 V4 = clean implementation.
+
+==================================================
+10 OCTOBER 2026 DELIVERY ADDENDUM — CURRENT AUTHORITY
+==================================================
+Resume existing HEAD; do not restart. Target staged user testing 11 October 2026.
+Build as many complete independent workflows as safely achievable in BASELINE order.
+Master live-only gates do not block independent consumers. V2/V3 remain frozen.
+No sub-agents. Ordinary V4 implementation/checkpoints are authorised; live operations
+and production deployment are not. Do not remove proven functions or relocate UI.
+Save current source/tests and CHECKPOINT.md around every 10 minutes of active work,
+never intentionally beyond 15; commit [checkpoint], push v4-cleanroom, verify remote.
+Save WIP / NOT VERIFIED too; do not overwrite working installers with broken builds.
+Each recovery record: current unit, completed work, modified files, test results,
+known failures/unfinished work, exact NEXT and pending approval. No force push.
+Chat: CHECKPOINT | SCRIPT | STATUS | VERIFIED | SHA | NEXT; continue automatically.
+Add shared V4 footer: active scripts only, V4 <1–5 character label>: real version;
+dedupe/dispose, subtle bottom centre, pointer-events none, Ctrl+Q compatible, no polling.
+Every installer @name starts V4; metadata/update/download/version identities checked.
+Use clean scoped CSS, preserve scanner and native locations. Required regression
+contracts in BASELINE stay binding. HTTP 200 is never mutation confirmation.
+Readiness: READY FOR READ-ONLY TEST / READY FOR CONTROLLED LIVE TEST /
+OFFLINE VERIFIED — LIVE GATE PENDING / PARTIAL / BLOCKED / NOT BUILT.
+At finish update README + CHECKPOINT, push/verify, supply install links, versions,
+statuses/tests/live gates/unbuilt blockers/testing order/material V2 differences.

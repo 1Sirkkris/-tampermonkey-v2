@@ -1,3 +1,17 @@
+# Active delivery checkpoint — 10 October 2026 (Sydney)
+
+- Unit: resume / full-suite delivery.
+- Status: PARTIAL. GitHub HEAD verified as cc00319d86629bf021dc540f5173e57712e570a6; existing source preserved. Only OBS 0.1.2 and Master 0.1.3 are operational installers; diagnostic capture is separate.
+- Completed: read AGENTS, BRIEF, BASELINE and recovery; verified remote checkpoint via GitHub and fetched branches. Current delivery authority added to BRIEF.
+- Files modified: v4/BRIEF.txt, v4/CHECKPOINT.md.
+- Verification: npm test 148 passed / 0 failed; npm run check passed for all three existing installers; inherited source unchanged.
+- Known unfinished: full BASELINE except OBS/Master; Master remaining live gates documented below. Shared V4 watermark not implemented yet.
+- NEXT: finish baseline verification; establish shared watermark with installer/lifecycle fixtures, then build Tote Audit from V2 contract. Continue independent consumers despite Master live gates.
+- Pending approval: none for source; live inventory/printing/mutations and production rollout remain unauthorised.
+- Recovery: fetch v4-cleanroom, read four governing documents, continue NEXT. Checkpoint every 10–15 minutes and before unit changes, including WIP. No sub-agents.
+
+## Preserved previous verification and evidence
+
 # Recovery state
 
 - Unit: FCR Master.
@@ -19,7 +33,7 @@
 - Resolved native blocker: document-ready `P.now('jQuery')` attaches to private native jQuery even though AUI defines globals; first synchronous renderer registration on the exact native bare POST is retained. Deliberate Retry Inventory after completed/failed/aborted jqXHR reuses that renderer without re-completing the request or other subscribers. Old DataTables instances/nav wrappers are disposed; query/dates/replaced placeholder barriers remain. Failed reads settle native loading once; unsent lazy sections have no spinner.
 - Lifecycle: normal native section hashes keep the active owner. BFCache/ISS/Tote restoration rebinds only document renderer capabilities to new generations and fresh automatic reads; no prior results or pending work survive. Captured native nav case and problem/problems endpoint labels corrected.
 - Continuation: read source 0.1.1 recognizes exact true terminal markers, rejects contradictions/truncation, and owns bounded generic native continuations so renderer callbacks cannot start uncancellable later-page requests. Generic completeness remains explicitly unknown.
-- Next: keep standalone V4 0.1.3 for read-only use with V2/V3 disabled; the new log/user feedback accepts the observed paths. Remaining acceptance: native A/L/navigation/retry/filter/date controls, exact badges, repeated use/BFCache and OBS evidence. Actual browser-world attachment, Measurement auth/framing, repeated native date-filter state and long idle remain acceptance gates. Printer service acknowledgement/output remains unverified; no automatic print retries. Stay within Master until those material live gates are assessed; do not claim production replacement readiness.
+- Next: keep standalone V4 0.1.3 for read-only use with V2/V3 disabled; the new log/user feedback accepts the observed paths. Remaining acceptance: native A/L/navigation/retry/filter/date controls, exact badges, repeated use/BFCache and OBS evidence. Actual browser-world attachment, Measurement auth/framing, repeated native date-filter state and long idle remain acceptance gates. Printer service acknowledgement/output remains unverified; no automatic print retries. Current user authorises independent workflows while these live gates remain pending; do not claim production replacement readiness.
 - User feedback evidence: `V4_OBS_2026-10-06T04-52-47-605Z_47events.txt`, SHA-256 `280008c38044b606e5c373365d69942ab8a3172bb2acb7924a5eb073e1089d17`. Current user confirms containers legitimately lack Product data and reports brittle Pandash and initial MADCAT auth needing a click; working V2 MADCAT is the behavioural reference. Raw log remains outside the repository.
 - Master 0.1.3: native empty Product display returns `product:null`/ready without fake error or item badges; exact programmatic lookups/mismatches/nonempty malformed/login responses remain strict. Pandash transient network/timeouts/429/5xx retry at most twice, restriction GET coalesces only within one cancellation owner and caches validated settings for 30 minutes, missing/null messages are optional while missing/invalid levels never become L0. No auth/schema/permanent HTTP retry loops.
 - MADCAT correction: V2 observes outgoing native credentials; V4's prior successful-response gate could stall acquisition on a pending/failed item response. Capture now preserves the native Promise/return identity and observes fresh outgoing tokens. This is not credential acceptance proof; the raw read still enforces auth and bounded distinct-token renewal. Manual result rechecks reuse usable auth; an auth-required fallback can recheck once on a native notification, including a token arriving during history. No polling; stale generations cannot revive. Auth stage/deadline/outcome and Pandash status/method/stage/attempt evidence now make the next live failure diagnosable. The user's exact live MADCAT cause remains unproven in the earlier log.
