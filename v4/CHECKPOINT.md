@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: AFT native client/state extraction.
-- Status: PARTIAL — WIP / NOT VERIFIED installer. Existing 11 installers remain built/verified; no AFT installer yet.
-- Completed: AFT native object/instruction identity parsing, hidden native step exclusion, owner/state/quantity radio extraction, exact action/status/end/fresh workflow protocol, bounded active-only native status polling and response/auth validation. Seven proven native mode definitions retained. AFT_CONTRACT.md derives requirements from V2 0.9.46.
-- Files modified: aft-client.mjs, tests/aft.test.mjs, AFT_CONTRACT.md, README.md, CHECKPOINT.md.
-- Verification: 245 tests passed / 0 failed; 5 new actual AFT client/parser fixtures. Existing 11 installer build/check preserved. No live operations.
-- Known unfinished: durable AFT runner, EACH/SKU/Date/Move/Flip UI and queue, native mode switching, mutation/readback recovery, generated installer and behavior fixtures. Native markup/auth/outcomes remain live gates.
-- NEXT: implement durable AFT workflow runner, then familiar native UI/installer and integration tests; checkpoint WIP if deadline arrives. Then ISS and remaining independent tools.
-- Pending approval: none for internal implementation. Live operations/printing/production require explicit approval. No subagents.
-- Recovery: pushed expected-parent GitHub commit/ref, local source/tests checkpoint. Existing installers are untouched during source WIP.
+- Unit: AFT native runner/UI installer 0.1.0.
+- Status: PARTIAL — WIP candidate, not controlled-live ready. Preserve all previously verified installers.
+- Completed: native left-side EACH/SKU/Date/Move/FCSKU helpers, seven top-right mode actions, opaque structured source choices/S-P-U, distinct date removal/replacement, scanner Enter/123START, expiry calendar, durable whole-batch owner/rows, Stop settles submitted Confirm, Clear/reload retain UNKNOWN. Move EACH/ALL/QTY requires complete exact source/destination quantity delta plus native workflow advancement. No live operations.
+- Files modified: aft-client/workflow/runtime/entry.mjs, AFT installer, build.mjs, tests/aft.test.mjs, AFT_CONTRACT.md, README/CHECKPOINT.
+- Verification: 250 tests passed / 0 failed, 10 AFT fixtures including source runner uncertainty/Stop, exact quantities and generated DOM-ready installer; 12 installer metadata/build checks pass.
+- Unfinished parity: V2 known-rejected consumer-type recovery and native rendered quantity fallback are not yet rebuilt; conservative failure leaves visible recovery rows. Mode container uses native form, helper Run disabled as V2. Date queue uses CODE YYYY-MM-DD plus calendar rather than V2 individual row editor; restore individual row controls before parity signoff. Unknown outcomes never auto-end/replay. Native-world/identity/schema/long-batch testing pending.
+- NEXT: continue independent RIVER/SIM/Carton/Calm/PO/Screenshot tools while AFT parity gaps and ISS dependency remain explicit. Then finish AFT recovery/date UI and independently owned ISS native-origin workers/familiar FCR three areas. Do not claim complete suite yet.
+- Pending approval: none for internal implementation; live operations/printing/production require explicit approval. No subagents.
+- Recovery: local source/tests committed and expected-parent GitHub ref update verified. Frequent WIP checkpoints required.
 
 ## Preserved previous verification and evidence
 
