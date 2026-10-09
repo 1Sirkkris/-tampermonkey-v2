@@ -1,0 +1,25 @@
+// ==UserScript==
+// @name         V4 OBS
+// @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v4
+// @version      ${version}
+// @description  Independent native-page evidence and explicit V4 operation transcripts.
+// @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
+// @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
+// @include      /^https?:\/\/aft-qt-[^\/]+\.corp\.amazon\.com\//
+// @include      /^https?:\/\/aft-moveapp-[^\/]+\.proxy\.amazon\.com\//
+// @include      /^https?:\/\/tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com\//
+// @include      /^https?:\/\/fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com\//
+// @include      /^https?:\/\/(?:t\.corp\.amazon\.com|river\.amazon\.com|aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com|jp\.item-measurement\.aft\.a2z\.com)\//
+// @include      /^https?:\/\/console\.harmony\.a2z\.com\/poportal(?:[/?#]|$)/
+// @include      /^https?:\/\/fcmenu-(?:iad|nrt)-regionalized\.corp\.amazon\.com\//
+// @run-at       document-start
+// @grant        unsafeWindow
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
+// @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/OBS.user.js
+// @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/OBS.user.js
+// ==/UserScript==

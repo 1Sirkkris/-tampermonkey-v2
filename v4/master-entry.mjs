@@ -1,3 +1,4 @@
+import { registerWatermark } from './watermark.mjs';
 import { createMasterRuntime, watchNativeAjax } from './master-runtime.mjs';
 import { installMeasurementCapture } from './measurement-auth.mjs';
 import { createMeasurementAuth } from './measurement-auth.mjs';
@@ -5,7 +6,7 @@ import { createFcrEnrichment, createGmJsonReader } from './fcr-enrichment.mjs';
 import { createMasterFeatures } from './master-features.mjs';
 import { createMasterActions } from './master-actions.mjs';
 
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 const page = typeof unsafeWindow === 'object' ? unsafeWindow : window;
 const storage = { get: (key, fallback) => GM_getValue(key, fallback), set: (key, value) => GM_setValue(key, value),
   listen: (key, callback) => GM_addValueChangeListener(key, callback), remove: id => GM_removeValueChangeListener(id) };
@@ -20,7 +21,9 @@ if (!page[guard]) {
   let stop = () => {};
   function start() {
     if (location.origin === 'https://jp.item-measurement.aft.a2z.com') {
-      stop = installMeasurementCapture({ page, storage });
+      const release = registerWatermark(window, 'FCRM', VERSION);
+      const capture = installMeasurementCapture({ page, storage });
+      stop = () => { capture(); release(); };
       evidence({ type: 'script.start', script: 'FCR MASTER', version: VERSION, intent: 'read', data: { context: 'measurement-auth' } });
       return;
     }
@@ -42,9 +45,10 @@ if (!page[guard]) {
     });
     features = createMasterFeatures({ window, page, runtime, enrichment, auth, storage, onEvidence: evidence });
     actions = createMasterActions({ window, runtime, fetch: page.fetch.bind(page), onEvidence: evidence, uuid });
+    const release = registerWatermark(window, 'FCRM', VERSION);
     runtime.start(); const bridge = watchNativeAjax(page, () => runtime);
     evidence({ type: 'script.start', script: 'FCR MASTER', version: VERSION, intent: 'read', data: { context: 'native-fcr' } });
-    stop = () => { runtime.dispose(); bridge.restore?.(); };
+    stop = () => { runtime.dispose(); bridge.restore?.(); release(); };
   }
   start();
   window.addEventListener('pagehide', () => stop());

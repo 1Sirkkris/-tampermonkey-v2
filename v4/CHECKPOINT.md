@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: resume / full-suite delivery.
-- Status: PARTIAL. GitHub HEAD verified as cc00319d86629bf021dc540f5173e57712e570a6; existing source preserved. Only OBS 0.1.2 and Master 0.1.3 are operational installers; diagnostic capture is separate.
-- Completed: read AGENTS, BRIEF, BASELINE and recovery; verified remote checkpoint via GitHub and fetched branches. Current delivery authority added to BRIEF.
-- Files modified: v4/BRIEF.txt, v4/CHECKPOINT.md.
-- Verification: npm test 148 passed / 0 failed; npm run check passed for all three existing installers; inherited source unchanged.
-- Known unfinished: full BASELINE except OBS/Master; Master remaining live gates documented below. Shared V4 watermark not implemented yet.
-- NEXT: finish baseline verification; establish shared watermark with installer/lifecycle fixtures, then build Tote Audit from V2 contract. Continue independent consumers despite Master live gates.
-- Pending approval: none for source; live inventory/printing/mutations and production rollout remain unauthorised.
-- Recovery: fetch v4-cleanroom, read four governing documents, continue NEXT. Checkpoint every 10–15 minutes and before unit changes, including WIP. No sub-agents.
+- Unit: shared active-script watermark.
+- Status: OFFLINE VERIFIED — LIVE GATE PENDING. Master 0.1.4 and OBS 0.1.3 preserve the verified implementation and add the active runtime footer.
+- Completed: one V4 DOM footer across isolated scripts; dedupe, real executing version, safe old-owner disposal, pagehide cleanup, pointer-events none; no periodic timer. OBS now builds from canonical source using the same pinned bundler as Master.
+- Files modified: v4/watermark.mjs, master-entry.mjs, obs-entry.mjs, obs-metadata.txt, build.mjs, checks.mjs, generated Master/OBS, tests/obs.test.mjs, tests/watermark.test.mjs, README.md, CHECKPOINT.md.
+- Verification: baseline 148 passes; watermark milestone full suite 152 passes / 0 failures; build/check/whitespace pass. Existing HTTP native-page randomUUID fallback retained; duplicate script metadata is checked.
+- Known unfinished: all other operational installers; actual cross-userscript Tampermonkey footer and Ctrl+Q acceptance pending. Master remaining gates are preserved below.
+- NEXT: implement Tote Audit on its existing standalone route; preserve all twelve inventory columns, queued physical scans and exact X0/ZZ matching. Shared read/enrichment/auth source is available, not a runtime dependency.
+- Pending approval: none for internal implementation. Live print/mutations and deployment require approval.
+- Save path: GitHub connector creates a commit with the verified current remote parent, then non-force expected-SHA ref update and readback. Local git push/fetch review stalled; all files remain local and remote checkpoint is authoritative. Never force push.
 
 ## Preserved previous verification and evidence
 

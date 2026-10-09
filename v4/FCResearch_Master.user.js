@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.3
+// @version      0.1.4
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -26,6 +26,58 @@
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FCResearch_Master.user.js
 // ==/UserScript==
 (() => {
+  // watermark.mjs
+  function registerWatermark(window2, label, version) {
+    if (!/^[A-Za-z0-9]{1,5}$/.test(label) || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid V4 runtime identity");
+    const document = window2.document, id = "tm-v4-runtime-watermark";
+    const token = typeof window2.crypto.randomUUID === "function" ? window2.crypto.randomUUID() : [...window2.crypto.getRandomValues(new Uint32Array(4))].map((value) => value.toString(16)).join("-");
+    let disposed = false;
+    function render(host) {
+      const entries = [...host.children].sort((a, b) => a.dataset.tmV4Runtime.localeCompare(b.dataset.tmV4Runtime));
+      entries.forEach((entry, index) => {
+        entry.textContent = (index ? " | " : "") + "V4 " + entry.dataset.tmV4Runtime + ": " + entry.dataset.tmV4Version;
+        host.appendChild(entry);
+      });
+      if (!entries.length) host.remove();
+    }
+    function mount() {
+      if (disposed) return;
+      let host = document.getElementById(id);
+      if (!host) {
+        host = document.createElement("div");
+        host.id = id;
+        host.dataset.tmV4Script = "RUNTIME";
+        host.setAttribute("aria-hidden", "true");
+        host.style.cssText = "position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-align:center;text-shadow:0 1px 1px rgba(255,255,255,.95)";
+        document.documentElement.appendChild(host);
+      }
+      let entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label);
+      if (!entry) {
+        entry = document.createElement("span");
+        entry.dataset.tmV4Runtime = label;
+        host.appendChild(entry);
+      }
+      entry.dataset.tmV4Version = version;
+      entry.dataset.tmV4Owner = token;
+      render(host);
+    }
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      document.removeEventListener("DOMContentLoaded", mount);
+      window2.removeEventListener("pagehide", dispose);
+      const host = document.getElementById(id);
+      if (!host) return;
+      const entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label && node.dataset.tmV4Owner === token);
+      entry?.remove();
+      render(host);
+    }
+    mount();
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true });
+    window2.addEventListener("pagehide", dispose, { once: true });
+    return dispose;
+  }
+
   // fcr-read.mjs
   var FCR_READ_VERSION = "0.1.2";
   var FcrReadError = class extends Error {
@@ -2228,7 +2280,7 @@
   }
 
   // master-entry.mjs
-  var VERSION = "0.1.3";
+  var VERSION = "0.1.4";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var storage = {
     get: (key, fallback) => GM_getValue(key, fallback),
@@ -2247,7 +2299,12 @@
   if (!page[guard]) {
     let start = function() {
       if (location.origin === "https://jp.item-measurement.aft.a2z.com") {
-        stop = installMeasurementCapture({ page, storage });
+        const release2 = registerWatermark(window, "FCRM", VERSION);
+        const capture = installMeasurementCapture({ page, storage });
+        stop = () => {
+          capture();
+          release2();
+        };
         evidence({ type: "script.start", script: "FCR MASTER", version: VERSION, intent: "read", data: { context: "measurement-auth" } });
         return;
       }
@@ -2289,12 +2346,14 @@
       });
       features = createMasterFeatures({ window, page, runtime, enrichment, auth, storage, onEvidence: evidence });
       actions = createMasterActions({ window, runtime, fetch: page.fetch.bind(page), onEvidence: evidence, uuid });
+      const release = registerWatermark(window, "FCRM", VERSION);
       runtime.start();
       const bridge = watchNativeAjax(page, () => runtime);
       evidence({ type: "script.start", script: "FCR MASTER", version: VERSION, intent: "read", data: { context: "native-fcr" } });
       stop = () => {
         runtime.dispose();
         bridge.restore?.();
+        release();
       };
     };
     page[guard] = { version: VERSION };

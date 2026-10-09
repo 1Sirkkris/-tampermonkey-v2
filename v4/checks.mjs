@@ -8,6 +8,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const files = readdirSync(root).filter(name => name.endsWith('.user.js'));
 files.push(...readdirSync(root + '/diagnostics').filter(name => name.endsWith('.user.js')).map(name => 'diagnostics/' + name));
 assert(files.length > 0, 'No V4 installer');
+const identities = new Set();
 for (const name of files) {
   const path = root + '/' + name;
   const source = readFileSync(path, 'utf8');
@@ -15,6 +16,9 @@ for (const name of files) {
   assert(metadata, name + ': metadata missing');
   const field = key => metadata.match(new RegExp('// @' + key + '\\s+([^\\n]+)'))?.[1].trim();
   assert(field('name').startsWith('V4 '), name + ': wrong identity');
+  const identity = field('namespace') + '|' + field('name');
+  assert(!identities.has(identity), name + ': duplicate script identity'); identities.add(identity);
+  if (!name.startsWith('diagnostics/')) assert(source.includes('tm-v4-runtime-watermark'), name + ': missing watermark');
   assert.equal(field('downloadURL'), 'https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/' + name);
   assert.equal(field('updateURL'), field('downloadURL'));
   assert.equal(source.match(/(?:const|var|let) VERSION\s*=\s*(['"])([^'"]+)\1/)?.[2], field('version'));

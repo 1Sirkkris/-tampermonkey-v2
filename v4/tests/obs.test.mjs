@@ -123,8 +123,8 @@ test('installs alone with the familiar FCR header controls and explicit build id
   const app = fixture(); t.after(() => app.dispose());
   assert.equal(app.ui.parentElement.querySelector('.warehouse-id').textContent, 'BWU2');
   assert.deepEqual([...app.ui.querySelectorAll('button')].map(x => x.textContent), ['OBS 1/6000', 'FAT OFF', 'Clear']);
-  assert.match(app.ui.textContent, /V4 0\.1\.2/);
-  assert.equal(app.ui.dataset.tmV4Version, '0.1.2');
+  assert.match(app.ui.textContent, /V4 0\.1\.3/);
+  assert.equal(app.ui.dataset.tmV4Version, '0.1.3');
   assert.equal(app.window.BWU2Fleet, undefined);
   assert.equal(app.fetchCalls, 0);
   app.time.tick(2000); await settle();

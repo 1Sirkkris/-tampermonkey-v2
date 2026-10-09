@@ -37,10 +37,18 @@ export function masterBuild() {
   return buildSync({ entryPoints: [root + '/master-entry.mjs'], bundle: true, write: false, format: 'iife', target: 'es2022',
     legalComments: 'none', banner: { js: metadata }, charset: 'utf8' }).outputFiles[0].text;
 }
+export function obsBuild() {
+  const obsSource = readFileSync(root + '/obs-entry.mjs', 'utf8');
+  const version = obsSource.match(/const VERSION = '([^']+)'/)[1];
+  const banner = readFileSync(root + '/obs-metadata.txt', 'utf8').replace('${version}', version);
+  return buildSync({ entryPoints: [root + '/obs-entry.mjs'], bundle: true, write: false, format: 'iife', target: 'es2022', legalComments: 'none', banner: { js: banner }, charset: 'utf8' }).outputFiles[0].text;
+}
 if (process.argv.includes('--check')) {
+  if (readFileSync(root + '/OBS.user.js', 'utf8') !== obsBuild()) throw new Error('OBS installer is stale: npm run build');
   if (readFileSync(root + '/FCResearch_Master.user.js', 'utf8') !== masterBuild()) throw new Error('Master installer is stale: npm run build');
   console.log('PASS: Master installer matches canonical source');
 } else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   writeFileSync(root + '/FCResearch_Master.user.js', masterBuild());
+  writeFileSync(root + '/OBS.user.js', obsBuild());
   console.log('Built Master ' + version);
 }
