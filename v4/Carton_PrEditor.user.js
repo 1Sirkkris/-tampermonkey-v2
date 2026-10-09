@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Carton PrEditor
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Ready barcode/count Complete helper with durable no-repeat evidence.
 // @match https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*
 // @grant none
@@ -246,20 +246,32 @@
       } catch {
       }
     }
+    function readyCarton() {
+      const barcode = clean(d.getElementById("input-page-barcode-container-tertiary-text")?.textContent), counts = [...clean(d.body.textContent).matchAll(/Barcodes scanned:\s*(\d+)/gi)].map((match) => Number(match[1])), button = d.getElementById("input-page-button-container-button");
+      if (!/^(?:csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})$/i.test(barcode) || counts.length !== 1 || counts[0] < 2 || !button || !button.isConnected || button.disabled || button.getAttribute("aria-disabled") === "true" || button.closest("[hidden],[aria-hidden=true]") || !/^complete\b/i.test(clean(button.textContent))) return null;
+      return { barcode, count: counts[0], button };
+    }
     async function inspect() {
       if (disposed || busy || !enabled) return;
-      const barcode = clean(d.getElementById("input-page-barcode-container-tertiary-text")?.textContent), counts = [...clean(d.body.textContent).matchAll(/Barcodes scanned:\s*(\d+)/gi)].map((m) => Number(m[1])), button = d.getElementById("input-page-button-container-button");
-      if (!/^(?:csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})$/i.test(barcode) || counts.length !== 1 || counts[0] < 2 || !button || button.disabled || button.getAttribute("aria-disabled") === "true" || !/^complete\b/i.test(clean(button.textContent))) return;
+      const snapshot = readyCarton();
+      if (!snapshot) return;
       busy = true;
+      let changed = false;
       try {
         await withOperationLock(window2, "tm-v4.carton.owner", async () => {
           if (disposed || !enabled) return;
-          const journal = createOperationJournal({ storage, key, uuid: () => window2.crypto.randomUUID() });
+          const current = readyCarton();
+          if (!current || current.barcode !== snapshot.barcode || current.count !== snapshot.count || current.button !== snapshot.button) {
+            changed = true;
+            paint("Native readiness changed — checking current carton");
+            return;
+          }
+          const { barcode, count, button } = current, journal = createOperationJournal({ storage, key, uuid: () => window2.crypto.randomUUID() });
           if (journal.rows.some((row2) => row2.container.toUpperCase() === barcode.toUpperCase())) {
             paint("Already submitted — verify native result");
             return;
           }
-          const row = journal.add([barcode], { count: counts[0], kind: "carton-complete" })[0];
+          const row = journal.add([barcode], { count, kind: "carton-complete" })[0];
           journal.transition(row, "SUBMITTED", "Complete control submitted", { operationId: row.id });
           onEvidence({ type: "operation", intent: "mutation", operationId: row.id, phase: "SUBMITTED", data: { kind: "carton-complete" } });
           for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) button.dispatchEvent(new window2.MouseEvent(type, { bubbles: true, cancelable: true }));
@@ -272,6 +284,7 @@
         paint(error.message);
       } finally {
         busy = false;
+        if (changed && !disposed) window2.queueMicrotask(() => void inspect());
       }
     }
     root.addEventListener("click", () => {
@@ -308,7 +321,7 @@
   }
 
   // carton-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var guard = Symbol.for("tampermonkey.v4.carton.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

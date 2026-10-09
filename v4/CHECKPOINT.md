@@ -1,14 +1,15 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Sideline shared-owner recovery correction; native 0.1.3 / ISS 0.1.2.
+- Unit: Carton readiness correction 0.1.1.
 - Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: reproduced second-instance Reset/second Stop overwriting another submitted owner and deleting queued rows. Idle clears now acquire the canonical native workflow lock and reload the current journal. Own busy preflight second Stop clears only after settling; own submitted result retained. Stop/disposal before delayed Web Lock grant perform zero reads/mutations/writes. UI waits for clear outcome before discarding local draft. ISS bundles the same corrected native engine.
-- Files modified: sideline workflow/runtime/entry/installer/tests/contract; ISS worker/entry/installer/tests and suite expected version; README/CHECKPOINT.
-- Verification: 307 tests passed / 0 failed (Sideline 27; ISS 13; suite 2); 19 deterministic installers and 67 source module checks pass; whitespace pass. Reproducer failed before fix and passes after. No live operation.
-- Known gates: native Tampermonkey/auth/frame/locks/scanner/expiry acceptance, actual readbacks; Drop/Stow PARTIAL empty-container location proof. AFT additional-confirmation native outcome gate. Carton readiness is read before asynchronous ownership; NEXT will reproduce a native DOM change before lock grant and revalidate readiness before Complete.
-- NEXT: reproduce/fix Carton stale barcode/count/button after asynchronous owner acquisition; add real-source fixture and rebuild candidate. Then final README staged testing/F01–F16 matrix and end-of-session pushed checkpoint.
+- Completed: reproduced stale barcode/count snapshot reaching native Complete after asynchronous lock acquisition. One canonical readiness reader now revalidates current barcode/count/button under the owner, blocks stale/detached/hidden controls, and rechecks changed unsent readiness without replaying mutations. Disposal before lock does not submit/consume barcode. V2 ON default, saved toggle and two beeps preserved.
+- Files modified: carton runtime/entry/installer/tests/contract, README/CHECKPOINT.
+- Verification: 310 tests passed / 0 failed; Carton 6 fixtures including failing-before/passing-after stale native readiness, disabled/count-one/reload/no-replay/disposal/hidden/current installer. All 19 deterministic installer + 67 source module checks pass; whitespace pass. No live operational action.
+- Suite: all 18 operational installers built; four READY FOR READ-ONLY TEST, twelve OFFLINE VERIFIED — LIVE GATE PENDING, Drop/Stow PARTIAL. Read-only capture diagnostic 0.1.1 also built. No unbuilt BASELINE workflows; missing live proof is not completed acceptance.
+- Known gates: native auth/markup/frame/locks/real outcomes and scanner/visual acceptance; Drop/Stow empty-container location proof; AFT additional native confirmation stage. Carton auto-complete defaults ON, so installing on a ready carton is an operational action requiring approval. Calm buttons submit labor forms. No production rollout.
+- NEXT: final staged testing instructions and per-case evidence/F01–F16 matrix in README; final scope/metadata/docs verification; push final recoverable delivery checkpoint. No further broad refactoring or repetition without new defects.
 - Pending approval: none for code; live operations, Carton auto-completion, Calm labor submission, ticket/printing/production actions require explicit approval. No agents.
-- Recovery: source/tests local checkpoint and expected-parent non-force GitHub push/readback. Source changes only v4/; main/V3 preserved.
+- Recovery: source/tests local checkpoint, non-force expected-parent GitHub tree/branch readback; all source changes exclusively v4/. Main/V3 preserved.
 
 ## Preserved previous verification and evidence
 

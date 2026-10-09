@@ -1,3 +1,3 @@
 import{registerWatermark}from'./watermark.mjs';import{createCartonHelper}from'./carton-runtime.mjs';import{evidence,installRouteLifecycle}from'./ui-tools.mjs';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const guard=Symbol.for('tampermonkey.v4.carton.installer');if(!window[guard]){window[guard]={version:VERSION};installRouteLifecycle(window,()=>{if(window.top!==window.self||!/^\/wf/.test(location.pathname))return;const release=registerWatermark(window,'CART',VERSION),helper=createCartonHelper({window,onEvidence:data=>evidence(window,'CART',VERSION,data)});return()=>{helper.dispose();release();};},()=>location.pathname,{waitForDom:true});}
