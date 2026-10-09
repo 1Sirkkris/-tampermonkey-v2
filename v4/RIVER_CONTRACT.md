@@ -1,0 +1,7 @@
+# RIVER contract
+
+V2 0.3.20 FCR capture/handoff and native bottom-left Run/Stop-Clear assistant. Self-contained V4 reader resolves exact product; exact SKU PO rows/latest date and all quantity components, not whole-inventory totals. Date ambiguity/ties/missing components => manual unavailable. Cost, vendor and missing fields remain N/A. Generic native PO pagination completeness is separate from global schema completeness and visibly recorded.
+
+Native page-info/heading steps: Pandash option2, Issue-at-FC option1, ASIN; Related TT manual; Information W1 FNSKU/PO/vendor/cost/TBD/title and title-space commit; Sortability option1; Severity exact PO-line units/shipments0 or manual missing/0; Images dropdown option2; final Create Issue manual. Known enabled Next advances once per exact step; no retry when native transition is unknown. Native setters/focus/composed input/change/blur and retained values; event-driven readiness with deadlines, cancellation before/after every frame and write, no arbitrary 500ms title pause.
+
+STOP/CLEAR cancels all pending waits/writes/Next and clears only V4 payload. Disposal cancels without discarding handoff. One active local assistant, scoped CSS, footer, cleanup. Missing/ambiguous markup remains a visible gate. Browser native schema/page-info/form readiness/GM cross-origin handoff and actual final user steps need live verification. No final ticket or inventory operation is automated or performed this session.

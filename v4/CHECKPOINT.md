@@ -1,14 +1,14 @@
 # Active delivery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: SIM Markdown Toolbar 0.1.0.
+- Unit: RIVER Ticket Assistant 0.1.0.
 - Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: all 12 adjacent native editor controls, native setter/input/change/caret; lines/fences/TSV/table/HR; snippets add/edit/delete/manage/import/export/duplicate merge with corrupt data preserved; gallery/all image links/Ctrl-copy and authenticated sequential blob downloads with same-origin direct fallback honestly labelled. Exact Attachments scope, Audit Trail controls, synopsis/announcement collapse, editor replacement dedup and lifecycle cancellation/cleanup. No ticket submission.
-- Files modified: sim-markdown/runtime/entry.mjs, SIM_Markdown_Toolbar.user.js, SIM_CONTRACT.md, build.mjs, tests/sim.test.mjs, README/CHECKPOINT.
-- Verification: 270 tests passed / 0 failed, 9 SIM fixtures including gallery and failed download handoffs; 17 deterministic installers and metadata/syntax/independence checks pass. Cleanup observer bug reproduced and fixed before checkpoint.
-- Known gates: actual native editor controlled events/caret, popup/CSP/clipboard and attachment auth/downloads; old V2 presets require explicit JSON export/import into V4 storage. RIVER/ISS not built; AFT remains PARTIAL with recovery/rendered-quantity/date-row gaps.
-- NEXT: implement native FCR capture + RIVER step assistant, preserve quantity/manual final gates and Stop/Clear cancellation. Then restore AFT parity and implement independently owned ISS areas as safely achievable.
-- Pending approval: none for internal code; live ticket/operational submission/printing/production require explicit approval. No agents.
-- Recovery: local source/test checkpoint and non-force expected-parent GitHub push/readback.
+- Completed: independent exact FCR product/PO capture, latest dated exact SKU line/all three quantity components, missing/ambiguous quantity manual; capture indicator/badge handoff into native AU RIVER via V4-only GM payload. Native bottom-left Run/Stop-Clear and nine known steps, W1 composed field commit/title-space, native quantity choice, related-ticket/manual quantity/final Create gates, one Next per step with unknown transition barrier, cancellation before/after each awaited write and Next; no arbitrary title delay/polling. No live ticket/inventory action.
+- Files modified: river-capture/runtime/fcr/entry.mjs, FCResearch_RIVER_Ticket_Assistant.user.js, RIVER_CONTRACT.md, build.mjs, tests/river.test.mjs, README/CHECKPOINT.
+- Verification: 276 tests passed / 0 failed, 6 RIVER source/generated fixtures; 18 deterministic installers and metadata/syntax/independence checks pass. Stop during pending native frame produces zero later writes/Next. Product cancellation fails before publishing.
+- Gates: actual native FCR PO schema/global completeness, badge location, page-info/radios/dropdown/W1 native readiness, GM handoff and manual steps. Conservative exact identity/date handling replaces V2 title/substring guessing; unavailable stays manual. AFT remains PARTIAL; ISS not built.
+- NEXT: restore AFT known-rejected recovery, native rendered quantity and individual Date rows; then implement familiar ISS FCR three areas with independently bundled native workers. Preserve all other installers and evidence.
+- Pending approval: none for code; live operations/final ticket/printing/production require explicit approval. No agents.
+- Recovery: source/tests local commit and non-force expected-parent GitHub push/readback.
 
 ## Preserved previous verification and evidence
 
