@@ -7,16 +7,18 @@ export function validateLocation(result,container,destination=null){
  if(destination&&result.rows.some(row=>upper(row.outerLocation)!==upper(destination)))throw new NativeRequestError('Requested destination not confirmed by native location readback',{outcome:'UNKNOWN'});
  return result;
 }
+export function validateMoveEnvelope(response,raw){const content=response.headers.get('content-type')||'';
+ if(!response.ok||response.redirected||/html/i.test(content)||/^\s*</.test(raw))throw new NativeRequestError('Move response does not prove a native outcome',{outcome:'UNKNOWN',status:response.status});
+ let data;try{data=raw?JSON.parse(raw):null;}catch{data=null;}
+ if(data&&(data.success===false||data.error||data.errorMessage))throw new NativeRequestError('Move explicitly rejected',{outcome:'REJECTED',status:response.status});
+ if(data&&/^(?:pending|submitted|queued|processing)$/i.test(String(data.status||data.state||'')))throw new NativeRequestError('Move remains pending — verify before retry',{outcome:'UNKNOWN'});
+}
 export function createMoveContainer({window,fetch,reader,identity,onEvidence=()=>{}}){
  return async(row,{signal,beforeMutation,checkRunning,onPhase=()=>{}})=>{
   const container=clean(row.container),destination=clean(row.destination);if(!/^(?:tsX|csX)[A-Z0-9_-]+$/i.test(container)||!/^dz-[A-Za-z0-9_-]+$/.test(destination))throw new NativeRequestError('Invalid exact container/destination');
   identity();onPhase('location-preflight');validateLocation(await reader.inventory(container,{signal}),container);checkRunning();identity();beforeMutation();onPhase('move');
   let response;try{response=await fetch(MOVE_CONTAINER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sourceScannableId:null,destinationScannableId:destination,containerScannableId:container,confirmed:'true'}),signal});}catch{throw new NativeRequestError('Move submission outcome unknown',{outcome:'UNKNOWN'});}
-  const raw=await response.text();const content=response.headers.get('content-type')||'';
-  if(!response.ok||response.redirected||/html/i.test(content)||/^\s*</.test(raw))throw new NativeRequestError('Move response does not prove a native outcome',{outcome:'UNKNOWN',status:response.status});
-  let data;try{data=raw?JSON.parse(raw):null;}catch{data=null;}
-  if(data&&(data.success===false||data.error||data.errorMessage))throw new NativeRequestError('Move explicitly rejected',{outcome:'REJECTED',status:response.status});
-  if(data&&/^(?:pending|submitted|queued|processing)$/i.test(String(data.status||data.state||'')))throw new NativeRequestError('Move remains pending — verify before retry',{outcome:'UNKNOWN'});
+  validateMoveEnvelope(response,await response.text());
   onPhase('location-verification');let verified;try{verified=validateLocation(await reader.inventory(container,{signal}),container,destination);}catch(error){throw new NativeRequestError(error.message,{outcome:'UNKNOWN'});}
   onEvidence({type:'move.location',intent:'read',data:{outcome:'exact-destination',rows:verified.rows.length}});return{status:response.status,verifiedBy:'native-inventory-outerLocation'};
  };

@@ -746,6 +746,18 @@
     if (destination && result.rows.some((row) => upper(row.outerLocation) !== upper(destination))) throw new NativeRequestError("Requested destination not confirmed by native location readback", { outcome: "UNKNOWN" });
     return result;
   }
+  function validateMoveEnvelope(response, raw) {
+    const content = response.headers.get("content-type") || "";
+    if (!response.ok || response.redirected || /html/i.test(content) || /^\s*</.test(raw)) throw new NativeRequestError("Move response does not prove a native outcome", { outcome: "UNKNOWN", status: response.status });
+    let data;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = null;
+    }
+    if (data && (data.success === false || data.error || data.errorMessage)) throw new NativeRequestError("Move explicitly rejected", { outcome: "REJECTED", status: response.status });
+    if (data && /^(?:pending|submitted|queued|processing)$/i.test(String(data.status || data.state || ""))) throw new NativeRequestError("Move remains pending — verify before retry", { outcome: "UNKNOWN" });
+  }
   function createMoveContainer({ window: window2, fetch, reader, identity, onEvidence = () => {
   } }) {
     return async (row, { signal, beforeMutation, checkRunning, onPhase = () => {
@@ -765,17 +777,7 @@
       } catch {
         throw new NativeRequestError("Move submission outcome unknown", { outcome: "UNKNOWN" });
       }
-      const raw = await response.text();
-      const content = response.headers.get("content-type") || "";
-      if (!response.ok || response.redirected || /html/i.test(content) || /^\s*</.test(raw)) throw new NativeRequestError("Move response does not prove a native outcome", { outcome: "UNKNOWN", status: response.status });
-      let data;
-      try {
-        data = raw ? JSON.parse(raw) : null;
-      } catch {
-        data = null;
-      }
-      if (data && (data.success === false || data.error || data.errorMessage)) throw new NativeRequestError("Move explicitly rejected", { outcome: "REJECTED", status: response.status });
-      if (data && /^(?:pending|submitted|queued|processing)$/i.test(String(data.status || data.state || ""))) throw new NativeRequestError("Move remains pending — verify before retry", { outcome: "UNKNOWN" });
+      validateMoveEnvelope(response, await response.text());
       onPhase("location-verification");
       let verified;
       try {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Dropzone Selector Queue
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Native dropzones, durable queue and exact native destination verification.
 // @include /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant unsafeWindow
@@ -16,58 +16,6 @@
 // @downloadURL https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Dropzone_Selector_Queue.user.js
 // ==/UserScript==
 (() => {
-  // watermark.mjs
-  function registerWatermark(window2, label, version) {
-    if (!/^[A-Za-z0-9]{1,5}$/.test(label) || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid V4 runtime identity");
-    const document = window2.document, id = "tm-v4-runtime-watermark";
-    const token = typeof window2.crypto.randomUUID === "function" ? window2.crypto.randomUUID() : [...window2.crypto.getRandomValues(new Uint32Array(4))].map((value) => value.toString(16)).join("-");
-    let disposed = false;
-    function render(host) {
-      const entries = [...host.children].sort((a, b) => a.dataset.tmV4Runtime.localeCompare(b.dataset.tmV4Runtime));
-      entries.forEach((entry, index) => {
-        entry.textContent = (index ? " | " : "") + "V4 " + entry.dataset.tmV4Runtime + ": " + entry.dataset.tmV4Version;
-        host.appendChild(entry);
-      });
-      if (!entries.length) host.remove();
-    }
-    function mount() {
-      if (disposed) return;
-      let host = document.getElementById(id);
-      if (!host) {
-        host = document.createElement("div");
-        host.id = id;
-        host.dataset.tmV4Script = "RUNTIME";
-        host.setAttribute("aria-hidden", "true");
-        host.style.cssText = "position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-align:center;text-shadow:0 1px 1px rgba(255,255,255,.95)";
-        document.documentElement.appendChild(host);
-      }
-      let entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label);
-      if (!entry) {
-        entry = document.createElement("span");
-        entry.dataset.tmV4Runtime = label;
-        host.appendChild(entry);
-      }
-      entry.dataset.tmV4Version = version;
-      entry.dataset.tmV4Owner = token;
-      render(host);
-    }
-    function dispose() {
-      if (disposed) return;
-      disposed = true;
-      document.removeEventListener("DOMContentLoaded", mount);
-      window2.removeEventListener("pagehide", dispose);
-      const host = document.getElementById(id);
-      if (!host) return;
-      const entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label && node.dataset.tmV4Owner === token);
-      entry?.remove();
-      render(host);
-    }
-    mount();
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true });
-    window2.addEventListener("pagehide", dispose, { once: true });
-    return dispose;
-  }
-
   // ui-tools.mjs
   var clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
   var upper = (value) => clean(value).toUpperCase();
@@ -130,6 +78,369 @@
       window2.removeEventListener("pagehide", hide);
       window2.removeEventListener("pageshow", show);
     };
+  }
+
+  // operation-journal.mjs
+  var phases = /* @__PURE__ */ new Set(["QUEUED", "READING", "SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"]);
+  function createOperationJournal({ storage, key, normalize = (value) => clean(value), uuid = () => crypto.randomUUID() }) {
+    let rows = [], draft = "";
+    const saved = storage.getItem(key);
+    if (saved) {
+      let parsed;
+      try {
+        parsed = JSON.parse(saved);
+      } catch {
+        throw new Error("Recovery data is corrupt — preserve it before repair");
+      }
+      if (parsed.schema !== 1 || !Array.isArray(parsed.rows)) throw new Error("Recovery schema unsupported — no work discarded");
+      rows = parsed.rows.map((row) => {
+        if (!row || !normalize(row.container) || !phases.has(row.state) || typeof row.id !== "string") throw new Error("Recovery row invalid — no work discarded");
+        return { ...row, state: row.state === "SUBMITTED" ? "UNKNOWN" : row.state === "READING" ? "QUEUED" : row.state, message: row.state === "SUBMITTED" ? "Reload interrupted submitted operation — verify native result" : row.message || "" };
+      });
+      draft = typeof parsed.draft === "string" ? parsed.draft : "";
+    }
+    function save() {
+      const json = JSON.stringify({ schema: 1, rows, draft });
+      storage.setItem(key, json);
+      if (storage.getItem(key) !== json) throw new Error("Recovery storage did not persist — submission blocked");
+    }
+    function add(values, details = {}) {
+      const added = [];
+      for (const value of values) {
+        const container = normalize(value);
+        if (!container) throw new Error("Invalid container: " + clean(value));
+        if (rows.some((row2) => upper(row2.container) === upper(container) && !["CONFIRMED", "REJECTED"].includes(row2.state))) continue;
+        const row = { ...details, id: uuid(), container, state: "QUEUED", message: "Queued" };
+        rows.push(row);
+        added.push(row);
+      }
+      save();
+      return added;
+    }
+    function transition(row, state, message = "", details = {}) {
+      if (!phases.has(state) || !rows.includes(row)) throw new Error("Invalid operation state");
+      if (row.state === "UNKNOWN" && state !== "UNKNOWN") throw new Error("UNKNOWN cannot be automatically replayed");
+      if (row.state === "SUBMITTED" && !["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
+      const old = { ...row };
+      Object.assign(row, details, { state, message });
+      try {
+        save();
+      } catch (error) {
+        Object.assign(row, old);
+        throw error;
+      }
+      return row;
+    }
+    function clearKnown() {
+      rows = rows.filter((row) => !["CONFIRMED", "REJECTED"].includes(row.state));
+      save();
+    }
+    function clearConfirmed() {
+      rows = rows.filter((row) => row.state !== "CONFIRMED");
+      save();
+    }
+    function clear() {
+      rows = rows.filter((row) => ["SUBMITTED", "UNKNOWN"].includes(row.state));
+      draft = "";
+      save();
+    }
+    return { get rows() {
+      return rows;
+    }, get draft() {
+      return draft;
+    }, setDraft(value) {
+      draft = String(value);
+      save();
+    }, add, transition, clear, clearConfirmed, clearKnown, save, next: () => rows.find((row) => row.state === "QUEUED") };
+  }
+  async function withOperationLock(window2, name, work) {
+    if (typeof window2.navigator.locks?.request !== "function") throw new Error("Browser Web Locks unavailable — operation blocked");
+    return window2.navigator.locks.request(name, { mode: "exclusive", ifAvailable: true }, async (lock) => {
+      if (!lock) throw new Error("Another V4 tab owns this workflow");
+      return work();
+    });
+  }
+
+  // native-json.mjs
+  var NativeRequestError = class extends Error {
+    constructor(message, { outcome = "REJECTED", status = 0 } = {}) {
+      super(message);
+      this.outcome = outcome;
+      this.status = status;
+    }
+  };
+
+  // move-container.mjs
+  var MOVE_CONTAINER_URL = "https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container";
+  var DROPZONES = Object.freeze({ upper: [["Cubiscan", "dz-Pcubiscan-{floor}"], ["Prep", "dz-P-Prep-{floor}"], ["ISS", "dz-P-ISS-{floor}"], ["Damages", "dz-P-Damages-{floor}"], ["Hazmat", "dz-P-Hazmat-{floor}"], ["Nonsort", "dz-Pnonsort-{floor}"]], p1: [["Hazmat", "dz-P-HAZMAT_OUT"], ["Ticketland", "dz-P-Ticketland"], ["Consolidation", "dz-P-issconsol"], ["ISS WIP", "dz-S-ISSWIP1"], ["Nonsort", "dz-P-IB-nonsort"], ["Shipdock", "dz-P-ISS-Shipdock"], ["OB IOL", "dz-P-OBIOL"], ["Damageland", "dz-Pdamageland"], ["Receive Damages", "dz-P-rcv-Damages"]] });
+  function dropzone(floor, type) {
+    if (type === "PRIME") return "dz-P-PRIME";
+    if (!["P1", "P2", "P3", "P4"].includes(floor)) return "";
+    const row = (floor === "P1" ? DROPZONES.p1 : DROPZONES.upper).find((row2) => row2[0] === type);
+    return row ? row[1].replace("{floor}", floor) : "";
+  }
+  function validateLocation(result, container, destination = null) {
+    if (!result?.complete || !Array.isArray(result.rows) || !result.rows.length || result.rows.some((row) => upper(row.container) !== upper(container) || !clean(row.outerLocation))) throw new NativeRequestError("Complete exact container location unavailable", { outcome: destination ? "UNKNOWN" : "REJECTED" });
+    if (destination && result.rows.some((row) => upper(row.outerLocation) !== upper(destination))) throw new NativeRequestError("Requested destination not confirmed by native location readback", { outcome: "UNKNOWN" });
+    return result;
+  }
+  function validateMoveEnvelope(response, raw) {
+    const content = response.headers.get("content-type") || "";
+    if (!response.ok || response.redirected || /html/i.test(content) || /^\s*</.test(raw)) throw new NativeRequestError("Move response does not prove a native outcome", { outcome: "UNKNOWN", status: response.status });
+    let data;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = null;
+    }
+    if (data && (data.success === false || data.error || data.errorMessage)) throw new NativeRequestError("Move explicitly rejected", { outcome: "REJECTED", status: response.status });
+    if (data && /^(?:pending|submitted|queued|processing)$/i.test(String(data.status || data.state || ""))) throw new NativeRequestError("Move remains pending — verify before retry", { outcome: "UNKNOWN" });
+  }
+  function createMoveContainer({ window: window2, fetch, reader, identity, onEvidence = () => {
+  } }) {
+    return async (row, { signal, beforeMutation, checkRunning, onPhase = () => {
+    } }) => {
+      const container = clean(row.container), destination = clean(row.destination);
+      if (!/^(?:tsX|csX)[A-Z0-9_-]+$/i.test(container) || !/^dz-[A-Za-z0-9_-]+$/.test(destination)) throw new NativeRequestError("Invalid exact container/destination");
+      identity();
+      onPhase("location-preflight");
+      validateLocation(await reader.inventory(container, { signal }), container);
+      checkRunning();
+      identity();
+      beforeMutation();
+      onPhase("move");
+      let response;
+      try {
+        response = await fetch(MOVE_CONTAINER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceScannableId: null, destinationScannableId: destination, containerScannableId: container, confirmed: "true" }), signal });
+      } catch {
+        throw new NativeRequestError("Move submission outcome unknown", { outcome: "UNKNOWN" });
+      }
+      validateMoveEnvelope(response, await response.text());
+      onPhase("location-verification");
+      let verified;
+      try {
+        verified = validateLocation(await reader.inventory(container, { signal }), container, destination);
+      } catch (error) {
+        throw new NativeRequestError(error.message, { outcome: "UNKNOWN" });
+      }
+      onEvidence({ type: "move.location", intent: "read", data: { outcome: "exact-destination", rows: verified.rows.length } });
+      return { status: response.status, verifiedBy: "native-inventory-outerLocation" };
+    };
+  }
+
+  // drop-native.mjs
+  function createDropNative({ window: window2, page: page2 = window2, reader, identity, onChange = () => {
+  }, onBusy = () => {
+  }, onEvidence = () => {
+  } }) {
+    let disposed = false;
+    const tasks = /* @__PURE__ */ new Set(), details = /* @__PURE__ */ new WeakMap(), key = "tm-v4.drop.rows";
+    function selected(url, method) {
+      try {
+        const target = new window2.URL(url, window2.location.href);
+        return String(method).toUpperCase() === "POST" && target.origin === window2.location.origin && target.pathname === "/api/move-container";
+      } catch {
+        return false;
+      }
+    }
+    async function guard2(body, sendNative, responseInfo, signal) {
+      const controller = new window2.AbortController(), task = { controller, row: null, journal: null };
+      task.settled = new Promise((resolve) => task.finish = resolve);
+      tasks.add(task);
+      onBusy(true);
+      const cancel = () => controller.abort();
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        return await withOperationLock(window2, "tm-v4.move-container.owner", async () => {
+          if (disposed || signal?.aborted) throw new Error("Native move cancelled before submission");
+          let payload;
+          try {
+            payload = JSON.parse(body);
+          } catch {
+            throw new Error("Native move payload is not exact JSON");
+          }
+          const container = clean(payload?.containerScannableId), destination = clean(payload?.destinationScannableId);
+          if (!/^(?:tsX|csX)[A-Za-z0-9_-]+$/i.test(container) || !/^dz-[A-Za-z0-9_-]+$/.test(destination) || payload.confirmed !== true && payload.confirmed !== "true" || payload.sourceScannableId !== null) throw new Error("Native move payload/context is unsupported — no request sent");
+          identity();
+          const capability = typeof reader === "function" ? reader() : reader;
+          const journal = createOperationJournal({ storage: window2.localStorage, key, uuid: () => window2.crypto.randomUUID() });
+          task.journal = journal;
+          if (journal.rows.some((row2) => upper(row2.container) === upper(container) && ["QUEUED", "READING", "SUBMITTED", "UNKNOWN"].includes(row2.state))) throw new Error("Native move has unresolved or queued ownership for this container");
+          const row = journal.add([container], { mode: "drop", kind: "native-move", destination })[0];
+          task.row = row;
+          journal.transition(row, "READING", "Native move location preflight");
+          onChange("Native preflight • " + container);
+          validateLocation(await capability.inventory(container, { signal: controller.signal }), container);
+          if (disposed || controller.signal.aborted) throw new Error("Native move cancelled before submission");
+          identity();
+          journal.transition(row, "SUBMITTED", "Native move submitted — result pending", { operationId: row.id });
+          onChange("SUBMITTED • native " + container);
+          onEvidence({ type: "operation", intent: "mutation", operationId: row.id, phase: "SUBMITTED", data: { kind: "native-move" } });
+          let native;
+          const expired = () => controller.abort();
+          const timer = window2.setTimeout(expired, 25e3);
+          let cancelAwait;
+          const interrupted = new Promise((_, reject) => {
+            cancelAwait = () => reject(new Error("Native move request cancelled/timed out"));
+            controller.signal.addEventListener("abort", cancelAwait, { once: true });
+          });
+          try {
+            native = await Promise.race([sendNative(controller.signal), interrupted]);
+            const info = await responseInfo(native);
+            validateMoveEnvelope(info, await info.text());
+          } finally {
+            window2.clearTimeout(timer);
+            controller.signal.removeEventListener("abort", cancelAwait);
+          }
+          try {
+            validateLocation(await capability.inventory(container, { signal: controller.signal }), container, destination);
+          } catch (error) {
+            throw Object.assign(error, { outcome: "UNKNOWN" });
+          }
+          journal.transition(row, "CONFIRMED", "Exact native destination location verified");
+          onChange("CONFIRMED • native " + container);
+          onEvidence({ type: "operation", intent: "mutation", operationId: row.id, phase: "CONFIRMED", data: { kind: "native-move" } });
+          return native;
+        });
+      } catch (error) {
+        const row = task.row;
+        let outcome = row?.state === "SUBMITTED" || row?.state === "UNKNOWN" ? "UNKNOWN" : "REJECTED";
+        if (row?.state === "SUBMITTED" && error.outcome === "REJECTED") outcome = "REJECTED";
+        try {
+          if (row && row.state !== "UNKNOWN") task.journal.transition(row, outcome, error.message);
+        } catch {
+          outcome = "UNKNOWN";
+        }
+        onChange(outcome + " • native move • " + error.message);
+        if (row?.operationId) onEvidence({ type: "operation", intent: "mutation", operationId: row.operationId, phase: outcome, data: { kind: "native-move" } });
+        throw error;
+      } finally {
+        signal?.removeEventListener("abort", cancel);
+        tasks.delete(task);
+        task.finish();
+        onBusy(tasks.size > 0);
+      }
+    }
+    const originalFetch = page2.fetch;
+    const wrapper = function(input, init = {}) {
+      const url = typeof input === "string" || input instanceof window2.URL ? String(input) : input?.url;
+      if (!selected(url, init.method || input?.method || "GET") || disposed) return originalFetch.apply(this, arguments);
+      const receiver = this;
+      return guard2(init.body, (nativeSignal) => originalFetch.call(receiver, input, { ...init, signal: nativeSignal }), async (response) => ({ ok: response.ok, status: response.status, redirected: response.redirected || response.url && new window2.URL(response.url, window2.location.href).pathname !== "/api/move-container", headers: response.headers, text: () => response.clone().text() }), init.signal || input?.signal);
+    };
+    page2.fetch = wrapper;
+    const proto = page2.XMLHttpRequest?.prototype, open = proto?.open, send = proto?.send, abort = proto?.abort;
+    function wrappedOpen(method, url, async = true) {
+      details.set(this, { method, url, async, controller: null });
+      return open.apply(this, arguments);
+    }
+    function wrappedSend(body) {
+      const metadata = details.get(this);
+      if (!metadata || !selected(metadata.url, metadata.method) || disposed) return send.apply(this, arguments);
+      if (metadata.async === false) throw new Error("Synchronous native move cannot acquire ownership — request blocked");
+      metadata.controller = new window2.AbortController();
+      const xhr = this;
+      void guard2(body, (nativeSignal) => new Promise((resolve, reject) => {
+        nativeSignal.addEventListener("abort", () => abort.call(xhr), { once: true });
+        xhr.addEventListener("loadend", () => resolve(xhr), { once: true });
+        try {
+          send.call(xhr, body);
+        } catch (error) {
+          reject(error);
+        }
+      }), async (response) => ({ ok: response.status >= 200 && response.status < 300, status: response.status, redirected: !!response.responseURL && new window2.URL(response.responseURL, window2.location.href).pathname !== "/api/move-container", headers: { get: (key2) => response.getResponseHeader?.(key2) || "" }, text: async () => {
+        if (response.responseType === "json") return JSON.stringify(response.response);
+        return response.responseText || "";
+      } }), metadata.controller.signal).catch(() => {
+        if (xhr.readyState < 2) {
+          xhr.dispatchEvent(new window2.ProgressEvent("error"));
+          xhr.dispatchEvent(new window2.ProgressEvent("loadend"));
+        }
+      });
+      return void 0;
+    }
+    function wrappedAbort() {
+      details.get(this)?.controller?.abort();
+      return abort.apply(this, arguments);
+    }
+    if (proto) {
+      proto.open = wrappedOpen;
+      proto.send = wrappedSend;
+      proto.abort = wrappedAbort;
+    }
+    return { pause() {
+      for (const task of tasks) if (task.row?.state !== "SUBMITTED" && task.row?.state !== "UNKNOWN") task.controller.abort();
+      return Promise.allSettled([...tasks].map((task) => task.settled));
+    }, dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const task of tasks) {
+        try {
+          if (task.row?.state === "SUBMITTED") {
+            task.journal.transition(task.row, "UNKNOWN", "Native move disposed after submission");
+            onEvidence({ type: "operation", intent: "mutation", phase: "UNKNOWN", operationId: task.row.operationId, data: { kind: "native-move" } });
+          } else if (task.row?.state === "READING") task.journal.transition(task.row, "REJECTED", "Native preflight disposed");
+        } catch {
+        }
+        task.controller.abort();
+      }
+      if (page2.fetch === wrapper) page2.fetch = originalFetch;
+      if (proto?.open === wrappedOpen) proto.open = open;
+      if (proto?.send === wrappedSend) proto.send = send;
+      if (proto?.abort === wrappedAbort) proto.abort = abort;
+    } };
+  }
+
+  // watermark.mjs
+  function registerWatermark(window2, label, version) {
+    if (!/^[A-Za-z0-9]{1,5}$/.test(label) || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid V4 runtime identity");
+    const document = window2.document, id = "tm-v4-runtime-watermark";
+    const token = typeof window2.crypto.randomUUID === "function" ? window2.crypto.randomUUID() : [...window2.crypto.getRandomValues(new Uint32Array(4))].map((value) => value.toString(16)).join("-");
+    let disposed = false;
+    function render(host) {
+      const entries = [...host.children].sort((a, b) => a.dataset.tmV4Runtime.localeCompare(b.dataset.tmV4Runtime));
+      entries.forEach((entry, index) => {
+        entry.textContent = (index ? " | " : "") + "V4 " + entry.dataset.tmV4Runtime + ": " + entry.dataset.tmV4Version;
+        host.appendChild(entry);
+      });
+      if (!entries.length) host.remove();
+    }
+    function mount() {
+      if (disposed) return;
+      let host = document.getElementById(id);
+      if (!host) {
+        host = document.createElement("div");
+        host.id = id;
+        host.dataset.tmV4Script = "RUNTIME";
+        host.setAttribute("aria-hidden", "true");
+        host.style.cssText = "position:fixed;left:50%;bottom:2px;transform:translateX(-50%);z-index:2147483000;max-width:94vw;padding:2px 7px;border-radius:6px 6px 0 0;background:rgba(255,255,255,.34);color:rgba(15,23,42,.52);font:800 11px/1.25 Arial,sans-serif;letter-spacing:.2px;pointer-events:none;user-select:none;text-align:center;text-shadow:0 1px 1px rgba(255,255,255,.95)";
+        document.documentElement.appendChild(host);
+      }
+      let entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label);
+      if (!entry) {
+        entry = document.createElement("span");
+        entry.dataset.tmV4Runtime = label;
+        host.appendChild(entry);
+      }
+      entry.dataset.tmV4Version = version;
+      entry.dataset.tmV4Owner = token;
+      render(host);
+    }
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      document.removeEventListener("DOMContentLoaded", mount);
+      window2.removeEventListener("pagehide", dispose);
+      const host = document.getElementById(id);
+      if (!host) return;
+      const entry = [...host.children].find((node) => node.dataset.tmV4Runtime === label && node.dataset.tmV4Owner === token);
+      entry?.remove();
+      render(host);
+    }
+    mount();
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true });
+    window2.addEventListener("pagehide", dispose, { once: true });
+    return dispose;
   }
 
   // identity.mjs
@@ -681,152 +992,6 @@
     return Object.freeze({ product, barcodeProduct, inventory, history, section });
   }
 
-  // native-json.mjs
-  var NativeRequestError = class extends Error {
-    constructor(message, { outcome = "REJECTED", status = 0 } = {}) {
-      super(message);
-      this.outcome = outcome;
-      this.status = status;
-    }
-  };
-
-  // move-container.mjs
-  var MOVE_CONTAINER_URL = "https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com/api/move-container";
-  var DROPZONES = Object.freeze({ upper: [["Cubiscan", "dz-Pcubiscan-{floor}"], ["Prep", "dz-P-Prep-{floor}"], ["ISS", "dz-P-ISS-{floor}"], ["Damages", "dz-P-Damages-{floor}"], ["Hazmat", "dz-P-Hazmat-{floor}"], ["Nonsort", "dz-Pnonsort-{floor}"]], p1: [["Hazmat", "dz-P-HAZMAT_OUT"], ["Ticketland", "dz-P-Ticketland"], ["Consolidation", "dz-P-issconsol"], ["ISS WIP", "dz-S-ISSWIP1"], ["Nonsort", "dz-P-IB-nonsort"], ["Shipdock", "dz-P-ISS-Shipdock"], ["OB IOL", "dz-P-OBIOL"], ["Damageland", "dz-Pdamageland"], ["Receive Damages", "dz-P-rcv-Damages"]] });
-  function dropzone(floor, type) {
-    if (type === "PRIME") return "dz-P-PRIME";
-    if (!["P1", "P2", "P3", "P4"].includes(floor)) return "";
-    const row = (floor === "P1" ? DROPZONES.p1 : DROPZONES.upper).find((row2) => row2[0] === type);
-    return row ? row[1].replace("{floor}", floor) : "";
-  }
-  function validateLocation(result, container, destination = null) {
-    if (!result?.complete || !Array.isArray(result.rows) || !result.rows.length || result.rows.some((row) => upper(row.container) !== upper(container) || !clean(row.outerLocation))) throw new NativeRequestError("Complete exact container location unavailable", { outcome: destination ? "UNKNOWN" : "REJECTED" });
-    if (destination && result.rows.some((row) => upper(row.outerLocation) !== upper(destination))) throw new NativeRequestError("Requested destination not confirmed by native location readback", { outcome: "UNKNOWN" });
-    return result;
-  }
-  function createMoveContainer({ window: window2, fetch, reader, identity, onEvidence = () => {
-  } }) {
-    return async (row, { signal, beforeMutation, checkRunning, onPhase = () => {
-    } }) => {
-      const container = clean(row.container), destination = clean(row.destination);
-      if (!/^(?:tsX|csX)[A-Z0-9_-]+$/i.test(container) || !/^dz-[A-Za-z0-9_-]+$/.test(destination)) throw new NativeRequestError("Invalid exact container/destination");
-      identity();
-      onPhase("location-preflight");
-      validateLocation(await reader.inventory(container, { signal }), container);
-      checkRunning();
-      identity();
-      beforeMutation();
-      onPhase("move");
-      let response;
-      try {
-        response = await fetch(MOVE_CONTAINER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceScannableId: null, destinationScannableId: destination, containerScannableId: container, confirmed: "true" }), signal });
-      } catch {
-        throw new NativeRequestError("Move submission outcome unknown", { outcome: "UNKNOWN" });
-      }
-      const raw = await response.text();
-      const content = response.headers.get("content-type") || "";
-      if (!response.ok || response.redirected || /html/i.test(content) || /^\s*</.test(raw)) throw new NativeRequestError("Move response does not prove a native outcome", { outcome: "UNKNOWN", status: response.status });
-      let data;
-      try {
-        data = raw ? JSON.parse(raw) : null;
-      } catch {
-        data = null;
-      }
-      if (data && (data.success === false || data.error || data.errorMessage)) throw new NativeRequestError("Move explicitly rejected", { outcome: "REJECTED", status: response.status });
-      if (data && /^(?:pending|submitted|queued|processing)$/i.test(String(data.status || data.state || ""))) throw new NativeRequestError("Move remains pending — verify before retry", { outcome: "UNKNOWN" });
-      onPhase("location-verification");
-      let verified;
-      try {
-        verified = validateLocation(await reader.inventory(container, { signal }), container, destination);
-      } catch (error) {
-        throw new NativeRequestError(error.message, { outcome: "UNKNOWN" });
-      }
-      onEvidence({ type: "move.location", intent: "read", data: { outcome: "exact-destination", rows: verified.rows.length } });
-      return { status: response.status, verifiedBy: "native-inventory-outerLocation" };
-    };
-  }
-
-  // operation-journal.mjs
-  var phases = /* @__PURE__ */ new Set(["QUEUED", "READING", "SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"]);
-  function createOperationJournal({ storage, key, normalize = (value) => clean(value), uuid = () => crypto.randomUUID() }) {
-    let rows = [], draft = "";
-    const saved = storage.getItem(key);
-    if (saved) {
-      let parsed;
-      try {
-        parsed = JSON.parse(saved);
-      } catch {
-        throw new Error("Recovery data is corrupt — preserve it before repair");
-      }
-      if (parsed.schema !== 1 || !Array.isArray(parsed.rows)) throw new Error("Recovery schema unsupported — no work discarded");
-      rows = parsed.rows.map((row) => {
-        if (!row || !normalize(row.container) || !phases.has(row.state) || typeof row.id !== "string") throw new Error("Recovery row invalid — no work discarded");
-        return { ...row, state: row.state === "SUBMITTED" ? "UNKNOWN" : row.state === "READING" ? "QUEUED" : row.state, message: row.state === "SUBMITTED" ? "Reload interrupted submitted operation — verify native result" : row.message || "" };
-      });
-      draft = typeof parsed.draft === "string" ? parsed.draft : "";
-    }
-    function save() {
-      const json = JSON.stringify({ schema: 1, rows, draft });
-      storage.setItem(key, json);
-      if (storage.getItem(key) !== json) throw new Error("Recovery storage did not persist — submission blocked");
-    }
-    function add(values, details = {}) {
-      const added = [];
-      for (const value of values) {
-        const container = normalize(value);
-        if (!container) throw new Error("Invalid container: " + clean(value));
-        if (rows.some((row2) => upper(row2.container) === upper(container) && !["CONFIRMED", "REJECTED"].includes(row2.state))) continue;
-        const row = { ...details, id: uuid(), container, state: "QUEUED", message: "Queued" };
-        rows.push(row);
-        added.push(row);
-      }
-      save();
-      return added;
-    }
-    function transition(row, state, message = "", details = {}) {
-      if (!phases.has(state) || !rows.includes(row)) throw new Error("Invalid operation state");
-      if (row.state === "UNKNOWN" && state !== "UNKNOWN") throw new Error("UNKNOWN cannot be automatically replayed");
-      if (row.state === "SUBMITTED" && !["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) throw new Error("Submitted work cannot become runnable");
-      const old = { ...row };
-      Object.assign(row, details, { state, message });
-      try {
-        save();
-      } catch (error) {
-        Object.assign(row, old);
-        throw error;
-      }
-      return row;
-    }
-    function clearKnown() {
-      rows = rows.filter((row) => !["CONFIRMED", "REJECTED"].includes(row.state));
-      save();
-    }
-    function clearConfirmed() {
-      rows = rows.filter((row) => row.state !== "CONFIRMED");
-      save();
-    }
-    function clear() {
-      rows = rows.filter((row) => ["SUBMITTED", "UNKNOWN"].includes(row.state));
-      draft = "";
-      save();
-    }
-    return { get rows() {
-      return rows;
-    }, get draft() {
-      return draft;
-    }, setDraft(value) {
-      draft = String(value);
-      save();
-    }, add, transition, clear, clearConfirmed, clearKnown, save, next: () => rows.find((row) => row.state === "QUEUED") };
-  }
-  async function withOperationLock(window2, name, work) {
-    if (typeof window2.navigator.locks?.request !== "function") throw new Error("Browser Web Locks unavailable — operation blocked");
-    return window2.navigator.locks.request(name, { mode: "exclusive", ifAvailable: true }, async (lock) => {
-      if (!lock) throw new Error("Another V4 tab owns this workflow");
-      return work();
-    });
-  }
-
   // hierarchy-runtime.mjs
   function normalizeHierarchyContainer(value) {
     const raw = clean(value);
@@ -836,9 +1001,10 @@
 
   // drop-runtime.mjs
   function createDropzoneQueue({ window: window2, move, identity, version, onEvidence = () => {
+  }, onPause = () => {
   }, storage = window2.localStorage }) {
     const d = window2.document, key = "tm-v4.drop.rows", prefKey = "tm-v4.drop.preferences", listeners = new window2.AbortController();
-    let journal, owner = false, running = false, processing = false, disposed = false, currentRow = null, controller = null, runPromise = null, observer = null, lastStep = false;
+    let journal, owner = false, running = false, processing = false, nativeBusy = false, disposed = false, currentRow = null, controller = null, runPromise = null, observer = null, lastStep = false;
     let prefs = { floor: "", type: "PRIME", enabled: true, inputEnabled: true };
     try {
       Object.assign(prefs, JSON.parse(storage.getItem(prefKey) || "{}"));
@@ -864,15 +1030,15 @@
       input.readOnly = !prefs.inputEnabled;
       root.querySelectorAll("[data-floor]").forEach((button) => {
         button.dataset.selected = String(button.dataset.floor === prefs.floor);
-        button.disabled = processing;
+        button.disabled = processing || nativeBusy;
       });
-      root.querySelector("[data-type=PRIME]").disabled = processing;
+      root.querySelector("[data-type=PRIME]").disabled = processing || nativeBusy;
       root.querySelector("[data-type=PRIME]").dataset.selected = String(prefs.type === "PRIME");
-      root.querySelector(".drops").innerHTML = prefs.type === "PRIME" ? "PRIME selected (no DZ needed)" : (prefs.floor === "P1" ? DROPZONES.p1 : DROPZONES.upper).map(([type]) => `<button data-type="${escapeHtml(type)}" data-selected="${type === prefs.type}" ${processing ? "disabled" : ""}>${escapeHtml(type)}</button>`).join("");
+      root.querySelector(".drops").innerHTML = prefs.type === "PRIME" ? "PRIME selected (no DZ needed)" : (prefs.floor === "P1" ? DROPZONES.p1 : DROPZONES.upper).map(([type]) => `<button data-type="${escapeHtml(type)}" data-selected="${type === prefs.type}" ${processing || nativeBusy ? "disabled" : ""}>${escapeHtml(type)}</button>`).join("");
       root.querySelector("[data-counts]").textContent = `${journal.rows.filter((row) => row.state === "QUEUED").length} queued • ${journal.rows.filter((row) => row.state === "CONFIRMED").length} done • ${journal.rows.filter((row) => ["SUBMITTED", "UNKNOWN"].includes(row.state)).length} unresolved`;
       root.querySelector(".rows").innerHTML = journal.rows.map((row) => `<div data-state="${row.state}"><b>${escapeHtml(row.container)}</b> → ${escapeHtml(row.destination)}<br>${row.state} ${escapeHtml(row.message)}</div>`).join("");
-      root.querySelector("[data-action=run]").disabled = processing;
-      origins.disabled = processing;
+      root.querySelector("[data-action=run]").disabled = processing || nativeBusy;
+      origins.disabled = processing || nativeBusy;
     }
     function persistPrefs() {
       storage.setItem(prefKey, JSON.stringify(prefs));
@@ -903,13 +1069,15 @@
       render();
     }
     function pause() {
+      const nativeSettled = onPause();
       running = false;
       if (currentRow?.state === "READING") controller?.abort();
       status(currentRow?.state === "SUBMITTED" ? "PAUSED — submitted outcome still pending" : "Paused");
       render();
+      return nativeSettled;
     }
     async function run() {
-      if (processing || disposed) return;
+      if (processing || nativeBusy || disposed) return;
       try {
         await add();
       } catch (error) {
@@ -965,7 +1133,7 @@
       await runPromise;
     }
     async function clear(doneOnly = false) {
-      pause();
+      await pause();
       if (runPromise) await runPromise;
       try {
         await edit(() => {
@@ -980,7 +1148,7 @@
       }
     }
     function autoDestination() {
-      if (disposed || processing || !prefs.enabled) return;
+      if (disposed || processing || nativeBusy || !prefs.enabled) return;
       const host = d.querySelector("#root,#app,main") || d.body;
       if (!host) return;
       const text2 = [...host.childNodes].filter((node) => node !== root && !(node.nodeType === 1 && node.hasAttribute("data-tm-v4-script"))).map((node) => node.textContent).join(" ");
@@ -1016,13 +1184,13 @@
       const button = event.target.closest("button");
       if (!button) return;
       const action = button.dataset.action;
-      if (button.dataset.floor && !processing) {
+      if (button.dataset.floor && !processing && !nativeBusy) {
         prefs.floor = button.dataset.floor;
         prefs.type = "";
         lastStep = false;
         persistPrefs();
       }
-      if (button.dataset.type && !processing) {
+      if (button.dataset.type && !processing && !nativeBusy) {
         prefs.type = button.dataset.type;
         lastStep = false;
         persistPrefs();
@@ -1092,7 +1260,20 @@
     d.documentElement.append(style, root);
     if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", ready, { once: true, signal: listeners.signal });
     else ready();
-    return { root, run, pause, clear, getState: () => journal?.rows, dispose() {
+    return { root, run, pause, clear, setNativeBusy: (value) => {
+      nativeBusy = value;
+      render();
+    }, refreshNative: (message) => {
+      if (!processing) {
+        try {
+          load();
+          render();
+        } catch (error) {
+          status(error.message);
+        }
+      }
+      if (message) status(message);
+    }, getState: () => journal?.rows, dispose() {
       if (disposed) return;
       running = false;
       if (currentRow) {
@@ -1111,7 +1292,7 @@
   }
 
   // drop-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.drop.installer");
   if (!page[guard]) {
@@ -1123,8 +1304,12 @@
         const reader = createFcrReader({ origin: options.fcrOrigin, warehouse: "BWU2", DOMParser: window.DOMParser, fetch, onEvidence: emit });
         return createMoveContainer({ window, fetch, reader, identity, onEvidence: emit })(row, options);
       };
-      const queue = createDropzoneQueue({ window, move, identity, version: VERSION, onEvidence: emit });
+      let native;
+      const queue = createDropzoneQueue({ window, move, identity, version: VERSION, onEvidence: emit, onPause: () => native?.pause() });
+      const nativeReader = () => createFcrReader({ origin: localStorage.getItem("tm-v4.drop.fcr-origin") || "https://fcresearch-fe.aka.amazon.com", warehouse: "BWU2", DOMParser: window.DOMParser, fetch, onEvidence: emit });
+      native = createDropNative({ window, page, reader: nativeReader, identity, onBusy: (value) => queue.setNativeBusy(value), onChange: (message) => queue.refreshNative(message), onEvidence: emit });
       return () => {
+        native.dispose();
         queue.dispose();
         release();
       };
