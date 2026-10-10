@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Dropzone Selector Queue
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.2
+// @version 0.1.3
 // @description Native dropzones, durable queue and exact native destination verification.
 // @include /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant unsafeWindow
@@ -1004,7 +1004,7 @@
   }, onPause = () => {
   }, storage = window2.localStorage }) {
     const d = window2.document, key = "tm-v4.drop.rows", prefKey = "tm-v4.drop.preferences", listeners = new window2.AbortController();
-    let journal, owner = false, running = false, processing = false, nativeBusy = false, disposed = false, currentRow = null, controller = null, runPromise = null, observer = null, lastStep = false;
+    let journal, owner = false, running = false, processing = false, nativeBusy = false, disposed = false, currentRow = null, controller = null, runPromise = null, observer = null, lastStep = false, runGeneration = 0;
     let prefs = { floor: "", type: "PRIME", enabled: true, inputEnabled: true };
     try {
       Object.assign(prefs, JSON.parse(storage.getItem(prefKey) || "{}"));
@@ -1050,8 +1050,10 @@
       if (["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) onEvidence({ type: "drop.operation", intent: "mutation", phase: state, operationId: row.operationId, data: { outcome: state, stage: row.phase || "move" } });
     }
     async function edit(work) {
+      if (disposed) throw new Error("Queue disposed before edit");
       if (owner) return work();
       return withOperationLock(window2, "tm-v4.move-container.owner", async () => {
+        if (disposed) throw new Error("Queue disposed before edit");
         load();
         return work();
       });
@@ -1059,78 +1061,91 @@
     async function add() {
       const destination = dropzone(prefs.floor, prefs.type);
       if (!destination) throw new Error("Select exact floor/dropzone");
-      const values = input.value.split(/[\s,;]+/).filter(Boolean), invalid = values.filter((value) => !normalizeHierarchyContainer(value) && upper(value) !== "123START");
+      const captured = input.value, values = captured.split(/[\s,;]+/).filter(Boolean), invalid = values.filter((value) => !normalizeHierarchyContainer(value) && upper(value) !== "123START");
       const valid = values.filter(normalizeHierarchyContainer);
       root.querySelector(".unable").hidden = !invalid.length;
       root.querySelector(".unable").textContent = "Unable: " + invalid.join(" • ");
       if (valid.length) await edit(() => journal.add(valid, { destination }));
-      input.value = "";
-      window2.sessionStorage.setItem("tm-v4.drop.draft", "");
+      if (input.value === captured) input.value = "";
+      else if (captured && input.value.startsWith(captured)) input.value = input.value.slice(captured.length).replace(/^[\s,;]+/, "");
+      window2.sessionStorage.setItem("tm-v4.drop.draft", input.value);
       render();
     }
     function pause() {
       const nativeSettled = onPause();
+      runGeneration++;
       running = false;
       if (currentRow?.state === "READING") controller?.abort();
       status(currentRow?.state === "SUBMITTED" ? "PAUSED — submitted outcome still pending" : "Paused");
       render();
       return nativeSettled;
     }
-    async function run() {
-      if (processing || nativeBusy || disposed) return;
-      try {
-        await add();
-      } catch (error) {
-        status(error.message);
-        return;
-      }
-      processing = running = true;
+    function run() {
+      if (processing || nativeBusy || disposed) return Promise.resolve();
+      const generation = ++runGeneration;
+      processing = true;
       render();
-      runPromise = withOperationLock(window2, "tm-v4.move-container.owner", async () => {
-        owner = true;
-        load();
-        journal.save();
-        identity();
-        while (running && !disposed) {
-          const row = journal.next();
-          if (!row) break;
-          currentRow = row;
-          controller = new window2.AbortController();
-          let submitted = false;
-          transition(row, "READING", "Checking native location");
-          try {
-            await move(row, { signal: controller.signal, fcrOrigin: origins.value, checkRunning: () => {
-              if (!running || disposed) throw new Error("Paused before movement");
-            }, onPhase: (phase) => {
-              row.phase = phase;
-              journal.save();
-              render();
-            }, beforeMutation: () => {
-              if (!running || disposed) throw new Error("Paused before movement");
-              identity();
-              row.operationId = uuid();
-              transition(row, "SUBMITTED", "Submitted — verifying location");
-              submitted = true;
-            } });
-            if (disposed) break;
-            transition(row, "CONFIRMED", "Exact native destination verified");
-            status("Moved ✓ " + row.container);
-          } catch (error) {
-            if (disposed) break;
-            transition(row, submitted ? error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN" : !running || controller.signal.aborted ? "QUEUED" : "REJECTED", error.message);
-            status(error.message);
-            running = false;
-          } finally {
-            currentRow = null;
-            controller = null;
-          }
+      runPromise = (async () => {
+        try {
+          await add();
+          if (disposed || generation !== runGeneration) return;
+          running = true;
+          await withOperationLock(window2, "tm-v4.move-container.owner", async () => {
+            if (disposed || !running || generation !== runGeneration) return;
+            owner = true;
+            load();
+            journal.save();
+            identity();
+            while (running && !disposed && generation === runGeneration) {
+              const row = journal.next();
+              if (!row) break;
+              currentRow = row;
+              controller = new window2.AbortController();
+              let submitted = false;
+              transition(row, "READING", "Checking native location");
+              try {
+                await move(row, {
+                  signal: controller.signal,
+                  fcrOrigin: origins.value,
+                  checkRunning: () => {
+                    if (!running || disposed || generation !== runGeneration) throw new Error("Paused before movement");
+                  },
+                  onPhase: (phase) => {
+                    row.phase = phase;
+                    journal.save();
+                    render();
+                  },
+                  beforeMutation: () => {
+                    if (!running || disposed || generation !== runGeneration) throw new Error("Paused before movement");
+                    identity();
+                    row.operationId = uuid();
+                    transition(row, "SUBMITTED", "Submitted — verifying location");
+                    submitted = true;
+                  }
+                });
+                if (disposed) break;
+                transition(row, "CONFIRMED", "Exact native destination verified");
+                status("Moved ✓ " + row.container);
+              } catch (error) {
+                if (disposed) break;
+                transition(row, submitted ? error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN" : !running || controller.signal.aborted ? "QUEUED" : "REJECTED", error.message);
+                status(error.message);
+                running = false;
+              } finally {
+                currentRow = null;
+                controller = null;
+              }
+            }
+          });
+        } catch (error) {
+          status(error.message);
+        } finally {
+          owner = running = processing = false;
+          runPromise = null;
+          render();
         }
-      }).catch((error) => status(error.message)).finally(() => {
-        owner = running = processing = false;
-        runPromise = null;
-        render();
-      });
-      await runPromise;
+      })();
+      return runPromise;
     }
     async function clear(doneOnly = false) {
       await pause();
@@ -1140,7 +1155,10 @@
           if (doneOnly) journal.clearConfirmed();
           else journal.clear();
         });
-        if (!doneOnly) input.value = "";
+        if (!doneOnly) {
+          input.value = "";
+          window2.sessionStorage.setItem("tm-v4.drop.draft", "");
+        }
         render();
         status("Cleared safe rows; unresolved outcomes retained");
       } catch (error) {
@@ -1275,6 +1293,7 @@
       if (message) status(message);
     }, getState: () => journal?.rows, dispose() {
       if (disposed) return;
+      runGeneration++;
       running = false;
       if (currentRow) {
         try {
@@ -1292,7 +1311,7 @@
   }
 
   // drop-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.3";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.drop.installer");
   if (!page[guard]) {
