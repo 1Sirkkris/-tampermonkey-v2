@@ -14,19 +14,37 @@ export function createHierarchyQueue({window,mode,driver,identity,version,onEvid
   try{root.querySelector('[data-identity]').textContent='AUTO ID: '+identity().login;}catch(error){root.querySelector('[data-identity]').textContent=error.message;}
  }
  function transition(row,state,message,extra={}){journal.transition(row,state,message,extra);render();if(['SUBMITTED','CONFIRMED','REJECTED','UNKNOWN'].includes(state))onEvidence({type:'hierarchy.operation',intent:'mutation',phase:state,operationId:row.operationId,data:{mode,stage:row.phase||mode,outcome:state}});}
- async function edit(work){if(owned)return work();return withOperationLock(window,lock,async()=>{load();return work();});}
- async function add(text=input.value){const values=String(text).split(/[\s,;]+/).filter(Boolean);if(!values.length)return;await edit(()=>journal.add(values,{mode}));input.value='';window.sessionStorage.setItem(prefix+'draft','');status('Queued '+values.length+' containers');render();input.focus();}
- function pause(){running=false;status(currentRow?.state==='SUBMITTED'?'PAUSED — waiting for submitted result':'Paused safely');if(currentRow&&currentRow.state==='READING')controller?.abort();render();}
- async function start(){if(processing||disposed)return;try{await add();}catch(error){status(error.message);return;}const run=++generation;running=true;processing=true;render();
-  runPromise=withOperationLock(window,lock,async()=>{owned=true;load();journal.save();identity();
-   while(running&&!disposed&&run===generation){const row=journal.rows.find(row=>row.mode===mode&&row.state==='QUEUED');if(!row)break;currentRow=row;controller=new window.AbortController();transition(row,'READING','Validating native session');let submitted=false;
-    try{
-     await driver(row,{mode,signal:controller.signal,checkRunning:()=>{if(!running||disposed||run!==generation)throw new Error('Paused before mutation');},onPhase:phase=>{if(disposed)return;row.phase=phase;row.message='Processing '+phase;journal.save();render();},beforeMutation:()=>{if(!running||disposed||run!==generation)throw new Error('Paused before mutation');identity();if(submitted)throw new Error('Duplicate submission blocked');row.operationId=uuid();transition(row,'SUBMITTED','Submitted — waiting for native acknowledgement');submitted=true;}});
-     if(disposed||run!==generation)break;transition(row,'CONFIRMED','Native hierarchy acknowledged');status('DONE '+row.container+' — scan next');
-    }catch(error){if(disposed||run!==generation)break;const state=submitted?(error.outcome==='REJECTED'?'REJECTED':'UNKNOWN'):!running||controller.signal.aborted?'QUEUED':'REJECTED';transition(row,state,error.message);status(error.message);running=false;}
-    finally{currentRow=null;controller=null;}
-   }
-  }).catch(error=>status(error.message)).finally(()=>{owned=false;running=false;processing=false;runPromise=null;render();if(!disposed)input.focus();});await runPromise;
+ async function edit(work){if(disposed)throw new Error('Queue disposed before edit');if(owned)return work();return withOperationLock(window,lock,async()=>{if(disposed)throw new Error('Queue disposed before edit');load();return work();});}
+ async function add(text=input.value){const captured=String(text),values=captured.split(/[\s,;]+/).filter(Boolean);if(!values.length)return;await edit(()=>journal.add(values,{mode}));if(input.value===captured)input.value='';else if(captured&&input.value.startsWith(captured))input.value=input.value.slice(captured.length).replace(/^[\s,;]+/,'');window.sessionStorage.setItem(prefix+'draft',input.value);status('Queued '+values.length+' containers');render();input.focus();}
+ function pause(){generation++;running=false;status(currentRow?.state==='SUBMITTED'?'PAUSED — waiting for submitted result':'Paused safely');if(currentRow&&currentRow.state==='READING')controller?.abort();render();}
+ function start(){
+  if(processing||disposed)return Promise.resolve();
+  const run=++generation;processing=true;render();
+  // The tracked run includes Add and both asynchronous ownership acquisitions.
+  runPromise=(async()=>{
+   try{
+    await add();if(disposed||run!==generation)return;running=true;
+    await withOperationLock(window,lock,async()=>{
+     if(disposed||!running||run!==generation)return;
+     owned=true;load();journal.save();identity();
+     while(running&&!disposed&&run===generation){
+      const row=journal.rows.find(row=>row.mode===mode&&row.state==='QUEUED');if(!row)break;
+      currentRow=row;controller=new window.AbortController();transition(row,'READING','Validating native session');let submitted=false;
+      try{
+       await driver(row,{mode,signal:controller.signal,
+        checkRunning:()=>{if(!running||disposed||run!==generation)throw new Error('Paused before mutation');},
+        onPhase:phase=>{if(disposed)return;row.phase=phase;row.message='Processing '+phase;journal.save();render();},
+        beforeMutation:()=>{if(!running||disposed||run!==generation)throw new Error('Paused before mutation');identity();if(submitted)throw new Error('Duplicate submission blocked');row.operationId=uuid();transition(row,'SUBMITTED','Submitted — waiting for native acknowledgement');submitted=true;}});
+       if(disposed)break;transition(row,'CONFIRMED','Native hierarchy acknowledged');status('DONE '+row.container+' — scan next');
+      }catch(error){
+       if(disposed)break;const state=submitted?(error.outcome==='REJECTED'?'REJECTED':'UNKNOWN'):!running||controller.signal.aborted?'QUEUED':'REJECTED';
+       transition(row,state,error.message);status(error.message);running=false;
+      }finally{currentRow=null;controller=null;}
+     }
+    });
+   }catch(error){status(error.message);}
+   finally{owned=false;running=false;processing=false;runPromise=null;render();if(!disposed)input.focus();}
+  })();return runPromise;
  }
  async function clear(){pause();if(runPromise)await runPromise;try{await edit(()=>journal.clear());input.value='';window.sessionStorage.setItem(prefix+'draft','');status(journal.rows.length?'Unresolved submissions retained — verify native result':'Cleared — next batch');render();}catch(error){status(error.message);}}
  input.addEventListener('input',()=>window.sessionStorage.setItem(prefix+'draft',input.value),{signal:listeners.signal});

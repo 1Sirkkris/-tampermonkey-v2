@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Unbind Hierarchy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Native hierarchy queue with durable submission barriers and one batch owner.
 // @match https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant unsafeWindow
@@ -576,92 +576,105 @@
       if (["SUBMITTED", "CONFIRMED", "REJECTED", "UNKNOWN"].includes(state)) onEvidence({ type: "hierarchy.operation", intent: "mutation", phase: state, operationId: row.operationId, data: { mode, stage: row.phase || mode, outcome: state } });
     }
     async function edit(work) {
+      if (disposed) throw new Error("Queue disposed before edit");
       if (owned) return work();
       return withOperationLock(window2, lock, async () => {
+        if (disposed) throw new Error("Queue disposed before edit");
         load();
         return work();
       });
     }
     async function add(text = input.value) {
-      const values = String(text).split(/[\s,;]+/).filter(Boolean);
+      const captured = String(text), values = captured.split(/[\s,;]+/).filter(Boolean);
       if (!values.length) return;
       await edit(() => journal.add(values, { mode }));
-      input.value = "";
-      window2.sessionStorage.setItem(prefix + "draft", "");
+      if (input.value === captured) input.value = "";
+      else if (captured && input.value.startsWith(captured)) input.value = input.value.slice(captured.length).replace(/^[\s,;]+/, "");
+      window2.sessionStorage.setItem(prefix + "draft", input.value);
       status("Queued " + values.length + " containers");
       render();
       input.focus();
     }
     function pause() {
+      generation++;
       running = false;
       status(currentRow?.state === "SUBMITTED" ? "PAUSED — waiting for submitted result" : "Paused safely");
       if (currentRow && currentRow.state === "READING") controller?.abort();
       render();
     }
-    async function start() {
-      if (processing || disposed) return;
-      try {
-        await add();
-      } catch (error) {
-        status(error.message);
-        return;
-      }
+    function start() {
+      if (processing || disposed) return Promise.resolve();
       const run = ++generation;
-      running = true;
       processing = true;
       render();
-      runPromise = withOperationLock(window2, lock, async () => {
-        owned = true;
-        load();
-        journal.save();
-        identity();
-        while (running && !disposed && run === generation) {
-          const row = journal.rows.find((row2) => row2.mode === mode && row2.state === "QUEUED");
-          if (!row) break;
-          currentRow = row;
-          controller = new window2.AbortController();
-          transition(row, "READING", "Validating native session");
-          let submitted = false;
-          try {
-            await driver(row, { mode, signal: controller.signal, checkRunning: () => {
-              if (!running || disposed || run !== generation) throw new Error("Paused before mutation");
-            }, onPhase: (phase) => {
-              if (disposed) return;
-              row.phase = phase;
-              row.message = "Processing " + phase;
-              journal.save();
-              render();
-            }, beforeMutation: () => {
-              if (!running || disposed || run !== generation) throw new Error("Paused before mutation");
-              identity();
-              if (submitted) throw new Error("Duplicate submission blocked");
-              row.operationId = uuid();
-              transition(row, "SUBMITTED", "Submitted — waiting for native acknowledgement");
-              submitted = true;
-            } });
-            if (disposed || run !== generation) break;
-            transition(row, "CONFIRMED", "Native hierarchy acknowledged");
-            status("DONE " + row.container + " — scan next");
-          } catch (error) {
-            if (disposed || run !== generation) break;
-            const state = submitted ? error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN" : !running || controller.signal.aborted ? "QUEUED" : "REJECTED";
-            transition(row, state, error.message);
-            status(error.message);
-            running = false;
-          } finally {
-            currentRow = null;
-            controller = null;
-          }
+      runPromise = (async () => {
+        try {
+          await add();
+          if (disposed || run !== generation) return;
+          running = true;
+          await withOperationLock(window2, lock, async () => {
+            if (disposed || !running || run !== generation) return;
+            owned = true;
+            load();
+            journal.save();
+            identity();
+            while (running && !disposed && run === generation) {
+              const row = journal.rows.find((row2) => row2.mode === mode && row2.state === "QUEUED");
+              if (!row) break;
+              currentRow = row;
+              controller = new window2.AbortController();
+              transition(row, "READING", "Validating native session");
+              let submitted = false;
+              try {
+                await driver(row, {
+                  mode,
+                  signal: controller.signal,
+                  checkRunning: () => {
+                    if (!running || disposed || run !== generation) throw new Error("Paused before mutation");
+                  },
+                  onPhase: (phase) => {
+                    if (disposed) return;
+                    row.phase = phase;
+                    row.message = "Processing " + phase;
+                    journal.save();
+                    render();
+                  },
+                  beforeMutation: () => {
+                    if (!running || disposed || run !== generation) throw new Error("Paused before mutation");
+                    identity();
+                    if (submitted) throw new Error("Duplicate submission blocked");
+                    row.operationId = uuid();
+                    transition(row, "SUBMITTED", "Submitted — waiting for native acknowledgement");
+                    submitted = true;
+                  }
+                });
+                if (disposed) break;
+                transition(row, "CONFIRMED", "Native hierarchy acknowledged");
+                status("DONE " + row.container + " — scan next");
+              } catch (error) {
+                if (disposed) break;
+                const state = submitted ? error.outcome === "REJECTED" ? "REJECTED" : "UNKNOWN" : !running || controller.signal.aborted ? "QUEUED" : "REJECTED";
+                transition(row, state, error.message);
+                status(error.message);
+                running = false;
+              } finally {
+                currentRow = null;
+                controller = null;
+              }
+            }
+          });
+        } catch (error) {
+          status(error.message);
+        } finally {
+          owned = false;
+          running = false;
+          processing = false;
+          runPromise = null;
+          render();
+          if (!disposed) input.focus();
         }
-      }).catch((error) => status(error.message)).finally(() => {
-        owned = false;
-        running = false;
-        processing = false;
-        runPromise = null;
-        render();
-        if (!disposed) input.focus();
-      });
-      await runPromise;
+      })();
+      return runPromise;
     }
     async function clear() {
       pause();
@@ -786,6 +799,6 @@
   }
 
   // unbind-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   installHierarchy(window, typeof unsafeWindow === "object" ? unsafeWindow : window, "unbind", VERSION);
 })();

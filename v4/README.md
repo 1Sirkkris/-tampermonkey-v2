@@ -17,8 +17,8 @@ Click a script name to open its Tampermonkey installer. Disable corresponding V2
 | [Tote Audit / FC Lite](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FC_Lite.user.js) | 0.1.1 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 9 + 2 shared barcode | Native barcode schemas, scanner timing, discrepancies/auth and optional print |
 | [Bin Check](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bin_Check_Overlay.user.js) | 0.1.1 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 7 | Native filtered rows, hierarchy floor and visual placement; optional print |
 | [FNSKU Mapping](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/FNSKU_Mapping_Lookup.user.js) | 0.1.0 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 10 | Regional native auth/results/pagination and honest partial regions |
-| [Bind Hierarchy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bind_Hierarchy_Queue.user.js) | 0.1.1 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 14 shared hierarchy | Native seed/template/session/identity/acknowledgement; approved operation |
-| [Unbind Hierarchy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Unbind_Hierarchy_Queue.user.js) | 0.1.1 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 14 shared hierarchy | Native identity/acknowledgement and reload recovery; approved operation |
+| [Bind Hierarchy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Bind_Hierarchy_Queue.user.js) | 0.1.2 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 18 shared hierarchy | Native seed/template/session/identity/acknowledgement; approved operation |
+| [Unbind Hierarchy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Unbind_Hierarchy_Queue.user.js) | 0.1.2 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 18 shared hierarchy | Native identity/acknowledgement and reload recovery; approved operation |
 | [Dropzone Queue](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Dropzone_Selector_Queue.user.js) | 0.1.3 | PARTIAL | PARTIAL | 18 | Empty-container location proof absent; nonempty native Enter/queue/identity/readback live gate |
 | [Stow Andons](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Stow_Andons_Helper.user.js) | 0.1.1 | PARTIAL | PARTIAL | 9 | Empty-container movement withheld; native frames/auth/locks/readback and optional print |
 | [Sideline Queue + Lazy](https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/v4-cleanroom/v4/Sideline_Queue_Lazy.user.js) | 0.1.3 | COMPLETE | OFFLINE VERIFIED — LIVE GATE PENDING | 27 | Native scanner/preflight/hazards/QTY/date/Predicant/two-stage Stop and longer batches |
@@ -36,9 +36,9 @@ COMPLETE describes the implemented offline contract, not complete live acceptanc
 
 ## Verified evidence and reproducible commands
 
-Current automated result: **336 passed / 0 failed**, with no skipped/cancelled tests. Deterministic source/installer match, 19 installer metadata/version/update/download/duplicate identity/independence checks, 69 source syntax checks and whitespace pass.
+Current automated result: **340 passed / 0 failed**, with no skipped/cancelled tests. Deterministic source/installer match, 19 installer metadata/version/update/download/duplicate identity/independence checks, 69 source syntax checks and whitespace pass.
 
-The test command uses four concurrent test files for bounded runner resource use. All 336 cases completed with zero skipped/cancelled cases; an initial unrestricted run stopped without a complete result and is not claimed as passing.
+The test command uses four concurrent test files for bounded runner resource use. All 340 cases completed with zero skipped/cancelled cases; an initial unrestricted run stopped without a complete result and is not claimed as passing.
 
 Shared checks include 3 actual build recovery fixtures, 30 FCR read fixtures, 21 enrichment, 16 auth, 4 watermark and 2 generated suite integration fixtures. Actual separate installer bundles share one truthful footer across FCR/ISS navigation, Ctrl+Q and BFCache, with zero script-owned idle API requests in those fixtures. No deployed idle performance claim is implied.
 
@@ -129,3 +129,5 @@ For the empty-container gate, use a read-only native FCR query of one truly empt
 Dropzone 0.1.3 fixes two reproduced draft regressions: CLEAR ALL no longer restores erased unsent scans after reload, and a scan received during Run's owner acquisition survives for the next batch/reload. CLEAR DONE preserves the draft; unresolved submissions remain quarantined. This restores scanner/recovery behaviour without changing native locations, UI/styles or movement proof requirements.
 
 Run startup is now tracked by the Dropzone owner: Pause/Clear during delayed browser ownership acquisition cannot resume into movement. Clear waits for startup before erasing only safe rows; submitted results still settle. Generated scanner `123START`/Pause/Clear cases verify that no GM/native mutation is sent in the cancelled startup case.
+
+Bind/Unbind 0.1.2 fixes reproduced scanner loss, mutation after an early Pause and ledger writes after disposal during Start ownership acquisition. Start is tracked immediately, Clear waits for startup, new scanner drafts survive and disposed work cannot erase them. Native payloads, interfaces and positive acknowledgement rules are unchanged; generated independent installers verify `123START`/Pause/Clear startup cancellation with zero native sends. These are offline recovery improvements; native operational/visual/scanner acceptance remains pending.
