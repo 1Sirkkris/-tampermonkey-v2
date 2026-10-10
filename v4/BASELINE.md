@@ -1,6 +1,6 @@
 # V4 clean-room baseline
 
-Established 5 October 2026. Scope: inventory and rebuild sequence; no implementation in this checkpoint.
+Established 5 October 2026. This is the authoritative workflow inventory and original rebuild order. Current implementation/readiness/next action are in CHECKPOINT.md and README.md; the initial OBS-first gate below is historical and must not restart completed work.
 
 - V2 reference: `main` at `e4399d89ff11551ec1afb132d67c448da1e43568`.
 - Frozen V3 reference: `v3-groundup` at `77ff9f7818ea8d2d53422654a7e6b7ca51b6db13`.
@@ -74,4 +74,4 @@ Basis: all 22 current V2 source entries and relevant current changes; Sep 30 aud
 
 This baseline does not select a fleet architecture or assert test readiness. Each unit must first record **PRESERVE / FAILURES / STATE / SUCCESS / UNKNOWN / RESET / DEPENDENCIES**, resolve evidence gaps, then implement and verify. Ordinary engineering and restoring proven behaviour are authorised; material user-facing changes require explicit approval.
 
-Before another unit starts: validate, commit, push `v4-cleanroom`, verify the remote SHA and report it. Push intermediate checkpoints for large/risky/uncertain work. Never force-push or rewrite recovery history. Next unit: OBS behaviour contract.
+Before another unit starts: validate, commit, push `v4-cleanroom`, verify the remote SHA and report it. Push intermediate checkpoints for large/risky/uncertain work. Never force-push or rewrite recovery history. Current NEXT is in CHECKPOINT.md; original first unit was OBS behaviour contract. Save around every 10 minutes (never intentionally beyond 15), including WIP/tests, preserve working installers, and report actual Australia/Sydney system time and confirmed push separately.
