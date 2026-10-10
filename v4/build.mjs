@@ -1,5 +1,5 @@
 import { buildSync } from 'esbuild';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,11 +78,27 @@ export function additionalBuild(spec) {
   return buildSync({entryPoints:[root+'/'+spec.entry],bundle:true,write:false,format:'iife',target:'es2022',legalComments:'none',banner:{js:header},charset:'utf8'}).outputFiles[0].text;
 }
 function installers() { return [['FCResearch_Master.user.js',masterBuild()],['OBS.user.js',obsBuild()],...additional.map(spec=>[spec.file,additionalBuild(spec)])]; }
+function publishInstallers(outputs) {
+  const staging = mkdtempSync(root + '/build-staging-');
+  try {
+    // Compile and stage every output before publishing. An interrupted write
+    // can damage only this build's staging, never an existing candidate.
+    for (const [name, source] of outputs) {
+      const path = staging + '/' + name;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, source, { flag: 'wx' });
+    }
+    // Same-filesystem rename publishes one complete installer atomically.
+    // A batch interruption may leave old/new candidates, each still intact.
+    for (const [name] of outputs) renameSync(staging + '/' + name, root + '/' + name);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
 if (process.argv.includes('--check')) {
   for(const [name,source] of installers()) if(readFileSync(root+'/'+name,'utf8')!==source)throw new Error(name+' installer is stale: npm run build');
   console.log('PASS: all generated installers match canonical source');
 } else if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // Build every output successfully before replacing any existing candidate.
-  for(const [name,source] of installers())writeFileSync(root+'/'+name,source);
+  publishInstallers(installers());
   console.log('Built all V4 installers');
 }
