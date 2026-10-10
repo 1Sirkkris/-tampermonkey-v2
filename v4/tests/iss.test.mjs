@@ -6,7 +6,7 @@ test('worker exact parent/nonce, command dedup and native Stop controls reject s
 function fakeBridge(overrides={}){return{ready:async()=>{},run:async()=>({rows:[{container:'item',state:'CONFIRMED'}],outcome:'CONFIRMED'}),control(){},reconnect:async()=>{},dispose(){},...overrides};}
 test('native handoff loss survives parent Clear/Run/reload; no second command is sent',async t=>{const w=setup(t);let calls=0;const bridge=fakeBridge({run:async()=>{calls++;throw Object.assign(new Error('lost native handoff'),{outcome:'UNKNOWN'});}}),ui=createIssConsole({window:w,version:'0.1.0',bridgeFactory:()=>bridge});t.after(ui.dispose);const input=ui.root.querySelector('[data-panel=edit] textarea');input.value='X000000001';await ui.run('edit');assert.equal(ui.getRows('edit')[0].state,'UNKNOWN');await ui.clear('edit');input.value='X000000001';await ui.run('edit');assert.equal(calls,1);assert.equal(ui.getRows('edit')[0].state,'UNKNOWN');ui.dispose();const restored=createIssConsole({window:w,version:'0.1.0',bridgeFactory:()=>fakeBridge()});t.after(restored.dispose);assert.equal(restored.getRows('edit')[0].state,'UNKNOWN');});
 test('familiar three ISS areas retain defaults, duplicate Lazy quantities, source/destination scanner focus and consume START',async t=>{const w=setup(t);let captured;const ui=createIssConsole({window:w,version:'0.1.0',bridgeFactory:()=>fakeBridge({run:async(kind,payload)=>{captured=payload;return{rows:[{state:'REJECTED',container:'item'}],outcome:'REJECTED'};}})});t.after(ui.dispose);assert.equal(ui.root.querySelectorAll('[data-panel]').length,3);assert.equal(ui.root.querySelector('[data-panel=edit] [data-field=desiredState]').value,'PENDING_RESEARCH');const panel=ui.root.querySelector('[data-panel=sideline]');panel.querySelector('[data-mode=lazy]').click();const source=panel.querySelector('[data-field=source]'),destination=panel.querySelector('[data-field=destination]'),items=panel.querySelector('textarea');panel.querySelector('[data-option=delay]').click();source.value='tsXsrc';source.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.equal(w.document.activeElement,destination);destination.value='tsXdst';destination.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.equal(w.document.activeElement,items);items.value='X000000001\nX000000001\n123START';items.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await tick();assert.equal(captured.options.items[0].quantity,2);assert.equal(captured.options.items.length,1);assert(!items.value.includes('123START'));assert.equal(w.document.querySelector('#native').textContent,'FCR native content');});
-test('generated ISS mounts only at proven FCR hash, bundles workers without idle frames/API, real footer and cleanup',async t=>{const w=setup(t);w.unsafeWindow=w;w.GM_xmlhttpRequest=()=>{throw new Error('idle GM');};w.fetch=()=>{throw new Error('idle API');};const source=readFileSync(new URL('../ISS_Console.user.js',import.meta.url),'utf8');w.eval(source);w.eval(source);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await tick();assert.equal(w.document.querySelectorAll('#tm-v4-iss').length,1);assert.equal(w.document.querySelector('iframe'),null);assert.match(w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 ISSC: 0.1.2/);w.dispatchEvent(new w.Event('pagehide'));assert.equal(w.document.querySelector('#tm-v4-iss'),null);assert.equal(w.document.querySelector('#native').textContent,'FCR native content');});
+test('generated ISS mounts only at proven FCR hash, bundles workers without idle frames/API, real footer and cleanup',async t=>{const w=setup(t);w.unsafeWindow=w;w.GM_xmlhttpRequest=()=>{throw new Error('idle GM');};w.fetch=()=>{throw new Error('idle API');};const source=readFileSync(new URL('../ISS_Console.user.js',import.meta.url),'utf8');w.eval(source);w.eval(source);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await tick();assert.equal(w.document.querySelectorAll('#tm-v4-iss').length,1);assert.equal(w.document.querySelector('iframe'),null);assert.match(w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 ISSC: 0.1.3/);w.dispatchEvent(new w.Event('pagehide'));assert.equal(w.document.querySelector('#tm-v4-iss'),null);assert.equal(w.document.querySelector('#native').textContent,'FCR native content');});
 import{installIssWorker}from'../iss-worker.mjs';
 function nativeWorker(t,kind,fetch){const nonce='aabbccdd-1111-2222-3333-444455556666',origin='https://fcresearch-fe.aka.amazon.com',base=kind==='aft'?'https://aft-qt-jp.aka.nrt.corp.amazon.com/app/edititems':'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/';const dom=new JSDOM('<body>',{url:base+'?tmV4ParentOrigin='+encodeURIComponent(origin)+'#tm-v4-iss-worker='+nonce});const w=dom.window,sent=[],parent={postMessage:data=>sent.push(data)};Object.defineProperty(w,'parent',{value:parent});w.employeeLogin='verified-user';w.fetch=fetch;let locked=false;w.navigator.locks={request:async(name,opts,fn)=>{if(locked)return fn(null);locked=true;try{return await fn({name});}finally{locked=false;}}};const worker=installIssWorker({window:w,page:w,gmRequest:()=>{throw new Error('Unexpected GM request');}});t.after(()=>{worker.dispose();w.close();});function deliver(type,data={}){w.dispatchEvent(new w.MessageEvent('message',{source:parent,origin,data:{protocol:'tm-v4.iss',nonce,type,...data}}));}return{w,sent,deliver,worker};}
 const nativeResponse=(url,data)=>({ok:true,status:200,url,headers:{get:()=> 'application/json'},text:async()=>typeof data==='string'?data:JSON.stringify(data)});
@@ -20,3 +20,83 @@ test('real Lazy worker waits for exact date request/parent reply before sending 
 test('Stop cancels real Lazy date RPC with zero movement; unsubmitted row remains recoverable',async t=>{let moves=0;const worker=nativeWorker(t,'sideline',dateFetch(()=>moves++));worker.deliver('run',{requestId:'cancel-expiry',payload:lazyPayload});await until(()=>worker.sent.some(row=>row.type==='date'));worker.deliver('control',{action:'stop',area:'sideline'});await until(()=>worker.sent.some(row=>row.type==='result'));assert.equal(moves,0);assert(worker.sent.some(row=>row.type==='date-cancel'));assert.equal(worker.sent.find(row=>row.type==='result').result.rows[0].state,'QUEUED');assert.equal(worker.sent.find(row=>row.type==='result').result.outcome,'REJECTED');});
 test('Stop and Clear during late health readiness send zero native commands; reconnect cannot orphan health waiter',async t=>{const w=setup(t);let ready,calls=0;const ui=createIssConsole({window:w,version:'0.1.0',bridgeFactory:()=>fakeBridge({ready:()=>new Promise(resolve=>ready=resolve),run:async()=>calls++})});t.after(ui.dispose);ui.root.querySelector('[data-panel=edit] textarea').value='X000000001';const task=ui.run('edit');await until(()=>ready);ui.stop('edit');const clearing=ui.clear('edit');ready();await task;await clearing;assert.equal(calls,0);assert.equal(ui.getRows('edit').length,0);const bridge=createIssBridge({window:w});const health=bridge.ready('aft');health.catch(()=>{});assert.throws(()=>bridge.reconnect('aft'),/pending/);bridge.dispose();});
 test('ISS preserves V2 Lazy defaults, per-item quantities and destination rescan Move start without a container item',async t=>{const w=setup(t);let captured,callbacks;const ui=createIssConsole({window:w,version:'0.1.0',bridgeFactory:options=>{callbacks=options;return fakeBridge({run:async(kind,payload)=>{captured=payload;return{rows:[],outcome:'REJECTED'};}});}});t.after(ui.dispose);const side=ui.root.querySelector('[data-panel=sideline]');assert.equal(side.dataset.clearSource,'false');assert.equal(side.dataset.delay,'true');const edit=ui.root.querySelector('[data-panel=edit]');edit.querySelector('textarea').value='X000000001\nX000000002';edit.querySelector('textarea').dispatchEvent(new w.Event('input',{bubbles:true}));callbacks.onProgress({kind:'aft',area:'edit',code:'X000000001',choices:[{state:'SELLABLE',qty:4},{state:'PENDING_RESEARCH',qty:2}]});assert.equal(edit.querySelectorAll('.qty-row').length,2);assert.match(edit.querySelector('.qty-row').textContent,/X00000000142—/);const move=ui.root.querySelector('[data-panel=move]');move.querySelector('[data-field=source]').value='tsXsrc';move.querySelector('[data-field=destination]').value='tsXdst';const input=move.querySelector('textarea');input.value='X000000001\ntsXdst';input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await tick();assert.equal(captured.items.length,1);assert.equal(captured.items[0].code,'X000000001');assert(!input.value.includes('tsXdst'));});
+
+function lazyConsole(t, onControl=()=>{}) {
+ const w=setup(t);let callbacks,settle,started=false;
+ const ui=createIssConsole({window:w,version:'0.1.0',bridgeFactory:options=>{callbacks=options;return fakeBridge({run:()=>{started=true;return new Promise(resolve=>settle=resolve);},control:(kind,action,data)=>onControl({kind,action,...data})});}});
+ t.after(ui.dispose);
+ const panel=ui.root.querySelector('[data-panel=sideline]');panel.querySelector('[data-mode=lazy]').click();
+ panel.querySelector('[data-field=source]').value='tsXsource';panel.querySelector('[data-field=destination]').value='tsXdest';
+ const input=panel.querySelector('textarea');input.value='X000000001';input.focus();
+ const scan=code=>{input.value+='\n'+code;input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));};
+ const progress=data=>callbacks.onProgress({kind:'sideline',area:'sideline',busy:true,running:true,...data});
+ return{w,ui,panel,input,scan,progress,started:()=>started,settle:result=>settle(result)};
+}
+
+test('ISS paints destination recovery before dispatch, deduplicates rescans and reopens only after native rejection',async t=>{
+ const controls=[];let fixture;
+ fixture=lazyConsole(t,data=>{if(data.action==='scan'){assert.equal(fixture.panel.dataset.loading,'1','loading must be visible before control dispatch');controls.push(data.code);}});
+ const {ui,panel,input,w,scan,progress}=fixture;const task=ui.run('sideline');await until(fixture.started);
+ progress({attention:'predicant',paused:true,message:'RESCAN DESTINATION tsXdest'});
+ assert.equal(panel.dataset.loading,'0');assert.equal(panel.getAttribute('aria-busy'),'false');
+ scan('tsXdest');assert.equal(controls.length,1);assert.equal(panel.dataset.loading,'1');
+ assert.equal(input.disabled,false);assert.equal(panel.querySelector('[data-action=stop]').disabled,false);assert.equal(w.document.activeElement,input);
+ assert.match(panel.querySelector('[data-loading-label]').textContent,/Confirming destination/);
+ // Previously queued waiting-state progress must not reopen a new pending rescan.
+ progress({attention:'predicant',paused:true,message:'RESCAN DESTINATION tsXdest'});scan('tsXdest');assert.equal(controls.length,1);
+ progress({attention:'recovery',paused:false,message:'Validating destination'});scan('tsXdest');assert.equal(controls.length,1);
+ progress({attention:'predicant',paused:true,message:'Destination clear rejected — rescan deliberately',rows:[{kind:'predicant-close',state:'REJECTED'}]});
+ assert.equal(panel.dataset.loading,'0');scan('tsXdest');assert.equal(controls.length,2);
+ fixture.settle({outcome:'UNKNOWN',rows:[{kind:'predicant-close',state:'UNKNOWN'}]});await task;
+ assert.equal(panel.dataset.loading,'0');assert.equal(ui.getRows('sideline')[0].state,'UNKNOWN');
+});
+
+test('ISS Stop removes recovery feedback and rejects later scanner controls while the native submission settles',async t=>{
+ const controls=[];const fixture=lazyConsole(t,data=>controls.push(data));const {ui,panel,scan,progress}=fixture;
+ const task=ui.run('sideline');await until(fixture.started);progress({attention:'predicant',paused:true,message:'Rescan destination'});scan('tsXdest');
+ assert.equal(panel.dataset.loading,'1');ui.stop('sideline');assert.equal(panel.dataset.loading,'0');
+ progress({attention:'recovery',paused:false,message:'Native submitted close still settling'});scan('tsXdest');
+ assert.equal(controls.filter(data=>data.action==='scan').length,1);assert.equal(panel.dataset.loading,'0');
+ assert.equal(ui.getRows('sideline')[0].state,'SUBMITTED');
+ const clearing=ui.clear('sideline');fixture.settle({outcome:'UNKNOWN',rows:[{kind:'predicant-close',state:'UNKNOWN'}]});await task;await clearing;
+ assert.equal(ui.getRows('sideline')[0].state,'UNKNOWN');assert.equal(panel.dataset.loading,'0');
+});
+
+test('generated ISS scanner paints recovery before the exact-peer control; UNKNOWN closes feedback and retains the handoff',async t=>{
+ const w=setup(t);w.unsafeWindow=w;w.GM_xmlhttpRequest=()=>{throw new Error('Unexpected GM request');};w.fetch=()=>{throw new Error('Unexpected idle request');};
+ w.eval(readFileSync(new URL('../ISS_Console.user.js',import.meta.url),'utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await tick();
+ const root=w.document.querySelector('#tm-v4-iss'),panel=root.querySelector('[data-panel=sideline]');panel.querySelector('[data-mode=lazy]').click();
+ panel.querySelector('[data-field=source]').value='tsXsource';panel.querySelector('[data-field=destination]').value='tsXdest';const input=panel.querySelector('textarea');input.value='X000000001';input.focus();
+ panel.querySelector('[data-action=run]').click();await until(()=>w.document.querySelector('iframe'));
+ const frame=w.document.querySelector('iframe'),url=new w.URL(frame.src),nonce=url.hash.split('=')[1],sent=[];
+ frame.contentWindow.postMessage=data=>{if(data.type==='control'&&data.action==='scan')assert.equal(panel.dataset.loading,'1');sent.push(data);};
+ const deliver=(type,data={})=>w.dispatchEvent(new w.MessageEvent('message',{origin:url.origin,source:frame.contentWindow,data:{protocol:'tm-v4.iss',nonce,type,...data}}));
+ deliver('ready');await until(()=>sent.some(data=>data.type==='run'));const requestId=sent.find(data=>data.type==='run').requestId;
+ const progress=data=>deliver('progress',{requestId,data:{area:'sideline',busy:true,running:true,...data}});
+ progress({attention:'predicant',paused:true,message:'RESCAN DESTINATION tsXdest'});
+ const scan=()=>{input.value+='\ntsXdest';input.setSelectionRange(input.value.length,input.value.length);input.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));};
+ scan();scan();assert.equal(sent.filter(data=>data.action==='scan').length,1);assert.equal(w.document.activeElement,input);
+ assert.equal(w.getComputedStyle(panel.querySelector('.loading')).pointerEvents,'none');
+ progress({attention:'recovery',paused:false});assert.equal(panel.dataset.loading,'1');
+ deliver('result',{requestId,result:{outcome:'UNKNOWN',rows:[{kind:'predicant-close',container:'tsXdest',state:'UNKNOWN'}]}});await tick();
+ assert.equal(panel.dataset.loading,'0');assert.equal(JSON.parse(w.localStorage.getItem('tm-v4.iss.sideline.rows')).rows[0].state,'UNKNOWN');
+ assert.match(panel.querySelector('.rows').textContent,/tsXdest UNKNOWN/);w.dispatchEvent(new w.Event('pagehide'));assert.equal(w.document.querySelector('#tm-v4-iss'),null);assert.equal(w.document.querySelector('#tm-v4-runtime-watermark'),null);
+});
+
+test('real native Lazy worker accepts one Predicant rescan; an untyped close result is UNKNOWN and never retries the item',async t=>{
+ let moves=0,closes=0,releaseClose;const worker=nativeWorker(t,'sideline',async(url,init)=>{
+  const path=new URL(url).pathname;
+  if(path==='/api/get-bootstrap-data')return nativeResponse(url,{warehouseInfo:'BWU2'});
+  if(path==='/api/scan-source-container')return nativeResponse(url,{'@type':'ScanSourceContainerResponse',success:true});
+  if(path==='/api/scanitem')return nativeResponse(url,{'@type':'ScanItemResponse',success:true,items:[{scannableId:'X000000001',quantity:3,skuDetail:{asin:'B000000001',fnSku:'X000000001',fcSku:'FC00000001'}}]});
+  if(path==='/api/move-items'){moves++;return nativeResponse(url,{'@type':'MoveItemsResponse',success:false,filterResult:{compatible:false,reason:{predicant:true}}});}
+  assert.equal(path,'/api/close-container');closes++;assert.equal(JSON.parse(init.body).containerScannableId,'tsXdest');
+  assert.equal(JSON.parse(worker.w.localStorage.getItem('tm-v4.sideline.rows')).rows.find(row=>row.kind==='predicant-close').state,'SUBMITTED');
+  await new Promise(resolve=>releaseClose=resolve);return nativeResponse(url,{success:true});
+ });
+ worker.deliver('run',{requestId:'native-predicant',payload:lazyPayload});await until(()=>worker.sent.some(data=>data.data?.attention==='predicant'));
+ worker.deliver('control',{action:'scan',area:'sideline',code:'tsXdest'});worker.deliver('control',{action:'scan',area:'sideline',code:'tsXdest'});
+ await until(()=>releaseClose);worker.deliver('control',{action:'scan',area:'sideline',code:'tsXdest'});assert.equal(closes,1);assert.equal(moves,1);
+ assert(worker.sent.some(data=>data.data?.attention==='recovery'));releaseClose();await until(()=>worker.sent.some(data=>data.type==='result'));
+ const result=worker.sent.find(data=>data.type==='result').result;assert.equal(result.outcome,'UNKNOWN');assert(result.rows.some(row=>row.kind==='predicant-close'&&row.state==='UNKNOWN'));assert.equal(closes,1);assert.equal(moves,1);
+});

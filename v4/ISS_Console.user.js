@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.2
+// @version 0.1.3
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -1316,19 +1316,19 @@
   function createIssConsole({ window: window2, bridgeFactory, version, onEvidence = () => {
   } }) {
     const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {};
-    let disposed = false, active3 = "edit", dateController = null, sideAttention = "", sideNativeMessage = "";
+    let disposed = false, active3 = "edit", dateController = null, sideAttention = "", sideNativeMessage = "", sideRecoveryPending = false;
     const root = d.createElement("section");
     root.id = "tm-v4-iss";
     root.dataset.tmV4Script = "ISSC";
     const style = d.createElement("style");
     style.dataset.tmV4Style = "ISSC";
-    style.textContent = "#tm-v4-iss{position:fixed;inset:0;overflow:auto;z-index:999990;background:#eaeded;color:#172033;font:13px Arial;box-sizing:border-box}#tm-v4-iss *{box-sizing:border-box}#tm-v4-iss header{height:72px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:white;border-bottom:1px solid #c8d0d8;box-shadow:0 1px 2px #0002}#tm-v4-iss .brand{font-size:24px;font-weight:800;color:#17324d}#tm-v4-iss .site{font-size:18px;color:#ff9900;margin-right:10px}#tm-v4-iss .accent{height:3px;background:#ff9900}#tm-v4-iss .workers{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:bold}#tm-v4-iss .grid{display:grid;grid-template-columns:1.85fr 1fr 1fr;gap:14px;padding:18px 20px;min-height:calc(100vh - 75px)}#tm-v4-iss .grid[data-active=move]{grid-template-columns:1fr 1.85fr 1fr}#tm-v4-iss .grid[data-active=sideline]{grid-template-columns:1fr 1fr 1.85fr}#tm-v4-iss .panel{min-width:0;display:flex;flex-direction:column;background:white;border:1px solid #b8c2cc;border-radius:4px;box-shadow:0 1px 3px #0002}#tm-v4-iss .panel[data-active=true]{border-color:#4b789f;box-shadow:0 2px 8px #1d44662e}#tm-v4-iss h2{margin:0;min-height:68px;padding:18px 14px;background:#f3f4f5;border-bottom:1px solid #cbd2d9;font-size:23px;color:#17324d}#tm-v4-iss .body{padding:12px;display:flex;flex-direction:column;gap:9px;flex:1}#tm-v4-iss .modes,#tm-v4-iss .choices,#tm-v4-iss .actions{display:flex;gap:5px;flex-wrap:wrap}#tm-v4-iss button{border:1px solid #8796a5;border-radius:3px;padding:7px;background:#f7f8fa;color:#21364a;font:800 12px Arial;cursor:pointer}#tm-v4-iss .modes button,#tm-v4-iss .choices button{flex:1}#tm-v4-iss button[data-selected=true]{background:#17324d;color:white}#tm-v4-iss button:disabled{opacity:.45;cursor:default}#tm-v4-iss label{display:flex;flex-direction:column;gap:5px;font-weight:bold}#tm-v4-iss input,#tm-v4-iss textarea{padding:8px;border:1px solid #8f9eac;border-radius:3px;width:100%;font:14px Arial;color:#172033;background:white}#tm-v4-iss textarea{height:180px;min-height:120px;resize:vertical;font:13px monospace}#tm-v4-iss .arrow{text-align:center;font-weight:bold;color:#81909f}#tm-v4-iss .actions button{flex:1}#tm-v4-iss [data-action=run]{background:#146eb4;border-color:#0f5f9d;color:white}#tm-v4-iss [role=status]{padding:7px 0;font-weight:700;overflow-wrap:anywhere}#tm-v4-iss .rows{max-height:190px;overflow:auto;font:11px monospace;overflow-wrap:anywhere}#tm-v4-iss [data-state=CONFIRMED]{color:#176b35}#tm-v4-iss [data-state=REJECTED]{color:#a63520}#tm-v4-iss [data-state=UNKNOWN],#tm-v4-iss [data-state=SUBMITTED]{background:#fff0b3;color:#664b0a}#tm-v4-iss .metrics{display:flex;gap:8px;font-size:11px;font-weight:bold}#tm-v4-iss .aside{background:#fff0b3;padding:7px;border:1px solid #d3a753;font-weight:bold}#tm-v4-iss .qty-cards{display:grid;gap:5px;background:#f0f5f8;padding:7px;font-weight:bold;font-size:10px}#tm-v4-iss [data-qty-list]{display:grid;gap:4px;max-height:91px;overflow:auto}#tm-v4-iss .qty-row{display:grid;grid-template-columns:1.25fr repeat(3,1fr);gap:5px;background:white;padding:6px;border:1px solid #c5cfd6}#tm-v4-iss .qty-row code{overflow:hidden;text-overflow:ellipsis}#tm-v4-iss .qty-row b{text-align:center;font:800 17px monospace;color:#17324d}#tm-v4-iss [hidden]{display:none}@media(max-width:1100px){#tm-v4-iss .grid{padding:10px;gap:9px}#tm-v4-iss .body{padding:8px}#tm-v4-iss button{font-size:11px;padding:5px}}";
+    style.textContent = '#tm-v4-iss{position:fixed;inset:0;overflow:auto;z-index:999990;background:#eaeded;color:#172033;font:13px Arial;box-sizing:border-box}#tm-v4-iss *{box-sizing:border-box}#tm-v4-iss header{height:72px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;background:white;border-bottom:1px solid #c8d0d8;box-shadow:0 1px 2px #0002}#tm-v4-iss .brand{font-size:24px;font-weight:800;color:#17324d}#tm-v4-iss .site{font-size:18px;color:#ff9900;margin-right:10px}#tm-v4-iss .accent{height:3px;background:#ff9900}#tm-v4-iss .workers{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:bold}#tm-v4-iss .grid{display:grid;grid-template-columns:1.85fr 1fr 1fr;gap:14px;padding:18px 20px;min-height:calc(100vh - 75px)}#tm-v4-iss .grid[data-active=move]{grid-template-columns:1fr 1.85fr 1fr}#tm-v4-iss .grid[data-active=sideline]{grid-template-columns:1fr 1fr 1.85fr}#tm-v4-iss .panel{position:relative;min-width:0;display:flex;flex-direction:column;background:white;border:1px solid #b8c2cc;border-radius:4px;box-shadow:0 1px 3px #0002}#tm-v4-iss .panel[data-active=true]{border-color:#4b789f;box-shadow:0 2px 8px #1d44662e}#tm-v4-iss h2{margin:0;min-height:68px;padding:18px 14px;background:#f3f4f5;border-bottom:1px solid #cbd2d9;font-size:23px;color:#17324d}#tm-v4-iss .body{padding:12px;display:flex;flex-direction:column;gap:9px;flex:1}#tm-v4-iss .modes,#tm-v4-iss .choices,#tm-v4-iss .actions{display:flex;gap:5px;flex-wrap:wrap}#tm-v4-iss button{border:1px solid #8796a5;border-radius:3px;padding:7px;background:#f7f8fa;color:#21364a;font:800 12px Arial;cursor:pointer}#tm-v4-iss .modes button,#tm-v4-iss .choices button{flex:1}#tm-v4-iss button[data-selected=true]{background:#17324d;color:white}#tm-v4-iss button:disabled{opacity:.45;cursor:default}#tm-v4-iss label{display:flex;flex-direction:column;gap:5px;font-weight:bold}#tm-v4-iss input,#tm-v4-iss textarea{padding:8px;border:1px solid #8f9eac;border-radius:3px;width:100%;font:14px Arial;color:#172033;background:white}#tm-v4-iss textarea{height:180px;min-height:120px;resize:vertical;font:13px monospace}#tm-v4-iss .arrow{text-align:center;font-weight:bold;color:#81909f}#tm-v4-iss .actions button{flex:1}#tm-v4-iss [data-action=run]{background:#146eb4;border-color:#0f5f9d;color:white}#tm-v4-iss [role=status]{padding:7px 0;font-weight:700;overflow-wrap:anywhere}#tm-v4-iss .rows{max-height:190px;overflow:auto;font:11px monospace;overflow-wrap:anywhere}#tm-v4-iss [data-state=CONFIRMED]{color:#176b35}#tm-v4-iss [data-state=REJECTED]{color:#a63520}#tm-v4-iss [data-state=UNKNOWN],#tm-v4-iss [data-state=SUBMITTED]{background:#fff0b3;color:#664b0a}#tm-v4-iss .metrics{display:flex;gap:8px;font-size:11px;font-weight:bold}#tm-v4-iss .aside{background:#fff0b3;padding:7px;border:1px solid #d3a753;font-weight:bold}#tm-v4-iss .qty-cards{display:grid;gap:5px;background:#f0f5f8;padding:7px;font-weight:bold;font-size:10px}#tm-v4-iss [data-qty-list]{display:grid;gap:4px;max-height:91px;overflow:auto}#tm-v4-iss .qty-row{display:grid;grid-template-columns:1.25fr repeat(3,1fr);gap:5px;background:white;padding:6px;border:1px solid #c5cfd6}#tm-v4-iss .qty-row code{overflow:hidden;text-overflow:ellipsis}#tm-v4-iss .qty-row b{text-align:center;font:800 17px monospace;color:#17324d}#tm-v4-iss .loading{position:absolute;inset:68px 0 0;z-index:20;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(221,226,230,.76);pointer-events:none}#tm-v4-iss .panel[data-loading="1"] .loading{display:flex}#tm-v4-iss .loading b{padding:5px 9px;border:1px solid #81909c;border-radius:3px;background:#fffffff0;font-size:10px;color:#334a5e}#tm-v4-iss .spinner{width:46px;height:46px;border:5px solid #ffffffe6;border-top-color:#146eb4;border-right-color:#146eb4;border-radius:50%}#tm-v4-iss .panel[data-loading="1"] .spinner{animation:tmV4IssSpin .72s linear infinite}#tm-v4-iss .panel[data-loading="1"] .qty-cards{position:relative;z-index:21}@keyframes tmV4IssSpin{to{transform:rotate(360deg)}}#tm-v4-iss [hidden]{display:none}@media(max-width:1100px){#tm-v4-iss .grid{padding:10px;gap:9px}#tm-v4-iss .body{padding:8px}#tm-v4-iss button{font-size:11px;padding:5px}}';
     const choices = (field, values) => `<input type="hidden" data-field="${field}" value="${values[0][0]}"><div class="choices">${values.map(([value2, label]) => `<button data-choice="${field}" data-value="${value2}">${label}</button>`).join("")}</div>`, states = [["INVENTORY", "Sellable"], ["PENDING_RESEARCH", "Pending"], ["UNSELLABLE", "Unsellable"]], damages = [["AMAZON_DAMAGE", "Amazon Damage"], ["DEFECTIVE", "Defective"], ["DISTRIBUTOR_DAMAGE", "Distributor Damage"], ["EXPIRED", "Expired"]], modes = (area, values) => `<div class="modes">${values.map((value2) => `<button data-mode="${value2}" data-area="${area}">${value2.toUpperCase()}</button>`).join("")}</div>`;
     const edit = `${modes("edit", ["each", "sku"])}<div class="qty-cards" data-qty hidden><b>INVENTORY QTY • SELLABLE / PENDING / UNSELLABLE</b><div data-qty-list></div></div><label data-source-state>SOURCE ${choices("currentState", states)}</label><label data-source-damage>SOURCE DISPOSITION ${choices("currentDamage", damages)}</label><p data-auto-source hidden>AUTO-DETECT SOURCE FROM ITEM</p><div class="arrow">↓</div><label>DESTINATION ${choices("desiredState", states)}</label><label data-target-damage>DESTINATION DISPOSITION ${choices("desiredDamage", damages)}</label><div class="arrow">↓</div><label><span data-items-label>ITEM BARCODES / ASIN / FNSKU</span><textarea data-field="text" spellcheck="false"></textarea></label>`;
     const move = `${modes("move", ["all", "each", "qty"])}<label data-quantity>QTY<input data-field="quantity" type="number" min="1" step="1"></label><label>SOURCE<input data-field="source" autocomplete="off"></label><div class="arrow">↓</div><label>DESTINATION<input data-field="destination" autocomplete="off"></label><div class="arrow">↓</div><label>ITEM BARCODES<textarea data-field="text" spellcheck="false"></textarea></label>`;
     const side = `${modes("sideline", ["queue", "lazy"])}<label>SOURCE<input data-field="source" autocomplete="off"></label><div class="arrow">↓</div><label>DESTINATION<input data-field="destination" autocomplete="off"></label><div class="arrow">↓</div><label><span data-items-label>CONTAINERS</span><textarea data-field="text" spellcheck="false"></textarea></label><div class="metrics"></div><div class="aside" hidden></div><div class="modes" data-lazy-options><button data-option="clearSource">CLEAR SOURCE: ON</button><button data-option="delay">DELAY: OFF</button></div>`;
     const warehouse = window2.location.pathname.match(/^\/([^/]+)\/results/)?.[1] || "BWU2";
-    root.innerHTML = `<header><div class="brand"><span class="site">${escapeHtml(warehouse)}</span>ISS Console</div><div class="workers"><span data-worker=aft>AFT NOT CONNECTED</span><button data-reconnect=aft>Reconnect</button><span data-worker=sideline>SIDELINE NOT CONNECTED</span><button data-reconnect=sideline>Reconnect</button><button data-exit>FCResearch</button></div></header><div class="accent"></div><main class="grid" data-active="edit">${Object.entries({ edit, move, sideline: side }).map(([area, content]) => `<section class="panel" data-panel="${area}" data-mode="${area === "edit" ? "sku" : area === "move" ? "all" : "queue"}"><h2>${area.toUpperCase()}</h2><div class="body">${content}<div class="actions"><button data-action="run">RUN ${area.toUpperCase()}</button><button data-action="stop">STOP</button><button data-action="clear">CLEAR</button>${area === "sideline" ? '<button data-action="pause">PAUSE</button>' : ""}</div><div role="status">Ready</div><div class="rows"></div></div></section>`).join("")}</main>`;
+    root.innerHTML = `<header><div class="brand"><span class="site">${escapeHtml(warehouse)}</span>ISS Console</div><div class="workers"><span data-worker=aft>AFT NOT CONNECTED</span><button data-reconnect=aft>Reconnect</button><span data-worker=sideline>SIDELINE NOT CONNECTED</span><button data-reconnect=sideline>Reconnect</button><button data-exit>FCResearch</button></div></header><div class="accent"></div><main class="grid" data-active="edit">${Object.entries({ edit, move, sideline: side }).map(([area, content]) => `<section class="panel" data-panel="${area}" data-mode="${area === "edit" ? "sku" : area === "move" ? "all" : "queue"}"><h2>${area.toUpperCase()}</h2><div class="loading" aria-hidden="true"><span class="spinner"></span><b data-loading-label>Working…</b></div><div class="body">${content}<div class="actions"><button data-action="run">RUN ${area.toUpperCase()}</button><button data-action="stop">STOP</button><button data-action="clear">CLEAR</button>${area === "sideline" ? '<button data-action="pause">PAUSE</button>' : ""}</div><div role="status">Ready</div><div class="rows"></div></div></section>`).join("")}</main>`;
     d.body.append(root);
     d.head.append(style);
     const panels = Object.fromEntries(["edit", "move", "sideline"].map((area) => [area, root.querySelector(`[data-panel=${area}]`)])), value = (area, name) => panels[area].querySelector(`[data-field=${name}]`), message = (area, text2) => panels[area].querySelector("[role=status]").textContent = text2, key = (area) => "tm-v4.iss." + area + ".rows", kind = (area) => area === "sideline" ? "sideline" : "aft";
@@ -1359,7 +1359,16 @@
       for (const input of panels[area].querySelectorAll("[data-field]")) data[input.dataset.field] = input.value;
       window2.localStorage.setItem("tm-v4.iss.draft." + area, JSON.stringify(data));
     }
+    function paintLoading(area) {
+      const panel = panels[area];
+      const waiting = area === "sideline" && ["predicant", "damaged", "date"].includes(sideAttention);
+      const loading = !!busy[area] && !stopStages[area] && (!waiting || sideRecoveryPending);
+      panel.dataset.loading = loading ? "1" : "0";
+      panel.setAttribute("aria-busy", String(loading));
+      panel.querySelector("[data-loading-label]").textContent = area === "sideline" && sideRecoveryPending ? "Confirming destination…" : area === "sideline" && sideAttention === "recovery" ? "Recovering destination…" : "Working…";
+    }
     function paint(area) {
+      paintLoading(area);
       const panel = panels[area], mode = panel.dataset.mode, blocked = busy[area] || kind(area) === "aft" && (busy.edit || busy.move);
       panel.dataset.active = String(active3 === area);
       for (const button of panel.querySelectorAll("[data-mode]")) {
@@ -1420,6 +1429,7 @@
       if (area === "sideline") {
         sideAttention = data.attention || "";
         sideNativeMessage = data.message || "";
+        if (data.attention === "recovery" || data.busy === false || data.running === false) sideRecoveryPending = false;
       }
       paint(area);
     }, onEvidence: (record) => {
@@ -1498,6 +1508,11 @@
         busy[area] = false;
         activeRows[area] = null;
         promises[area] = null;
+        if (area === "sideline") {
+          sideRecoveryPending = false;
+          sideAttention = "";
+          sideNativeMessage = "";
+        }
         paint(area);
         if (kind(area) === "aft") paint(area === "edit" ? "move" : "edit");
       });
@@ -1505,6 +1520,8 @@
     }
     function stop(area) {
       stopStages[area] = (stopStages[area] || 0) + 1;
+      if (area === "sideline") sideRecoveryPending = false;
+      paint(area);
       bridge.control(kind(area), "stop", { area });
       if (area === "sideline") {
         dateController?.abort();
@@ -1610,8 +1627,23 @@
           input.setSelectionRange(input.value.length, input.value.length);
           save(area);
           if (area === "sideline" && busy[area]) {
-            bridge.control("sideline", "scan", { area, code });
-            if (isSource && !["predicant", "damaged", "recovery"].includes(sideAttention)) stop(area);
+            if (stopStages[area] > 0) message(area, "Stop requested — wait for native settlement");
+            else if (isDest && (sideRecoveryPending || sideAttention === "recovery")) message(area, "Recovery already running • duplicate destination scan ignored");
+            else {
+              if (isDest && sideAttention === "predicant") {
+                sideRecoveryPending = true;
+                message(area, "Destination scanned • confirming…");
+                paint(area);
+              }
+              try {
+                bridge.control("sideline", "scan", { area, code });
+                if (isSource && !["predicant", "damaged", "recovery"].includes(sideAttention)) stop(area);
+              } catch (error) {
+                sideRecoveryPending = false;
+                paint(area);
+                message(area, error.message);
+              }
+            }
           } else if (isStart || area === "move" && isDest || area === "sideline" && (isSource || isDest)) void run(area);
           else message(area, "Container scan is a control — not an item");
         } else {
@@ -2948,7 +2980,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.3";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {
