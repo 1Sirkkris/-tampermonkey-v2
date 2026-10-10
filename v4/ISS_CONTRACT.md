@@ -21,3 +21,5 @@ SUCCESS/UNKNOWN: feedback never proves movement. Existing typed native responses
 RESET: Stop removes loading feedback immediately while the native submitted operation settles under its existing owner. Further scans cannot restart it. Clear awaits settlement and retains unresolved rows; dispose removes owned UI/events. Loading is non-intercepting and scanner input/Stop remain usable.
 
 DEPENDENCIES: existing exact-peer native bridge/progress. Offline source and generated installer tests plus real native-client fixtures; deployed scanner timing, appearance and Predicant outcomes remain live gates.
+
+The 0.1.4 installer bundles the corrected AFT mode-selection owner/lifetime from AFT_CONTRACT.md. Native worker Stop during mode preflight cancels reads and prevents later item submission. Familiar parent three-panel UI and immediate Predicant feedback are unchanged. Additional legitimate AFT Confirm stages remain PARTIAL pending native evidence.

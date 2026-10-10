@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.3
+// @version 0.1.4
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -712,6 +712,7 @@
       busy = true;
       stopped = false;
       promise = withOperationLock(window2, "tm-v4.aft.owner", async () => {
+        if (stopped || disposed) return;
         journal = createOperationJournal({ storage: window2.localStorage, key: AFT_KEY, uuid: () => window2.crypto.randomUUID() });
         if (journal.rows.some((x) => ["UNKNOWN", "SUBMITTED"].includes(x.state))) throw new Error("Unresolved AFT submission blocks replay/mode change");
         journal.save();
@@ -751,45 +752,59 @@
       if (!definition) throw new Error("Unsupported mode");
       await runModeSwitch(definition, mode, navigate);
     }
-    async function runModeSwitch(definition, mode, navigate) {
+    function runModeSwitch(definition, mode, navigate) {
       busy = true;
-      try {
-        await withOperationLock(window2, "tm-v4.aft.owner", async () => {
-          journal = createOperationJournal({ storage: window2.localStorage, key: AFT_KEY, uuid: () => window2.crypto.randomUUID() });
-          if (journal.rows.some((x) => ["UNKNOWN", "SUBMITTED", "QUEUED"].includes(x.state))) throw new Error("Resolve/clear queued AFT work before mode change");
-          const row = journal.add(["Mode " + mode + " " + window2.crypto.randomUUID()], { mode: "mode", kind: "native-mode" })[0];
-          active3 = row;
-          controller = new window2.AbortController();
-          state(row, "READING", "Native mode switch");
-          try {
-            let snap = await client.page(definition);
-            await client.wait(definition, snap.objectId);
-            const selected = snap.text?.match(/Mode\s*:\s*(Each|Sku|Datelot|Multi|Container)/i)?.[1]?.toUpperCase();
-            if (!snap.selector && (mode === "flip" || selected === definition.input)) {
-              state(row, "CONFIRMED", "Native mode already selected");
-              return;
+      stopped = false;
+      promise = (async () => {
+        try {
+          await withOperationLock(window2, "tm-v4.aft.owner", async () => {
+            check();
+            journal = createOperationJournal({ storage: window2.localStorage, key: AFT_KEY, uuid: () => window2.crypto.randomUUID() });
+            if (journal.rows.some((x) => ["UNKNOWN", "SUBMITTED", "QUEUED"].includes(x.state))) throw new Error("Resolve/clear queued AFT work before mode change");
+            const row = journal.add(["Mode " + mode + " " + window2.crypto.randomUUID()], { mode: "mode", kind: "native-mode" })[0];
+            active3 = row;
+            controller = new window2.AbortController();
+            state(row, "READING", "Native mode switch");
+            try {
+              let snap = await client.page(definition, "", controller.signal);
+              check();
+              await client.wait(definition, snap.objectId, { signal: controller.signal });
+              check();
+              const selected = snap.text?.match(/Mode\s*:\s*(Each|Sku|Datelot|Multi|Container)/i)?.[1]?.toUpperCase();
+              if (!snap.selector && (mode === "flip" || selected === definition.input)) {
+                state(row, "CONFIRMED", "Native mode already selected");
+                return;
+              }
+              if (!snap.selector) {
+                await action(row, definition, snap.objectId, "SelectMode", "SelectMode");
+                check();
+                snap = await client.page(definition, snap.objectId, controller.signal);
+                check();
+                if (!snap.selector) throw new Error("Native mode selector unavailable");
+              }
+              await action(row, definition, snap.objectId, "Input", definition.input, { complete: true });
+              check();
+              await closeKnown(definition, snap.objectId);
+              check();
+              await client.fresh(definition, snap.objectId, controller.signal);
+              check();
+              state(row, "CONFIRMED", "Native mode selected");
+              if (navigate) window2.location.assign(definition.path + "?experience=Desktop");
+            } catch (error) {
+              const outcome = row.prepared ? "UNKNOWN" : "REJECTED";
+              state(row, outcome, error.message);
+              throw Object.assign(error, { outcome });
             }
-            if (!snap.selector) {
-              await action(row, definition, snap.objectId, "SelectMode", "SelectMode");
-              snap = await client.page(definition, snap.objectId);
-              if (!snap.selector) throw new Error("Native mode selector unavailable");
-            }
-            await action(row, definition, snap.objectId, "Input", definition.input, { complete: true });
-            await closeKnown(definition, snap.objectId);
-            await client.fresh(definition, snap.objectId);
-            state(row, "CONFIRMED", "Native mode selected");
-            if (navigate) window2.location.assign(definition.path + "?experience=Desktop");
-          } catch (error) {
-            state(row, row.prepared ? "UNKNOWN" : "REJECTED", error.message);
-            throw error;
-          }
-        });
-      } finally {
-        active3 = null;
-        controller = null;
-        busy = false;
-        changed("Mode switch settled");
-      }
+          });
+        } finally {
+          active3 = null;
+          controller = null;
+          busy = false;
+          promise = null;
+          changed("Mode switch settled");
+        }
+      })();
+      return promise;
     }
     function stop() {
       stopped = true;
@@ -798,7 +813,8 @@
     }
     async function clear() {
       stop();
-      if (promise) await promise;
+      if (promise) await promise.catch(() => {
+      });
       await withOperationLock(window2, "tm-v4.aft.owner", async () => {
         journal = createOperationJournal({ storage: window2.localStorage, key: AFT_KEY, uuid: () => window2.crypto.randomUUID() });
         journal.clear();
@@ -2980,7 +2996,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.3";
+  var VERSION = "0.1.4";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

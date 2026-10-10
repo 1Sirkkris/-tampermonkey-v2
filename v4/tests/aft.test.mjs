@@ -7,11 +7,65 @@ test('actual client preserves native action payload and requires status rather t
 test('AFT malformed/lost status is uncertain; backend ERRORED is a known rejection',async t=>{const d=dom();t.after(()=>d.window.close());for(const status of ['<html>login</html>','{"status":"ERRORED"}','{"status":"COMPLETE"}']){const client=createAftClient({window:d.window,fetch:async path=>new Response(path==='/status'?status:'')});await assert.rejects(client.action(AFT_MODES.each,'exact','Confirm','Confirm'),error=>status.includes('ERRORED')?error.outcome==='REJECTED':error.outcome!=='REJECTED');}});
 import{parseAftRows,createAftRunner,AFT_KEY,exactInventoryQuantity}from'../aft-workflow.mjs';import{readFileSync}from'node:fs';
 function owned(t){const d=dom();t.after(()=>d.window.close());let busy=false;d.window.navigator.locks={request:async(n,o,work)=>{if(busy)return work(null);busy=true;try{return await work({name:n});}finally{busy=false;}}};return d.window;}
+
+function modeClient(w,{holdPage=false,loseInput=false}={}){
+ const calls=[];let id='opaque-mode-1',selected=false,complete=false,release,readSignal;
+ const client=createAftClient({window:w,fetch:async(path,init={})=>{
+  calls.push({path,body:init.body?JSON.parse(init.body):null});
+  if(path.startsWith('/app/')){
+   if(holdPage){holdPage=false;readSignal=init.signal;await new Promise((resolve,reject)=>{release=resolve;init.signal.addEventListener('abort',()=>reject(new w.DOMException('Cancelled','AbortError')),{once:true});});}
+   return new Response(html(id,selected?'Mode: Each Scan location':'Select mode <input name="options" value="EACH">'));
+  }
+  if(path==='/action'){if(loseInput)throw new Error('native result lost');selected=true;complete=true;}
+  if(path==='/end'){id='opaque-mode-2';complete=false;}
+  return new Response(path==='/status'?JSON.stringify({status:complete?'COMPLETE':'READY'}):'');
+ }});
+ return{client,calls,release:()=>release?.(),get readSignal(){return readSignal;}};
+}
+
+test('actual native mode client permits deliberate mode selection after Stop/Clear and retains opaque IDs/actions',async t=>{
+ const w=owned(t),native=modeClient(w),runner=createAftRunner({window:w,client:native.client,identity:()=>({})});t.after(runner.dispose);
+ runner.stop();await runner.clear();await runner.switchMode('each',{navigate:false});
+ assert.equal(runner.rows.at(-1).state,'CONFIRMED');assert.equal(runner.busy,false);
+ assert.deepEqual(native.calls.filter(call=>call.path==='/action').map(call=>call.body),[{id:{instructionId:'EditItems',objectId:'opaque-mode-1'},action:'Input',input:'EACH'}]);
+});
+
+test('Clear tracks an active native mode switch, aborts only preflight and waits for owner settlement without a later action',async t=>{
+ const w=owned(t),native=modeClient(w,{holdPage:true}),runner=createAftRunner({window:w,client:native.client,identity:()=>({})});t.after(runner.dispose);
+ const mode=runner.switchMode('each',{navigate:false}).catch(error=>error);await new Promise(resolve=>setTimeout(resolve,0));
+ let cleared=false,clearError;const clearing=runner.clear().then(()=>cleared=true,error=>clearError=error);await new Promise(resolve=>setTimeout(resolve,0));const aborted=native.readSignal.aborted;
+ native.release();await mode;await clearing;assert.equal(aborted,true);assert.equal(clearError,undefined);assert.equal(cleared,true);assert.equal(runner.rows.length,0);assert.equal(native.calls.filter(call=>call.path==='/action').length,0);
+});
+
+test('a lost native mode action remains UNKNOWN through Clear and blocks a later mode change without replay',async t=>{
+ const w=owned(t),native=modeClient(w,{loseInput:true}),runner=createAftRunner({window:w,client:native.client,identity:()=>({})});t.after(runner.dispose);
+ await assert.rejects(runner.switchMode('each',{navigate:false}));assert.equal(runner.rows.at(-1).state,'UNKNOWN');await runner.clear();
+ await assert.rejects(runner.switchMode('each',{navigate:false}),/Resolve\/clear/);assert.equal(native.calls.filter(call=>call.path==='/action').length,1);assert.equal(runner.rows.at(-1).state,'UNKNOWN');
+});
+
+test('AFT Stop/disposal before browser ownership starts no mode/item read or ledger write',async t=>{
+ for(const kind of ['mode','items'])for(const control of ['stop','dispose']){
+  const w=owned(t);let grant,calls=0;w.navigator.locks={request:async(name,_options,work)=>{await new Promise(resolve=>grant=resolve);return work({name});}};
+  const client={page:async()=>{calls++;return{objectId:'opaque',selector:true};},wait:async()=>{calls++;},action:async()=>{calls++;},fresh:async()=>{calls++;return{objectId:'opaque',state:'location'};}};
+  const runner=createAftRunner({window:w,client,identity:()=>({})});t.after(runner.dispose);
+  const task=(kind==='mode'?runner.switchMode('each',{navigate:false}):runner.run(parseAftRows('each','tsXone B0001'))).catch(error=>error);
+  runner[control]();grant();await task;assert.equal(calls,0);assert.equal(w.localStorage.getItem(AFT_KEY),null);
+ }
+});
+
+test('generated AFT Clear cancels mode preflight, waits for native owner, restores controls and sends no mode/inventory action',async t=>{
+ const w=owned(t),calls=[];w.employeeLogin='testoperator';w.unsafeWindow=w;w.document.body.innerHTML='<main>Mode: Each<h1>Scan location</h1></main>';let signal,release;
+ w.fetch=(path,init)=>{calls.push(path);signal=init.signal;return new Promise((resolve,reject)=>{release=()=>resolve(new Response(html('opaque','Select mode <input name="options" value="EACH">')));signal.addEventListener('abort',()=>reject(new w.DOMException('Cancelled','AbortError')),{once:true});});};
+ w.GM_xmlhttpRequest=()=>{throw new Error('Mode preflight must not reach FCR');};w.eval(readFileSync(new URL('../AFT_Edit_SKU_Move.user.js',import.meta.url),'utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await new Promise(resolve=>setTimeout(resolve,0));
+ const root=w.document.querySelector('#tm-v4-aft'),button=w.document.querySelector('#tm-v4-aft-control [data-mode=each]');button.click();await new Promise(resolve=>setTimeout(resolve,0));root.querySelector('[data-clear]').click();
+ for(let i=0;i<6;i++)await new Promise(resolve=>setTimeout(resolve,0));release();assert.equal(signal.aborted,true);assert.equal(calls.length,1);assert(!calls.some(path=>path==='/action'));
+ assert.equal(JSON.parse(w.localStorage.getItem(AFT_KEY)).rows.length,0);assert.equal(button.disabled,false);assert.match(w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 AFT: 0.1.4/);w.dispatchEvent(new w.Event('pagehide'));
+});
 test('EACH retains repeated physical rows; SKU and location queues deduplicate; date collisions fail before calls',()=>{assert.equal(parseAftRows('each','tsX1 B0001 X0001\ntsX1 B0001 X0001').length,2);assert.equal(parseAftRows('sku','X0001\nx0001').length,1);assert.equal(parseAftRows('flip','tsX1 TSX1',{old:'a',newCode:'b'}).length,1);assert.throws(()=>parseAftRows('date','a 2026-10-11\na 2026-10-12',{location:'tsX1'}),/different dates/);assert.throws(()=>parseAftRows('date','a 2026-02-30',{location:'tsX1'}),/calendar/);});
 test('AFT lost accepted Confirm stays UNKNOWN across Clear, new Run and reload without a second Confirm',async t=>{const w=owned(t);let step='location',confirms=0;const client={fresh:async()=>({objectId:'o',state:'location'}),wait:async()=>{},page:async()=>({objectId:'o',state:step}),action:async(d,id,name,input)=>{if(name==='Confirm'){confirms++;assert.equal(JSON.parse(w.localStorage.getItem(AFT_KEY)).rows[0].state,'SUBMITTED');throw new Error('lost confirmation');}step=step==='location'?'item':step==='item'?'newState':'confirm';},end:async()=>{throw new Error('must not end unknown');}};const runner=createAftRunner({window:w,client,identity:()=>({})});t.after(runner.dispose);const items=parseAftRows('each','tsX1 B0001');await runner.run(items);assert.equal(runner.rows[0].state,'UNKNOWN');await runner.clear();assert.equal(runner.rows[0].state,'UNKNOWN');await runner.run(items);assert.equal(confirms,1);const restored=createAftRunner({window:w,client,identity:()=>({})});t.after(restored.dispose);assert.equal(restored.rows[0].state,'UNKNOWN');});
 test('AFT explicit native success confirms an EACH row; Stop settles Confirm and leaves later rows queued',async t=>{const w=owned(t);let step='location',finish;const client={fresh:async()=>({objectId:'o',state:'location'}),wait:async()=>{},page:async()=>({objectId:'o',state:step}),action:async(d,id,name,input)=>{if(name==='Confirm'){await new Promise(resolve=>finish=resolve);step='success';}else if(name==='Done')step='success';else step=step==='location'?'item':step==='item'?'newState':'confirm';},end:async()=>{}};const runner=createAftRunner({window:w,client,identity:()=>({})});t.after(runner.dispose);const task=runner.run(parseAftRows('each','tsX1 B0001\ntsX2 B0002'));while(!finish)await new Promise(resolve=>setTimeout(resolve,0));runner.stop();assert.equal(runner.rows[0].state,'SUBMITTED');finish();await task;assert.deepEqual(runner.rows.map(row=>row.state),['CONFIRMED','QUEUED']);});
 test('exact movement readback cannot accept incomplete or other-container inventory',()=>{assert.equal(exactInventoryQuantity({complete:true,rows:[{container:'tsX1',fnsku:'X1',qty:2}]},'tsX1',['X1']),2);assert.throws(()=>exactInventoryQuantity({complete:false,rows:[]},'tsX1',['X1']),/Complete/);assert.throws(()=>exactInventoryQuantity({complete:true,rows:[{container:'tsX2',qty:2}]},'tsX1',['X1']),/another/);});
-test('generated AFT starts at DOM ready with familiar native hosts, scanner focus, one footer and no idle API',async t=>{const w=owned(t);w.document.body.innerHTML='<main>Mode: Each<h1>Scan location</h1></main>';w.unsafeWindow=w;w.fetch=()=>{throw new Error('idle API');};w.GM_xmlhttpRequest=()=>{throw new Error('idle GM');};const source=readFileSync(new URL('../AFT_Edit_SKU_Move.user.js',import.meta.url),'utf8');w.eval(source);w.eval(source);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await new Promise(resolve=>setTimeout(resolve,0));assert.equal(w.document.querySelectorAll('#tm-v4-aft').length,1);assert.match(w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 AFT: 0.1.3/);const root=w.document.querySelector('#tm-v4-aft');root.querySelector('[data-min]').click();assert.equal(root.querySelector('.body').hidden,true);w.dispatchEvent(new w.Event('pagehide'));assert.equal(w.document.querySelector('#tm-v4-aft'),null);});
+test('generated AFT starts at DOM ready with familiar native hosts, scanner focus, one footer and no idle API',async t=>{const w=owned(t);w.document.body.innerHTML='<main>Mode: Each<h1>Scan location</h1></main>';w.unsafeWindow=w;w.fetch=()=>{throw new Error('idle API');};w.GM_xmlhttpRequest=()=>{throw new Error('idle GM');};const source=readFileSync(new URL('../AFT_Edit_SKU_Move.user.js',import.meta.url),'utf8');w.eval(source);w.eval(source);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await new Promise(resolve=>setTimeout(resolve,0));assert.equal(w.document.querySelectorAll('#tm-v4-aft').length,1);assert.match(w.document.querySelector('#tm-v4-runtime-watermark').textContent,/V4 AFT: 0.1.4/);const root=w.document.querySelector('#tm-v4-aft');root.querySelector('[data-min]').click();assert.equal(root.querySelector('.body').hidden,true);w.dispatchEvent(new w.Event('pagehide'));assert.equal(w.document.querySelector('#tm-v4-aft'),null);});
 import{renderedAftQuantity}from'../aft-client.mjs';import{createAftUi}from'../aft-runtime.mjs';
 test('native Quantity at end of HTML is read cheaply, Verify still blocks; rendered fallback cancellation removes frame',async t=>{const w=owned(t);assert.equal(aftQuantity({state:'quantity',text:'Enter quantity',raw:'{"quantity":12}'}),12);const controller=new w.AbortController(),task=renderedAftQuantity(w,AFT_MODES.moveAll,'exact',{signal:controller.signal});assert.equal(w.document.querySelectorAll('iframe').length,1);controller.abort();await assert.rejects(task,/cancelled/);assert.equal(w.document.querySelector('iframe'),null);});
 test('familiar state/disposition buttons restore defaults and forbid identical SKU routes',t=>{const w=owned(t);w.document.body.innerHTML='<main>Mode: Sku</main>';const runner={rows:[],busy:false,run:async()=>{},clear:async()=>{},stop(){},switchMode:async()=>{}};const ui=createAftUi({window:w,runner,version:'0.1.1'});t.after(ui.dispose);assert.equal(ui.root.querySelector('[data-field=desiredState]').value,'UNSELLABLE');assert.equal(ui.root.querySelector('[data-field=desiredDamage]').value,'DEFECTIVE');assert.equal(ui.root.querySelector('[data-choice=desiredState][data-value=INVENTORY]').disabled,true);assert.equal(ui.root.querySelectorAll('.choices button').length,14);});
