@@ -1,9 +1,10 @@
 import { registerWatermark } from './watermark.mjs';
 import { installRouteLifecycle } from './ui-tools.mjs';
+import { createCaptureRedactor } from './native-capture-redact.mjs';
+import { createNativeContractTrace } from './native-contract-trace.mjs';
 
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const guard = Symbol.for('tampermonkey.v4.native-capture');
-const privateField = /pass|token|secret|csrf|auth|cookie|session|employee|associate|login|user(?:id|name)/i;
 
 function scope(location) {
   if (/^(?:fcresearch-fe\.aka\.amazon\.com|qi-fcresearch-(?:fe|jp)\.corp\.amazon\.com|qifcr\.fe\.aftx\.amazonoperations\.app)$/.test(location.hostname)) return 'FCR';
@@ -12,31 +13,13 @@ function scope(location) {
   return null;
 }
 
-function createRedactor() {
-  const containers = new Map();
-  return value => String(value)
-    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED JWT]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/(["']?(?:authorization|access[_-]?token|id[_-]?token|refresh[_-]?token|password|secret|csrf[_-]?token|csrf|cookie|session(?:[_-]?id|[_-]?token)?|employee(?:Login|Id)|associate(?:Login|Id)|user(?:Login|Id|Name))["']?\s*[:=]\s*)(["'])[^\r\n]*?\2/gi, '$1$2[REDACTED]$2')
-    .replace(/\b(?:tsX|csX)[A-Za-z0-9_-]+\b/gi, code => {
-      const key = code.toUpperCase();
-      if (!containers.has(key)) containers.set(key, code.slice(0, 3) + 'CAPTURE' + String(containers.size + 1).padStart(4, '0'));
-      return containers.get(key);
-    });
-}
-
-function safeUrl(raw, redact) {
-  const url = new URL(raw, location.href);
-  url.username = ''; url.password = '';
-  for (const key of [...url.searchParams.keys()]) if (privateField.test(key)) url.searchParams.set(key, '[REDACTED]');
-  return redact(url.href);
-}
 
 if (!window[guard]) {
   window[guard] = { version: VERSION };
-  let running = false, controller = null, objectUrl = null, releaseTimer = null;
+  let running = false, controller = null, objectUrl = null, releaseTimer = null, trace = null;
+  const pageWindow = typeof unsafeWindow === 'object' ? unsafeWindow : window;
   const revoke = () => { clearTimeout(releaseTimer); if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = null; };
-  const cancel = reason => { controller?.abort(reason); revoke(); };
+  const cancel = reason => { controller?.abort(reason); trace?.dispose(); trace = null; revoke(); };
   installRouteLifecycle(window, () => {
     if (!scope(location)) return;
     const releaseFooter = registerWatermark(window, 'FCAP', VERSION);
@@ -51,15 +34,10 @@ if (!window[guard]) {
     const context = location.origin + location.pathname + location.search;
     const deadline = setTimeout(() => controller.abort('timeout'), 30000);
     try {
-      const redact = createRedactor(), page = safeUrl(location.href, redact);
+      const redactor = createCaptureRedactor(window), redact = redactor.text, page = redactor.url(location.href);
       const clone = document.documentElement.cloneNode(true);
       clone.querySelectorAll('[data-tm-v4-master],[data-tm-v4-script],[data-tm-v4-style],iframe').forEach(node => node.remove());
-      clone.querySelectorAll('input,textarea,select').forEach(node => {
-        if (!privateField.test(node.name + ' ' + node.id + ' ' + node.type)) return;
-        node.setAttribute('value', '[REDACTED]');
-        if (node.tagName !== 'INPUT') node.textContent = '[REDACTED]';
-      });
-      clone.querySelectorAll('meta[name]').forEach(node => { if (privateField.test(node.name)) node.setAttribute('content', '[REDACTED]'); });
+      redactor.scrubDocument(clone);
       const html = redact(clone.outerHTML);
       if (html.length > 16000000) throw new Error('Capture document limit reached');
       const scripts = [...document.scripts].filter(node => !node.closest('[data-tm-v4-script],[data-tm-v4-master]')).slice(0, 80);
@@ -78,7 +56,7 @@ if (!window[guard]) {
       async function worker() {
         while (!signal.aborted && next < scripts.length) {
           const index = next++, script = scripts[index];
-          const record = { index, type: script.type || 'text/javascript', url: script.src ? safeUrl(script.src, redact) : null, source: '' };
+          const record = { index, type: script.type || 'text/javascript', url: script.src ? redactor.url(script.src) : null, source: '' };
           records[index] = record;
           try {
             let source = script.textContent;
@@ -105,4 +83,25 @@ if (!window[guard]) {
       if (signal.reason !== 'navigation') alert('Native capture failed: ' + String(error.message || error));
     } finally { clearTimeout(deadline); running = false; controller = null; }
   });
+
+  GM_registerMenuCommand('Start passive native response trace ' + VERSION, () => {
+    const workflow = scope(location);
+    if (!workflow) { alert('Native trace is unavailable on this route'); return; }
+    if (trace?.active) { alert('A native trace is already active; use Stop and export'); return; }
+    trace?.dispose(); trace = null;
+    try {
+      trace = createNativeContractTrace({ window, page: pageWindow, workflow, version: VERSION });
+      alert('Passive native trace started for up to 3 minutes. No native action is initiated. Use Stop and export before navigation. Live operational actions still require an explicitly approved test case.');
+    } catch (error) { alert('Native trace failed: ' + String(error.message || error)); }
+  });
+  GM_registerMenuCommand('Stop and export native response trace ' + VERSION, () => {
+    if (!trace) { alert('No native trace available on this route'); return; }
+    const evidence = trace.stop();
+    revoke(); objectUrl = URL.createObjectURL(new Blob([JSON.stringify(evidence, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = objectUrl;
+    link.download = evidence.workflow + '_native_trace_' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    document.body.append(link); link.click(); link.remove(); releaseTimer = setTimeout(revoke, 1000);
+    trace.dispose(); trace = null;
+  });
+
 }
