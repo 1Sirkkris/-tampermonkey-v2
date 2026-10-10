@@ -1,3 +1,18 @@
+# Active root-level review recovery checkpoint
+
+- Checkpoint creation: 2026-10-10 23:13:30 AEDT (system clock, Australia/Sydney).
+- Latest confirmed source/receipt push: 2026-10-10 17:46:44 AEDT, SHA 0b31195047e6b4842435d80e2a9d5a98acabecdc; confirmed remote unchanged at recovery. Elapsed since previous successful push: 19606 seconds (inactive interval, not unsaved development). Publication of this checkpoint pending until remote readback; enclosing commit identifies this save.
+- Current workflow: deep root-level suite review, starting Sideline expiry and shared ISS date/workflow ownership. Review WIP — NOT VERIFIED; current published installers unchanged and retain previous verification.
+- Recovered state: clean local HEAD equals freshly fetched origin/v4-cleanroom 0b31195; no uncommitted or unpushed work in this checkout. main e4399d89ff11551ec1afb132d67c448da1e43568 and frozen V3 77ff9f7818ea8d2d53422654a7e6b7ca51b6db13 verified remotely unchanged.
+- Verification rerun: npm test 346 pass / 0 fail / 0 skipped/cancelled, 16.5 seconds. No operational request performed.
+- User authority: uploaded deep root-level cleanup prompt plus latest 'review both prompts again > continue with critical override being important!'. Both accessible attached prompts read. Neither contains an explicit CRITICAL OVERRIDE section. Prior approval boundaries remain binding; because latest override wording is unavailable, runtime/expiry/safety/UI behavior changes are HELD pending exact text. Continue read-only inspection, tests, documentation and concrete reviewable proposals. Do not infer new approval from cleanup intent. Ordinary recovery checkpoints remain authorised.
+- Files modified: CHECKPOINT.md only. Source/builds untouched. Existing next native-evidence gates preserved below.
+- Exact NEXT: inspect Sideline client/date-picker/preflight/runtime and ISS worker/date handoff against V2/native evidence; reproduce incorrect date appearance/reuse/cancellation with actual-source tests. Record root cause and minimal fix for review without editing active runtime/installers while override wording remains unknown. Then inspect independent workflows for demonstrable defects; preserve known-good candidates.
+- Pending user input: exact critical override wording, absent from both accessible attachments. Any material workflow/rule/safety/expiry change requires explicit approval; no live mutations or production deployment authorised.
+- WIP: this checkpoint/review record; upcoming diagnostic tests/proposals will be under v4/. No runtime WIP.
+
+## Preserved latest implementation checkpoint
+
 # Active final continuation checkpoint — full suite staged testing
 
 - Checkpoint creation: 2026-10-10 17:44:42 AEDT (actual system clock, Australia/Sydney).
