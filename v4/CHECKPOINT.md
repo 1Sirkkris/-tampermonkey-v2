@@ -1,7 +1,7 @@
 # Active delivery checkpoint — full staged testing inventory
 
 - Checkpoint creation: 2026-10-10 15:15:29 AEDT (system clock, Australia/Sydney).
-- Latest previously confirmed GitHub push/readback: 2026-10-10 15:08:18 AEDT; 688c61ab386ed4275341cd35f52e1b28064a290f. Confirmed: YES. Time since successful push: 431 seconds at creation. This source save's exact confirmed push time is recorded in the immediate receipt; enclosing commit is checkpoint identity.
+- Latest previously confirmed GitHub push/readback: 2026-10-10 15:08:18 AEDT; 688c61ab386ed4275341cd35f52e1b28064a290f. Confirmed: YES. Time since successful push: 431 seconds at creation. Source checkpoint push/readback confirmed YES at 2026-10-10 15:15:52 AEDT; SHA 422df177146816e591616f4ad2e7fca5b53f69a4. This receipt records its successful push; enclosing commit is checkpoint identity.
 - Current workflow: suite readiness/docs validation. Status: 14 operational implementations COMPLETE offline + 4 PARTIAL; manual capture COMPLETE/read-only. No live mutation verified.
 - Completed: all 19 direct installer links/versions/readiness/fixture counts and implementation classifications; staged read-only/draft/approved operation/movement/side-effect testing; per-case evidence and F01–F16 matrix; exact empty-location/additional-confirmation contracts; explicit safety differences and measured limits. BASELINE historical OBS-first gate cannot restart current progress. Automated checks now reject invalid include regex, missing/duplicate README installer rows, version drift or invalid statuses.
 - Files modified: v4/README.md, BASELINE.md, checks.mjs, CHECKPOINT.md. No installer changed in this unit.
