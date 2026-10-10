@@ -1,5 +1,3 @@
-// Historical review cases: approved 11 October and promoted into tests/sideline-expiry.test.mjs.
-// Retained for provenance; npm test runs the promoted suite.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -125,4 +123,35 @@ test('actual generated Sideline scanner START cannot submit with another source 
   await tick();
   assert.equal(count, 0, 'generated native client submitted after source rescan with a stale date');
   assert(prompted);
+});
+
+test('changing source or removing the prompted item cancels the active preflight date immediately', async t => {
+  const window = setup(t), { ui } = uiFor(t, window, async () => item('EXPIRATION_DATE'));
+  ui.fields.source.value = 'tsXsourceA'; ui.fields.destination.value = 'tsXdestination'; ui.fields.items.value = 'X000000001';
+  const scan = () => ui.fields.items.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  scan(); await tick(); assert(window.document.querySelector('#tm-v4-date-picker'));
+  ui.fields.source.value = 'tsXsourceB'; ui.fields.source.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(window.document.querySelector('#tm-v4-date-picker'), null);
+  scan(); await tick(); assert(window.document.querySelector('#tm-v4-date-picker'));
+  ui.fields.items.value = ''; ui.fields.items.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(); assert.equal(window.document.querySelector('#tm-v4-date-picker'), null);
+});
+
+test('a changed authoritative prompt for the same source/item requires a fresh answer', async t => {
+  let requirement = 'EXPIRATION_DATE';
+  const window = setup(t), { ui, moves } = uiFor(t, window, async () => item(requirement));
+  await choosePreflightDate(window, ui); requirement = 'PRODUCTION_DATE';
+  ui.fields.source.dispatchEvent(new window.Event('input', { bubbles: true }));
+  const pending = ui.run('lazy'); await tick();
+  assert.equal(moves.length, 0); assert.match(window.document.querySelector('#tm-v4-date-picker').textContent, /REQUIRES PRODUCTION DATE/);
+  ui.workflow.stop(); await pending;
+});
+
+test('an UNKNOWN preflight result cannot prevent a deliberate same-item scanner recheck', async t => {
+  let reads = 0;
+  const window = setup(t), { ui } = uiFor(t, window, async () => ++reads === 1 ? { kind: 'retry', reason: 'Hazmat UNKNOWN' } : item('NONE'));
+  ui.fields.source.value = 'tsXsourceA'; ui.fields.destination.value = 'tsXdestination'; ui.fields.items.value = 'X000000001';
+  const scan = () => ui.fields.items.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  scan(); await tick(); assert.equal(reads, 1); assert.match(window.document.querySelector('[data-preflight]').textContent, /UNKNOWN/);
+  scan(); await tick(); assert.equal(reads, 2); assert.match(window.document.querySelector('[data-preflight]').textContent, /GOOD/);
 });

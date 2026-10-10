@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 SIM Markdown Toolbar
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native editor formatting, snippets and attachment gallery/download controls.
 // @match https://t.corp.amazon.com/*
 // @grant none
@@ -192,10 +192,13 @@
   }
 
   // sim-runtime.mjs
+  function attachmentScope(d) {
+    const label = [...d.querySelectorAll("th,h1,h2,h3,h4,legend,summary,strong,b,span,div")].find((node) => clean(node.textContent) === "Attachments" && ![...node.children].some((child) => clean(child.textContent) === "Attachments"));
+    return label ? label.closest("table,section") || label.parentElement : null;
+  }
   function imageAttachments(window2) {
-    const d = window2.document, label = [...d.querySelectorAll("th,h1,h2,h3,h4,legend,summary,strong,b,span,div")].find((node) => clean(node.textContent) === "Attachments" && ![...node.children].some((child) => clean(child.textContent) === "Attachments"));
-    if (!label) return [];
-    const scope = label.closest("table,section") || label.parentElement, seen = /* @__PURE__ */ new Set(), rows = [];
+    const scope = attachmentScope(window2.document), seen = /* @__PURE__ */ new Set(), rows = [];
+    if (!scope) return rows;
     for (const link of scope.querySelectorAll("a[href]")) {
       let url;
       try {
@@ -220,7 +223,7 @@
   function createSimToolbar({ window: window2, onEvidence = () => {
   } }) {
     const d = window2.document, events = new window2.AbortController(), key = "tm-v4.sim.snippets", bars = /* @__PURE__ */ new Map(), owned = /* @__PURE__ */ new Set(), urls = /* @__PURE__ */ new Set(), collapsed = /* @__PURE__ */ new Set();
-    let disposed = false, downloadController = null, imageGroup = null, modal = null, scheduled = false;
+    let disposed = false, downloadController = null, imageGroup = null, modal = null, scheduled = false, attachments = null;
     const style = d.createElement("style");
     style.dataset.tmV4Style = "SIMTt";
     style.textContent = ".tm-v4-sim-bar{display:flex;align-items:center;gap:4px;margin-bottom:6px;flex-wrap:nowrap}.tm-v4-sim-bar button,.tm-v4-sim-images button{flex:0 0 auto;width:auto;min-width:0;max-width:none;padding:2px 6px;height:24px;font:11px/20px Arial;white-space:nowrap;box-sizing:border-box;cursor:pointer}.tm-v4-sim-bar select{flex:0 0 auto;min-width:180px;height:24px}.tm-v4-sim-images{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:0;list-style:none}.tm-v4-sim-images button:first-child{background:#dbeafe;border:1px solid #93c5fd;color:#1d4ed8;border-radius:4px}.tm-v4-sim-images button:last-child{background:#dcfce7;border:1px solid #86efac;color:#166534;border-radius:4px}.tm-v4-sim-modal{position:fixed;inset:0;background:#0006;display:flex;align-items:center;justify-content:center;z-index:999999;color:#111;font:13px Arial}.tm-v4-sim-modal>div{background:white;padding:16px;border-radius:6px;width:640px;max-width:95vw;max-height:90vh;overflow:auto}.tm-v4-sim-modal input,.tm-v4-sim-modal textarea{box-sizing:border-box;width:100%}.tm-v4-sim-modal textarea{height:200px}.tm-v4-sim-modal .row{display:flex;justify-content:space-between;margin-bottom:5px}.tm-v4-sim-status{font:11px Arial;color:#a33120}";
@@ -474,6 +477,7 @@
     function attach() {
       scheduled = false;
       if (disposed) return;
+      attachments = attachmentScope(d);
       for (const [ta, bar] of bars) if (!ta.isConnected) {
         bar.remove();
         owned.delete(bar);
@@ -542,9 +546,21 @@
         button.click();
       }
     }
+    const nativeSelector = 'textarea[data-testid="sim-markdownEditor--textArea"],[role=tab],[class*="expand-button"]';
+    function relevant(node) {
+      if (node.nodeType !== 1) return false;
+      if (node.closest('[data-tm-v4-script="SIMTt"]')) return false;
+      if (node.matches(nativeSelector) || node.querySelector(nativeSelector)) return true;
+      return [...node.querySelectorAll("th,h1,h2,h3,h4,legend,summary,strong,b,span,div"), node].some((label) => clean(label.textContent) === "Attachments");
+    }
     const observer = new window2.MutationObserver((records) => {
       if (disposed) return;
-      if (records.every((record) => [...owned].some((node) => node.contains(record.target)))) return;
+      const changed = records.some((record) => {
+        if (record.target.closest?.('[data-tm-v4-script="SIMTt"]')) return false;
+        if (attachments?.contains(record.target) || record.target.closest?.("[role=tablist]")) return true;
+        return [...record.addedNodes, ...record.removedNodes].some((node) => relevant(node) || node === attachments || node.contains?.(attachments));
+      });
+      if (!changed) return;
       if (!scheduled) {
         scheduled = true;
         window2.queueMicrotask(attach);
@@ -571,7 +587,7 @@
   }
 
   // sim-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var guard = Symbol.for("tampermonkey.v4.sim.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

@@ -6,7 +6,7 @@ import { createFcrEnrichment, createGmJsonReader } from './fcr-enrichment.mjs';
 import { createMasterFeatures } from './master-features.mjs';
 import { createMasterActions } from './master-actions.mjs';
 
-const VERSION = '0.1.5';
+const VERSION = '0.1.6';
 const page = typeof unsafeWindow === 'object' ? unsafeWindow : window;
 const storage = { get: (key, fallback) => GM_getValue(key, fallback), set: (key, value) => GM_setValue(key, value),
   listen: (key, callback) => GM_addValueChangeListener(key, callback), remove: id => GM_removeValueChangeListener(id) };
@@ -29,7 +29,7 @@ if (!page[guard]) {
     }
     if (!/\/[A-Z0-9-]{2,12}\/results(?:\/|$)/.test(location.pathname) || /^#(?:fcr-tote-checker|iss-console)/.test(location.hash)) return;
     let features, actions;
-    const runtime = createMasterRuntime({ window, page, storage, fetch: page.fetch.bind(page), onEvidence: evidence,
+    const runtime = createMasterRuntime({ window, page, version: VERSION, storage, fetch: page.fetch.bind(page), onEvidence: evidence,
       onRefresh: () => { features?.refresh(); actions?.refresh(); }, onReset: () => { features?.reset(); actions?.reset(); }, onDispose: () => { features?.dispose(); actions?.dispose(); } });
     const auth = createMeasurementAuth({ window, storage, onEvidence: evidence });
     const enrichment = createFcrEnrichment({ warehouse: runtime.warehouse, readJson: createGmJsonReader(GM_xmlhttpRequest),

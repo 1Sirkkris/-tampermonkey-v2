@@ -10,7 +10,7 @@ const rejects = (promise, code) => assert.rejects(promise, failure => failure in
 function fixture(responses = [], options = {}) {
   const calls = [], evidence = [];
   const reader = createFcrEnrichment({ warehouse: 'BWU2', now: () => now, uuid: () => 'fixture-id', getMeasurementAuth: async () => auth,
-    onEvidence: entry => evidence.push(entry), readJson: async request => {
+    pandashRetryDelays: [], onEvidence: entry => evidence.push(entry), readJson: async request => {
       calls.push(request); assert(responses.length, 'Unexpected enrichment request');
       const reply = responses.shift(); if (reply instanceof Error) throw reply;
       return typeof reply === 'function' ? reply(request) : reply;
@@ -31,7 +31,8 @@ test('construction is idle and hazmat forms retain exact native request fields i
 test('missing/invalid/ambiguous exact hazmat never becomes level zero or a safe result', async () => {
   const missing = fixture([{ restriction: 'AU' }, { rows: [{ asin: 'B099999999', level: 1, message: 'Unrelated' }] }]);
   assert.equal((await missing.reader.hazmat('B012345678')).complete, false);
-  for (const row of [{ asin: 'B012345678', message: '' }, { asin: 'B012345678', level: -1, message: '' }]) {
+  assert.equal((await fixture([{ restriction: 'AU' }, { rows: [{ asin: 'B012345678', message: '' }] }]).reader.hazmat('B012345678')).complete, false);
+  for (const row of [{ asin: 'B012345678', level: -1, message: '' }]) {
     await rejects(fixture([{ restriction: 'AU' }, { rows: [row] }]).reader.hazmat('B012345678'), 'SCHEMA');
   }
   await rejects(fixture([{ restriction: 'AU' }, { rows: [
@@ -41,7 +42,7 @@ test('missing/invalid/ambiguous exact hazmat never becomes level zero or a safe 
 
 test('restriction fallback stays explicit, while authentication and caller cancellation prevent the POST', async () => {
   const app = fixture([error('NETWORK'), { rows: [{ asin: 'B012345678', level: 1, message: 'Native' }] }], { pandashRetryDelays: [] });
-  const result = await app.reader.hazmat('B012345678'); assert.match(result.warning, /default restriction/);
+  const result = await app.reader.hazmat('B012345678'); assert.match(result.warning, /default restriction/); assert.equal(result.complete, false); assert.equal(result.hazmat, null);
   assert.equal(new URLSearchParams(app.calls[1].body).get('source'), 'default-hazmat-FC');
   const authFail = fixture([error('AUTH_REQUIRED')]); await rejects(authFail.reader.hazmat('B012345678'), 'AUTH_REQUIRED'); assert.equal(authFail.calls.length, 1);
   const controller = new AbortController();
@@ -178,9 +179,9 @@ test('GM timeout/network/start errors have typed outcomes and preserve an idle c
 
 test('Pandash retries transient GET/POST failures with exact payload and sanitized stage evidence', async () => {
   const app = fixture([error('HTTP', 503), { restriction: 'AU' }, error('HTTP', 429), error('TIMEOUT'),
-    { rows: [{ asin: 'B012345678', level: '1' }] }], { pandashRetryDelays: [0, 0] });
+    { rows: [{ asin: 'B012345678', level: '1', message: 'Native message' }] }], { pandashRetryDelays: [0, 0] });
   const result = await app.reader.hazmat('B012345678');
-  assert.deepEqual(result.hazmat, { level: 1, message: '' });
+  assert.deepEqual(result.hazmat, { level: 1, message: 'Native message' });
   assert.equal(app.calls.length, 5);
   assert.equal(app.calls[2].body, app.calls[3].body); assert.equal(app.calls[3].body, app.calls[4].body);
   const failures = app.evidence.filter(value => value.data.outcome === 'failed').map(value => value.data);
@@ -202,8 +203,8 @@ test('Pandash bounds retries and never retries authentication, permanent HTTP or
 test('Pandash restriction is shared within one owner and cached only when validated until its deadline', async () => {
   let release, time = now; const controller = new AbortController();
   const app = fixture([() => new Promise(resolve => { release = resolve; }),
-    { rows: [{ asin: 'B012345678', level: 0, message: null }] }, { rows: [{ asin: 'B099999999', level: 2 }] },
-    { rows: [{ asin: 'B012345678', level: 1 }] }, { restriction: 'AU2' }, { rows: [{ asin: 'B012345678', level: 1 }] }], { now: () => time });
+    { rows: [{ asin: 'B012345678', level: 0, message: 'Native message' }] }, { rows: [{ asin: 'B099999999', level: 2, message: 'Native message' }] },
+    { rows: [{ asin: 'B012345678', level: 1, message: 'Native message' }] }, { restriction: 'AU2' }, { rows: [{ asin: 'B012345678', level: 1, message: 'Native message' }] }], { now: () => time });
   const first = app.reader.hazmat('B012345678', { signal: controller.signal });
   const second = app.reader.hazmat('B099999999', { signal: controller.signal });
   assert.equal(app.calls.length, 1); release({ restriction: 'AU' });
@@ -216,7 +217,7 @@ test('Pandash restriction is shared within one owner and cached only when valida
 
 test('cancelled Pandash retry and another cancellation owner cannot poison subsequent reads', async () => {
   const controller = new AbortController();
-  const app = fixture([error('HTTP', 503), { restriction: 'AU' }, { rows: [{ asin: 'B012345678', level: 1 }] }]);
+  const app = fixture([error('HTTP', 503), { restriction: 'AU' }, { rows: [{ asin: 'B012345678', level: 1, message: 'Native message' }] }], { pandashRetryDelays: [500, 1500] });
   const pending = app.reader.hazmat('B012345678', { signal: controller.signal });
   await new Promise(resolve => setImmediate(resolve)); controller.abort();
   await rejects(pending, 'CANCELLED'); assert.equal(app.calls.length, 1);
@@ -226,6 +227,32 @@ test('cancelled Pandash retry and another cancellation owner cannot poison subse
 test('Pandash never interprets boolean, array, fractional or unsafe levels as valid L0', async () => {
   for (const level of [false, true, [], [0], '', null, undefined, 1.5, '1.5', Number.MAX_SAFE_INTEGER + 1]) {
     const app = fixture([{ restriction: 'AU' }, { rows: [{ asin: 'B012345678', level }] }]);
-    await rejects(app.reader.hazmat('B012345678'), 'SCHEMA');
+    if (level == null || level === '') assert.equal((await app.reader.hazmat('B012345678')).complete, false);
+    else await rejects(app.reader.hazmat('B012345678'), 'SCHEMA');
   }
+});
+
+test('missing Hazmat data retries at most twice, recovers exact data and never defaults to L0', async () => {
+  for (const missing of [{}, { rows: [] }, { rows: [{ asin: 'B012345678', level: 0 }] }, { rows: [{ asin: 'B012345678', message: 'Native message' }] }]) {
+    const app = fixture([{ restriction: 'AU' }, missing, missing, missing], { pandashRetryDelays: [0, 0] });
+    const result = await app.reader.hazmat('B012345678');
+    assert.equal(app.calls.length, 4); assert.equal(result.complete, false); assert.equal(result.hazmat, null);
+    assert.deepEqual(app.evidence.filter(record => record.data.outcome === 'incomplete').map(record => record.data.retry), [true, true, false]);
+  }
+  const app = fixture([{ restriction: 'AU' }, { rows: [] }, { rows: [{ asin: 'B012345678', level: 1, message: 'Can be processed' }] }], { pandashRetryDelays: [0, 0] });
+  assert.equal((await app.reader.hazmat('B012345678')).hazmat.level, 1); assert.equal(app.calls.length, 3);
+});
+
+test('mixed missing data and transient errors share the same two-recheck Hazmat budget', async () => {
+  const app = fixture([{ restriction: 'AU' }, { rows: [] }, error('TIMEOUT'), { rows: [] }], { pandashRetryDelays: [0, 0] });
+  assert.equal((await app.reader.hazmat('B012345678')).complete, false); assert.equal(app.calls.length, 4);
+  assert.equal(app.evidence.filter(record => record.data.outcome === 'failed').length, 1);
+});
+
+test('cancel during a missing-data recheck delay prevents every later Hazmat POST', async () => {
+  const controller = new AbortController();
+  const app = fixture([{ restriction: 'AU' }, { rows: [] }], { pandashRetryDelays: [100, 100] });
+  const pending = app.reader.hazmat('B012345678', { signal: controller.signal });
+  await new Promise(resolve => setImmediate(resolve)); controller.abort();
+  await rejects(pending, 'CANCELLED'); assert.equal(app.calls.length, 2);
 });

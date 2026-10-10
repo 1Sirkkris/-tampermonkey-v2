@@ -1,3 +1,17 @@
+# Approved audit implementation — publication checkpoint
+
+- Creation: 2026-10-11 08:12:16 AEDT, system clock, Australia/Sydney.
+- Current branch/base: v4-cleanroom at 7899f65b886d702b088009812e2755bbb7dd509c. This is the fetched base SHA, not a commit of the new changes.
+- Current authority: user approved the thirteen audit passes; issue 7 keeps manual Hazmat recheck always available; issue 13 is today +900 calendar days. Issue 12 follow-up selected “Keep automatic collapse”. These instructions supersede the old uncertain runtime-edit hold for this scope.
+- STATUS: tested batch approved for commit/push by the user on 11 October at 08:20 AEDT. Publication prepared 2026-10-11 08:20:46 AEDT; confirmed push/readback will be recorded after completion. No live operational action performed. Earlier push timestamps below are historical.
+- Scope/result: [thirteen numbered passes](review/README.md). Source edits, focused regressions and generated installers are under v4/ only. Native route evidence is recorded in RIVER_CONTRACT.md. V2/main and frozen V3 references remain read-only.
+- Final verification: 2026-10-11 08:14:02 AEDT. npm test: 368 passed / 0 failed / 0 skipped or cancelled, 9.9 seconds. npm run check: all 19 installers exactly match canonical source; 70 module syntax/independence and installer metadata/readiness checks pass. git diff --check passes. PAO passes separately in Australia/Sydney time. Original 346 baseline passed before edits; 22 approved regressions now extend it. No live operational API used.
+- Versions: OBS 0.1.4; Master 0.1.6; Tote 0.1.2; Sideline 0.1.4; ISS 0.1.5; RIVER 0.1.1; SIM 0.1.1. Other 12 candidates are byte-identical to the base.
+- Pending: native authenticated/scanner/markup/Hazmat-efficiency/long-run acceptance. Existing empty-container location and extra AFT native confirmation contracts remain unavailable. No native mutations, printing or ticket/labor submission authorized by these offline checks.
+- NEXT: commit/push the approved tested result without rewriting history and confirm the remote SHA. Do not apply the archived proposal again.
+
+## Historical recovery records — superseded approval hold
+
 # Active root review checkpoint — expiry proposal HELD
 
 - Checkpoint creation: 2026-10-10 23:23:28 AEDT (system clock, Australia/Sydney).

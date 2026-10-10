@@ -58,3 +58,6 @@ Reference: V2 `BWU2_Observability_Core.user.js` 0.1.37 at `e4399d8`; audit F14/F
 Offline installer fixtures: no V2/V3 globals/libraries/storage; current FCR controls/location; normal/FAT capacities and reload; native fetch/XHR success/error semantics unchanged; POST status is not a mutation; GM owner events visible; cross-document duplicate/export/count/Clear race; storage/export failures retain evidence; redaction; pagehide/BFCache cleanup; zero idle interval/background requests. Syntax and independence checks on the exact authored installer.
 
 Live acceptance remains outstanding: Tampermonkey page-world hooks and GM notification timing, deployed FCR header, cross-origin worker frames, actual browser downloads and long idle. No live Amazon operation is authorised merely by these fixtures.
+
+## Approved native-hook/layout correction — 11 October
+OBS advertises each actual forwarded fetch/XHR function using the same V4 native hook ancestry marker as Sideline. Sideline retains its barrier through either installation order, while unrecognized replacement still fails ownership. Disposal preserves unrelated owners. UI anchoring now runs once per render after label updates; native coordinates, header-parent observer and controls are retained.

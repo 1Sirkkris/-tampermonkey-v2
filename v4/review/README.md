@@ -1,58 +1,29 @@
-# Root review — unpublished Sideline expiry proposal
+# Approved audit passes — tested result
 
-Status: WIP — active runtime correction NOT APPLIED / NOT APPROVED. The user explicitly prioritised a critical override on 10 October; its exact wording is absent from both accessible attachments. The worker holds runtime/expiry/safety/UI behavior edits and installer publication pending that text. Tests/documentation/checkpoints and concrete isolated proposals continue. No live operational action was performed.
+The user approved all thirteen passes, with the issue 7 and 13 clarifications below. The issue 12 follow-up explicitly selected “Keep automatic collapse”. The user subsequently approved commit/push/publication of this tested batch to v4-cleanroom. Confirmed publication is recorded in CHECKPOINT.md. V2/V3 reference files are untouched. No live native action or print/ticket submission was performed.
 
-## Demonstrated root causes
+1. **Date ownership fixed.** One workflow-owned answer map scopes dates to source, exact item/SKU and native prompt/shelf life. NONE sends null. Source changes and prompted-item removal cancel stale prompts. Same-source repeated scans reuse the current answer.
+2. **Hazmat preflight fixed.** Sideline/ISS read the nested validated result. Allowed, restricted and UNKNOWN are distinct; missing/unrecognized decisions do not cause a false rejection or L0.
+3. **ISS Stop/Clear fixed.** One cancellation routine removes recursion. Second Stop waits for submitted work to settle; Clear coalesces and retains UNKNOWN recovery.
+4. **Measurement capture fixed.** Master/Tote share one page hook with independent storage subscribers and independent disposal; native results/errors and credential redaction are preserved.
+5. **Date overlay fixed.** The canonical modal is above the Sideline panels/dock, without a second CSS override.
+6. **RIVER ownership fixed.** One explicit launch handoff and one reused capture control. Master alone and the assistant use the canonical Australia route. Native September 29 evidence distinguishes AU from the older NA workflow; final ticket gates stay manual.
+7. **Hazmat recheck fixed.** Missing/incomplete data and transient POST failures share two automatic rechecks maximum. Manual recheck is always enabled, including while loading; repeated clicks coalesce into one pending manual read. Complete native data stops automatic retries. Exhausted or unvalidated data remains UNKNOWN; Sideline discards cached UNKNOWN preflight results so a deliberate rescan can recheck.
+8. **OBS/Sideline coexistence fixed.** The native barrier recognizes cooperating forwarded hooks in either order. Replaced/unrecognized hooks still block submission; disposal/BFCache are covered.
+9. **Master version fixed.** The installer version now owns runtime UI and action/handoff evidence. The stale separate constant is removed.
+10. **OBS anchoring simplified.** One anchor calculation per render; familiar header location and controls are retained.
+11. **SIM hydration work narrowed.** Only relevant editor/attachment/tab/collapse changes trigger attach scans. Unrelated page churn and owned mutations are ignored; native replacements still work.
+12. **Automatic collapse preserved.** As explicitly selected, Ticket synopsis/Announcements collapse once; manual reopening remains respected.
+13. **PAO policy confirmed.** Today +900 calendar days. 11 October 2026 gives **29 March 2029**; production-date prompting and native shelf-life conversion stay unchanged.
 
-| Issue | Actual-source/generated reproduction | Minimal proposed correction |
-|---|---|---|
-| Expiry answer has the wrong owner/scope | Choose date for an item from source A; change to source B and scan 123START. Both the actual UI/workflow and generated native client send the old answer without a new-source prompt. A new source explicitly reporting NONE still receives the old date. | One workflow-owned answer map keyed by source, barcode, exact ASIN/FNSKU/FCSKU and native prompt/shelf-life context; consult it only when the current native response requires a date. Remove the UI's separate dateAnswered set and consult that same owner. Preserve same-source repeated-scan reuse. |
-| Date modal below owned panels | Actual scoped CSS: modal z-index 1000010; Sideline panels 2147483645 and dock 2147483646. | Set the canonical shared picker overlay to 2147483647, above the owned panels. No styling override layer or native page reset. |
+## Verification
 
-`sideline-expiry.repro.test.mjs` asserts desired behavior against actual imported source and the actual generated installer. Current published code: **1 pass / 4 fail**, zero skipped/cancelled. These are offline synthetic native responses, not live observations. The positive control verifies one answer still covers two physical scans of the same item/source; the generated negative verifies scanner START through the real bundled client and payload path.
+Final result: **368 passed / 0 failed / 0 skipped or cancelled**. All 19 generated installers match canonical source; 70 module syntax/independence and metadata checks pass. PAO also passes in Australia/Sydney time. The retained 346-case baseline is extended by 22 approved regression cases, including the five original expiry reproductions in the normal test glob. Generated installer identity, deterministic builds, syntax/independence and whitespace are checked. Native authenticated application/markup/scanner/long-run acceptance remains pending; offline fixtures do not establish live efficiency.
 
-`SIDELINE_EXPIRY_PROPOSAL.patch` is a concrete unapplied patch to only `sideline-workflow.mjs`, `sideline-runtime.mjs`, and `date-picker.mjs`. In an isolated copy it passes **346 retained regression cases + all 5 review cases**, deterministic build and all 19 installer/69 module checks. Versions remain original because this copy is not a release. Active source/installers remain byte-for-byte unchanged. Shared source would affect Sideline and ISS bundles if approved; both need version bumps and regenerated tests at that point.
+Changed candidates: OBS 0.1.4, Master 0.1.6, Tote 0.1.2, Sideline 0.1.4, ISS 0.1.5, RIVER 0.1.1, SIM 0.1.1. Other installers are byte-identical to the recovery baseline.
 
-The proposal removes one redundant dateAnswered set and its independent mutation rules. The stronger context key/finite-answer guard adds code: net +425 bytes across the three source modules. This is simpler date ownership, not a measured performance or size optimisation.
+## Historical proposal
 
-## Reproduce without changing a candidate
+SIDELINE_EXPIRY_PROPOSAL.patch is the archived pre-approval proposal, now implemented and extended in canonical source. Do not apply it again. The old review-only reproduction file is retained for provenance; npm test runs tests/sideline-expiry.test.mjs (five promoted cases plus cancellation/changed-requirement/manual-recheck coverage).
 
-From the repository root:
-
-```sh
-node --test v4/review/sideline-expiry.repro.test.mjs
-# Expected on current source: 1 pass / 4 fail.
-cd v4
-npm test
-npm run check
-# Existing regression baseline: 346 pass, builds unchanged.
-```
-
-To review the proposal in an isolated checkout (never apply directly to the active branch before the override is resolved):
-
-```sh
-git worktree add --detach ../v4-review HEAD
-cd ../v4-review
-git apply /absolute/path/to/active/repo/v4/review/SIDELINE_EXPIRY_PROPOSAL.patch
-cd v4
-npm ci --ignore-scripts
-npm run build
-npm test
-npm run check
-node --test review/sideline-expiry.repro.test.mjs
-# Proposal: retained 346 + targeted 5 pass. No network/native operational API used.
-```
-
-## Contract/evidence and review coverage
-
-Reviewed responsibility/condition chains: `sideline-client`, `sideline-preflight`, `sideline-workflow`, `sideline-runtime`, `sideline-native`, `date-picker`, and the ISS date handoff/worker integration. Canonical identity and UI helpers were inspected only where these chains depend on them; do not call that a full review of those modules. Other workflow root reviews remain outstanding. No claim that every suite line has been assessed.
-
-Retain: native expirationPromptType gating; exact item identity; hazard/overage gates; production/shelf-life conversion; date cancellation before movement; request identities; one native owner; durable submitted/unknown barriers; two-stage Stop; same-run repeated-item reuse; optional OBS. Broad native form/shadow-root fallbacks need real markup before removal. No transport, mutation proof, ownership, scanner sequence, native location or quantity rule is changed by this proposal.
-
-V2 evidence: `resetPreflightWorkflowState` clears its date cache and date queue; `pumpPreflightDates` documents one question per distinct barcode per run. V4's UI already deduplicates answers by source/code but its workflow stores by code only: conflicting date ownership is the reproduced root cause. Only native NONE means the new-source item has no expiry prompt in the explicit second reproduction.
-
-PAO remains unresolved policy/evidence, not an implemented change: V2 `paoDateMs` and current V4 add 900 calendar days from today, while user SOP context describes receive-date based PAO when expiry is not printed. Current UI provides a manual PAO button for an expiration prompt. Native PAO eligibility/receive-date provenance and the intended approved rule need clarification before changing the button, date arithmetic, or prompt conditions. No PAO policy is guessed or removed.
-
-## Exact next action
-
-Obtain the exact critical override. Reconcile it with the unapplied proposal; request any functional/safety/UI approval it requires. If authorised, apply this concrete patch, promote the five reproductions into the normal regression suite, bump Sideline/ISS versions, build/check/test, update readiness and push a verified checkpoint. Then continue root review of native operation queues and other BASELINE workflows. Empty-container location and legitimate additional AFT Confirm contracts remain unavailable; do not invent them.
+Native RIVER evidence: BWU2_Observability_2026-09-29T05-53-42-088Z_1899events.txt, line 145, node 0dbb253e-c43a-4a8b-a316-e32b8ab9be21, Australia/AU FC network/Hazmat AU. Older BWU2_Observability_2026-08-31T07-22-13-713Z_1134events.txt, line 105, f2738dec-7f6f-4c2e-a85a-db7228de25f1 executes the distinct NA workflow. No raw credentials or item response bodies are copied into the repository.

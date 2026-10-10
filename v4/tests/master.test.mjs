@@ -10,6 +10,20 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const product = (code = 'B012345678') => '<table><tr><th>ASIN</th><td>' + code + '</td></tr><tr><th>Title</th><td>Exact title</td></tr></table>';
 const inventory = '<table id="table-inventory"><thead><tr><th>Container</th><th>ASIN</th><th>Quantity (1)</th></tr></thead><tbody><tr><td>tsX111</td><td>B012345678</td><td>1</td></tr></tbody></table>';
 const markup = () => '<form><input id="search" value="B012345678"></form><aside><h2>Sections</h2>' + MASTER_LABELS.map((label, i) => '<div><a href="#' + FCR_SECTIONS[i] + '">' + label + '</a></div>').join('') + '</aside><main>' + FCR_SECTIONS.map(endpoint => '<div data-section-type="' + endpoint + '"></div>').join('') + '</main>';
+
+test('generated Master displays its installer version in UI and lifecycle evidence', async t => {
+  const source = readFileSync(new URL('../FCResearch_Master.user.js', import.meta.url), 'utf8'), version = source.match(/@version\s+(\S+)/)[1];
+  const window = new JSDOM(markup(), { url: 'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=B012345678', runScripts: 'outside-only' }).window;
+  t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
+  const evidence = []; window.addEventListener('tampermonkey-v4:evidence', event => evidence.push(JSON.parse(event.detail)));
+  window.unsafeWindow = window; window.fetch = () => { throw new Error('No idle request'); };
+  window.GM_getValue = (key, fallback) => fallback; window.GM_setValue = () => {}; window.GM_addValueChangeListener = () => 1; window.GM_removeValueChangeListener = () => {};
+  window.GM_xmlhttpRequest = () => { throw new Error('No idle request'); };
+  window.eval(source); window.document.dispatchEvent(new window.Event('DOMContentLoaded')); await tick();
+  assert.match(window.document.querySelector('[data-tm-v4-master-status]').textContent, new RegExp(version.replaceAll('.', '\\.')));
+  assert.equal(window.document.querySelector('[data-tm-v4-runtime=FCRM]').dataset.tmV4Version, version);
+  assert.equal(evidence.find(record => record.type === 'script.start').version, version);
+});
 function setup(t, { fetch = async url => new Response(url.endsWith('/product') ? product() : url.endsWith('/inventory') ? inventory : '<table><tr><td>Native section</td></tr></table>'), stored = new Map(), lateJquery = false } = {}) {
   const dom = new JSDOM(markup(), { url: 'https://fcresearch-fe.aka.amazon.com/BWU2/results?s=B012345678', runScripts: 'outside-only' });
   const { window } = dom, calls = [], renders = [];

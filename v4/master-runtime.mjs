@@ -1,6 +1,5 @@
 import { createFcrReader, FCR_SECTIONS } from './fcr-read.mjs';
 
-export const MASTER_VERSION = '0.1.3';
 export const MASTER_LABELS = Object.freeze([
   'Product', 'Inventory', 'Inventory History', 'Container History', 'Purchase Order Items',
   'Purchase Order', 'Receive History', 'Shipment', 'Container Details', 'Employee',
@@ -100,7 +99,7 @@ export function watchNativeAjax(page, getRuntime) {
   return registry;
 }
 
-export function createMasterRuntime({ window, page = window, storage, fetch, onRender = () => {}, onRefresh = () => {}, onReset = () => {}, onDispose = () => {}, onEvidence = () => {} }) {
+export function createMasterRuntime({ window, page = window, version = 'test', storage, fetch, onRender = () => {}, onRefresh = () => {}, onReset = () => {}, onDispose = () => {}, onEvidence = () => {} }) {
   const document = window.document;
   let life = null, generation = null, ready = false, observers = [], scheduled = false;
   const owned = new Set(), hidden = new Map(), prefs = new Map(), saveErrors = new Set();
@@ -315,7 +314,7 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
       status = mark(document.createElement('span')); status.setAttribute('data-tm-v4-master-status', ''); status.setAttribute('role', 'status');
       (nav || document.querySelector('#search')?.parentElement || document.body).append(status);
     }
-    status.textContent = 'V4 FCR Master ' + MASTER_VERSION + (problem ? ' — ' + problem : !nav ? ' — Native Sections navigation unavailable' : '');
+    status.textContent = 'V4 FCR Master ' + version + (problem ? ' — ' + problem : !nav ? ' — Native Sections navigation unavailable' : '');
     if (!nav) return;
     for (const [index, label] of MASTER_LABELS.entries()) {
       const endpoint = FCR_SECTIONS[index];
@@ -410,6 +409,6 @@ export function createMasterRuntime({ window, page = window, storage, fetch, onR
     ready = false; generation = null;
   }
   const api = Object.freeze({ start, dispose, automatic, nativeRequest, captureRenderer, subscribe, load, mark, notify,
-    current: () => generation, active, refresh, reader, warehouse, schedule });
+    current: () => generation, active, refresh, reader, warehouse, version, schedule });
   return api;
 }

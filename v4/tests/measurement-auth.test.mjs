@@ -200,3 +200,21 @@ test('auth diagnostics distinguish cache/frame/deadline/cancellation without cre
   const serialized = JSON.stringify(evidence);
   assert(!serialized.includes(token)); assert(!serialized.includes('X012345678')); assert(!serialized.includes('Authorization'));
 });
+
+test('Master and Tote capture subscribers receive native credentials independently until the last disposal', async t => {
+  const app = fixture(t, { native: true }), tote = new Storage();
+  const first = installMeasurementCapture({ page: app.page, storage: app.storage, now: () => now });
+  const hook = app.page.fetch;
+  const second = installMeasurementCapture({ page: app.page, storage: tote, now: () => now });
+  t.after(first); t.after(second);
+  assert.equal(app.page.fetch, hook);
+  const url = MEASUREMENT_ORIGIN + '/prod/measurementEvents/X012345678/FNSKU';
+  await app.page.fetch(url, { headers: { Authorization: token } });
+  assert.equal(JSON.parse(tote.get(MEASUREMENT_AUTH_KEY)).token, token);
+  assert.equal(app.auth.read().token, token);
+  first(); app.storage.data.clear();
+  await app.page.fetch(url, { headers: { Authorization: otherToken } });
+  assert.equal(app.storage.data.size, 0);
+  assert.equal(JSON.parse(tote.get(MEASUREMENT_AUTH_KEY)).token, otherToken);
+  second(); assert.equal(app.page.fetch, app.originalFetch);
+});

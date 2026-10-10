@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.4
+// @version 0.1.5
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -853,6 +853,9 @@
     }
     return [...map.values()];
   }
+  function sidelineDateKey(source, code, ctx) {
+    return JSON.stringify([upper(source), upper(code), upper(ctx.asin), upper(ctx.fnsku), upper(ctx.fcsku), ctx.dateType, ctx.dateDetail?.shelfLife ?? null]);
+  }
   function createSidelineWorkflow({ window: window2, client, preflight, pickDate, onChange = () => {
   }, onEvidence = () => {
   } }) {
@@ -1029,7 +1032,8 @@
                     continue;
                   }
                   if (result.kind === "retry" || !result.ctx) throw new Error(result.reason || "Preflight failed");
-                  let date = dates.get(upper(row.container)) ?? null;
+                  const dateKey = sidelineDateKey(row.source, row.container, result.ctx);
+                  let date = result.kind === "yellow" ? dates.get(dateKey) ?? null : null;
                   if (result.kind === "yellow" && date === null) {
                     attention = "date";
                     notify();
@@ -1040,7 +1044,7 @@
                       running = false;
                       break;
                     }
-                    dates.set(upper(row.container), date);
+                    dates.set(dateKey, date);
                     attention = "";
                   }
                   if (!await control()) break;
@@ -1215,7 +1219,10 @@
       wake?.();
       scanResolve?.(null);
     }
-    return { run, scan, pause, stop, reset, dispose, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), setDate: (code, value) => dates.set(upper(code), value) };
+    return { run, scan, pause, stop, reset, dispose, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), hasDate: (source, code, ctx) => dates.has(sidelineDateKey(source, code, ctx)), setDate: (source, code, ctx, value) => {
+      if (!Number.isFinite(value)) throw new Error("Invalid date answer");
+      dates.set(sidelineDateKey(source, code, ctx), value);
+    } };
   }
 
   // date-picker.mjs
@@ -1238,6 +1245,12 @@
     if (entered < today.getTime()) throw new Error("Expiration must be today or later");
     return entered;
   }
+  function paoExpiration(now = /* @__PURE__ */ new Date()) {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 900);
+    return date.getTime();
+  }
   function createDatePicker(window2, { owner = "SIDE" } = {}) {
     let cancelCurrent = () => {
     };
@@ -1249,7 +1262,7 @@
       root.id = "tm-v4-date-picker";
       root.dataset.tmV4Script = owner;
       style.dataset.tmV4Script = owner;
-      style.textContent = `#tm-v4-date-picker{position:fixed;inset:0;z-index:1000010;display:flex;align-items:center;justify-content:center;background:#0008;font:14px Arial;color:#172033}#tm-v4-date-picker .wrap{max-width:1100px;width:96vw;padding:12px;background:#f8fafc;border:2px solid #334155;border-radius:8px}#tm-v4-date-picker .preview{display:flex;gap:12px;align-items:center;padding:8px;background:white;margin-bottom:10px}#tm-v4-date-picker img{width:90px;max-height:105px;object-fit:contain}#tm-v4-date-picker .panels{display:grid;grid-template-columns:1fr 2fr 1.5fr;gap:10px}#tm-v4-date-picker section{border:1px solid #94a3b8;border-radius:5px;overflow:hidden}#tm-v4-date-picker h3{margin:0;background:#e2e8f0;padding:8px;display:flex;justify-content:space-between}#tm-v4-date-picker .grid{display:grid;gap:5px;padding:7px;grid-template-columns:repeat(4,1fr)}#tm-v4-date-picker .days{grid-template-columns:repeat(7,1fr)}#tm-v4-date-picker button{padding:9px;border:1px solid #94a3b8;border-radius:4px;background:white;font-weight:800;cursor:pointer}#tm-v4-date-picker button.selected{background:#146eb4;color:white}#tm-v4-date-picker button:disabled{opacity:.35;cursor:default}#tm-v4-date-picker footer{display:flex;gap:10px;margin-top:10px}#tm-v4-date-picker [data-error]{color:#b91c1c;font-weight:bold}`;
+      style.textContent = `#tm-v4-date-picker{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:#0008;font:14px Arial;color:#172033}#tm-v4-date-picker .wrap{max-width:1100px;width:96vw;padding:12px;background:#f8fafc;border:2px solid #334155;border-radius:8px}#tm-v4-date-picker .preview{display:flex;gap:12px;align-items:center;padding:8px;background:white;margin-bottom:10px}#tm-v4-date-picker img{width:90px;max-height:105px;object-fit:contain}#tm-v4-date-picker .panels{display:grid;grid-template-columns:1fr 2fr 1.5fr;gap:10px}#tm-v4-date-picker section{border:1px solid #94a3b8;border-radius:5px;overflow:hidden}#tm-v4-date-picker h3{margin:0;background:#e2e8f0;padding:8px;display:flex;justify-content:space-between}#tm-v4-date-picker .grid{display:grid;gap:5px;padding:7px;grid-template-columns:repeat(4,1fr)}#tm-v4-date-picker .days{grid-template-columns:repeat(7,1fr)}#tm-v4-date-picker button{padding:9px;border:1px solid #94a3b8;border-radius:4px;background:white;font-weight:800;cursor:pointer}#tm-v4-date-picker button.selected{background:#146eb4;color:white}#tm-v4-date-picker button:disabled{opacity:.35;cursor:default}#tm-v4-date-picker footer{display:flex;gap:10px;margin-top:10px}#tm-v4-date-picker [data-error]{color:#b91c1c;font-weight:bold}`;
       d.head.append(style);
       d.body.append(root);
       let month = null, day = 1, year = null, done = false;
@@ -1308,9 +1321,7 @@
             return;
           }
         } else if (b.hasAttribute("data-pao")) {
-          const date = new Date(today);
-          date.setDate(date.getDate() + 900);
-          finish(date.getTime());
+          finish(paoExpiration(today));
           return;
         } else if (b.hasAttribute("data-cancel")) {
           finish(null);
@@ -1331,7 +1342,7 @@
   // iss-runtime.mjs
   function createIssConsole({ window: window2, bridgeFactory, version, onEvidence = () => {
   } }) {
-    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {};
+    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {}, clearing = {};
     let disposed = false, active3 = "edit", dateController = null, sideAttention = "", sideNativeMessage = "", sideRecoveryPending = false;
     const root = d.createElement("section");
     root.id = "tm-v4-iss";
@@ -1472,7 +1483,7 @@
       return { area, mode, options: { source: meta.source, destination: meta.destination, items: parseSidelineItems(value(area, "text").value, meta.source, meta.destination), clearSource: panel.dataset.clearSource === "true", delay: panel.dataset.delay === "true" } };
     }
     async function run(area) {
-      if (disposed || busy[area] || kind(area) === "aft" && (busy.edit || busy.move)) return;
+      if (disposed || clearing[area] || busy[area] || kind(area) === "aft" && (busy.edit || busy.move)) return;
       let input;
       try {
         input = payload(area);
@@ -1534,39 +1545,49 @@
       });
       await promises[area];
     }
-    function stop(area) {
-      stopStages[area] = (stopStages[area] || 0) + 1;
+    function cancel(area) {
       if (area === "sideline") sideRecoveryPending = false;
-      paint(area);
       bridge.control(kind(area), "stop", { area });
       if (area === "sideline") {
         dateController?.abort();
         picker.dispose();
       }
+      paint(area);
       message(area, busy[area] ? "Stop requested — native submitted result settles" : "Stopped; recovery retained");
-      if (stopStages[area] >= 2 && !busy[area]) void clear(area);
     }
-    async function clear(area) {
-      stop(area);
-      if (area === "sideline") {
-        dateController?.abort();
-        picker.dispose();
-      }
-      if (promises[area]) await promises[area];
-      try {
-        await withOperationLock(window2, "tm-v4.iss." + area + ".owner", async () => {
-          const journal = createOperationJournal({ storage: window2.localStorage, key: key(area), uuid: () => window2.crypto.randomUUID() });
-          journal.clear();
-          journals[area] = journal;
-        });
-        bridge.control(kind(area), "clear", { area });
-        value(area, "text").value = "";
-        save(area);
-        message(area, "Cleared safe rows • unresolved handoffs retained");
-        paint(area);
-      } catch (error) {
-        message(area, error.message);
-      }
+    function stop(area) {
+      stopStages[area] = (stopStages[area] || 0) + 1;
+      cancel(area);
+      if (stopStages[area] >= 2) void clear(area, { cancelled: true });
+    }
+    function clear(area, { cancelled = false } = {}) {
+      if (clearing[area]) return clearing[area];
+      stopStages[area] = Math.max(1, stopStages[area] || 0);
+      if (!cancelled) cancel(area);
+      const work = (async () => {
+        if (promises[area]) await promises[area];
+        if (disposed) return;
+        try {
+          await withOperationLock(window2, "tm-v4.iss." + area + ".owner", async () => {
+            const journal = createOperationJournal({ storage: window2.localStorage, key: key(area), uuid: () => window2.crypto.randomUUID() });
+            journal.clear();
+            journals[area] = journal;
+          });
+          if (disposed) return;
+          bridge.control(kind(area), "clear", { area });
+          value(area, "text").value = "";
+          save(area);
+          message(area, "Cleared safe rows • unresolved handoffs retained");
+          paint(area);
+        } catch (error) {
+          message(area, error.message);
+        }
+      })();
+      clearing[area] = work;
+      void work.finally(() => {
+        if (clearing[area] === work) delete clearing[area];
+      });
+      return work;
     }
     root.addEventListener("input", (event) => {
       const area = event.target.closest("[data-panel]")?.dataset.panel;
@@ -2615,7 +2636,7 @@
   }
 
   // fcr-enrichment.mjs
-  var FCR_ENRICHMENT_VERSION = "0.1.1";
+  var FCR_ENRICHMENT_VERSION = "0.1.2";
   var MEASUREMENT_ORIGIN = "https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com";
   var BIN_URL = "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem";
   var PANDASH_URL = "https://pandash.amazon.com/GridServlet";
@@ -2734,7 +2755,7 @@
       } catch {
       }
     }
-    async function read(options) {
+    async function read(options, { retries = pandashRetryDelays.length, reportFailure = true } = {}) {
       const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
       const endpoint = parsed.pathname.startsWith("/prod/measurementEvents/") ? "measurementEvents" : parsed.pathname.split("/").at(-1);
       for (let attempt = 0; ; attempt++) {
@@ -2745,8 +2766,8 @@
           return result;
         } catch (error) {
           active2(options.signal);
-          const retry = pandash && attempt < pandashRetryDelays.length && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
-          evidence2(endpoint, {
+          const retry = pandash && attempt < retries && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
+          if (reportFailure) evidence2(endpoint, {
             outcome: "failed",
             code: error.code || "NETWORK",
             status: error.status,
@@ -2792,26 +2813,45 @@
         if (error.code === "AUTH_REQUIRED") throw error;
         restrictionWarning = "Restriction lookup failed; default restriction used";
       }
-      const payload = await read({
+      const request = {
         url: PANDASH_URL,
         method: "POST",
         stage: "hazmat",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ language: "default", source: sourceRestriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
         signal
-      });
-      if (!Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are missing");
-      const matches = payload.rows.filter((row) => upper2(row?.asin) === asin);
-      if (!matches.length) return { hazmat: null, complete: false, warning: "No exact ASIN hazmat result", source: "network" };
-      const mapped = matches.map((row) => {
-        const level = Number(row.level);
-        if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean2(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
-        return { level, message: row.message ?? "" };
-      });
-      if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
-      active2(signal);
-      evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
-      return { hazmat: mapped[0], complete: true, warning: restrictionWarning, source: "network" };
+      };
+      for (let attempt = 0; ; attempt++) {
+        let warning = "";
+        try {
+          const payload = await read(request, { retries: 0, reportFailure: false });
+          if (payload.rows != null && !Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are invalid");
+          const matches = (payload.rows || []).filter((row) => upper2(row?.asin) === asin);
+          const mapped = matches.map((row) => {
+            if (row.level == null || row.level === "") return null;
+            const level = Number(row.level);
+            if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean2(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
+            return { level, message: row.message ?? "" };
+          });
+          if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
+          if (matches.length && mapped[0] && mapped[0].message.trim() && !restrictionWarning) {
+            active2(signal);
+            evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
+            return { hazmat: mapped[0], complete: true, warning: "", source: "network" };
+          }
+          warning = restrictionWarning || (!matches.length ? "No exact ASIN hazmat result" : "Hazmat level or message is missing");
+        } catch (error) {
+          active2(signal);
+          const retryable = ["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600);
+          const retry2 = retryable && attempt < pandashRetryDelays.length;
+          evidence2("hazmat", { outcome: "failed", code: error.code, status: error.status, stage: "hazmat", method: "POST", attempt: attempt + 1, retry: retry2 });
+          if (!retry2) throw error;
+        }
+        const retry = !restrictionWarning && attempt < pandashRetryDelays.length;
+        if (warning) evidence2("hazmat", { outcome: "incomplete", stage: "hazmat", attempt: attempt + 1, retry });
+        if (warning && !retry) return { hazmat: null, complete: false, warning, source: "network" };
+        await wait(pandashRetryDelays[attempt], signal);
+      }
     }
     async function binDescription(containerValue, itemValue, { signal, verifiedAliases = [] } = {}) {
       const container = clean2(containerValue), item = upper2(itemValue);
@@ -2941,9 +2981,12 @@
       try {
         const context = await client.bootstrap({ signal });
         enrichment ||= createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
-        const hazard = await enrichment.hazmat(result.ctx.asin, { signal });
-        if (/can be processed/i.test(hazard.message) && !/cannot|can't|not be processed/i.test(hazard.message)) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + hazard.level + " — OK TO PROCESS" };
-        return { kind: "red", reason: "HAZMAT L" + hazard.level + " — NOT PROCESSABLE", ctx: result.ctx };
+        const hazard = await enrichment.hazmat(result.ctx.asin, { signal }), data = hazard.complete === true ? hazard.hazmat : null;
+        if (!data || !Number.isSafeInteger(data.level) || data.level < 0 || !data.message?.trim()) return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — missing validated processing decision", ctx: result.ctx };
+        const blocked = /cannot|can't|not be processed/i.test(data.message), allowed2 = /can be processed/i.test(data.message) && !blocked;
+        if (allowed2) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + data.level + " — OK TO PROCESS" };
+        if (blocked) return { kind: "red", reason: "HAZMAT L" + data.level + " — NOT PROCESSABLE", ctx: result.ctx };
+        return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — unrecognised processing decision", ctx: result.ctx };
       } catch (error) {
         return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — " + error.message, ctx: result.ctx };
       }
@@ -2996,7 +3039,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.4";
+  var VERSION = "0.1.5";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

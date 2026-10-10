@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.5
+// @version      0.1.6
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -546,7 +546,6 @@
   }
 
   // master-runtime.mjs
-  var MASTER_VERSION = "0.1.3";
   var MASTER_LABELS = Object.freeze([
     "Product",
     "Inventory",
@@ -668,7 +667,7 @@
     registry.watch();
     return registry;
   }
-  function createMasterRuntime({ window: window2, page: page2 = window2, storage: storage2, fetch, onRender = () => {
+  function createMasterRuntime({ window: window2, page: page2 = window2, version = "test", storage: storage2, fetch, onRender = () => {
   }, onRefresh = () => {
   }, onReset = () => {
   }, onDispose = () => {
@@ -932,7 +931,7 @@
         status.setAttribute("role", "status");
         (nav || document.querySelector("#search")?.parentElement || document.body).append(status);
       }
-      status.textContent = "V4 FCR Master " + MASTER_VERSION + (problem ? " — " + problem : !nav ? " — Native Sections navigation unavailable" : "");
+      status.textContent = "V4 FCR Master " + version + (problem ? " — " + problem : !nav ? " — Native Sections navigation unavailable" : "");
       if (!nav) return;
       for (const [index, label] of MASTER_LABELS.entries()) {
         const endpoint = FCR_SECTIONS[index];
@@ -1095,13 +1094,14 @@
       refresh,
       reader,
       warehouse,
+      version,
       schedule
     });
     return api;
   }
 
   // fcr-enrichment.mjs
-  var FCR_ENRICHMENT_VERSION = "0.1.1";
+  var FCR_ENRICHMENT_VERSION = "0.1.2";
   var MEASUREMENT_ORIGIN = "https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com";
   var BIN_URL = "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem";
   var PANDASH_URL = "https://pandash.amazon.com/GridServlet";
@@ -1220,7 +1220,7 @@
       } catch {
       }
     }
-    async function read(options) {
+    async function read(options, { retries = pandashRetryDelays.length, reportFailure = true } = {}) {
       const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
       const endpoint = parsed.pathname.startsWith("/prod/measurementEvents/") ? "measurementEvents" : parsed.pathname.split("/").at(-1);
       for (let attempt = 0; ; attempt++) {
@@ -1231,8 +1231,8 @@
           return result;
         } catch (error) {
           active2(options.signal);
-          const retry = pandash && attempt < pandashRetryDelays.length && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
-          evidence2(endpoint, {
+          const retry = pandash && attempt < retries && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
+          if (reportFailure) evidence2(endpoint, {
             outcome: "failed",
             code: error.code || "NETWORK",
             status: error.status,
@@ -1278,26 +1278,45 @@
         if (error.code === "AUTH_REQUIRED") throw error;
         restrictionWarning = "Restriction lookup failed; default restriction used";
       }
-      const payload = await read({
+      const request = {
         url: PANDASH_URL,
         method: "POST",
         stage: "hazmat",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ language: "default", source: sourceRestriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
         signal
-      });
-      if (!Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are missing");
-      const matches = payload.rows.filter((row) => upper(row?.asin) === asin);
-      if (!matches.length) return { hazmat: null, complete: false, warning: "No exact ASIN hazmat result", source: "network" };
-      const mapped = matches.map((row) => {
-        const level = Number(row.level);
-        if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean2(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
-        return { level, message: row.message ?? "" };
-      });
-      if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
-      active2(signal);
-      evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
-      return { hazmat: mapped[0], complete: true, warning: restrictionWarning, source: "network" };
+      };
+      for (let attempt = 0; ; attempt++) {
+        let warning = "";
+        try {
+          const payload = await read(request, { retries: 0, reportFailure: false });
+          if (payload.rows != null && !Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are invalid");
+          const matches = (payload.rows || []).filter((row) => upper(row?.asin) === asin);
+          const mapped = matches.map((row) => {
+            if (row.level == null || row.level === "") return null;
+            const level = Number(row.level);
+            if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean2(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
+            return { level, message: row.message ?? "" };
+          });
+          if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
+          if (matches.length && mapped[0] && mapped[0].message.trim() && !restrictionWarning) {
+            active2(signal);
+            evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
+            return { hazmat: mapped[0], complete: true, warning: "", source: "network" };
+          }
+          warning = restrictionWarning || (!matches.length ? "No exact ASIN hazmat result" : "Hazmat level or message is missing");
+        } catch (error) {
+          active2(signal);
+          const retryable = ["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600);
+          const retry2 = retryable && attempt < pandashRetryDelays.length;
+          evidence2("hazmat", { outcome: "failed", code: error.code, status: error.status, stage: "hazmat", method: "POST", attempt: attempt + 1, retry: retry2 });
+          if (!retry2) throw error;
+        }
+        const retry = !restrictionWarning && attempt < pandashRetryDelays.length;
+        if (warning) evidence2("hazmat", { outcome: "incomplete", stage: "hazmat", attempt: attempt + 1, retry });
+        if (warning && !retry) return { hazmat: null, complete: false, warning, source: "network" };
+        await wait(pandashRetryDelays[attempt], signal);
+      }
     }
     async function binDescription(containerValue, itemValue, { signal, verifiedAliases = [] } = {}) {
       const container = clean2(containerValue), item = upper(itemValue);
@@ -1418,7 +1437,7 @@
   }
 
   // measurement-auth.mjs
-  var MEASUREMENT_AUTH_VERSION = "0.1.1";
+  var MEASUREMENT_AUTH_VERSION = "0.1.2";
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
   var SITE = "https://jp.item-measurement.aft.a2z.com";
   var GUARD = Symbol.for("tampermonkey.v4.measurement.capture");
@@ -1453,8 +1472,9 @@
   }
   function installMeasurementCapture({ page: page2, storage: storage2, now = Date.now }) {
     if (page2.location.origin !== SITE) throw failure2("INPUT", "Measurement capture requires the native Measurement page");
-    if (page2[GUARD]) return page2[GUARD];
+    if (page2[GUARD]) return page2[GUARD].subscribe(storage2, now);
     const controller = new page2.AbortController(), details = /* @__PURE__ */ new WeakMap();
+    const subscribers = /* @__PURE__ */ new Map();
     const originalFetch = page2.fetch, proto = page2.XMLHttpRequest?.prototype;
     const originalOpen = proto?.open, originalHeader = proto?.setRequestHeader, originalSend = proto?.send;
     const observe = (fn) => {
@@ -1465,8 +1485,10 @@
     };
     function save(raw) {
       if (controller.signal.aborted) return;
-      const value = normalizeMeasurementToken(raw, now());
-      if (value) storage2.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt: now(), captureId: page2.crypto.randomUUID() }));
+      for (const [target, subscriber] of subscribers) observe(() => {
+        const capturedAt = subscriber.now(), value = normalizeMeasurementToken(raw, capturedAt);
+        if (value) target.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt, captureId: page2.crypto.randomUUID() }));
+      });
     }
     const wrappedFetch = function(...args) {
       const result = Reflect.apply(originalFetch, this, args);
@@ -1504,7 +1526,7 @@
       if (proto?.open === wrappedOpen) proto.open = originalOpen;
       if (proto?.setRequestHeader === wrappedHeader) proto.setRequestHeader = originalHeader;
       if (proto?.send === wrappedSend) proto.send = originalSend;
-      if (page2[GUARD] === dispose) delete page2[GUARD];
+      if (page2[GUARD] === capture) delete page2[GUARD];
     }
     if (typeof originalFetch === "function") page2.fetch = wrappedFetch;
     if (typeof originalOpen === "function" && typeof originalHeader === "function" && typeof originalSend === "function") {
@@ -1512,8 +1534,22 @@
       proto.setRequestHeader = wrappedHeader;
       proto.send = wrappedSend;
     }
-    page2[GUARD] = dispose;
-    return dispose;
+    function subscribe(target, clock) {
+      const existing = subscribers.get(target);
+      if (existing) return existing.dispose;
+      let stopped = false;
+      const release = () => {
+        if (stopped) return;
+        stopped = true;
+        subscribers.delete(target);
+        if (!subscribers.size) dispose();
+      };
+      subscribers.set(target, { now: clock, dispose: release });
+      return release;
+    }
+    const capture = { subscribe };
+    page2[GUARD] = capture;
+    return subscribe(storage2, now);
   }
   function createMeasurementAuth({ window: window2, storage: storage2, now = Date.now, timeoutMs = 1e4, onEvidence = () => {
   } }) {
@@ -1652,9 +1688,17 @@
     return Object.freeze({ read, acquire, loginUrl, watch });
   }
 
+  // river-capture.mjs
+  function riverUrl(warehouse) {
+    if (!/^[A-Z0-9-]{2,12}$/.test(warehouse)) throw new Error("Valid warehouse required");
+    const url = new URL("https://river.amazon.com/" + warehouse + "/workflows");
+    for (const [key, value] of Object.entries({ buildingType: "fc", q0: "3654ec14-7232-4f65-84c3-87927cdb4d0c", q1: "0dbb253e-c43a-4a8b-a316-e32b8ab9be21", id: "0dbb253e-c43a-4a8b-a316-e32b8ab9be21" })) url.searchParams.set(key, value);
+    return url.href;
+  }
+
   // master-features.mjs
-  var clean3 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-  var upper2 = (value) => clean3(value).toUpperCase();
+  var clean4 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  var upper3 = (value) => clean4(value).toUpperCase();
   var UI2 = "[data-tm-v4-master]";
   var STYLE = `
 [data-tm-v4-section]{margin-left:5px;padding:0 4px;font-weight:bold}
@@ -1686,10 +1730,10 @@
     return Math.min(...candidates);
   }
   function sizeCandidates(rows, item, aliases = []) {
-    const wanted = new Set([item, ...aliases].map(upper2));
+    const wanted = new Set([item, ...aliases].map(upper3));
     const rank = (value) => /^(?:tsX|csX)[A-Za-z0-9]+$/i.test(value) ? 0 : /^P-\d-/i.test(value) ? 1 : 2;
-    const sorted = rows.filter((row) => row.container && (!/^X[A-Z0-9]{9}$/.test(upper2(item)) || !row.fnsku || upper2(row.fnsku) === upper2(item)) && [row.asin, row.fnsku, row.fcsku, row.lpn].some((code) => wanted.has(upper2(code)))).sort((a, b) => rank(a.container) - rank(b.container) || b.qty - a.qty);
-    return [...new Map(sorted.map((row) => [upper2(row.container), row.container])).values()].slice(0, 3);
+    const sorted = rows.filter((row) => row.container && (!/^X[A-Z0-9]{9}$/.test(upper3(item)) || !row.fnsku || upper3(row.fnsku) === upper3(item)) && [row.asin, row.fnsku, row.fcsku, row.lpn].some((code) => wanted.has(upper3(code)))).sort((a, b) => rank(a.container) - rank(b.container) || b.qty - a.qty);
+    return [...new Map(sorted.map((row) => [upper3(row.container), row.container])).values()].slice(0, 3);
   }
   function createMadcatCache({ storage: storage2, now = Date.now }) {
     const key = "tm-v4.master.madcat.cache", entries = /* @__PURE__ */ new Map();
@@ -1737,11 +1781,11 @@
       if (!label || !value) continue;
       const clone = value.cloneNode(true);
       clone.querySelectorAll(UI2).forEach((node) => node.remove());
-      entries.set(upper2(label.textContent), { label, value, text: clean3(clone.textContent) });
+      entries.set(upper3(label.textContent), { label, value, text: clean4(clone.textContent) });
     }
-    const declared = ["ASIN", "ISBN", "FNSKU", "FCSKU"].map((field) => upper2(entries.get(field)?.text)).filter(Boolean);
+    const declared = ["ASIN", "ISBN", "FNSKU", "FCSKU"].map((field) => upper3(entries.get(field)?.text)).filter(Boolean);
     if (!declared.length || declared.some((code) => !verified.aliases.includes(code))) return null;
-    if (clean3(entries.get("TITLE")?.text) !== clean3(verified.title)) return null;
+    if (clean4(entries.get("TITLE")?.text) !== clean4(verified.title)) return null;
     return { table, entries, product: verified };
   }
   function createMasterFeatures({ window: window2, page: page2 = window2, runtime, enrichment, auth, storage: storage2, now = Date.now, onEvidence = () => {
@@ -1814,7 +1858,7 @@
       } catch (error) {
         if (!isCurrent(gen) || current.serial !== serial) return;
         current.status = "error";
-        current.error = clean3(error.message);
+        current.error = clean4(error.message);
       }
       if (isCurrent(gen)) runtime.schedule();
     }
@@ -1825,7 +1869,7 @@
       if (current.status === "loading" || !force && current.status !== "idle") return;
       current.stopAuth?.();
       current.stopAuth = null;
-      const code = upper2(product.fnsku || product.asin || product.isbn), identity = (product.fnsku ? "FNSKU:" : "ASIN:") + code;
+      const code = upper3(product.fnsku || product.asin || product.isbn), identity = (product.fnsku ? "FNSKU:" : "ASIN:") + code;
       const serial = ++current.serial;
       current.status = "loading";
       current.error = "";
@@ -1854,14 +1898,18 @@
       } catch (error) {
         if (!isCurrent(gen) || current.serial !== serial) return;
         current.status = "error";
-        current.error = clean3(error.message);
+        current.error = clean4(error.message);
       }
       if (isCurrent(gen)) runtime.schedule();
     }
     function queueHaz(gen, asin, force = false) {
       if (!/^B[A-Z0-9]{9}$/.test(asin) || !isCurrent(gen)) return;
       const group = state(gen), previous = group.haz.get(asin);
-      if (previous?.status === "loading" || !force && previous) return;
+      if (previous?.status === "loading") {
+        if (force) previous.manualPending = true;
+        return;
+      }
+      if (!force && previous) return;
       const cached = hazCache.get(asin);
       if (!force && cached && cached.expiresAt > now()) {
         group.haz.set(asin, { ...cached.value });
@@ -1874,7 +1922,7 @@
     function pump(gen) {
       const group = state(gen);
       while (isCurrent(gen) && group.jobs.length && group.workers < 4) {
-        const asin = group.jobs.shift();
+        const asin = group.jobs.shift(), request = group.haz.get(asin);
         group.workers++;
         (async () => {
           let value;
@@ -1882,7 +1930,7 @@
             const result = await enrichment.hazmat(asin, { signal: gen.controller.signal });
             value = { status: "ready", result };
           } catch (error) {
-            value = { status: "error", error: clean3(error.message) };
+            value = { status: "error", error: clean4(error.message) };
           } finally {
             group.workers--;
           }
@@ -1891,6 +1939,7 @@
           hazCache.delete(asin);
           hazCache.set(asin, { value, expiresAt: now() + (value.result?.complete ? 216e5 : 6e4) });
           while (hazCache.size > 500) hazCache.delete(hazCache.keys().next().value);
+          if (request.manualPending) queueHaz(gen, asin, true);
           pump(gen);
           runtime.schedule();
         })();
@@ -1898,13 +1947,13 @@
     }
     function river(gen) {
       if (!isCurrent(gen)) return;
-      const url = new URL("https://river.amazon.com/" + runtime.warehouse + "/workflows");
-      for (const [key, value] of Object.entries({ buildingType: "fc", workflowId: "undefined", q0: "3654ec14-7232-4f65-84c3-87927cdb4d0c", q1: "f2738dec-7f6f-4c2e-a85a-db7228de25f1", id: "f2738dec-7f6f-4c2e-a85a-db7228de25f1" })) url.searchParams.set(key, value);
-      const tab = window2.open(url.href, "_blank");
+      const handoff = new window2.CustomEvent("tampermonkey-v4:river-handoff", { cancelable: true, detail: JSON.stringify({ warehouse: runtime.warehouse, query: gen.query }) });
+      if (!document.dispatchEvent(handoff)) return;
+      const tab = window2.open(riverUrl(runtime.warehouse), "_blank");
       if (tab) tab.opener = null;
       else runtime.notify("RIVER popup blocked — allow popups and retry");
       try {
-        onEvidence({ type: "fcr.handoff", script: "FCR MASTER", version: MASTER_VERSION, intent: "read", data: { action: "river.open", warehouse: runtime.warehouse } });
+        onEvidence({ type: "fcr.handoff", script: "FCR MASTER", version: runtime.version, intent: "read", data: { action: "river.open", warehouse: runtime.warehouse } });
       } catch {
       }
     }
@@ -1913,12 +1962,12 @@
       const status = state(gen).haz.get(asin);
       if (!status) return;
       const hazmat = status.result?.complete ? status.result.hazmat : null;
-      const label = status.status === "loading" ? "CHECK…" : status.status === "error" ? "ERROR" : hazmat ? "L" + hazmat.level : "N/A";
-      const canRiver = product && status.status === "ready" && (!hazmat || hazmat.level === 0);
+      const label = status.status === "loading" ? "CHECK…" : hazmat ? "L" + hazmat.level : "UNKNOWN";
+      const canRiver = product && status.status === "ready" && hazmat?.level === 0;
       const badge = ownButton(host, "hazmat", label, () => canRiver ? river(gen) : (queueHaz(gen, asin, true), runtime.schedule()));
       badge.disabled = status.status === "loading";
       badge.dataset.state = status.status === "error" ? "error" : "hazmat";
-      badge.title = canRiver ? "Create Hazmat RIVER ticket" : status.error || hazmat?.message || "No exact ASIN hazmat result; recheck";
+      badge.title = canRiver ? "Create Hazmat RIVER ticket" : status.error || hazmat?.message || status.result?.warning || "No exact ASIN hazmat result; recheck";
       const colours = ["#999", "#33cc02", "#ffe103", "#ffbf03", "#ff8002", "#ff4001", "#ed0700", "#ad03de", "#3333ff"];
       badge.style.background = hazmat && hazmat.level < colours.length ? colours[hazmat.level] : "#fff";
       badge.style.color = hazmat && hazmat.level >= 6 ? "#fff" : "#111";
@@ -1927,7 +1976,8 @@
           queueHaz(gen, asin, true);
           runtime.schedule();
         });
-        recheck.disabled = status.status === "loading";
+        recheck.disabled = false;
+        recheck.title = status.manualPending ? "Manual recheck queued" : "Recheck Hazmat data";
       }
     }
     function highlightProperties(panel) {
@@ -1942,7 +1992,7 @@
       const table = document.querySelector("#table-purchase-order-item");
       if (!table?.tBodies[0]) return;
       const wrapper = table.closest(".dataTables_scroll"), head = wrapper?.querySelector(".dataTables_scrollHead table") || table;
-      const headers = [...head.querySelectorAll("thead th")].map((node) => clean3(node.textContent).toLowerCase());
+      const headers = [...head.querySelectorAll("thead th")].map((node) => clean4(node.textContent).toLowerCase());
       const unfilled = headers.findIndex((value) => value.includes("unfilled")), cancelled = headers.findIndex((value) => /cancelled|canceled/.test(value)), dateIndex = headers.findIndex((value) => /order date|^date$/.test(value));
       const six = new Date(now());
       six.setMonth(six.getMonth() - 6);
@@ -1950,10 +2000,10 @@
       seven.setMonth(seven.getMonth() - 7);
       for (const row of table.tBodies[0].rows) {
         const flags = row.cells ? [...row.cells].map(() => []) : [];
-        const readNumber = (index) => Number(clean3(row.cells[index]?.querySelector("input")?.value ?? row.cells[index]?.textContent).replace(/[ ,]/g, ""));
+        const readNumber = (index) => Number(clean4(row.cells[index]?.querySelector("input")?.value ?? row.cells[index]?.textContent).replace(/[ ,]/g, ""));
         if (unfilled >= 0 && readNumber(unfilled) > 0) flags[unfilled]?.push("unfilled");
         if (cancelled >= 0 && readNumber(cancelled) > 0) flags[cancelled]?.push("cancelled");
-        const raw = clean3(row.cells[dateIndex]?.textContent), match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+        const raw = clean4(row.cells[dateIndex]?.textContent), match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
         if (match) {
           const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
           if (date.getFullYear() === Number(match[1]) && date.getMonth() + 1 === Number(match[2]) && date.getDate() === Number(match[3])) {
@@ -2005,7 +2055,7 @@
           mad.title = group.madcat.error || (history ? "Inventory History fallback only; click to renew RAW auth and retry" : "RAW Item Measurement: rolling 30-day check");
         }
         const primary = (panel.entries.get("ASIN") || panel.entries.get("ISBN"))?.value;
-        if (primary && /^B[A-Z0-9]{9}$/.test(upper2(product.asin))) paintHaz(primary, upper2(product.asin), gen, true);
+        if (primary && /^B[A-Z0-9]{9}$/.test(upper3(product.asin))) paintHaz(primary, upper3(product.asin), gen, true);
         void size(gen);
         void madcat(gen);
       }
@@ -2013,19 +2063,19 @@
       const table = inventory && document.querySelector("#table-inventory");
       if (table) {
         const head = table.closest(".dataTables_scroll")?.querySelector(".dataTables_scrollHead table") || table;
-        const asinIndex = [...head.querySelectorAll("thead th")].findIndex((node) => /^ASIN$/i.test(clean3(node.textContent)));
-        const permitted = new Set(inventory.rows.map((row) => upper2(row.asin)));
+        const asinIndex = [...head.querySelectorAll("thead th")].findIndex((node) => /^ASIN$/i.test(clean4(node.textContent)));
+        const permitted = new Set(inventory.rows.map((row) => upper3(row.asin)));
         for (const row of table.tBodies[0]?.rows || []) {
           const cell = row.cells[asinIndex];
           if (!cell) continue;
           const clone = cell.cloneNode(true);
           clone.querySelectorAll(UI2).forEach((node) => node.remove());
-          const asin = upper2(clone.textContent);
+          const asin = upper3(clone.textContent);
           if (permitted.has(asin)) paintHaz(cell, asin, gen);
         }
         let recheck = table.closest('[data-section-type="inventory"]')?.querySelector(':scope > [data-tm-v4-badge="recheck-hazmat"]');
         if (!recheck) recheck = ownButton(table.closest('[data-section-type="inventory"]') || table.parentElement, "recheck-hazmat", "Recheck N/A + L0", () => {
-          for (const [asin, value] of group.haz) if (permitted.has(asin) && value.status !== "loading" && (!value.result?.hazmat || value.result.hazmat.level === 0)) queueHaz(gen, asin, true);
+          for (const [asin, value] of group.haz) if (permitted.has(asin) && (!value.result?.hazmat || value.result.hazmat.level === 0)) queueHaz(gen, asin, true);
           runtime.schedule();
         });
       }
@@ -2045,12 +2095,12 @@
   }
 
   // master-actions.mjs
-  var clean4 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-  var upper3 = (value) => clean4(value).toUpperCase();
+  var clean5 = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  var upper4 = (value) => clean5(value).toUpperCase();
   var UI3 = "[data-tm-v4-master]";
   var hex = (value) => Array.from(String(value)).map((character) => character.charCodeAt(0).toString(16)).join("");
   function printableCode(value) {
-    const match = clean4(value).match(/\b(?:LPN[A-Za-z0-9-]{4,}|FBA[A-Za-z0-9]{6,}|[A-Za-z0-9]{10})\b/);
+    const match = clean5(value).match(/\b(?:LPN[A-Za-z0-9-]{4,}|FBA[A-Za-z0-9]{6,}|[A-Za-z0-9]{10})\b/);
     return match?.[0] || "";
   }
   function printmonUrl({ code, quantity: quantity2, description = "", badge = "", sequence }) {
@@ -2127,7 +2177,7 @@
     }
     function emit(operationId, phase, data) {
       try {
-        onEvidence({ type: "operation", script: "FCR MASTER", version: MASTER_VERSION, intent: "mutation", operationId, phase, data: { kind: "label-print", endpoint: "Printmon", ...data } });
+        onEvidence({ type: "operation", script: "FCR MASTER", version: runtime.version, intent: "mutation", operationId, phase, data: { kind: "label-print", endpoint: "Printmon", ...data } });
       } catch {
       }
     }
@@ -2135,10 +2185,10 @@
       const row = target?.closest("tr"), table = row?.closest("table");
       if (row && table) {
         const head = table.closest(".dataTables_scroll")?.querySelector(".dataTables_scrollHead table") || table;
-        const index = [...head.querySelectorAll("thead th")].findIndex((node) => /^(?:title|product|description|item name)$/i.test(clean4(node.textContent)));
-        if (index >= 0) return clean4(row.cells[index]?.textContent);
+        const index = [...head.querySelectorAll("thead th")].findIndex((node) => /^(?:title|product|description|item name)$/i.test(clean5(node.textContent)));
+        if (index >= 0) return clean5(row.cells[index]?.textContent);
       }
-      return currentPanel?.product.aliases.includes(upper3(code)) ? currentPanel.product.title : "";
+      return currentPanel?.product.aliases.includes(upper4(code)) ? currentPanel.product.title : "";
     }
     async function print(code, quantity2 = 1, target) {
       const gen = runtime.current();
@@ -2288,7 +2338,7 @@
   }
 
   // master-entry.mjs
-  var VERSION = "0.1.5";
+  var VERSION = "0.1.6";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var storage = {
     get: (key, fallback) => GM_getValue(key, fallback),
@@ -2321,6 +2371,7 @@
       const runtime = createMasterRuntime({
         window,
         page,
+        version: VERSION,
         storage,
         fetch: page.fetch.bind(page),
         onEvidence: evidence,

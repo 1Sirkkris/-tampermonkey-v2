@@ -1,7 +1,7 @@
 import { FcrReadError } from './fcr-read.mjs';
 import { MEASUREMENT_ORIGIN } from './fcr-enrichment.mjs';
 
-export const MEASUREMENT_AUTH_VERSION = '0.1.1';
+export const MEASUREMENT_AUTH_VERSION = '0.1.2';
 export const MEASUREMENT_AUTH_KEY = 'tm-v4.measurement.auth';
 const SITE = 'https://jp.item-measurement.aft.a2z.com';
 const GUARD = Symbol.for('tampermonkey.v4.measurement.capture');
@@ -37,15 +37,18 @@ function nativeMeasurementUrl(value, page) {
 // Installs only on the native Measurement site. The eventual Master installer includes both origins.
 export function installMeasurementCapture({ page, storage, now = Date.now }) {
   if (page.location.origin !== SITE) throw failure('INPUT', 'Measurement capture requires the native Measurement page');
-  if (page[GUARD]) return page[GUARD];
+  if (page[GUARD]) return page[GUARD].subscribe(storage, now);
   const controller = new page.AbortController(), details = new WeakMap();
+  const subscribers = new Map();
   const originalFetch = page.fetch, proto = page.XMLHttpRequest?.prototype;
   const originalOpen = proto?.open, originalHeader = proto?.setRequestHeader, originalSend = proto?.send;
   const observe = fn => { try { fn(); } catch { /* Native calls must remain unchanged. */ } };
   function save(raw) {
     if (controller.signal.aborted) return;
-    const value = normalizeMeasurementToken(raw, now());
-    if (value) storage.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt: now(), captureId: page.crypto.randomUUID() }));
+    for (const [target, subscriber] of subscribers) observe(() => {
+      const capturedAt = subscriber.now(), value = normalizeMeasurementToken(raw, capturedAt);
+      if (value) target.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt, captureId: page.crypto.randomUUID() }));
+    });
   }
   const wrappedFetch = function (...args) {
     const result = Reflect.apply(originalFetch, this, args);
@@ -80,14 +83,27 @@ export function installMeasurementCapture({ page, storage, now = Date.now }) {
     if (proto?.open === wrappedOpen) proto.open = originalOpen;
     if (proto?.setRequestHeader === wrappedHeader) proto.setRequestHeader = originalHeader;
     if (proto?.send === wrappedSend) proto.send = originalSend;
-    if (page[GUARD] === dispose) delete page[GUARD];
+    if (page[GUARD] === capture) delete page[GUARD];
   }
   if (typeof originalFetch === 'function') page.fetch = wrappedFetch;
   if (typeof originalOpen === 'function' && typeof originalHeader === 'function' && typeof originalSend === 'function') {
     proto.open = wrappedOpen; proto.setRequestHeader = wrappedHeader; proto.send = wrappedSend;
   }
-  page[GUARD] = dispose;
-  return dispose;
+  function subscribe(target, clock) {
+    const existing = subscribers.get(target);
+    if (existing) return existing.dispose;
+    let stopped = false;
+    const release = () => {
+      if (stopped) return;
+      stopped = true; subscribers.delete(target);
+      if (!subscribers.size) dispose();
+    };
+    subscribers.set(target, { now: clock, dispose: release });
+    return release;
+  }
+  const capture = { subscribe };
+  page[GUARD] = capture;
+  return subscribe(storage, now);
 }
 
 export function createMeasurementAuth({ window, storage, now = Date.now, timeoutMs = 10000, onEvidence = () => {} }) {

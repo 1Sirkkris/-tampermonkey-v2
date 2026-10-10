@@ -1,4 +1,4 @@
-import { MASTER_VERSION } from './master-runtime.mjs';
+import { riverUrl } from './river-capture.mjs';
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const upper = value => clean(value).toUpperCase();
 const UI = '[data-tm-v4-master]';
@@ -166,7 +166,8 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
   function queueHaz(gen, asin, force = false) {
     if (!/^B[A-Z0-9]{9}$/.test(asin) || !isCurrent(gen)) return;
     const group = state(gen), previous = group.haz.get(asin);
-    if (previous?.status === 'loading' || (!force && previous)) return;
+    if (previous?.status === 'loading') { if (force) previous.manualPending = true; return; }
+    if (!force && previous) return;
     const cached = hazCache.get(asin);
     if (!force && cached && cached.expiresAt > now()) { group.haz.set(asin, { ...cached.value }); return; }
     group.haz.set(asin, { status: 'loading' }); group.jobs.push(asin); pump(gen);
@@ -174,7 +175,7 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
   function pump(gen) {
     const group = state(gen);
     while (isCurrent(gen) && group.jobs.length && group.workers < 4) {
-      const asin = group.jobs.shift(); group.workers++;
+      const asin = group.jobs.shift(), request = group.haz.get(asin); group.workers++;
       (async () => {
         let value;
         try { const result = await enrichment.hazmat(asin, { signal: gen.controller.signal }); value = { status: 'ready', result }; }
@@ -184,30 +185,31 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
         group.haz.set(asin, value);
         hazCache.delete(asin); hazCache.set(asin, { value, expiresAt: now() + (value.result?.complete ? 21600000 : 60000) });
         while (hazCache.size > 500) hazCache.delete(hazCache.keys().next().value);
+        if (request.manualPending) queueHaz(gen, asin, true);
         pump(gen); runtime.schedule();
       })();
     }
   }
   function river(gen) {
     if (!isCurrent(gen)) return;
-    const url = new URL('https://river.amazon.com/' + runtime.warehouse + '/workflows');
-    for (const [key, value] of Object.entries({ buildingType: 'fc', workflowId: 'undefined', q0: '3654ec14-7232-4f65-84c3-87927cdb4d0c', q1: 'f2738dec-7f6f-4c2e-a85a-db7228de25f1', id: 'f2738dec-7f6f-4c2e-a85a-db7228de25f1' })) url.searchParams.set(key, value);
-    const tab = window.open(url.href, '_blank'); if (tab) tab.opener = null; else runtime.notify('RIVER popup blocked — allow popups and retry');
-    try { onEvidence({ type: 'fcr.handoff', script: 'FCR MASTER', version: MASTER_VERSION, intent: 'read', data: { action: 'river.open', warehouse: runtime.warehouse } }); } catch {}
+    const handoff = new window.CustomEvent('tampermonkey-v4:river-handoff', { cancelable: true, detail: JSON.stringify({ warehouse: runtime.warehouse, query: gen.query }) });
+    if (!document.dispatchEvent(handoff)) return;
+    const tab = window.open(riverUrl(runtime.warehouse), '_blank'); if (tab) tab.opener = null; else runtime.notify('RIVER popup blocked — allow popups and retry');
+    try { onEvidence({ type: 'fcr.handoff', script: 'FCR MASTER', version: runtime.version, intent: 'read', data: { action: 'river.open', warehouse: runtime.warehouse } }); } catch {}
   }
   function paintHaz(host, asin, gen, product = false) {
     queueHaz(gen, asin); const status = state(gen).haz.get(asin);
     if (!status) return;
     const hazmat = status.result?.complete ? status.result.hazmat : null;
-    const label = status.status === 'loading' ? 'CHECK…' : status.status === 'error' ? 'ERROR' : hazmat ? 'L' + hazmat.level : 'N/A';
-    const canRiver = product && status.status === 'ready' && (!hazmat || hazmat.level === 0);
+    const label = status.status === 'loading' ? 'CHECK…' : hazmat ? 'L' + hazmat.level : 'UNKNOWN';
+    const canRiver = product && status.status === 'ready' && hazmat?.level === 0;
     const badge = ownButton(host, 'hazmat', label, () => canRiver ? river(gen) : (queueHaz(gen, asin, true), runtime.schedule()));
     badge.disabled = status.status === 'loading'; badge.dataset.state = status.status === 'error' ? 'error' : 'hazmat';
-    badge.title = canRiver ? 'Create Hazmat RIVER ticket' : status.error || hazmat?.message || 'No exact ASIN hazmat result; recheck';
+    badge.title = canRiver ? 'Create Hazmat RIVER ticket' : status.error || hazmat?.message || status.result?.warning || 'No exact ASIN hazmat result; recheck';
     const colours = ['#999', '#33cc02', '#ffe103', '#ffbf03', '#ff8002', '#ff4001', '#ed0700', '#ad03de', '#3333ff'];
     badge.style.background = hazmat && hazmat.level < colours.length ? colours[hazmat.level] : '#fff';
     badge.style.color = hazmat && hazmat.level >= 6 ? '#fff' : '#111';
-    if (product) { const recheck = ownButton(host, 'pandash', 'Pandash', () => { queueHaz(gen, asin, true); runtime.schedule(); }); recheck.disabled = status.status === 'loading'; }
+    if (product) { const recheck = ownButton(host, 'pandash', 'Pandash', () => { queueHaz(gen, asin, true); runtime.schedule(); }); recheck.disabled = false; recheck.title = status.manualPending ? 'Manual recheck queued' : 'Recheck Hazmat data'; }
   }
   function highlightProperties(panel) {
     for (const label of ['SORTABLE', 'VERY HIGH VALUE', 'CONVEYABLE', 'MASTER CASE']) {
@@ -283,7 +285,7 @@ export function createMasterFeatures({ window, page = window, runtime, enrichmen
       }
       let recheck = table.closest('[data-section-type="inventory"]')?.querySelector(':scope > [data-tm-v4-badge="recheck-hazmat"]');
       if (!recheck) recheck = ownButton(table.closest('[data-section-type="inventory"]') || table.parentElement, 'recheck-hazmat', 'Recheck N/A + L0', () => {
-        for (const [asin, value] of group.haz) if (permitted.has(asin) && value.status !== 'loading' && (!value.result?.hazmat || value.result.hazmat.level === 0)) queueHaz(gen, asin, true);
+        for (const [asin, value] of group.haz) if (permitted.has(asin) && (!value.result?.hazmat || value.result.hazmat.level === 0)) queueHaz(gen, asin, true);
         runtime.schedule();
       });
     }

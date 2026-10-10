@@ -1,3 +1,4 @@
+import{forwardHook,containsHook}from'./native-hook.mjs';
 export function createNativeOperationTap({window,page=window,paths,onBefore,onResult}){
  const details=new WeakMap();let disposed=false;const selected=new Set(paths),timers=new Set();
  function begin(url,body,method){if(disposed||String(method).toUpperCase()!=='POST')return null;let target;try{target=new window.URL(url,window.location.href);}catch{return null;}if(target.origin!==window.location.origin||!selected.has(target.pathname))return null;let payload;try{payload=typeof body==='string'?JSON.parse(body):null;}catch{payload=null;}const context=onBefore({path:target.pathname,payload});if(!context)return null;let done=false;const timer=window.setTimeout(()=>finish(0,'',target.href,true),25000);timers.add(timer);
@@ -7,6 +8,7 @@ export function createNativeOperationTap({window,page=window,paths,onBefore,onRe
  const proto=page.XMLHttpRequest?.prototype,open=proto?.open,send=proto?.send;
  function wrappedOpen(method,url){details.set(this,{method,url});return open.apply(this,arguments);}
  function wrappedSend(body){const metadata=details.get(this),record=metadata?begin(metadata.url,body,metadata.method):null;if(record)this.addEventListener('loadend',()=>{let raw;try{raw=this.responseType==='json'?JSON.stringify(this.response):this.responseText;}catch{raw='';}record.finish(this.status,raw,this.responseURL||metadata.url);},{once:true});return send.apply(this,arguments);}
+ forwardHook(wrapper,originalFetch);forwardHook(wrappedOpen,open);forwardHook(wrappedSend,send);
  if(proto){proto.open=wrappedOpen;proto.send=wrappedSend;}
- return{owns:()=>page.fetch===wrapper&&(!proto||proto.open===wrappedOpen&&proto.send===wrappedSend),dispose(){if(disposed)return;disposed=true;for(const timer of timers)window.clearTimeout(timer);timers.clear();if(page.fetch===wrapper)page.fetch=originalFetch;if(proto?.open===wrappedOpen)proto.open=open;if(proto?.send===wrappedSend)proto.send=send;}};
+ return{owns:()=>!disposed&&containsHook(page.fetch,wrapper)&&(!proto||containsHook(proto.open,wrappedOpen)&&containsHook(proto.send,wrappedSend)),dispose(){if(disposed)return;disposed=true;for(const timer of timers)window.clearTimeout(timer);timers.clear();if(page.fetch===wrapper)page.fetch=originalFetch;if(proto?.open===wrappedOpen)proto.open=open;if(proto?.send===wrappedSend)proto.send=send;}};
 }

@@ -23,3 +23,6 @@ RESET: Stop removes loading feedback immediately while the native submitted oper
 DEPENDENCIES: existing exact-peer native bridge/progress. Offline source and generated installer tests plus real native-client fixtures; deployed scanner timing, appearance and Predicant outcomes remain live gates.
 
 The 0.1.4 installer bundles the corrected AFT mode-selection owner/lifetime from AFT_CONTRACT.md. Native worker Stop during mode preflight cancels reads and prevents later item submission. Familiar parent three-panel UI and immediate Predicant feedback are unchanged. Additional legitimate AFT Confirm stages remain PARTIAL pending native evidence.
+
+## Approved Stop/Clear correction — 11 October
+STATE: Stop and Clear call one cancellation routine; neither recursively calls the other. The second Stop waits for an active handoff to settle before clearing. Concurrent Clear calls coalesce; no new Run starts while Clear is pending. SUCCESS/UNKNOWN: clearing retains SUBMITTED/UNKNOWN recovery and the canonical owner lock. The shared Sideline date/Hazmat corrections are bundled independently in ISS. Native origin, auth, frames, scanner and long-run acceptance remain live gates.

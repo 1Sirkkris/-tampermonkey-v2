@@ -1,6 +1,6 @@
 import { FcrReadError } from './fcr-read.mjs';
 
-export const FCR_ENRICHMENT_VERSION = '0.1.1';
+export const FCR_ENRICHMENT_VERSION = '0.1.2';
 export const MEASUREMENT_ORIGIN = 'https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
 const BIN_URL = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem';
 const PANDASH_URL = 'https://pandash.amazon.com/GridServlet';
@@ -85,7 +85,7 @@ export function createFcrEnrichment({
     try { onEvidence({ type: 'fcr.read', script: 'FCR ENRICHMENT', version: FCR_ENRICHMENT_VERSION, intent: 'read', data: { endpoint, ...data } }); }
     catch { /* OBS is optional. */ }
   }
-  async function read(options) {
+  async function read(options, { retries = pandashRetryDelays.length, reportFailure = true } = {}) {
     const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
     const endpoint = parsed.pathname.startsWith('/prod/measurementEvents/') ? 'measurementEvents' : parsed.pathname.split('/').at(-1);
     for (let attempt = 0; ; attempt++) {
@@ -93,9 +93,9 @@ export function createFcrEnrichment({
       try { const result = await readJson(options); active(options.signal); return result; }
       catch (error) {
         active(options.signal);
-        const retry = pandash && attempt < pandashRetryDelays.length &&
+        const retry = pandash && attempt < retries &&
           (['NETWORK', 'TIMEOUT'].includes(error.code) || (error.code === 'HTTP' && (error.status === 429 || (error.status >= 500 && error.status < 600))));
-        evidence(endpoint, { outcome: 'failed', code: error.code || 'NETWORK', status: error.status, method: options.method || 'GET',
+        if (reportFailure) evidence(endpoint, { outcome: 'failed', code: error.code || 'NETWORK', status: error.status, method: options.method || 'GET',
           stage: options.stage, attempt: attempt + 1, retry });
         if (!retry) throw error;
       }
@@ -131,20 +131,40 @@ export function createFcrEnrichment({
       if (error.code === 'AUTH_REQUIRED') throw error;
       restrictionWarning = 'Restriction lookup failed; default restriction used';
     }
-    const payload = await read({ url: PANDASH_URL, method: 'POST', stage: 'hazmat', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ language: 'default', source: sourceRestriction + '-hazmat-FC', marketPlaces: 'AU', asins: asin, rows: '1', page: '1', fc: warehouse }).toString(), signal });
-    if (!Array.isArray(payload.rows)) throw fail('SCHEMA', 'Hazmat rows are missing');
-    const matches = payload.rows.filter(row => upper(row?.asin) === asin);
-    if (!matches.length) return { hazmat: null, complete: false, warning: 'No exact ASIN hazmat result', source: 'network' };
-    const mapped = matches.map(row => {
-      const level = Number(row.level);
-      if (!['number', 'string'].includes(typeof row.level) || !/^\d+$/.test(clean(row.level)) || !Number.isSafeInteger(level) || level < 0 ||
-          (row.message != null && typeof row.message !== 'string')) throw fail('SCHEMA', 'Hazmat level/message is invalid');
-      return { level, message: row.message ?? '' };
-    });
-    if (new Set(mapped.map(row => JSON.stringify(row))).size > 1) throw fail('IDENTITY', 'Conflicting exact ASIN hazmat rows');
-    active(signal); evidence('hazmat', { outcome: 'complete', level: mapped[0].level });
-    return { hazmat: mapped[0], complete: true, warning: restrictionWarning, source: 'network' };
+    const request = { url: PANDASH_URL, method: 'POST', stage: 'hazmat', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ language: 'default', source: sourceRestriction + '-hazmat-FC', marketPlaces: 'AU', asins: asin, rows: '1', page: '1', fc: warehouse }).toString(), signal };
+    // One budget covers missing data AND transient POST failures: initial read + at most two rechecks.
+    for (let attempt = 0; ; attempt++) {
+      let warning = '';
+      try {
+        const payload = await read(request, { retries: 0, reportFailure: false });
+        if (payload.rows != null && !Array.isArray(payload.rows)) throw fail('SCHEMA', 'Hazmat rows are invalid');
+        const matches = (payload.rows || []).filter(row => upper(row?.asin) === asin);
+        const mapped = matches.map(row => {
+          if (row.level == null || row.level === '') return null;
+          const level = Number(row.level);
+          if (!['number', 'string'].includes(typeof row.level) || !/^\d+$/.test(clean(row.level)) || !Number.isSafeInteger(level) || level < 0 ||
+              (row.message != null && typeof row.message !== 'string')) throw fail('SCHEMA', 'Hazmat level/message is invalid');
+          return { level, message: row.message ?? '' };
+        });
+        if (new Set(mapped.map(row => JSON.stringify(row))).size > 1) throw fail('IDENTITY', 'Conflicting exact ASIN hazmat rows');
+        if (matches.length && mapped[0] && mapped[0].message.trim() && !restrictionWarning) {
+          active(signal); evidence('hazmat', { outcome: 'complete', level: mapped[0].level });
+          return { hazmat: mapped[0], complete: true, warning: '', source: 'network' };
+        }
+        warning = restrictionWarning || (!matches.length ? 'No exact ASIN hazmat result' : 'Hazmat level or message is missing');
+      } catch (error) {
+        active(signal);
+        const retryable = ['NETWORK', 'TIMEOUT'].includes(error.code) || error.code === 'HTTP' && (error.status === 429 || error.status >= 500 && error.status < 600);
+        const retry = retryable && attempt < pandashRetryDelays.length;
+        evidence('hazmat', { outcome: 'failed', code: error.code, status: error.status, stage: 'hazmat', method: 'POST', attempt: attempt + 1, retry });
+        if (!retry) throw error;
+      }
+      const retry = !restrictionWarning && attempt < pandashRetryDelays.length;
+      if (warning) evidence('hazmat', { outcome: 'incomplete', stage: 'hazmat', attempt: attempt + 1, retry });
+      if (warning && !retry) return { hazmat: null, complete: false, warning, source: 'network' };
+      await wait(pandashRetryDelays[attempt], signal);
+    }
   }
 
   async function binDescription(containerValue, itemValue, { signal, verifiedAliases = [] } = {}) {

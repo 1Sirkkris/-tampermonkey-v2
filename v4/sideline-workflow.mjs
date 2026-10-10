@@ -1,6 +1,7 @@
 import{createOperationJournal,withOperationLock}from'./operation-journal.mjs';import{clean,upper}from'./ui-tools.mjs';
 export const validSidelineContainer=value=>/^(?:csX|tsX)[A-Za-z0-9_-]+$/i.test(clean(value));
 export function parseSidelineItems(text,source,destination){const map=new Map();for(const raw of String(text).split(/\r?\n/)){const value=clean(raw),key=upper(value);if(!value||['123START',upper(source),upper(destination)].includes(key))continue;if(validSidelineContainer(value))continue;const row=map.get(key);if(row)row.quantity++;else map.set(key,{code:value,quantity:1});}return[...map.values()];}
+export function sidelineDateKey(source,code,ctx){return JSON.stringify([upper(source),upper(code),upper(ctx.asin),upper(ctx.fnsku),upper(ctx.fcsku),ctx.dateType,ctx.dateDetail?.shelfLife??null]);}
 export function createSidelineWorkflow({window,client,preflight,pickDate,onChange=()=>{},onEvidence=()=>{}}){
  const key='tm-v4.sideline.rows',uuid=()=>window.crypto.randomUUID();let journal=createOperationJournal({storage:window.localStorage,key,uuid}),running=false,busy=false,owns=false,clearAfterSettled=false,paused=false,disposed=false,active=null,attentionRow=null,readController,wake,scanResolve,attention='',message='',stopStage=0,dates=new Map(),sourceMeta=null;
  const notify=()=>onChange({running,busy,paused,attention,message,rows:journal.rows,stopStage});
@@ -45,7 +46,7 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
     try{if(mode==='queue'){await client.source(row.container,{signal:signal()});if(!await control())break;const result=await client.close(row.container,{signal:readController.signal,beforeMutation:id=>submit(row,id)});settle(row,result);}
      else{const result=await preflight(row.source,row.container,{signal:signal()});if(!await control())break;
       if(result.kind==='red'){journal.transition(row,'REJECTED','ASIDE • '+result.reason);notify();continue;}if(result.kind==='retry'||!result.ctx)throw new Error(result.reason||'Preflight failed');
-      let date=dates.get(upper(row.container))??null;if(result.kind==='yellow'&&date===null){attention='date';notify();date=await pickDate({code:row.container,ctx:result.ctx,signal:readController.signal});if(date===null||!running){journal.transition(row,'QUEUED','Date cancelled — not submitted');if(paused)continue;running=false;break;}dates.set(upper(row.container),date);attention='';}
+      const dateKey=sidelineDateKey(row.source,row.container,result.ctx);let date=result.kind==='yellow'?(dates.get(dateKey)??null):null;if(result.kind==='yellow'&&date===null){attention='date';notify();date=await pickDate({code:row.container,ctx:result.ctx,signal:readController.signal});if(date===null||!running){journal.transition(row,'QUEUED','Date cancelled — not submitted');if(paused)continue;running=false;break;}dates.set(dateKey,date);attention='';}
       if(!await control())break;await move(row,sourceMeta,result.ctx,date);
       if(running&&row.state==='CONFIRMED'&&options.delay){const ms=2000+window.crypto.getRandomValues(new Uint32Array(1))[0]%6001;message='Delay '+Math.ceil(ms/1000)+'s';notify();await new Promise(resolve=>{const timer=window.setTimeout(resolve,ms);readController=new window.AbortController();readController.signal.addEventListener('abort',()=>{window.clearTimeout(timer);resolve();},{once:true});});}
      }
@@ -71,5 +72,5 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
   catch(error){message=error.message;notify();return false;}
  }
  function dispose(){if(disposed)return;disposed=true;running=false;paused=false;try{if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN','Page disposed after submission');else if(active?.state==='READING')journal.transition(active,'QUEUED','Page disposed before submission');}catch{}readController?.abort();wake?.();scanResolve?.(null);}
- return{run,scan,pause,stop,reset,dispose,getRows:()=>journal.rows,getState:()=>({running,busy,paused,attention,message,stopStage}),setDate:(code,value)=>dates.set(upper(code),value)};
+ return{run,scan,pause,stop,reset,dispose,getRows:()=>journal.rows,getState:()=>({running,busy,paused,attention,message,stopStage}),hasDate:(source,code,ctx)=>dates.has(sidelineDateKey(source,code,ctx)),setDate:(source,code,ctx,value)=>{if(!Number.isFinite(value))throw new Error('Invalid date answer');dates.set(sidelineDateKey(source,code,ctx),value);}};
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Tote Audit
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Independent FC-Lite Tote Audit; complete inventory and physical scans.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -546,7 +546,7 @@
   }
 
   // fcr-enrichment.mjs
-  var FCR_ENRICHMENT_VERSION = "0.1.1";
+  var FCR_ENRICHMENT_VERSION = "0.1.2";
   var MEASUREMENT_ORIGIN = "https://o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com";
   var BIN_URL = "https://aft-poirot-website-nrt.nrt.proxy.amazon.com/api/scanitem";
   var PANDASH_URL = "https://pandash.amazon.com/GridServlet";
@@ -665,7 +665,7 @@
       } catch {
       }
     }
-    async function read(options) {
+    async function read(options, { retries = pandashRetryDelays.length, reportFailure = true } = {}) {
       const parsed = new URL(options.url), pandash = parsed.origin + parsed.pathname === PANDASH_URL;
       const endpoint = parsed.pathname.startsWith("/prod/measurementEvents/") ? "measurementEvents" : parsed.pathname.split("/").at(-1);
       for (let attempt = 0; ; attempt++) {
@@ -676,8 +676,8 @@
           return result;
         } catch (error) {
           active2(options.signal);
-          const retry = pandash && attempt < pandashRetryDelays.length && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
-          evidence2(endpoint, {
+          const retry = pandash && attempt < retries && (["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600));
+          if (reportFailure) evidence2(endpoint, {
             outcome: "failed",
             code: error.code || "NETWORK",
             status: error.status,
@@ -723,26 +723,45 @@
         if (error.code === "AUTH_REQUIRED") throw error;
         restrictionWarning = "Restriction lookup failed; default restriction used";
       }
-      const payload = await read({
+      const request = {
         url: PANDASH_URL,
         method: "POST",
         stage: "hazmat",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ language: "default", source: sourceRestriction + "-hazmat-FC", marketPlaces: "AU", asins: asin, rows: "1", page: "1", fc: warehouse }).toString(),
         signal
-      });
-      if (!Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are missing");
-      const matches = payload.rows.filter((row) => upper(row?.asin) === asin);
-      if (!matches.length) return { hazmat: null, complete: false, warning: "No exact ASIN hazmat result", source: "network" };
-      const mapped = matches.map((row) => {
-        const level = Number(row.level);
-        if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
-        return { level, message: row.message ?? "" };
-      });
-      if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
-      active2(signal);
-      evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
-      return { hazmat: mapped[0], complete: true, warning: restrictionWarning, source: "network" };
+      };
+      for (let attempt = 0; ; attempt++) {
+        let warning = "";
+        try {
+          const payload = await read(request, { retries: 0, reportFailure: false });
+          if (payload.rows != null && !Array.isArray(payload.rows)) throw fail("SCHEMA", "Hazmat rows are invalid");
+          const matches = (payload.rows || []).filter((row) => upper(row?.asin) === asin);
+          const mapped = matches.map((row) => {
+            if (row.level == null || row.level === "") return null;
+            const level = Number(row.level);
+            if (!["number", "string"].includes(typeof row.level) || !/^\d+$/.test(clean(row.level)) || !Number.isSafeInteger(level) || level < 0 || row.message != null && typeof row.message !== "string") throw fail("SCHEMA", "Hazmat level/message is invalid");
+            return { level, message: row.message ?? "" };
+          });
+          if (new Set(mapped.map((row) => JSON.stringify(row))).size > 1) throw fail("IDENTITY", "Conflicting exact ASIN hazmat rows");
+          if (matches.length && mapped[0] && mapped[0].message.trim() && !restrictionWarning) {
+            active2(signal);
+            evidence2("hazmat", { outcome: "complete", level: mapped[0].level });
+            return { hazmat: mapped[0], complete: true, warning: "", source: "network" };
+          }
+          warning = restrictionWarning || (!matches.length ? "No exact ASIN hazmat result" : "Hazmat level or message is missing");
+        } catch (error) {
+          active2(signal);
+          const retryable = ["NETWORK", "TIMEOUT"].includes(error.code) || error.code === "HTTP" && (error.status === 429 || error.status >= 500 && error.status < 600);
+          const retry2 = retryable && attempt < pandashRetryDelays.length;
+          evidence2("hazmat", { outcome: "failed", code: error.code, status: error.status, stage: "hazmat", method: "POST", attempt: attempt + 1, retry: retry2 });
+          if (!retry2) throw error;
+        }
+        const retry = !restrictionWarning && attempt < pandashRetryDelays.length;
+        if (warning) evidence2("hazmat", { outcome: "incomplete", stage: "hazmat", attempt: attempt + 1, retry });
+        if (warning && !retry) return { hazmat: null, complete: false, warning, source: "network" };
+        await wait(pandashRetryDelays[attempt], signal);
+      }
     }
     async function binDescription(containerValue, itemValue, { signal, verifiedAliases = [] } = {}) {
       const container = clean(containerValue), item = upper(itemValue);
@@ -863,7 +882,7 @@
   }
 
   // measurement-auth.mjs
-  var MEASUREMENT_AUTH_VERSION = "0.1.1";
+  var MEASUREMENT_AUTH_VERSION = "0.1.2";
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
   var SITE = "https://jp.item-measurement.aft.a2z.com";
   var GUARD = Symbol.for("tampermonkey.v4.measurement.capture");
@@ -898,8 +917,9 @@
   }
   function installMeasurementCapture({ page: page2, storage, now = Date.now }) {
     if (page2.location.origin !== SITE) throw failure2("INPUT", "Measurement capture requires the native Measurement page");
-    if (page2[GUARD]) return page2[GUARD];
+    if (page2[GUARD]) return page2[GUARD].subscribe(storage, now);
     const controller = new page2.AbortController(), details = /* @__PURE__ */ new WeakMap();
+    const subscribers = /* @__PURE__ */ new Map();
     const originalFetch = page2.fetch, proto = page2.XMLHttpRequest?.prototype;
     const originalOpen = proto?.open, originalHeader = proto?.setRequestHeader, originalSend = proto?.send;
     const observe = (fn) => {
@@ -910,8 +930,10 @@
     };
     function save(raw) {
       if (controller.signal.aborted) return;
-      const value = normalizeMeasurementToken(raw, now());
-      if (value) storage.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt: now(), captureId: page2.crypto.randomUUID() }));
+      for (const [target, subscriber] of subscribers) observe(() => {
+        const capturedAt = subscriber.now(), value = normalizeMeasurementToken(raw, capturedAt);
+        if (value) target.set(MEASUREMENT_AUTH_KEY, JSON.stringify({ ...value, capturedAt, captureId: page2.crypto.randomUUID() }));
+      });
     }
     const wrappedFetch = function(...args) {
       const result = Reflect.apply(originalFetch, this, args);
@@ -949,7 +971,7 @@
       if (proto?.open === wrappedOpen) proto.open = originalOpen;
       if (proto?.setRequestHeader === wrappedHeader) proto.setRequestHeader = originalHeader;
       if (proto?.send === wrappedSend) proto.send = originalSend;
-      if (page2[GUARD] === dispose) delete page2[GUARD];
+      if (page2[GUARD] === capture) delete page2[GUARD];
     }
     if (typeof originalFetch === "function") page2.fetch = wrappedFetch;
     if (typeof originalOpen === "function" && typeof originalHeader === "function" && typeof originalSend === "function") {
@@ -957,8 +979,22 @@
       proto.setRequestHeader = wrappedHeader;
       proto.send = wrappedSend;
     }
-    page2[GUARD] = dispose;
-    return dispose;
+    function subscribe(target, clock) {
+      const existing = subscribers.get(target);
+      if (existing) return existing.dispose;
+      let stopped = false;
+      const release = () => {
+        if (stopped) return;
+        stopped = true;
+        subscribers.delete(target);
+        if (!subscribers.size) dispose();
+      };
+      subscribers.set(target, { now: clock, dispose: release });
+      return release;
+    }
+    const capture = { subscribe };
+    page2[GUARD] = capture;
+    return subscribe(storage, now);
   }
   function createMeasurementAuth({ window: window2, storage, now = Date.now, timeoutMs = 1e4, onEvidence = () => {
   } }) {
@@ -1495,7 +1531,7 @@
   }
 
   // tote-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.tote.installer");
   if (!page[guard]) {

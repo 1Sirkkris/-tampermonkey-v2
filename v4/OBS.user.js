@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 OBS
 // @namespace    https://github.com/1Sirkkris/-tampermonkey-v2/v4
-// @version      0.1.3
+// @version      0.1.4
 // @description  Independent native-page evidence and explicit V4 operation transcripts.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
@@ -76,10 +76,17 @@
     return dispose;
   }
 
+  // native-hook.mjs
+  var FORWARD = Symbol.for("tampermonkey.v4.native.forward");
+  function forwardHook(wrapper, original) {
+    Object.defineProperty(wrapper, FORWARD, { value: original });
+    return wrapper;
+  }
+
   // obs-entry.mjs
   (() => {
     "use strict";
-    const VERSION = "0.1.3";
+    const VERSION = "0.1.4";
     const PAGE = typeof unsafeWindow === "object" && unsafeWindow ? unsafeWindow : window;
     const GUARD = Symbol.for("tampermonkey.v4.obs.document");
     if (PAGE[GUARD]) return;
@@ -476,7 +483,7 @@
           throw error;
         });
       };
-      PAGE.fetch = wrapped;
+      PAGE.fetch = forwardHook(wrapped, original);
       restoreFetch = () => {
         if (PAGE.fetch === wrapped) PAGE.fetch = original;
       };
@@ -526,8 +533,8 @@
           throw error;
         }
       };
-      proto.open = wrappedOpen;
-      proto.send = wrappedSend;
+      proto.open = forwardHook(wrappedOpen, open);
+      proto.send = forwardHook(wrappedSend, send);
       restoreXhr = () => {
         if (proto.open === wrappedOpen) proto.open = open;
         if (proto.send === wrappedSend) proto.send = send;
@@ -667,7 +674,6 @@
           if (reset(next ? "fat-on" : "fat-off", next ? "fat" : "normal")) location.reload();
         }, { signal: controller.signal });
       }
-      anchor();
     }
     function render() {
       if (!running) return;

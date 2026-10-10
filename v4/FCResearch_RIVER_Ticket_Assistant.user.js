@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 RIVER Ticket Assistant
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Exact FCR handoff and native RIVER assistant with manual final gates.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -459,31 +459,30 @@
   // river-fcr.mjs
   function createRiverCapture({ window: window2, reader, setValue, open, onEvidence = () => {
   }, version, warehouse }) {
-    const d = window2.document, events = new window2.AbortController(), buttons = /* @__PURE__ */ new Set(), style = d.createElement("style");
+    const d = window2.document, events = new window2.AbortController(), style = d.createElement("style");
     style.dataset.tmV4Style = "RIVR";
     style.textContent = ".tm-v4-river-capture{display:inline-flex;align-items:center;margin-left:7px;padding:2px 7px;border:1px solid #765900;border-radius:12px;background:#fff3b0;color:#111;font:800 11px Arial;cursor:pointer}.tm-v4-river-capture[data-ready=true]{background:#dff6ff;border-color:#005a78}";
     d.head.append(style);
-    let controller = null, payload = null, current = "", disposed = false;
-    function query() {
-      return clean(new window2.URLSearchParams(window2.location.search).get("s") || d.getElementById("search")?.value);
-    }
-    function paint(text2, ready = false) {
-      for (const button of buttons) {
-        button.textContent = text2;
-        button.dataset.ready = String(ready);
-        button.title = payload?.warning || "Exact FCR product + latest native PO line capture";
-      }
+    let controller = null, payload = null, current = "", disposed = false, button = null, label = "RIVER CAPTURE…", ready = false;
+    const query = () => clean(new window2.URLSearchParams(window2.location.search).get("s") || d.getElementById("search")?.value);
+    function paint(text2, isReady = false) {
+      label = text2;
+      ready = isReady;
+      if (!button) return;
+      if (button.textContent !== text2) button.textContent = text2;
+      button.dataset.ready = String(ready);
+      button.title = payload?.warning || "Exact FCR product + latest native PO line capture";
     }
     async function capture() {
       const search = query();
       if (!search || search === current) return;
+      controller?.abort();
+      payload = null;
+      current = search;
       if (!/^[A-Za-z0-9]{10}$/.test(search)) {
         paint("RIVER • exact item required");
         return;
       }
-      current = search;
-      payload = null;
-      controller?.abort();
       controller = new window2.AbortController();
       const signal = controller.signal;
       paint("RIVER CAPTURE…");
@@ -495,65 +494,62 @@
         paint("RIVER READY ✓", true);
         onEvidence({ type: "river.capture", intent: "read", data: { quantityAvailable: data.inventoryQuantity !== null, quantityMode: data.quantityMode } });
       } catch (error) {
-        if (disposed || signal.aborted) return;
-        paint("RIVER • " + error.message);
+        if (!disposed && !signal.aborted) paint("RIVER • " + error.message);
+      }
+    }
+    function launch() {
+      if (disposed) return;
+      if (payload && upper(query()) === upper(payload.sourceSearch)) {
+        setValue(RIVER_KEY, payload);
+        open(payload.riverUrl);
+      } else {
+        current = "";
+        void capture();
+        paint("RIVER capture pending — click when ready");
       }
     }
     function handoff(event) {
-      const badge = event.target.closest("[data-tm-v4-badge=hazmat]");
-      if (!badge || !badge.title.includes("Create Hazmat RIVER")) return;
-      if (event.type === "keydown" && !["Enter", " "].includes(event.key)) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (!payload || upper(query()) !== upper(payload.sourceSearch)) {
-        void capture();
-        paint("RIVER capture pending — click when ready");
+      let data;
+      try {
+        data = JSON.parse(event.detail);
+      } catch {
         return;
       }
-      setValue(RIVER_KEY, payload);
-      open(payload.riverUrl);
+      if (data.warehouse !== warehouse || upper(data.query) !== upper(query())) return;
+      event.preventDefault();
+      launch();
     }
     function reconcile() {
       if (disposed) return;
-      for (const button2 of buttons) if (!button2.isConnected) buttons.delete(button2);
-      const product = d.querySelector("[data-section-type=product]"), badge = product?.querySelector("[data-tm-v4-badge=hazmat]"), target = badge || product?.querySelector("table") || d.getElementById("table-product");
-      if (!target) return;
-      let button = target.nextElementSibling;
-      if (!button?.classList.contains("tm-v4-river-capture")) {
+      const product = d.querySelector("[data-section-type=product]"), target = product?.querySelector("[data-tm-v4-badge=hazmat]") || product?.querySelector("table") || d.getElementById("table-product");
+      if (!target) {
+        button?.remove();
+        return;
+      }
+      if (!button) {
         button = d.createElement("button");
         button.type = "button";
         button.className = "tm-v4-river-capture";
         button.dataset.tmV4Script = "RIVR";
-        button.textContent = "RIVER CAPTURE…";
-        button.addEventListener("click", () => {
-          if (payload && upper(query()) === upper(payload.sourceSearch)) {
-            setValue(RIVER_KEY, payload);
-            open(payload.riverUrl);
-          } else {
-            current = "";
-            void capture();
-          }
-        }, { signal: events.signal });
-        target.after(button);
-        buttons.add(button);
-        if (payload) paint("RIVER READY ✓", true);
+        button.addEventListener("click", launch, { signal: events.signal });
       }
+      if (target.nextElementSibling !== button) target.after(button);
+      paint(label, ready);
       void capture();
     }
     const observer = new window2.MutationObserver((records) => {
-      if (records.every((record) => [...buttons].some((button) => button.contains(record.target)))) return;
+      if (records.every((record) => button?.contains(record.target))) return;
       reconcile();
     });
     observer.observe(d.querySelector("#results-content") || d.body, { childList: true, subtree: true });
-    d.addEventListener("click", handoff, { capture: true, signal: events.signal });
-    d.addEventListener("keydown", handoff, { capture: true, signal: events.signal });
+    d.addEventListener("tampermonkey-v4:river-handoff", handoff, { signal: events.signal });
     reconcile();
     return { capture, dispose() {
       disposed = true;
       controller?.abort();
       observer.disconnect();
       events.abort();
-      for (const button of buttons) button.remove();
+      button?.remove();
       style.remove();
     } };
   }
@@ -1026,7 +1022,7 @@
   }
 
   // river-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var guard = Symbol.for("tampermonkey.v4.river.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

@@ -108,8 +108,26 @@ test('hazmat groups repeated exact ASINs across product/inventory and product L0
   const opened = []; app.w.open = url => { opened.push(url); return {}; }; await app.show();
   assert.equal(app.calls.haz.length, 1); assert.equal(app.w.document.querySelectorAll('[data-tm-v4-badge="hazmat"]').length, 3);
   app.w.document.querySelector('[data-section-type="product"] [data-tm-v4-badge="hazmat"]').click();
-  assert.equal(opened.length, 1); const url = new URL(opened[0]); assert.equal(url.pathname, '/BWU2/workflows'); assert.equal(url.searchParams.get('id'), 'f2738dec-7f6f-4c2e-a85a-db7228de25f1');
+  assert.equal(opened.length, 1); const url = new URL(opened[0]); assert.equal(url.pathname, '/BWU2/workflows'); assert.equal(url.searchParams.get('id'), '0dbb253e-c43a-4a8b-a316-e32b8ab9be21');
   app.w.document.querySelector('[data-tm-v4-badge="recheck-hazmat"]').click(); await tick(); assert.equal(app.calls.haz.length, 2);
+});
+
+test('manual Hazmat recheck remains enabled during loading, coalesces clicks and UNKNOWN cannot open RIVER', async t => {
+  const pending = [], opened = [];
+  const app = setup(t, { enrichment: { hazmat: async () => new Promise(resolve => pending.push(resolve)) } });
+  app.w.open = url => { opened.push(url); return {}; };
+  await app.show();
+  const manual = app.w.document.querySelector('[data-section-type=product] [data-tm-v4-badge=pandash]');
+  assert.equal(manual.disabled, false);
+  manual.click(); manual.click(); manual.click(); assert.equal(app.calls.haz.length, 1);
+  pending.shift()({ hazmat: null, complete: false }); await tick(); await tick();
+  assert.equal(app.calls.haz.length, 2); assert.equal(manual.disabled, false);
+  pending.shift()({ hazmat: null, complete: false }); await tick(); await tick();
+  const badge = app.w.document.querySelector('[data-section-type=product] [data-tm-v4-badge=hazmat]');
+  assert.equal(badge.textContent, 'UNKNOWN'); assert(!badge.title.includes('Create Hazmat RIVER'));
+  badge.click(); assert.equal(opened.length, 0); assert.equal(app.calls.haz.length, 3);
+  pending.shift()({ hazmat: { level: 0, message: 'Native L0' }, complete: true }); await tick(); await tick();
+  badge.click(); assert.equal(opened.length, 1); assert.equal(app.calls.haz.length, 3);
 });
 
 test('hazmat worker concurrency is bounded and query cancellation prevents queued or late results', async t => {
