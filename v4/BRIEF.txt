@@ -601,3 +601,6 @@ Readiness: READY FOR READ-ONLY TEST / READY FOR CONTROLLED LIVE TEST /
 OFFLINE VERIFIED — LIVE GATE PENDING / PARTIAL / BLOCKED / NOT BUILT.
 At finish update README + CHECKPOINT, push/verify, supply install links, versions,
 statuses/tests/live gates/unbuilt blockers/testing order/material V2 differences.
+
+## 10 October universal recovery timestamp rule
+The latest user instructions require every checkpoint/progress update to include actual current Sydney local time from the system clock, format YYYY-MM-DD HH:mm:ss AEST/AEDT (Australia/Sydney, DST aware). Record creation and confirmed push/readback times separately in CHECKPOINT.md; never infer push time from commit time. Aim for 10 minute saves; never intentionally exceed 15. Record elapsed time from latest successful push when available. Chat: CHECKPOINT | SYDNEY TIME | SCRIPT | STATUS | TESTS | SHA | NEXT. Preserve WIP/tests and known-good installers; expected-parent non-force push and remote readback required.

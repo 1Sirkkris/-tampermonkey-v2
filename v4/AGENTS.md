@@ -15,3 +15,6 @@ Read `BRIEF.txt` and `BASELINE.md` before implementation. The user's current V4 
 - Do not call mocked/offline verification live proof. Never retry a mutation with an uncertain outcome or hide its recovery state.
 
 Keep `CHECKPOINT.md` current so recovery does not depend on chat history. Its commit is the checkpoint SHA; do not embed a self-referential SHA in the file.
+
+## 10 October universal recovery timestamp rule
+The latest user instructions require every checkpoint/progress update to include actual current Sydney local time from the system clock, format YYYY-MM-DD HH:mm:ss AEST/AEDT (Australia/Sydney, DST aware). Record creation and confirmed push/readback times separately in CHECKPOINT.md; never infer push time from commit time. Aim for 10 minute saves; never intentionally exceed 15. Record elapsed time from latest successful push when available. Chat: CHECKPOINT | SYDNEY TIME | SCRIPT | STATUS | TESTS | SHA | NEXT. Preserve WIP/tests and known-good installers; expected-parent non-force push and remote readback required.

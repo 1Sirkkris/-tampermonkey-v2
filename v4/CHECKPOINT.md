@@ -1,19 +1,22 @@
-# Active delivery checkpoint — 10 October 2026 (Sydney)
+# Active recovery checkpoint — 10 October 2026 (Sydney)
 
-- Unit: Carton readiness correction 0.1.1.
-- Status: OFFLINE VERIFIED — LIVE GATE PENDING.
-- Completed: reproduced stale barcode/count snapshot reaching native Complete after asynchronous lock acquisition. One canonical readiness reader now revalidates current barcode/count/button under the owner, blocks stale/detached/hidden controls, and rechecks changed unsent readiness without replaying mutations. Disposal before lock does not submit/consume barcode. V2 ON default, saved toggle and two beeps preserved.
-- Files modified: carton runtime/entry/installer/tests/contract, README/CHECKPOINT.
-- Verification: 310 tests passed / 0 failed; Carton 6 fixtures including failing-before/passing-after stale native readiness, disabled/count-one/reload/no-replay/disposal/hidden/current installer. All 19 deterministic installer + 67 source module checks pass; whitespace pass. No live operational action.
-- Suite: all 18 operational installers built; four READY FOR READ-ONLY TEST, twelve OFFLINE VERIFIED — LIVE GATE PENDING, Drop/Stow PARTIAL. Read-only capture diagnostic 0.1.1 also built. No unbuilt BASELINE workflows; missing live proof is not completed acceptance.
-- Known gates: native auth/markup/frame/locks/real outcomes and scanner/visual acceptance; Drop/Stow empty-container location proof; AFT additional native confirmation stage. Carton auto-complete defaults ON, so installing on a ready carton is an operational action requiring approval. Calm buttons submit labor forms. No production rollout.
-- NEXT: final staged testing instructions and per-case evidence/F01–F16 matrix in README; final scope/metadata/docs verification; push final recoverable delivery checkpoint. No further broad refactoring or repetition without new defects.
-- Pending approval: none for code; live operations, Carton auto-completion, Calm labor submission, ticket/printing/production actions require explicit approval. No agents.
-- Recovery: source/tests local checkpoint, non-force expected-parent GitHub tree/branch readback; all source changes exclusively v4/. Main/V3 preserved.
+- Checkpoint creation: 2026-10-10 14:50:18 AEDT, retrieved from system clock with Australia/Sydney zoneinfo.
+- Latest confirmed durable source before this save: e112c75a79e364fa9d8b3b23fdc68b526ca6255b; remote readback verified during this recovery. That commit was created 2026-10-10 10:38:25 AEDT. Its exact previous successful push timestamp was not recorded and cannot be reconstructed from commit creation time.
+- Latest confirmed GitHub push timestamp: pending for this checkpoint; record the successful push/readback in the next receipt. Time since previous successful push: unavailable for the historical checkpoint; no interval invented. Current work resumed at 2026-10-10 14:48:29 AEDT.
+- Current workflow: ISS Console Predicant destination recovery feedback. Status: recovered, implementation not yet changed.
+- Last verified state: all 19 independently built installers (18 operational + manual capture diagnostic); 310 tests pass / 0 fail. Build, deterministic source/installer match, 19 metadata/identity/update URL/independence checks, 67 source syntax checks and whitespace pass, freshly rerun during recovery. No live operational action.
+- Recovery comparison: fetched v4-cleanroom/main/v3-groundup. GitHub source and previous clean local tree both 6207acbc8a15c155a30ed3a49c51f103c99e8a0a; no uncommitted source and no newer accessible WIP. Duplicate local checkpoint history preserved as v4-local-recovery-20261010; active local v4-cleanroom now tracks actual remote history. No reset, discard, merge or force push.
+- Completed: preserved every verified workflow and Carton/Sideline fixes; recovered source and reran verification. New timestamp/checkpoint instructions recorded in AGENTS/BRIEF.
+- Files modified: v4/CHECKPOINT.md, v4/AGENTS.md, v4/BRIEF.txt. Existing installers unchanged.
+- Known failures/unfinished work: ISS lacks V2 immediate grey loading overlay when a valid Predicant destination rescan is dispatched; implement under existing native owner without changing operational sequence. Drop/Stow empty-container location proof absent; AFT/ISS additional native confirmation stages withheld until captured contract evidence. Native authentication/frame/locks/visual/scanner/live outcomes remain unverified.
+- Exact NEXT: add a small ISS recovery feedback contract and regression fixture reproducing missing immediate loading state; implement bounded loading feedback, repeated-scan protection and Stop/terminal cleanup; run actual source/installer tests, build ISS candidate, push checkpoint. Then update README readiness and staged F01–F16 user testing plan. Do not revisit passing components without a reproduced defect.
+- WIP location: none; source is last verified release. No existing working installer overwritten with WIP.
+- Pending approvals: none for implementation or routine saves. Live inventory/hierarchy/edit/print/ticket/labor/Carton auto-completion and production rollout require explicit approval. No agents.
+- Readiness: fixtures are offline proof only; no live mutation verified. Carton defaults ON, so installing on a ready carton requires an approved operational case. Calm buttons submit native labor forms.
 
 ## Preserved previous verification and evidence
 
-# Recovery state
+# Historical 6 October recovery state (not current NEXT)
 
 - Unit: FCR Master.
 - Status: PARTIAL — Master 0.1.3 source corrections now have a clean live read sample and positive user feedback. Container empty states, cached-auth raw MADCAT, Pandash and native inventory succeeded in the supplied run; full V2 replacement parity remains unverified.
