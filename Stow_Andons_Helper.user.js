@@ -10,7 +10,7 @@
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.8
+// @version      5.6.9
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.8';
+  const VERSION = '5.6.9';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -512,15 +512,41 @@
         onload: response => {
           const ms = Math.round(performance.now() - started);
           let data = response.responseText;
+
           try { data = response.responseText ? JSON.parse(response.responseText) : null; } catch {}
+          const raw = String(response.responseText || '');
+          const contentType = String(response.responseHeaders || '').match(/^content-type:\s*([^;\r\n]+)/im)?.[1]?.toLowerCase() || '';
+          let finalHost = '', finalPath = '', redirected = false;
+          try {
+            const final = new URL(response.finalUrl || response.responseURL || url);
+            const requested = new URL(url);
+            finalHost = final.hostname;
+            finalPath = final.pathname;
+            redirected = final.origin !== requested.origin || final.pathname !== requested.pathname;
+          } catch {}
+          const html = /html/i.test(contentType) || /^\s*(?:<!doctype html|<html\b)/i.test(raw);
+          const authRequired = [401, 403, 419].includes(Number(response.status))
+            || /(?:midway|sso|login|signin)/i.test(finalPath)
+            || (html && /(?:sign[ -]?in|log[ -]?in|midway|authentication)/i.test(raw.slice(0, 350)));
           observe('STOW_UNBIND_API_RESPONSE', {
             phase,
             status:Number(response.status) || 0,
-            ok:response.status >= 200 && response.status < 300,
+            ok:response.status >= 200 && response.status < 300 && !redirected && !html && !authRequired,
             ms,
             container,
+            contentType, responseLength: raw.length, finalHost, finalPath, redirected, html, authRequired,
             ...inlineUnbindResponseShape(phase, data, container)
           });
+          if (response.status >= 200 && response.status < 300 && (redirected || html || authRequired)) {
+            const error = new Error(authRequired
+              ? 'Unbind login expired — refresh/sign in' : 'Unexpected Unbind API redirect or HTML');
+            error.phase = phase;
+            error.status = response.status;
+            error.authRequired = authRequired;
+            error.ambiguous = phase === 'unbind';
+            reject(error);
+            return;
+          }
           if (response.status >= 200 && response.status < 300) {
             resolve({ data, status: response.status, ms });
             return;
@@ -566,19 +592,36 @@
     });
   }
 
-  async function unbindCurrentContainer(button) {
-    if (unbindBusy || button?.disabled) return;
-    const container = currentContainer();
+  const unbindReviewKey = container => 'bwu2.v2.stow.unbind.pending:' + canonical(container);
+  function unbindSetBusy(text, disabled = true) {
+    document.querySelectorAll('[data-unbind]').forEach(node => { node.disabled = disabled; node.textContent = text; });
+  }
+
+  // A read-only binding summary gives context, not proof of final mutation success.
+  async function verifyUnbindSummary(container) {
+    try {
+      const result = await unbindPostJson(UNBIND_SUMMARY_URL,
+        { warehouseId: 'BWU2', scannableId: container }, 12000, 'summary', container);
+      const list = result.data?.transferBindingSummaryList;
+      const outcome = Array.isArray(list) ? (list.length ? 'bound' : 'empty') : 'unknown';
+      observe('STOW_UNBIND_VERIFICATION', { container, outcome, count: Array.isArray(list) ? list.length : -1 });
+      return outcome;
+    } catch (error) {
+      observe('STOW_UNBIND_VERIFICATION', { container, outcome: 'unknown', status: Number(error?.status) || 0 });
+      return 'unknown';
+    }
+  }
+
+  async function unbindCurrentContainerLocked(button, container) {
     if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
     const login = await unbindLogin();
     if (!login) return toast('Could not detect Amazon login', true);
 
     usage('unbind');
-    unbindBusy = true;
     const runStarted = performance.now();
     let currentPhase = 'validate';
     observe('STOW_UNBIND_START', { container, loginReady:true });
-    const original = button?.textContent || 'Unbind';
+    const original = 'Unbind';
     if (button) {
       button.disabled = true;
       button.textContent = 'Validating…';
@@ -598,19 +641,42 @@
         },
         onPhase: phase => {
           currentPhase = phase;
-          if (!button) return;
-          button.textContent = phase === 'validate' ? 'Validating…'
-            : phase === 'summary' ? 'Checking…'
-            : 'Unbinding…';
+          unbindSetBusy(phase === 'validate' ? 'Validating…'
+            : phase === 'summary' ? 'Checking…' : 'Unbinding…');
         },
         request: async ({ phase, url, body }) => {
-          const result = await unbindPostJson(
-            url,
-            body,
-            phase === 'unbind' ? 20000 : 12000,
-            phase,
-            container
-          );
+          if (phase === 'unbind') {
+            // Persist before sending the irreversible request.
+            localStorage.setItem(unbindReviewKey(container), String(Date.now()));
+          }
+          let result;
+          for (let attempt = 1; attempt <= (phase === 'unbind' ? 1 : 2); attempt++) {
+            try {
+              result = await unbindPostJson(
+                url, body, phase === 'unbind' ? 20000 : 12000, phase, container
+              );
+              if (phase === 'validate') {
+                const returned = clean(result.data?.scannableId);
+                if (returned && returned.toLowerCase() !== container.toLowerCase()) {
+                  const error = new Error('Validation returned another container');
+                  error.phase = phase;
+                  error.permanent = true;
+                  throw error;
+                }
+                if (!returned) throw Object.assign(new Error('Missing validated container'), { phase });
+              }
+              if (phase === 'summary' && !Array.isArray(result.data?.transferBindingSummaryList)) {
+                throw Object.assign(new Error('Invalid binding summary'), { phase });
+              }
+              break;
+            } catch (error) {
+              const status = Number(error?.status || 0);
+              if (phase === 'unbind' || attempt === 2 || error?.authRequired || error?.permanent
+                || ([401, 403, 419].includes(status))
+                || (status >= 400 && status < 500 && status !== 408 && status !== 429)) throw error;
+              observe('STOW_UNBIND_READ_RETRY', { phase, container, attempt, status });
+            }
+          }
           observe('STOW_UNBIND_PHASE_OK', {
             phase,
             status:result.status,
@@ -622,6 +688,7 @@
         }
       });
 
+      localStorage.removeItem(unbindReviewKey(container));
       finalText = 'Unbound ✓';
       observe('STOW_UNBIND_SUCCESS', {
         container,
@@ -638,10 +705,13 @@
         message:clean(error?.message || error || 'Unbind failed'),
         totalMs:Math.round(performance.now() - runStarted)
       });
-      if (error?.ambiguous || clean(error?.phase || currentPhase) === 'unbind' && Number(error?.status || 0) === 0) {
+      if (localStorage.getItem(unbindReviewKey(container)) || error?.ambiguous) {
+        const outcome = await verifyUnbindSummary(container);
         finalText = 'CHECK RESULT';
         resetDelay = 2600;
-        toast(`Unbind result unknown — check ${container}`, true);
+        toast('Unbind unconfirmed — ' + (outcome === 'empty'
+          ? 'no bindings reported; verify native result' : outcome === 'bound'
+            ? 'bindings still reported; verify before retry' : 'check native result'), true);
       } else {
         finalText = 'Failed';
         resetDelay = 2000;
@@ -649,16 +719,52 @@
         toast(`Unbind failed${phase ? ` (${phase})` : ''}`, true);
       }
     } finally {
-      unbindBusy = false;
-      if (button) {
-        button.textContent = finalText;
-        setTimeout(() => {
-          if (!button.isConnected) return;
-          button.disabled = false;
-          button.textContent = original;
-        }, resetDelay);
-      }
+      unbindSetBusy(finalText);
       refocusSearch(100);
+    }
+  }
+
+
+  // Exclusive across FCResearch tabs on the same origin; never queue a second write.
+  async function unbindCurrentContainer(button) {
+    if (unbindBusy || button?.disabled) return;
+    const container = currentContainer();
+    if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
+    if (!navigator.locks?.request) return toast('Browser tab lock unavailable — Unbind not sent', true);
+    unbindBusy = true;
+    unbindSetBusy('Preparing…');
+    try {
+      const acquired = await navigator.locks.request('bwu2-v2-stow-unbind',
+        { ifAvailable: true }, async lock => {
+          if (!lock) return false;
+          if (currentContainer() !== container) {
+            toast('Container changed — Unbind cancelled', true);
+            return true;
+          }
+          if (localStorage.getItem(unbindReviewKey(container))) {
+            const result = await verifyUnbindSummary(container);
+            if (result !== 'bound' || !window.confirm(
+              'Previous Unbind result is UNKNOWN for ' + container
+              + '. Have you checked in native Unbind that it is still bound and a new attempt is needed?'
+            )) {
+              toast('CHECK RESULT — no second Unbind sent for ' + container, true);
+              return true;
+            }
+            // Explicit operator confirmation after read-only proof of remaining bindings.
+            localStorage.removeItem(unbindReviewKey(container));
+          }
+          await unbindCurrentContainerLocked(button, container);
+          return true;
+        });
+      if (!acquired) toast('Unbind already running in another FCResearch tab', true);
+    } catch (error) {
+      observe('STOW_UNBIND_LOCK_FAILURE', { container, reason: clean(error?.message || 'Lock failure') });
+      toast('Unbind blocked — check session or browser lock', true);
+    } finally {
+      setTimeout(() => {
+        unbindBusy = false;
+        unbindSetBusy('Unbind', false);
+      }, 1600);
     }
   }
 
@@ -679,6 +785,7 @@
       });
     });
     const unbind = $('[data-unbind]', root);
+    if (unbindBusy && unbind) { unbind.disabled = true; unbind.textContent = 'Preparing…'; }
     if (unbind) unbind.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();

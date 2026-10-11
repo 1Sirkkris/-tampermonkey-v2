@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.84
+// @version      0.1.85
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.84';
+  const VERSION = '0.1.85';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1206,14 +1206,13 @@
       return false;
     }
     if (!result) {
-      const clickable = river;
       badge.style.background = LEVEL_COLORS[0];
-      badge.textContent = 'Hazmat N/A';
-      badge.classList.toggle('fc-river-l0', clickable);
-      badge.setAttribute('role', clickable ? 'button' : 'status');
-      if (clickable) { badge.tabIndex = 0; badge.title = 'Create Hazmat RIVER ticket'; }
-      else { badge.removeAttribute('tabindex'); badge.title = ''; }
-      return clickable;
+      badge.textContent = 'Hazmat UNKNOWN';
+      badge.classList.remove('fc-river-l0');
+      badge.setAttribute('role', 'status');
+      badge.removeAttribute('tabindex');
+      badge.title = 'Unverified Pandash result — use Pandash or Recheck';
+      return false;
     }
     const level = clampLevel(result[0]);
     const message = String(result[1] || '');
@@ -1319,7 +1318,7 @@
 
   function inventoryBadgeNeedsRecheck(badge) {
     const text = clean(badge?.textContent || '');
-    return /hazmat\s*n\/a/i.test(text) || /^L0\b/i.test(text);
+    return /hazmat\s*(?:n\/a|unknown|error)/i.test(text) || /^L0\b/i.test(text);
   }
 
   function collectInventoryHazmatWork({ force = false, failuresOnly = false } = {}) {
@@ -1346,8 +1345,22 @@
   }
 
   async function runInventoryHazmat(work, force) {
-    const runId = ++inventoryRunId;
     if (!work.length) return 0;
+    const runId = ++inventoryRunId;
+    // Display a pending badge immediately: DOM refreshes must not cancel
+    // an in-flight request and launch another for the same ASIN.
+    for (const { pills } of work) {
+      for (const pill of pills) {
+        let badge = $('.fc-badge', pill);
+        if (!badge) {
+          badge = markUi(document.createElement('span'));
+          badge.className = 'fc-badge';
+          pill.appendChild(badge);
+        }
+        badge.textContent = 'Hazmat checking…';
+        badge.style.background = LEVEL_COLORS[0];
+      }
+    }
     await runWithConcurrency(work, MAX_PARALLEL, async ({ asin, pills }) => {
       if (runId !== inventoryRunId) return;
       const result = await getHazmat(asin, force);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.41
+// @version      0.2.42
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.41';
+  const VERSION = '0.2.42';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
@@ -55,7 +55,7 @@
   const BIN_TTL = 5 * 60 * 1000;
   const HISTORY_TTL = 2 * 60 * 1000;
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
-  const HAZ_FAILURE_TTL = 60 * 1000;
+  const HAZ_RESTRICTION_TTL = 30 * 60 * 1000;
   const HAZMAT_RETRY_DELAYS_MS = [500, 1500];
   const REQUEST_TIMEOUT_MS = 15000;
   const NATIVE_INVENTORY_PREVIEW_TTL_MS = 30 * 1000;
@@ -1184,8 +1184,8 @@
 
   const isAsin = value => /^[A-Z0-9]{10}$/i.test(upper(value));
   const hazKey = (fc, asin) => `${upper(fc)}:${upper(asin)}`;
-  const hazStoreKey = (fc, asin) => `${CACHE_PREFIX}haz:${upper(fc)}:${upper(asin)}`;
-  const hazLevelKey = fc => `${CACHE_PREFIX}hazlevel:${upper(fc)}`;
+  const hazStoreKey = (fc, asin) => `${CACHE_PREFIX}haz-exact-v2:${upper(fc)}:${upper(asin)}`;
+  const hazLevelKey = fc => `${CACHE_PREFIX}hazlevel-ttl-v2:${upper(fc)}`;
 
   function readHazStored(fc, asin) {
     try {
@@ -1208,7 +1208,9 @@
         return await gmRequest(options);
       } catch (error) {
         lastError = error;
-        if (attempt >= HAZMAT_RETRY_DELAYS_MS.length) break;
+        const status = Number(String(error?.message || '').match(/\bHTTP (\d{3})\b/)?.[1] || 0);
+        if (attempt >= HAZMAT_RETRY_DELAYS_MS.length
+            || (status >= 400 && status < 500 && status !== 408 && status !== 429)) break;
         recordUsage(`network.hazmat.retry.${attempt + 1}`);
         await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAYS_MS[attempt]));
       }
@@ -1232,7 +1234,9 @@
       }
 
       const stored = readHazStored(fc, asin);
-      if (stored?.ok && now - Number(stored.ts) < HAZ_SUCCESS_TTL) {
+      if (stored?.ok && now - Number(stored.ts) < HAZ_SUCCESS_TTL
+          && stored.value && Number.isInteger(stored.value.level)
+          && stored.value.level >= 0 && stored.value.level <= 8) {
         hazMemory.set(key, { ts: Number(stored.ts), ttl: HAZ_SUCCESS_TTL, value: stored.value });
         stats.hazCacheHits++;
         return { hazmat: stored.value, source: 'cache' };
@@ -1253,40 +1257,80 @@
     const work = (async () => {
       stats.hazNetwork++;
 
-      let restriction = null;
-      try { restriction = GM_getValue(hazLevelKey(fc), null); } catch {}
-      if (!restriction) {
+      async function readRestriction(refresh = false) {
+        if (!refresh) {
+          let saved = null;
+          try { saved = GM_getValue(hazLevelKey(fc), null); } catch {}
+          if (saved && typeof saved === 'object'
+              && Date.now() - Number(saved.ts) < HAZ_RESTRICTION_TTL
+              && /^[a-z0-9_-]{1,80}$/i.test(String(saved.value || ''))) return saved.value;
+        }
         try {
           const response = await hazmatRequestWithRetry({
             method: 'GET',
             url: `https://pandash.amazon.com/GridServlet?fc=${encodeURIComponent(fc)}`,
             responseType: 'json'
           }, 'Pandash restriction lookup');
-          restriction = response.response?.restriction || 'default';
-          try { GM_setValue(hazLevelKey(fc), restriction); } catch {}
-        } catch {
-          restriction = 'default';
+          const value = response.response?.restriction;
+          if (!/^[a-z0-9_-]{1,80}$/i.test(String(value || ''))) {
+            throw new Error('Pandash restriction configuration unavailable');
+          }
+          const restriction = String(value);
+          try { GM_setValue(hazLevelKey(fc), { value: restriction, ts: Date.now() }); } catch {}
+          return restriction;
+        } catch (error) {
+          if (/HTTP (?:401|403|419)|login|auth/i.test(String(error?.message || ''))) throw error;
+          recordUsage('hazmat.restriction.fallback');
+          return 'default';
         }
       }
+      let restriction = await readRestriction(force);
 
-      const response = await hazmatRequestWithRetry({
-        method: 'POST',
-        url: 'https://pandash.amazon.com/GridServlet',
-        data: `language=default&source=${encodeURIComponent(restriction || 'default')}-hazmat-FC&marketPlaces=${MARKETPLACE}&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        responseType: 'json'
-      }, 'Pandash hazmat lookup');
+      for (let attempt = 0; attempt <= HAZMAT_RETRY_DELAYS_MS.length; attempt++) {
+        if (attempt) {
+          recordUsage('hazmat.incomplete.retry');
+          await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAYS_MS[attempt - 1]));
+          if (attempt === 1) restriction = await readRestriction(true);
+        }
+        const response = await hazmatRequestWithRetry({
+          method: 'POST',
+          url: 'https://pandash.amazon.com/GridServlet',
+          data: `language=default&source=${encodeURIComponent(restriction)}-hazmat-FC&marketPlaces=${MARKETPLACE}&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          responseType: 'json'
+        }, 'Pandash hazmat lookup');
 
-      const row = response.response?.rows?.find(item => upper(item?.asin) === asin);
-      const value = row ? {
-        level: Number(row.level || 0),
-        message: String(row.message || '')
-      } : null;
+        const finalUrl = String(response.finalUrl || response.responseURL || '');
+        let redirected = false;
+        if (finalUrl) {
+          try {
+            const parsed = new URL(finalUrl);
+            redirected = parsed.hostname !== 'pandash.amazon.com' || parsed.pathname !== '/GridServlet';
+          } catch { redirected = true; }
+        }
+        const contentType = String(response.responseHeaders || '').match(/^content-type:\s*([^;\r\n]+)/im)?.[1] || '';
+        if (redirected || /html/i.test(contentType)) {
+          throw new Error('Pandash session or unexpected redirect — refresh authentication');
+        }
+        const rows = response.response?.rows;
+        const matches = Array.isArray(rows) ? rows.filter(item => upper(item?.asin) === asin) : [];
+        const row = matches.length === 1 ? matches[0] : null;
+        const rawLevel = row?.level;
+        const level = Number(rawLevel);
+        const valid = row && rawLevel !== null && rawLevel !== undefined
+          && String(rawLevel).trim() !== '' && Number.isInteger(level) && level >= 0 && level <= 8;
+        if (valid) {
+          const value = { level, message: String(row.message || '') };
+          hazMemory.set(key, { ts: Date.now(), ttl: HAZ_SUCCESS_TTL, value });
+          writeHazStored(fc, asin, { ts: Date.now(), ok: true, value });
+          recordUsage('hazmat.exact.success');
+          return value;
+        }
+        recordUsage(Array.isArray(rows) ? 'hazmat.exact.missing' : 'hazmat.response.invalid');
+      }
 
-      const ttl = value ? HAZ_SUCCESS_TTL : HAZ_FAILURE_TTL;
-      hazMemory.set(key, { ts: Date.now(), ttl, value });
-      if (value) writeHazStored(fc, asin, { ts: Date.now(), ok: true, value });
-      return value;
+      // No exact, validated response: UNKNOWN. Never cache this as L0 or N/A.
+      return null;
     })();
 
     inFlight.set(flightKey, work);
