@@ -4,7 +4,7 @@ Active branch: **v4-cleanroom**. Resume from [CHECKPOINT](CHECKPOINT.md), then r
 
 **18 operational installers are built: 14 implementations COMPLETE offline, four PARTIAL.** The nineteenth installer is a manual read-only native capture diagnostic. All fresh **18 approved code passes (1–18)** are complete offline; documentation pass 19 maintains these records. **537 tests pass**; all **19 installers match their source and metadata**. No current suite is LIVE MUTATION VERIFIED. GitHub checkpoints are authorised and published; deployment and live operational actions remain held.
 
-The direct links below serve branch `v4-cleanroom`. Passes 1/6/10 are published through `80ec375` (confirmed 2026-10-11 12:27:46 AEDT); the final documentation checkpoint follows. See [CHECKPOINT](CHECKPOINT.md) for the latest confirmed push, [current pass results](review/approved-current/README.md) and [evidence coverage](review/approved-current/evidence.md). These are staged test candidates, not production acceptance.
+The direct links below serve branch `v4-cleanroom`. All approved fixes and final validation are published at `7dbb3c2` (confirmed 2026-10-11 12:32:05 AEDT); CHECKPOINT records the publication receipt. See [CHECKPOINT](CHECKPOINT.md) for the latest confirmed push, [current pass results](review/approved-current/README.md) and [evidence coverage](review/approved-current/evidence.md). These are staged test candidates, not production acceptance.
 
 The October 6 user sample supports observed FCR native inventory/empty Product/Pandash/cached MADCAT reads on Master 0.1.3. It does not verify the whole current Master 0.1.7, cold/expired auth, every native control or operational mutations.
 

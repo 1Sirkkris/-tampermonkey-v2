@@ -2,7 +2,7 @@
 
 Audit base: remote `v4-cleanroom` at `1e9c610ab43ffd0496f0341213e1753349a0fe1c`. These are the fresh 19 passes, not original O1–O10 or earlier published P1–P13. Earlier numbered approvals and their reports remain separate.
 
-**All 18 approved code passes 1–18 are complete offline.** The user's later explicit approval lifted the remaining 1/6/10 and GitHub publication holds. Each correction has its independent recovery milestone; pass 19 maintains the current readiness/evidence record. GitHub publication through `80ec375` is confirmed; final documentation follows. Deployment and live operational actions remain held. No production/native action was performed. Parallel workers handled disjoint approved files; root owns builds, versions, regression validation and publication.
+**All 18 approved code passes 1–18 are complete offline.** The user's later explicit approval lifted the remaining 1/6/10 and GitHub publication holds. Each correction has its independent recovery milestone; pass 19 maintains the current readiness/evidence record. GitHub publication of all approved fixes and final validation is confirmed at `7dbb3c2`,2026-10-11 12:32:05 AEDT. Deployment and live operational actions remain held. No production/native action was performed. Parallel workers handled disjoint approved files; root owns builds, versions, regression validation and publication.
 
 Per-pass publication-hold notes record the status at their original implementation time; the latest CHECKPOINT receipt and current explicit approval supersede those historical holds.
 
@@ -42,6 +42,6 @@ Known implementation gates: empty-container location proof (Drop/Stow) and extra
 
 ## Exact next action / recovery
 
-Publish the final documentation checkpoint and receipt, preserving all tested candidates. No active operational WIP. Staged user testing begins with the README read-only cases; live operational actions and production require separately approved cases. Remaining implementation needs original sanitized empty-container location evidence and correlated extra AFT Confirm semantics; do not fabricate schemas or replay UNKNOWN to complete a queue.
+Final verified checkpoint7dbb3c2 and its receipt are saved. No active operational WIP; preserve the tested candidates. Staged user testing begins with the README read-only cases; live operational actions and production require separately approved cases. Remaining implementation needs original sanitized empty-container location evidence and correlated extra AFT Confirm semantics; do not fabricate schemas or replay UNKNOWN to complete a queue.
 
 Recover from the latest verified remote `v4-cleanroom` and top CHECKPOINT record. Earlier local checkpoints are preserved in refs `v4-local-approved-checkpoint-*`; the original dirty checkout is untouched. The earlier private full-diff report is historical recovery of the formerly unpublished batch, superseded by these durable GitHub checkpoints. Never add the untracked development node_modules symlink. [Evidence coverage](evidence.md) identifies original bytes, selected history/KB sections, mocks and unavailable material.

@@ -1,3 +1,16 @@
+# Confirmed final publication receipt
+
+- Receipt created: **2026-10-11 12:32:38 AEDT**, actual Australia/Sydney system clock.
+- Latest verified full-suite checkpoint: **7dbb3c23f67ce6b222e5e7fac34e1aec636bcf91**, pushed and remote SHA/exact tree read back at **2026-10-11 12:32:05 AEDT — CONFIRMED**. Tree09ac0a4d99a293cfcc721facc90eea821b90b8c2. Source/tests/all19 installers are durable on GitHub. This receipt records that confirmed checkpoint; only documentation changes here. Receipt publication is verified separately after committing, without a self-referential SHA/time.
+- Final verification: **537 tests pass;0 failed/skipped/cancelled**,10.854seconds; **19 exact installer/source matches**,metadata/version/update/identity/readiness/independence and **71 source syntax checks pass**;whitespace pass. All18 approved fresh code passes1–18 complete offline. No active WIP. The three new fixes added68 cases; fixture groups overlap.
+- Latest executing versions affected:AFT0.1.5,ISS0.1.8,Bind0.1.5,Unbind0.1.4,Bin0.1.2. Full19-link/version/status table in README.14 operational implementations COMPLETE offline,4 PARTIAL;manual diagnostic COMPLETE. No live mutation or production deployment performed.
+- Remaining implementation gates:original sanitized native empty-container location proof for Drop/Stow; correlated legitimate additional native Confirm semantics for AFT/ISS. Auth/native application/visual/scanner/worker/outcome/physical-print acceptance pending. No NOT BUILT installer. UNKNOWN remains protected; proven typed AFT recovery and familiar V2 Bin workflow retained.
+- Exact NEXT:resume from latest remote v4-cleanroom, check branch SHA and this receipt. Begin separately agreed README staged read-only user tests; review new sanitized missing-contract evidence when available. Do not repeatedly refactor/retest passing code or invent native contracts. Further live operational/printing/production actions require explicit case approval.
+- Pending approvals:none for completed fixes or GitHub recovery checkpoints;live operations/deployment and material new scope remain held. V2/main and frozen V3 untouched.
+- Recovery:current source/tests/installers/contracts/pass records/evidence inventory are all in GitHub. Earlier dirty checkout preserved; earlier local checkpoint histories archived; node_modules untracked/excluded. Confirmed checkpoint intervals during this implementation all below10minutes; time since preceding Bin push to final source confirmation259seconds. The receipt's creation is 33seconds after that confirmed push.
+
+## Earlier checkpoint records — history
+
 # Final approved1/6/10 recovery checkpoint
 
 - Created: 2026-10-11 12:31:49 AEDT; actual Australia/Sydney system clock.
