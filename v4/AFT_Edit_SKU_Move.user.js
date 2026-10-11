@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 AFT Edit SKU Move
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.4
+// @version 0.1.5
 // @description Native AFT EACH/SKU/Date/Move/Flip with durable unresolved action barriers.
 // @include /^https?:\/\/aft-qt-[^\/]+\.corp\.amazon\.com\/app\/(?:edititems|moveitems|fcskuflip)/
 // @grant unsafeWindow
@@ -223,7 +223,7 @@
         const target = new window2.URL(response.url || path, window2.location.origin);
         if (response.redirected || target.origin !== window2.location.origin || target.pathname !== new window2.URL(path, window2.location.origin).pathname) throw new Error("Native AFT redirected/auth response");
         const raw = await response.text();
-        if (!response.ok) throw Object.assign(new Error("Native AFT HTTP " + response.status), { outcome: response.status >= 400 && response.status < 500 ? "REJECTED" : "UNKNOWN" });
+        if (!response.ok) throw Object.assign(new Error("Native AFT HTTP " + response.status), { outcome: "UNKNOWN" });
         return raw;
       } finally {
         window2.clearTimeout(timer);
@@ -1612,7 +1612,7 @@
   }
 
   // aft-entry.mjs
-  var VERSION = "0.1.4";
+  var VERSION = "0.1.5";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.aft.installer");
   if (!page[guard]) {

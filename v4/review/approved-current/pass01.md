@@ -1,0 +1,8 @@
+# Pass 1 — AFT uncertain response recovery
+
+Problem: an unspecified HTTP 400 after Confirm was treated as rejection and entered recovery, repeating an action that might already have completed.
+Correction: the canonical AFT client classifies generic HTTP failures as UNKNOWN. Existing positively identified native ERRORED/consumer rejection recovery remains; no new retry, endpoint, timer or reconciliation mechanism. A fresh exact unit count can supply evidence, but an unchanged count alone cannot prove rejection or permit replay.
+Origin: aft-client.mjs assigned REJECTED to every 4xx; the existing runner correctly acted on that incorrect classification. Both standalone AFT and ISS use this client.
+Verification: 75 grouped source and real generated-installer cases pass, including 26 new uncertain-response cases. Before: ambiguous Confirm HTTP400 caused 3 Confirms/2 Ends. After: 1 Confirm/0 Ends, durable UNKNOWN; Run, Clear, reload and mode changes cannot repeat it. Normal SKU/EACH/date/Flip/Move, typed recovery, preflight cancellation and confirmed progress remain covered. All native outcomes in these tests are simulated; no live operation was performed.
+Candidates: AFT 0.1.5 and ISS 0.1.8. Both remain PARTIAL because legitimate additional native Confirm stage/outcome semantics are unavailable. No automatic fresh-count reconciliation was introduced.
+Status: approved correction OFFLINE VERIFIED — LIVE GATE PENDING; remaining native evidence/acceptance is separate. Test command: node --test tests/aft-uncertain.test.mjs tests/aft-uncertain-installer.test.mjs tests/aft.test.mjs tests/iss.test.mjs tests/iss-startup.test.mjs.

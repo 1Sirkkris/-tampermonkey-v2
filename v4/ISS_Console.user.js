@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.7
+// @version 0.1.8
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -314,7 +314,7 @@
         const target = new window2.URL(response.url || path, window2.location.origin);
         if (response.redirected || target.origin !== window2.location.origin || target.pathname !== new window2.URL(path, window2.location.origin).pathname) throw new Error("Native AFT redirected/auth response");
         const raw = await response.text();
-        if (!response.ok) throw Object.assign(new Error("Native AFT HTTP " + response.status), { outcome: response.status >= 400 && response.status < 500 ? "REJECTED" : "UNKNOWN" });
+        if (!response.ok) throw Object.assign(new Error("Native AFT HTTP " + response.status), { outcome: "UNKNOWN" });
         return raw;
       } finally {
         window2.clearTimeout(timer);
@@ -3103,7 +3103,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.7";
+  var VERSION = "0.1.8";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

@@ -8,7 +8,7 @@ Approved code scopes **2–5, 7–9, 11–18 are complete offline**. Pass 19 mai
 
 | Pass | Problem → correction or proposal | Result / exact evidence |
 |---|---|---|
-| 1 | AFT ambiguous reply can enter recovery → proposal: retain UNKNOWN, no automatic replay; preserve validated native ERRORED recovery | HELD; current source still produces 3 Confirms/2 Ends for unspecified HTTP400. Fresh count can help reconciliation, but unchanged count is not rejection proof. |
+| 1 | AFT ambiguous reply can enter recovery → proposal: retain UNKNOWN, no automatic replay; preserve validated native ERRORED recovery | [Completed offline](pass01.md); 75 grouped source/installer cases. Ambiguous HTTP400 now causes 1 Confirm/0 Ends; typed recovery retained. Fresh count can assist but unchanged count is not rejection proof. |
 | 2 | Stow click can adopt a changed tote → exact captured source and cancellable parent/native startup | [Completed offline](pass02.md); 27 grouped cases |
 | 3 | Old expiry or item/date context can be reused → one workflow lifetime, refreshed Run context | [Completed offline](pass03.md); shared Sideline/ISS checks |
 | 4 | Native QTY/Clear can start after Stop → tracked unsent lifetime before ownership/bootstrap | [Completed offline](pass04.md); 50 grouped cases |
@@ -40,6 +40,6 @@ Known implementation gates: held 1/6/10, empty-container location proof (Drop/St
 
 ## Exact next action / recovery
 
-Discuss 1, 6, 10 with the user in that order. Do not implement them until individually approved. Publication is a separate decision for the concrete tested batch; fetch/read back the remote first and reconcile any advance without overwrite/force-push. Current remote is still the base, not these local candidates.
+The user approved 1, 6, 10 and publication. Pass 1 is verified; finish the pass 6 shared-caller check and pass 10 captured-native installer check, independently checkpointing each. Previous 15-pass batch published/read back at cfdaaff, 2026-10-11 12:14:43 AEDT. Deployment and live actions remain held.
 
 Recover from this local branch and enclosing checkpoint. If scratch is unavailable, the private `V4_Approved_Implementation_Review.md` contains the complete unpublished unified diff and validation outputs; apply only to an isolated checkout of the pinned base with `git apply --check`. Preserve any older dirty/newer remote work. The old `/workspace/scratch/82eb845e7e24/repo` is untouched. There is no operational WIP in this batch; interrupted WIP remains in earlier recovery commits as history. Never add the untracked `v4/node_modules` symlink.

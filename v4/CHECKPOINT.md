@@ -1,3 +1,18 @@
+# Approved pass 1 recovery checkpoint
+
+- Created: 2026-10-11 12:23:17 AEDT; actual Australia/Sydney system clock.
+- Authority: explicit user approval for fresh 1, 6, 10 and GitHub checkpoints. V2/V3, live operations, printing and production deployment remain held.
+- Current workflow / completed: pass 1 canonical AFT HTTP-failure classification; standalone AFT 0.1.5 and shared ISS 0.1.8 atomically built. 75 targeted source/generated-installer cases pass (26 new). Before/after and remaining native Confirm gate: review/approved-current/pass01.md.
+- Files: aft-client.mjs, aft-entry.mjs, iss-entry.mjs, their two installers, four AFT/ISS test files, README, current pass register, this record. Enclosing commit is exact inventory/SHA.
+- Last whole-suite verification: prior published snapshot cfdaaff, 469 tests / 19 exact builds / 70 source checks. New 75-case AFT group passes; whole current suite not yet rerun. Do not add overlapping totals or claim live verification.
+- Known failures / WIP: pass 6 source + tests in hierarchy-native/entry/runtime and tests/hierarchy-native-guard.test.mjs, hierarchy-template.test.mjs are uncommitted WIP pending Stow worker shared-caller review; old Bind/Unbind installers preserved. Pass 10 source/tests and freshly built Bin 0.1.2 are outside this pass-1 commit; captured native installer proof passed, separate checkpoint next. Source/build mismatch during WIP is expected and explicitly not a verified suite.
+- Latest confirmed GitHub push/readback: 2026-10-11 12:14:43 AEDT, cfdaaff47a2e49a34c2b0760e3c96f20bf6b1fdc, confirmed. This pass-1 push is PENDING; record successful time separately after readback. Elapsed since prior push at creation: 515 seconds.
+- Exact NEXT: publish this immutable pass-1 commit with expected current remote head/non-force update; verify exact tree and remote SHA. Then finish/reproduce pass 6 shared Stow native worker interaction; build Bind/Unbind and checkpoint. Then checkpoint pass 10, run whole-suite validation and final readiness record.
+- Pending approvals: none for 1/6/10 or checkpoints. Any material new scope, live operational action or deployment requires approval.
+- Recovery: v4-cleanroom, /workspace/scratch/82eb845e7e24/v4-approved-work. Older dirty repo untouched. Never add untracked node_modules development symlink. Earlier local histories preserved in v4-local-approved-checkpoint-* refs; remote primary durable source.
+
+## Earlier checkpoint records — history
+
 # Approval recovery checkpoint — previously verified batch
 
 - Created: 2026-10-11 12:12:57 AEDT; actual Sydney system clock.
