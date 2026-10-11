@@ -10,7 +10,7 @@
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.9
+// @version      5.6.10
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.9';
+  const VERSION = '5.6.10';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -40,6 +40,7 @@
   const COOKIE = {
     floor: 'vm_fc_floor',
     print: 'vm_fc_print_dropzone',
+    printPrime: 'vm_fc_print_prime_dropzone',
     printQty: 'vm_fc_print_dz_qty',
     showImg: 'vm_fc_show_img_hover',
     imgWidth: 'vm_fc_img_width',
@@ -197,6 +198,10 @@
     return settingBool('vm-set-print', COOKIE.print, false);
   }
 
+  function printPrimeEnabled() {
+    return settingBool('vm-set-print-prime', COOKIE.printPrime, true);
+  }
+
   function printQty() {
     const input = document.getElementById('vm-set-qty');
     const value = Number.parseInt(input?.value || getCookie(COOKIE.printQty) || '2', 10);
@@ -274,6 +279,7 @@
     panel.innerHTML = `
       <b>Print</b>
       <label><input type="checkbox" id="vm-set-print">Print Dropzone Label</label>
+      <label style="padding-left:16px" title="Only applies to the Prime dropzone button"><input type="checkbox" id="vm-set-print-prime">Print PRIME Dropzone Label</label>
       <label>Quantity <input type="number" id="vm-set-qty" min="1" max="99"></label>
       <b>Hover Preview</b>
       <label><input type="checkbox" id="vm-set-img">Show Image</label>
@@ -301,6 +307,7 @@
     };
 
     bindCheck('vm-set-print', COOKIE.print, false);
+    bindCheck('vm-set-print-prime', COOKIE.printPrime, true);
     bindNumber('vm-set-qty', COOKIE.printQty, 2, 1, 99);
     bindCheck('vm-set-img', COOKIE.showImg, true);
     bindNumber('vm-set-imgw', COOKIE.imgWidth, 150, 50, 180);
@@ -422,7 +429,9 @@
     }).then(() => {
       finish('Moved ✓');
       toast(`Moved to ${dest}`);
-      if (printEnabled()) printLabel(dest).catch(error => toast(`Print failed: ${error.message}`, true));
+      if (printEnabled() && (key !== 'Prime' || printPrimeEnabled())) {
+        printLabel(dest).catch(error => toast(`Print failed: ${error.message}`, true));
+      }
     }).catch(error => {
       const status = Number(error?.status || 0);
       finish(status ? `Failed ${status}` : clean(error?.message || 'Move failed'), true);
