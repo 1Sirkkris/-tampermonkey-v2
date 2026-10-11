@@ -218,3 +218,89 @@ test('Master and Tote capture subscribers receive native credentials independent
   assert.equal(JSON.parse(tote.get(MEASUREMENT_AUTH_KEY)).token, otherToken);
   second(); assert.equal(app.page.fetch, app.originalFetch);
 });
+
+// Pass 16: acquisition sharing is local to this auth provider, not native capture or GM storage.
+test('four compatible cold callers share one frame and listener while retaining their own deadlines', async t => {
+  const app = fixture(t);
+  const pending = ['X012345678', 'X012345679', 'B012345678', 'B012345679'].map(code => app.auth.acquire(code));
+  assert.equal(app.frames().length, 1);
+  assert.equal(app.storage.listeners.size, 1);
+  assert.equal(app.tasks.size, 4);
+  app.storage.save();
+  assert.deepEqual((await Promise.all(pending)).map(value => value.token), [token, token, token, token]);
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+});
+
+test('cancelling one shared caller retains its peers; cancelling the last releases the frame and allows fresh acquisition', async t => {
+  const app = fixture(t), first = new AbortController(), second = new AbortController();
+  const cancelled = app.auth.acquire('X012345678', { signal: first.signal });
+  const survivor = app.auth.acquire('B012345678', { signal: second.signal });
+  const sharedFrame = app.frames()[0];
+  first.abort(); await assert.rejects(cancelled, { code: 'CANCELLED' });
+  assert.deepEqual(app.frames(), [sharedFrame]); assert.equal(app.storage.listeners.size, 1); assert.equal(app.tasks.size, 1);
+  app.storage.save(); assert.equal((await survivor).token, token);
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+  app.storage.data.clear();
+  const last = new AbortController(), lastPending = app.auth.acquire('X012345678', { signal: last.signal });
+  last.abort(); await assert.rejects(lastPending, { code: 'CANCELLED' });
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+  const fresh = app.auth.acquire('B012345678'); assert.equal(app.frames().length, 1); assert.notEqual(app.frames()[0], sharedFrame);
+  app.storage.save(); assert.equal((await fresh).token, token);
+});
+
+test('a shared caller deadline does not expire a later caller or its native frame', async t => {
+  const app = fixture(t), early = app.auth.acquire('X012345678');
+  const [firstTimer, expireEarly] = [...app.tasks][0];
+  const later = app.auth.acquire('B012345678'), frame = app.frames()[0];
+  app.tasks.delete(firstTimer); expireEarly(); assert.equal(await early, null);
+  assert.deepEqual(app.frames(), [frame]); assert.equal(app.tasks.size, 1); assert.equal(app.storage.listeners.size, 1);
+  app.storage.save(); assert.equal((await later).token, token);
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+});
+
+test('different previous-token conditions and forced native captures never join a cold acquisition', async t => {
+  const app = fixture(t), controllers = Array.from({ length: 5 }, () => new AbortController());
+  const rejectsOld = app.auth.acquire('X012345678', { signal: controllers[0].signal, previousToken: token });
+  const rejectsOther = app.auth.acquire('B012345678', { signal: controllers[1].signal, previousToken: otherToken });
+  const ordinary = app.auth.acquire('X012345679', { signal: controllers[2].signal });
+  const forced = app.auth.acquire('B012345679', { signal: controllers[3].signal, force: true });
+  const forcedOld = app.auth.acquire('X012345670', { signal: controllers[4].signal, force: true, previousToken: token });
+  assert.equal(app.frames().length, 5); assert.equal(app.storage.listeners.size, 5);
+  app.storage.save(token);
+  assert.equal((await rejectsOther).token, token); assert.equal((await ordinary).token, token); assert.equal((await forced).token, token);
+  assert.equal(app.frames().length, 2); assert.equal(app.storage.listeners.size, 2);
+  app.storage.save(otherToken);
+  assert.equal((await rejectsOld).token, otherToken); assert.equal((await forcedOld).token, otherToken);
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+});
+
+test('matching rejected-token requirements can share while forced acquisition still needs a new capture record', async t => {
+  const app = fixture(t); app.storage.save(token, 'old');
+  const first = app.auth.acquire('X012345678', { previousToken: token });
+  const second = app.auth.acquire('B012345678', { previousToken: token });
+  const forced = app.auth.acquire('X012345679', { force: true });
+  assert.equal(app.frames().length, 2); assert.equal(app.storage.listeners.size, 2);
+  // Notify without changing the stored native capture: forced acquisition must wait.
+  for (const { callback } of [...app.storage.listeners.values()]) callback();
+  assert.equal(app.frames().length, 2);
+  app.storage.save(token, 'new-record-same-token'); assert.equal((await forced).token, token);
+  assert.equal(app.frames().length, 1); assert.equal(app.tasks.size, 2);
+  app.storage.save(otherToken); assert.equal((await first).token, otherToken); assert.equal((await second).token, otherToken);
+  assert.equal(app.frames().length, 0); assert.equal(app.tasks.size, 0); assert.equal(app.storage.listeners.size, 0);
+});
+
+test('separate auth runtime owners retain independent acquisition frames and listeners', async t => {
+  const app = fixture(t), other = createMeasurementAuth({ window: app.page, storage: app.storage, now: () => now });
+  const first = app.auth.acquire('X012345678'), second = other.acquire('B012345678');
+  assert.equal(app.frames().length, 2); assert.equal(app.storage.listeners.size, 2);
+  app.storage.save(); assert.equal((await first).token, token); assert.equal((await second).token, token);
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+});
+
+test('shared acquisition storage failure settles every caller and releases all native resources', async t => {
+  const app = fixture(t), pending = Array.from({ length: 4 }, () => app.auth.acquire('X012345678'));
+  app.storage.failGet = true;
+  for (const { callback } of [...app.storage.listeners.values()]) callback();
+  for (const result of pending) await assert.rejects(result, { code: 'STORAGE' });
+  assert.equal(app.frames().length, 0); assert.equal(app.storage.listeners.size, 0); assert.equal(app.tasks.size, 0);
+});

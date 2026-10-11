@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Stow Andons Helper
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.3
 // @description Native inline drop controls, product warnings and origin-owned operation workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -798,7 +798,7 @@
     if (!data || !Array.isArray(data.transferBindingSummaryList)) throw new NativeRequestError("Native hierarchy summary invalid");
   }
   function validateHierarchyAcknowledgement(data) {
-    if (!data || typeof data.hostName !== "string" || !clean(data.hostName) || data.success === false || data.error || data.errorMessage || data.exception) throw new NativeRequestError("Hierarchy result not positively acknowledged", { outcome: "UNKNOWN" });
+    if (!data || typeof data.hostName !== "string" || !clean(data.hostName) || data.success === false || data.error || data.errorMessage || data.exception || ["PENDING", "PROCESSING", "QUEUED"].includes(upper(data.status))) throw new NativeRequestError("Hierarchy result not positively acknowledged", { outcome: "UNKNOWN" });
   }
   function createHierarchyDriver({ request, identity, seedBind, getTemplate, setTemplate }) {
     return async (row, { mode, signal, beforeMutation, checkRunning, onPhase = () => {
@@ -989,6 +989,7 @@
       busy = true;
       try {
         await withOperationLock(window2, lockName, async () => {
+          if (disposed || controller.signal.aborted) throw new Error("Native preflight cancelled");
           const input = data.row;
           if (!input || typeof input.id !== "string" || !/^(?:tsX|csX)[A-Z0-9_-]+$/i.test(clean(input.container))) throw new Error("Invalid operation request");
           identity();
@@ -1005,11 +1006,13 @@
             onEvidence({ type: "operation", intent: "mutation", phase: "SUBMITTED", operationId: row.id, data: { mode } });
             reply("submitted");
           }, onPhase: (phase) => reply("phase", { phase }) });
+          if (disposed) return;
           journal.transition(row, "CONFIRMED", "Native result confirmed");
           onEvidence({ type: "operation", intent: "mutation", phase: "CONFIRMED", operationId: row.id, data: { mode } });
           reply("result", { outcome: "CONFIRMED", verifiedBy: result?.verifiedBy || "native-hierarchy-acknowledgement" });
         });
       } catch (error) {
+        if (disposed) return;
         let outcome = row?.state === "SUBMITTED" || row?.state === "UNKNOWN" ? "UNKNOWN" : "REJECTED";
         if (row?.state === "SUBMITTED" && error.outcome === "REJECTED") outcome = "REJECTED";
         try {
@@ -1020,7 +1023,7 @@
         if (row?.operationId) onEvidence({ type: "operation", intent: "mutation", phase: outcome, operationId: row.operationId, data: { mode } });
         reply("result", { outcome, message: clean(error.message) });
       } finally {
-        onEvidence({ type: "operation.worker", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
+        if (!disposed) onEvidence({ type: "operation.worker", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
       }
     };
     window2.addEventListener("message", handle);
@@ -1045,6 +1048,11 @@
     return (row, { mode, signal, beforeMutation, onPhase = () => {
     }, checkRunning = () => {
     } }) => new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(Object.assign(new Error("Native preflight cancelled"), { outcome: "REJECTED" }));
+        return;
+      }
+      checkRunning();
       const origin = mode === "move" ? "https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com" : "https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com";
       const nonce = window2.crypto.randomUUID(), url = new window2.URL(mode === "move" ? "/move-container" : "/unbindHierarchy", origin);
       url.searchParams.set("tmV4ParentOrigin", window2.location.origin);
@@ -1065,6 +1073,7 @@
       const fail = (message2, outcome) => Object.assign(new Error(message2), { outcome });
       const cancel = () => finish(fail(sent ? "Native operation outcome unknown after disposal" : "Native preflight cancelled", sent ? "UNKNOWN" : "REJECTED"));
       const message = (event) => {
+        if (done) return;
         const data = event.data;
         if (event.source !== frame.contentWindow || event.origin !== origin || data?.protocol !== "tm-v4.operation" || data.nonce !== nonce) return;
         if (data.type === "ready" && !sent) {
@@ -1128,7 +1137,7 @@
   } }) {
     const d = window2.document, controller = new window2.AbortController(), pool = createReadPool(4);
     let dataController = new window2.AbortController(), lastRows = [];
-    let disposed = false, busy = false, operationController, journal, storageError = "", container = "", signature = "", generation = 0, cache = /* @__PURE__ */ new Map(), hoverSerial = 0;
+    let disposed = false, busy = false, activeOperation, journal, storageError = "", container = "", signature = "", generation = 0, cache = /* @__PURE__ */ new Map(), hoverSerial = 0;
     let prefs = { floor: "P2", print: false, qty: 2, img: true, imgw: 150, title: true, dims: true, weight: true, sortable: true };
     try {
       prefs = { ...prefs, ...JSON.parse(window2.localStorage.getItem("tm-v4.stow.settings") || "{}") };
@@ -1194,26 +1203,32 @@
       return journal?.rows.filter((r) => ["SUBMITTED", "UNKNOWN"].includes(r.state)) || [];
     }
     async function act(mode, destination) {
-      if (busy || storageError || !container) return;
+      const intended = currentContainer();
+      if (disposed || busy || storageError || !intended) return;
       say("");
       busy = true;
       renderControls();
-      operationController = new window2.AbortController();
+      const operation = { container: intended, controller: new window2.AbortController(), submitted: false };
+      activeOperation = operation;
       let row;
+      const checkRunning = () => {
+        if (disposed || operation.controller.signal.aborted || upper(currentContainer()) !== upper(intended)) throw new Error("Stow source changed or helper disposed before submission");
+      };
       try {
         await withOperationLock(window2, "tm-v4.stow.owner", async () => {
+          checkRunning();
           journal = createOperationJournal({ storage: window2.localStorage, key: "tm-v4.stow.rows", uuid: () => window2.crypto.randomUUID() });
-          if (journal.rows.some((r) => upper(r.container) === upper(container) && ["SUBMITTED", "UNKNOWN", "QUEUED", "READING"].includes(r.state))) throw new Error("Unresolved operation exists for this container — verify native result");
-          row = journal.add([container], { mode, destination })[0];
+          if (journal.rows.some((r) => upper(r.container) === upper(intended) && ["SUBMITTED", "UNKNOWN", "QUEUED", "READING"].includes(r.state))) throw new Error("Unresolved operation exists for this container — verify native result");
+          row = journal.add([intended], { mode, destination })[0];
           journal.transition(row, "READING", "Authenticating native worker");
           say("READING • " + row.container);
-          const result = await operate(row, { mode, signal: operationController.signal, checkRunning: () => {
-            if (disposed) throw new Error("Disposed before submission");
-          }, beforeMutation: () => {
-            if (disposed) throw new Error("Disposed before submission");
+          const result = await operate(row, { mode, signal: operation.controller.signal, checkRunning, beforeMutation: () => {
+            checkRunning();
             journal.transition(row, "SUBMITTED", "Handed to native worker — verify result");
+            operation.submitted = true;
             say("SUBMITTED • " + row.container);
           }, onPhase: (phase) => say(row.state + " • " + phase) });
+          if (disposed) return;
           journal.transition(row, "CONFIRMED", "Confirmed by " + result.verifiedBy);
           say("CONFIRMED • " + (mode === "move" ? destination : "Unbound") + " • " + row.container);
           if (mode === "move" && prefs.print) {
@@ -1226,18 +1241,21 @@
           }
         });
       } catch (error) {
-        let outcome = row?.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED";
-        if (error.outcome === "REJECTED") outcome = "REJECTED";
+        let outcome = ["SUBMITTED", "UNKNOWN"].includes(row?.state) ? "UNKNOWN" : "REJECTED";
+        if (error.outcome === "REJECTED" && row?.state !== "UNKNOWN") outcome = "REJECTED";
         try {
-          if (row) journal.transition(row, outcome, error.message);
+          if (row && row.state !== outcome) journal.transition(row, outcome, error.message);
         } catch {
         }
         say(outcome + " • " + error.message);
       } finally {
         busy = false;
-        renderControls();
-        onEvidence({ type: "stow.handoff", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
-        focus();
+        if (activeOperation === operation) activeOperation = null;
+        if (!disposed) {
+          renderControls();
+          onEvidence({ type: "stow.handoff", intent: "workflow", data: { mode, state: row?.state || "blocked" } });
+          focus();
+        }
       }
     }
     function product(code) {
@@ -1298,6 +1316,7 @@
       if (disposed) return;
       const next = currentContainer();
       if (next !== container) {
+        if (activeOperation && !activeOperation.submitted && upper(next) !== upper(activeOperation.container)) activeOperation.controller.abort();
         container = next;
         generation++;
         cache = /* @__PURE__ */ new Map();
@@ -1411,7 +1430,7 @@
         if (r) journal.transition(r, "UNKNOWN", "Stow disposed after native handoff");
       } catch {
       }
-      operationController?.abort();
+      activeOperation?.controller.abort();
       dataController.abort();
       controller.abort();
       observer.disconnect();
@@ -1426,7 +1445,7 @@
   }
 
   // stow-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.3";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.stow.installer");
   if (!page[guard]) {

@@ -1,5 +1,5 @@
 import{registerWatermark}from'./watermark.mjs';import{createFcrReader}from'./fcr-read.mjs';import{createGmFetch}from'./gm-fetch.mjs';import{createMoveContainer}from'./move-container.mjs';import{createNativeJson}from'./native-json.mjs';import{createHierarchyDriver}from'./hierarchy-driver.mjs';import{resolveIdentity}from'./identity.mjs';import{createOperationBridge,serveOperationBridge,workerContext}from'./operation-bridge.mjs';import{createStowHelper}from'./stow-runtime.mjs';import{evidence,installRouteLifecycle}from'./ui-tools.mjs';
-const VERSION = '0.1.1';
+const VERSION = '0.1.3';
 const page=typeof unsafeWindow==='object'?unsafeWindow:window,guard=Symbol.for('tampermonkey.v4.stow.installer');
 if(!page[guard]){page[guard]={version:VERSION};const emit=data=>evidence(window,'STOW',VERSION,data);installRouteLifecycle(window,()=>{
  const context=workerContext(window);if(context){

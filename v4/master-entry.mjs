@@ -6,7 +6,7 @@ import { createFcrEnrichment, createGmJsonReader } from './fcr-enrichment.mjs';
 import { createMasterFeatures } from './master-features.mjs';
 import { createMasterActions } from './master-actions.mjs';
 
-const VERSION = '0.1.6';
+const VERSION = '0.1.7';
 const page = typeof unsafeWindow === 'object' ? unsafeWindow : window;
 const storage = { get: (key, fallback) => GM_getValue(key, fallback), set: (key, value) => GM_setValue(key, value),
   listen: (key, callback) => GM_addValueChangeListener(key, callback), remove: id => GM_removeValueChangeListener(id) };

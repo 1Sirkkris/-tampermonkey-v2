@@ -1,6 +1,11 @@
 export const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const upper = value => clean(value).toUpperCase();
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+export function isRendered(window,node) {
+  if(!node?.isConnected||node.closest('[hidden]'))return false;
+  const style=window.getComputedStyle(node),rect=node.getBoundingClientRect();
+  return style.display!=='none'&&style.visibility!=='hidden'&&style.visibility!=='collapse'&&rect.width>0&&rect.height>0;
+}
 export function evidence(window, script, version, data) {
   try { const record={ script, version, ...data };if(record.intent==='mutation'&&['SUBMITTED','CONFIRMED','REJECTED','UNKNOWN'].includes(record.phase)&&typeof record.operationId==='string'){record.data={...record.data,stage:record.type};record.type='operation';}window.dispatchEvent(new window.CustomEvent('tampermonkey-v4:evidence', { detail: JSON.stringify(record) })); } catch {}
 }

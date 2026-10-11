@@ -1,0 +1,22 @@
+✔ RIVER ignores native fields and Next under CSS display:none ancestor (107.580745ms)
+✔ RIVER ignores native fields and Next under inherited CSS visibility:hidden (26.91474ms)
+✔ RIVER ignores native fields and Next under attribute-hidden ancestor (20.348292ms)
+✔ RIVER rejects a zero-area native field even when its CSS display is visible (19.777288ms)
+✔ RIVER waits for a CSS-hidden Next to render and then advances exactly once (52.217261ms)
+✔ RIVER Stop while hidden Next is pending prevents a later reveal from submitting (29.919456ms)
+✔ RIVER rejects a Next replaced after readiness before submitting and permits deliberate fresh Run (49.001129ms)
+✔ RIVER field replacement before the first native write prevents stale writes and Next (26.347213ms)
+✔ RIVER latest exact SKU line uses all three quantity components and refuses undated ambiguity/wrong identity (57.869441ms)
+✔ self-contained captured exact product retains missing PO as manual and cancellation never publishes (11.716817ms)
+✔ native ASIN writes/Next occur once, unknown transition cannot repeat; Stop clears only V4 payload (93.187877ms)
+✔ Stop during Information readiness/frame prevents every later field write and Next (66.18259ms)
+✔ related tickets/final Create remain manual and missing severity units do not invent a quantity (16.609617ms)
+✔ generated RIVER independent native UI/footer starts once with no automatic final submission and disposes (24.652041ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 650.429499

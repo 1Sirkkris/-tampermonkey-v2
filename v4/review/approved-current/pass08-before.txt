@@ -1,0 +1,86 @@
+✖ RIVER ignores native fields and Next under CSS display:none ancestor (112.062603ms)
+✔ RIVER ignores native fields and Next under inherited CSS visibility:hidden (29.864452ms)
+✔ RIVER ignores native fields and Next under attribute-hidden ancestor (16.146679ms)
+✖ RIVER rejects a zero-area native field even when its CSS display is visible (26.512722ms)
+✖ RIVER waits for a CSS-hidden Next to render and then advances exactly once (28.078178ms)
+✔ RIVER Stop while hidden Next is pending prevents a later reveal from submitting (27.278429ms)
+✖ RIVER rejects a Next replaced after readiness before submitting and permits deliberate fresh Run (28.85394ms)
+✔ RIVER field replacement before the first native write prevents stale writes and Next (28.561639ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 4
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 631.509015
+
+✖ failing tests:
+
+test at tests/river-readiness.test.mjs:27:3
+✖ RIVER ignores native fields and Next under CSS display:none ancestor (112.062603ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'B000000001' !== ''
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/82eb845e7e24/v4-approved-work/v4/tests/river-readiness.test.mjs:31:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'B000000001',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/river-readiness.test.mjs:37:1
+✖ RIVER rejects a zero-area native field even when its CSS display is visible (26.512722ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'B000000001' !== ''
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/82eb845e7e24/v4-approved-work/v4/tests/river-readiness.test.mjs:42:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'B000000001',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/river-readiness.test.mjs:46:1
+✖ RIVER waits for a CSS-hidden Next to render and then advances exactly once (28.078178ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/82eb845e7e24/v4-approved-work/v4/tests/river-readiness.test.mjs:55:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/river-readiness.test.mjs:74:1
+✖ RIVER rejects a Next replaced after readiness before submitting and permits deliberate fresh Run (28.85394ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/82eb845e7e24/v4-approved-work/v4/tests/river-readiness.test.mjs:86:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

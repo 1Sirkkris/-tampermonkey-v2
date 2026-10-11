@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 PO Portal Lite
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Native AU PO search, calendar and reversible Lite result columns.
 // @match https://console.harmony.a2z.com/poportal*
 // @match http://console.harmony.a2z.com/poportal*
@@ -163,10 +163,8 @@
     }
     function hide(node, value) {
       if (value) {
-        if (!node.hasAttribute("data-tm-v4-po-hidden")) {
-          node.setAttribute("data-tm-v4-po-hidden", "");
-          changed.add(node);
-        }
+        if (!node.hasAttribute("data-tm-v4-po-hidden")) node.setAttribute("data-tm-v4-po-hidden", "");
+        changed.add(node);
       } else if (changed.has(node)) {
         node.removeAttribute("data-tm-v4-po-hidden");
         changed.delete(node);
@@ -174,6 +172,10 @@
     }
     function apply() {
       if (disposed) return;
+      for (const node of changed) if (!node.isConnected) {
+        node.removeAttribute("data-tm-v4-po-hidden");
+        changed.delete(node);
+      }
       const native = d.getElementById("asin"), form = native?.closest("form");
       if (form && !form.querySelector('table[id*="purchase" i],table[id*="result" i]')) hide(form, !full);
       for (const table of d.querySelectorAll("table")) {
@@ -253,6 +255,7 @@
       observer.disconnect();
       events.abort();
       for (const node of changed) node.removeAttribute("data-tm-v4-po-hidden");
+      changed.clear();
       root.remove();
       calendar.remove();
       style.remove();
@@ -260,7 +263,7 @@
   }
 
   // po-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var guard = Symbol.for("tampermonkey.v4.po.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

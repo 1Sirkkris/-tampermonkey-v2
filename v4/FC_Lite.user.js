@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Tote Audit
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.2
+// @version 0.1.4
 // @description Independent FC-Lite Tote Audit; complete inventory and physical scans.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -882,7 +882,7 @@
   }
 
   // measurement-auth.mjs
-  var MEASUREMENT_AUTH_VERSION = "0.1.2";
+  var MEASUREMENT_AUTH_VERSION = "0.1.3";
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
   var SITE = "https://jp.item-measurement.aft.a2z.com";
   var GUARD = Symbol.for("tampermonkey.v4.measurement.capture");
@@ -999,6 +999,7 @@
   function createMeasurementAuth({ window: window2, storage, now = Date.now, timeoutMs = 1e4, onEvidence = () => {
   } }) {
     if (!window2?.document || !storage || !["get", "listen", "remove"].every((key) => typeof storage[key] === "function") || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4) throw failure2("INPUT", "Measurement auth configuration is invalid");
+    const coldAcquisitions = /* @__PURE__ */ new Map();
     function evidence2(data) {
       try {
         onEvidence({ type: "fcr.auth", script: "MEASUREMENT AUTH", version: MEASUREMENT_AUTH_VERSION, intent: "read", data: { endpoint: "measurement-auth", ...data } });
@@ -1035,67 +1036,96 @@
       } catch (cause) {
         throw failure2("STORAGE", "Measurement auth storage cannot be read", cause);
       }
-      return new Promise((resolve, reject) => {
-        let listener = null, frame = null, timer = null, settled = false;
-        const cleanup = () => {
-          if (timer != null) window2.clearTimeout(timer);
-          if (listener != null) {
-            try {
-              storage.remove(listener);
-            } catch {
-            }
-          }
-          signal?.removeEventListener("abort", cancelled);
-          frame?.remove();
-        };
-        const finish = (error, value = null) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          evidence2({ outcome: error ? "failed" : value ? "acquired" : "unavailable", code: error?.code, stage: "native-frame", elapsedMs: Math.max(0, now() - started) });
-          if (error) reject(error);
-          else resolve(value);
-        };
-        const cancelled = () => finish(failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason));
-        const changed = () => {
-          if (settled) return;
+      let acquisition = !force && coldAcquisitions.get(previousToken);
+      if (!acquisition) {
+        acquisition = createAcquisition(url, { force, previousToken, baseline });
+        if (!force) coldAcquisitions.set(previousToken, acquisition);
+      }
+      return acquisition.subscribe(signal);
+    }
+    function createAcquisition(url, { force, previousToken, baseline }) {
+      const subscribers = /* @__PURE__ */ new Set();
+      let listener = null, frame = null, started = false, closed = false;
+      function cleanup() {
+        if (listener != null) {
           try {
-            if (force && storage.get(MEASUREMENT_AUTH_KEY, "null") === baseline) return;
-            const value = read();
-            if (value && value.token !== previousToken) finish(null, value);
-          } catch (error) {
-            finish(error);
+            storage.remove(listener);
+          } catch {
           }
-        };
-        const started = now();
-        signal?.addEventListener("abort", cancelled, { once: true });
+        }
+        listener = null;
+        frame?.remove();
+        frame = null;
+      }
+      function release() {
+        if (subscribers.size) return;
+        closed = true;
+        if (!force && coldAcquisitions.get(previousToken) === acquisition) coldAcquisitions.delete(previousToken);
+        cleanup();
+      }
+      function finish(error, value = null) {
+        for (const subscriber of [...subscribers]) subscriber.finish(error, value);
+      }
+      function changed() {
+        if (closed) return;
+        try {
+          if (force && storage.get(MEASUREMENT_AUTH_KEY, "null") === baseline) return;
+          const value = read();
+          if (value && value.token !== previousToken) finish(null, value);
+        } catch (error) {
+          finish(error);
+        }
+      }
+      function start() {
+        started = true;
         try {
           listener = storage.listen(MEASUREMENT_AUTH_KEY, changed);
-          if (settled) {
+          if (closed) {
             cleanup();
             return;
           }
-          if (signal?.aborted) {
-            cancelled();
-            return;
-          }
           if (!force) changed();
-          if (settled) return;
-          timer = window2.setTimeout(() => finish(null), timeoutMs);
+          if (closed) return;
           frame = window2.document.createElement("iframe");
           frame.dataset.tmV4Auth = "measurement";
           frame.tabIndex = -1;
           frame.setAttribute("aria-hidden", "true");
           frame.setAttribute("inert", "");
           frame.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0";
-          frame.src = url;
-          if (force) frame.src = url + "&tmV4MeasurementRefresh=" + encodeURIComponent(now());
+          frame.src = force ? url + "&tmV4MeasurementRefresh=" + encodeURIComponent(now()) : url;
           evidence2({ outcome: "started", stage: "native-frame", renewal: force });
           (window2.document.body || window2.document.documentElement).append(frame);
         } catch (cause) {
           finish(cause instanceof FcrReadError ? cause : failure2("AUTH_REQUIRED", "Measurement acquisition could not start", cause));
         }
-      });
+      }
+      const acquisition = { subscribe(signal) {
+        return new Promise((resolve, reject) => {
+          const joinedAt = now();
+          let timer = null, settled = false;
+          const subscriber = { finish(error, value = null) {
+            if (settled) return;
+            settled = true;
+            if (timer != null) window2.clearTimeout(timer);
+            signal?.removeEventListener("abort", cancelled);
+            subscribers.delete(subscriber);
+            release();
+            evidence2({ outcome: error ? "failed" : value ? "acquired" : "unavailable", code: error?.code, stage: "native-frame", elapsedMs: Math.max(0, now() - joinedAt) });
+            if (error) reject(error);
+            else resolve(value);
+          } };
+          const cancelled = () => subscriber.finish(failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason));
+          subscribers.add(subscriber);
+          signal?.addEventListener("abort", cancelled, { once: true });
+          if (signal?.aborted) {
+            cancelled();
+            return;
+          }
+          timer = window2.setTimeout(() => subscriber.finish(null), timeoutMs);
+          if (!started) start();
+        });
+      } };
+      return acquisition;
     }
     function watch(callback, { signal } = {}) {
       if (typeof callback !== "function") throw failure2("INPUT", "Measurement auth callback is invalid");
@@ -1277,13 +1307,32 @@
       for (const alias of entry.product.aliases) if (!/^(?:X0|ZZ)[A-Z0-9]{8}$/.test(alias)) s.aliases.set(upper2(alias), entry);
       return entry;
     }
-    async function madcat(s, entry, force = false) {
+    function enrichmentRead(s, cache, key, read, valid, refresh = false) {
+      if (!refresh && cache.has(key)) return cache.get(key);
+      const pending = pool(read, s.controller.signal).then((result) => {
+        if (!valid(result) && cache.get(key) === pending) cache.delete(key);
+        return result;
+      }, (error) => {
+        if (cache.get(key) === pending) cache.delete(key);
+        throw error;
+      });
+      cache.set(key, pending);
+      return pending;
+    }
+    function binIdentity(s, entry) {
+      const p = entry.product, raw = upper2(entry.raw), fnsku = upper2(p.fnsku), fcsku = upper2(p.fcsku), asin = upper2(p.asin || p.isbn);
+      if (!fnsku || !asin || /^X0/.test(raw) && raw !== fnsku || /^ZZ/.test(raw) && raw !== fcsku) return JSON.stringify([upper2(s.container), raw]);
+      return JSON.stringify([upper2(s.container), asin, fnsku, fcsku, p.aliases.map(upper2).sort()]);
+    }
+    async function madcat(s, entry, force = false, refresh = false) {
       const run = ++entry.measurementSerial;
       entry.madcat = force ? "AUTH…" : "CHECK…";
       redraw(s);
       try {
         const match = matches(s, entry).find((row) => row.fnsku);
-        const result = await pool(() => enrichment.recentMadcat({ fnsku: match?.fnsku || entry.product.fnsku, asin: entry.product.asin || entry.product.isbn }, { signal: s.controller.signal, forceAuth: force }), s.controller.signal);
+        const identity = { fnsku: match?.fnsku || entry.product.fnsku, asin: entry.product.asin || entry.product.isbn };
+        const key = JSON.stringify([identity.fnsku ? "FNSKU" : "ASIN", upper2(identity.fnsku || identity.asin), upper2(entry.product.fnsku), upper2(entry.product.fcsku)]);
+        const result = await enrichmentRead(s, s.measurements, key, () => enrichment.recentMadcat(identity, { signal: s.controller.signal, forceAuth: force }), (result2) => result2.complete === true && result2.madcatSource === "raw" && typeof result2.madcat === "boolean", refresh || force);
         if (!current(s) || entry.measurementSerial !== run) return;
         entry.madcat = result.madcat === null ? "UNKNOWN" : result.madcat ? "YES" : result.madcatSource === "history" ? "NO?" : "NO";
         entry.measurement = result;
@@ -1307,7 +1356,7 @@
         status(`${matches(s, entry).length ? "✓ IN" : "✕ NOT IN"} ${s.container} — ${entry.raw}`);
         if (entry !== original) return;
         void madcat(s, entry);
-        pool(() => enrichment.binDescription(s.container, entry.raw, { signal: s.controller.signal, verifiedAliases: entry.product.aliases }), s.controller.signal).then((result) => {
+        enrichmentRead(s, s.bins, binIdentity(s, entry), () => enrichment.binDescription(s.container, entry.raw, { signal: s.controller.signal, verifiedAliases: entry.product.aliases }), (result) => result.complete === true && typeof result.size === "string" && !!result.size.trim()).then((result) => {
           if (current(s)) {
             entry.bin = result.size || "N/A";
             redraw(s);
@@ -1432,7 +1481,7 @@
           status("DONE — scan next container");
         } else {
           reset();
-          session = { container: code, inventory: [], entries: [], pending: [], aliases: /* @__PURE__ */ new Map(), products: /* @__PURE__ */ new Map(), haz: /* @__PURE__ */ new Map(), dims: /* @__PURE__ */ new Map(), controller: new window2.AbortController(), inventoryState: "LOADING", done: false };
+          session = { container: code, inventory: [], entries: [], pending: [], aliases: /* @__PURE__ */ new Map(), products: /* @__PURE__ */ new Map(), bins: /* @__PURE__ */ new Map(), measurements: /* @__PURE__ */ new Map(), haz: /* @__PURE__ */ new Map(), dims: /* @__PURE__ */ new Map(), controller: new window2.AbortController(), inventoryState: "LOADING", done: false };
           input.placeholder = "Scan item barcode";
           void load(session);
         }
@@ -1483,7 +1532,7 @@
         }
       }
       const entry = s?.entries.find((row) => String(row.id) === (target.dataset.madcat || target.dataset.print));
-      if (entry?.product && target.dataset.madcat) void madcat(s, entry, entry.measurement?.authRequired === true);
+      if (entry?.product && target.dataset.madcat) void madcat(s, entry, entry.measurement?.authRequired === true, true);
       if (entry?.product && target.dataset.print) {
         try {
           const message = await printBarcode(window2, fetch, entry.raw, entry.product.title, "TOTE", version);
@@ -1531,7 +1580,7 @@
   }
 
   // tote-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.4";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.tote.installer");
   if (!page[guard]) {

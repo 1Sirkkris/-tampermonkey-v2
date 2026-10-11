@@ -54,12 +54,26 @@ export function createToteAudit({ window, reader, enrichment, warehouse, version
     for(const alias of entry.product.aliases) if(!/^(?:X0|ZZ)[A-Z0-9]{8}$/.test(alias))s.aliases.set(upper(alias),entry);
     return entry;
   }
-  async function madcat(s, entry, force = false) {
+  function enrichmentRead(s,cache,key,read,valid,refresh=false) {
+    if(!refresh&&cache.has(key))return cache.get(key);
+    const pending=pool(read,s.controller.signal).then(result=>{if(!valid(result)&&cache.get(key)===pending)cache.delete(key);return result;},error=>{if(cache.get(key)===pending)cache.delete(key);throw error;});
+    cache.set(key,pending);return pending;
+  }
+  function binIdentity(s,entry) {
+    const p=entry.product,raw=upper(entry.raw),fnsku=upper(p.fnsku),fcsku=upper(p.fcsku),asin=upper(p.asin||p.isbn);
+    // Exact internal codes must match their own canonical field. A shared ASIN
+    // alone cannot make a different FNSKU/FCSKU compatible.
+    if(!fnsku||!asin||/^X0/.test(raw)&&raw!==fnsku||/^ZZ/.test(raw)&&raw!==fcsku)return JSON.stringify([upper(s.container),raw]);
+    return JSON.stringify([upper(s.container),asin,fnsku,fcsku,p.aliases.map(upper).sort()]);
+  }
+  async function madcat(s, entry, force = false, refresh = false) {
     const run = ++entry.measurementSerial;
     entry.madcat = force ? 'AUTH…' : 'CHECK…'; redraw(s);
     try {
       const match = matches(s,entry).find(row=>row.fnsku);
-      const result = await pool(()=>enrichment.recentMadcat({ fnsku: match?.fnsku || entry.product.fnsku, asin: entry.product.asin || entry.product.isbn }, { signal:s.controller.signal, forceAuth:force }),s.controller.signal);
+      const identity={fnsku:match?.fnsku||entry.product.fnsku,asin:entry.product.asin||entry.product.isbn};
+      const key=JSON.stringify([identity.fnsku?'FNSKU':'ASIN',upper(identity.fnsku||identity.asin),upper(entry.product.fnsku),upper(entry.product.fcsku)]);
+      const result=await enrichmentRead(s,s.measurements,key,()=>enrichment.recentMadcat(identity,{signal:s.controller.signal,forceAuth:force}),result=>result.complete===true&&result.madcatSource==='raw'&&typeof result.madcat==='boolean',refresh||force);
       if(!current(s)||entry.measurementSerial!==run)return;
       entry.madcat=result.madcat===null?'UNKNOWN':result.madcat?'YES':result.madcatSource==='history'?'NO?':'NO'; entry.measurement=result;
     } catch(error) { if(current(s)&&entry.measurementSerial===run){entry.madcat='ERROR ↻';entry.error=error.message;} }
@@ -72,7 +86,7 @@ export function createToteAudit({ window, reader, enrichment, warehouse, version
       const entry=mergeAliases(s,original); redraw(s); status(`${matches(s,entry).length?'✓ IN':'✕ NOT IN'} ${s.container} — ${entry.raw}`);
       if(entry!==original)return;
       void madcat(s,entry);
-      pool(()=>enrichment.binDescription(s.container,entry.raw,{signal:s.controller.signal,verifiedAliases:entry.product.aliases}),s.controller.signal).then(result=>{if(current(s)){entry.bin=result.size||'N/A';redraw(s);}},error=>{if(current(s)){entry.bin='ERROR';entry.error=error.message;redraw(s);}});
+      enrichmentRead(s,s.bins,binIdentity(s,entry),()=>enrichment.binDescription(s.container,entry.raw,{signal:s.controller.signal,verifiedAliases:entry.product.aliases}),result=>result.complete===true&&typeof result.size==='string'&&!!result.size.trim()).then(result=>{if(current(s)){entry.bin=result.size||'N/A';redraw(s);}},error=>{if(current(s)){entry.bin='ERROR';entry.error=error.message;redraw(s);}});
       onEvidence({type:'tote.scan',intent:'read',data:{outcome:entry.state,count:entry.count}});
     } catch(error) {if(current(s)){original.state='ERROR';original.error=error.message;status(error.message);redraw(s);}}
   }
@@ -116,7 +130,7 @@ export function createToteAudit({ window, reader, enrichment, warehouse, version
     if(disposed)return;const code=clean(value);if(!code)return;input.value='';
     if(containerCode(code)){
       if(session && upper(code)===upper(session.container)){session.done=true;redraw(session);status('DONE — scan next container');}
-      else {reset();session={container:code,inventory:[],entries:[],pending:[],aliases:new Map(),products:new Map(),haz:new Map(),dims:new Map(),controller:new window.AbortController(),inventoryState:'LOADING',done:false};input.placeholder='Scan item barcode';void load(session);}
+      else {reset();session={container:code,inventory:[],entries:[],pending:[],aliases:new Map(),products:new Map(),bins:new Map(),measurements:new Map(),haz:new Map(),dims:new Map(),controller:new window.AbortController(),inventoryState:'LOADING',done:false};input.placeholder='Scan item barcode';void load(session);}
     } else if(!session)status('Scan container first');
     else if(session.done)status('Session done — scan next container');
     else if(session.inventoryState!=='READY'){session.pending.push(code);redraw(session);status(`QUEUE ${session.pending.length} • inventory ${session.inventoryState.toLowerCase()}`);}
@@ -134,7 +148,7 @@ export function createToteAudit({ window, reader, enrichment, warehouse, version
     if(action==='stats'){try{await window.navigator.clipboard.writeText(JSON.stringify({container:s?.container,scans:s?.entries.reduce((sum,row)=>sum+row.count,0)||0,queued:s?.pending.length||0,inventoryState:s?.inventoryState||'WAIT_CONTAINER'},null,2));status('COPIED ✓');}catch{status('COPY FAILED');}}
     if(action==='haz'&&s){target.disabled=true;try{await systemEnrich(s,true);}finally{if(current(s))target.disabled=false;}}
     const entry=s?.entries.find(row=>String(row.id)===(target.dataset.madcat||target.dataset.print));
-    if(entry?.product&&target.dataset.madcat)void madcat(s,entry,entry.measurement?.authRequired===true);
+    if(entry?.product&&target.dataset.madcat)void madcat(s,entry,entry.measurement?.authRequired===true,true);
     if(entry?.product&&target.dataset.print){try{const message=await printBarcode(window,fetch,entry.raw,entry.product.title,'TOTE',version);if(current(s))status(message);}catch(error){if(current(s))status(error.message);}focus();}
   },{signal:listeners.signal});
   root.addEventListener('mouseover',async event=>{

@@ -87,20 +87,20 @@ test('same source and requirement reuse one answer for repeated physical scans',
 });
 
 import { readFileSync } from 'node:fs';
-test('actual generated Sideline scanner START cannot submit with another source expiry', async t => {
+for(const variation of ['source','date requirement'])test('actual generated Sideline scanner START rechecks '+variation, async t => {
   const dom = new JSDOM('<head></head><body><main>Native source page</main></body>', { url: 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com/', runScripts: 'outside-only' });
   const window = dom.window;
   t.after(() => window.close());
   window.localStorage.setItem('tm-v4.sideline.settings', JSON.stringify({ delay: false }));
   window.unsafeWindow = window; window.employeeLogin = 'validuser';
   window.navigator.locks = { request: async (name, options, fn) => fn({ name }) };
-  let moves = 0;
+  let moves = 0, requirement='EXPIRATION_DATE';
   window.fetch = async (url, init) => {
     const path = new URL(url).pathname;
     let data;
     if (path === '/api/get-bootstrap-data') data = { warehouseInfo: 'BWU2' };
     else if (path === '/api/scan-source-container') data = { '@type': 'ScanSourceContainerResponse', success: true, processPath: 'NORMAL' };
-    else if (path === '/api/scanitem') data = { '@type': 'ScanItemResponse', success: true, items: item('EXPIRATION_DATE').ctx.records };
+    else if (path === '/api/scanitem') data = { '@type': 'ScanItemResponse', success: true, items: item(requirement).ctx.records };
     else { assert.equal(path, '/api/move-items'); moves++; data = { '@type': 'MoveItemsResponse', success: true }; }
     return { ok: true, status: 200, url, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(data) };
   };
@@ -112,8 +112,7 @@ test('actual generated Sideline scanner START cannot submit with another source 
   const panel = window.document.querySelector('#tm-v4-side-lazy');
   const fields = Object.fromEntries([...panel.querySelectorAll('[data-field]')].map(node => [node.dataset.field, node]));
   await choosePreflightDate(window, { fields });
-  fields.source.value = 'tsXsourceB';
-  fields.source.dispatchEvent(new window.Event('input', { bubbles: true }));
+  if(variation==='source'){fields.source.value='tsXsourceB';fields.source.dispatchEvent(new window.Event('input',{bubbles:true}));}else requirement='PRODUCTION_DATE';
   fields.items.value += '\n123START';
   fields.items.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   await tick();
@@ -154,4 +153,30 @@ test('an UNKNOWN preflight result cannot prevent a deliberate same-item scanner 
   const scan = () => ui.fields.items.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   scan(); await tick(); assert.equal(reads, 1); assert.match(window.document.querySelector('[data-preflight]').textContent, /UNKNOWN/);
   scan(); await tick(); assert.equal(reads, 2); assert.match(window.document.querySelector('[data-preflight]').textContent, /GOOD/);
+});
+
+test('A → B → A within an unfinished draft cannot recover A expiry answers', async t => {
+ const window=setup(t),{ui,moves}=uiFor(t,window,async()=>item('EXPIRATION_DATE'));
+ await choosePreflightDate(window,ui);
+ for(const source of ['tsXsourceB','tsXsourceA']){ui.fields.source.value=source;ui.fields.source.dispatchEvent(new window.Event('input',{bubbles:true}));}
+ const pending=ui.run('lazy');await tick();const prompted=!!window.document.querySelector('#tm-v4-date-picker');
+ ui.workflow.stop();await pending;assert.equal(moves.length,0);assert(prompted,'returning to A is a new source context');
+});
+test('Run refreshes native context without a source edit: NONE → PRODUCTION_DATE',async t=>{
+ let requirement='NONE',reads=0;
+ const window=setup(t),{ui,moves}=uiFor(t,window,async()=>{reads++;return item(requirement);});
+ ui.fields.source.value='tsXsourceA';ui.fields.destination.value='tsXdestination';ui.fields.items.value='X000000001';
+ ui.fields.items.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await tick();requirement='PRODUCTION_DATE';
+ const pending=ui.run('lazy');await tick();const dialog=window.document.querySelector('#tm-v4-date-picker');
+ ui.workflow.stop();await pending;assert.equal(moves.length,0);assert.equal(reads,2);assert.match(dialog?.textContent||'',/REQUIRES PRODUCTION DATE/);
+});
+test('Run fresh NONE removes a same-source preflight expiry without prompting',async t=>{
+ let requirement='EXPIRATION_DATE',reads=0;const window=setup(t),{ui,moves}=uiFor(t,window,async()=>{reads++;return item(requirement);});
+ await choosePreflightDate(window,ui);requirement='NONE';await ui.run('lazy');assert.equal(reads,2);assert.equal(moves.length,1);assert.equal(moves[0].expiration,null);
+});
+for(const boundary of ['completion','reset','stop','item removal'])test('expiry answer ends at '+boundary+' even when the same source is reused',async t=>{
+ const window=setup(t),{ui}=uiFor(t,window,async()=>item('EXPIRATION_DATE'));await choosePreflightDate(window,ui);
+ if(boundary==='completion')await ui.run('lazy');else if(boundary==='reset')await ui.workflow.reset();else if(boundary==='stop')ui.workflow.stop();else{ui.fields.items.value='';ui.fields.items.dispatchEvent(new window.Event('input',{bubbles:true}));}
+ ui.fields.source.value='tsXsourceA';ui.fields.destination.value='tsXdestination';ui.fields.items.value='X000000001';
+ ui.fields.items.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await tick();assert(window.document.querySelector('#tm-v4-date-picker'));
 });

@@ -1,7 +1,7 @@
 import{clean,upper}from'./ui-tools.mjs';import{NativeRequestError}from'./native-json.mjs';
 export function validateHierarchy(data,container){if(!data||typeof data!=='object'||upper(data.warehouseId)!=='BWU2'||upper(data.scannableId)!==upper(container))throw new NativeRequestError('Validation did not prove exact BWU2 container');}
 export function validateSummary(data){if(!data||!Array.isArray(data.transferBindingSummaryList))throw new NativeRequestError('Native hierarchy summary invalid');}
-export function validateHierarchyAcknowledgement(data){if(!data||typeof data.hostName!=='string'||!clean(data.hostName)||data.success===false||data.error||data.errorMessage||data.exception)throw new NativeRequestError('Hierarchy result not positively acknowledged',{outcome:'UNKNOWN'});}
+export function validateHierarchyAcknowledgement(data){if(!data||typeof data.hostName!=='string'||!clean(data.hostName)||data.success===false||data.error||data.errorMessage||data.exception||['PENDING','PROCESSING','QUEUED'].includes(upper(data.status)))throw new NativeRequestError('Hierarchy result not positively acknowledged',{outcome:'UNKNOWN'});}
 export function createHierarchyDriver({request,identity,seedBind,getTemplate,setTemplate}){
  return async(row,{mode,signal,beforeMutation,checkRunning,onPhase=()=>{}})=>{
   const container=row.container;

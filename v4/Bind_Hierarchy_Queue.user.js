@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Bind Hierarchy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.2
+// @version 0.1.4
 // @description Native hierarchy queue with durable submission barriers and one batch owner.
 // @match https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
 // @grant unsafeWindow
@@ -217,7 +217,7 @@
     if (!data || !Array.isArray(data.transferBindingSummaryList)) throw new NativeRequestError("Native hierarchy summary invalid");
   }
   function validateHierarchyAcknowledgement(data) {
-    if (!data || typeof data.hostName !== "string" || !clean(data.hostName) || data.success === false || data.error || data.errorMessage || data.exception) throw new NativeRequestError("Hierarchy result not positively acknowledged", { outcome: "UNKNOWN" });
+    if (!data || typeof data.hostName !== "string" || !clean(data.hostName) || data.success === false || data.error || data.errorMessage || data.exception || ["PENDING", "PROCESSING", "QUEUED"].includes(upper(data.status))) throw new NativeRequestError("Hierarchy result not positively acknowledged", { outcome: "UNKNOWN" });
   }
   function createHierarchyDriver({ request, identity, seedBind, getTemplate, setTemplate }) {
     return async (row, { mode, signal, beforeMutation, checkRunning, onPhase = () => {
@@ -300,6 +300,11 @@
       records = records.slice(-40);
       for (const waiter of [...waiters]) waiter.check(entry);
       if (record.path === "/forceBind" && status === 200 && !redirected && typeof data?.hostName === "string" && data.hostName && record.request?.sourceWarehouseId && record.request?.destinationWarehouseId) {
+        try {
+          validateHierarchyAcknowledgement(data);
+        } catch {
+          return;
+        }
         onTemplate({ sourceWarehouseId: record.request.sourceWarehouseId, destinationWarehouseId: record.request.destinationWarehouseId });
       }
     }
@@ -432,7 +437,6 @@
         const result = await bound;
         validateHierarchyAcknowledgement(result.data);
         if (result.request?.destinationWarehouseId !== seed.destination || !result.request.sourceWarehouseId) throw new NativeRequestError("Native Bind destination/source tokens unverified", { outcome: "UNKNOWN" });
-        onTemplate({ sourceWarehouseId: result.request.sourceWarehouseId, destinationWarehouseId: seed.destination });
         return result;
       } finally {
         seed = null;
@@ -799,6 +803,6 @@
   }
 
   // bind-entry.mjs
-  var VERSION = "0.1.2";
+  var VERSION = "0.1.4";
   installHierarchy(window, typeof unsafeWindow === "object" ? unsafeWindow : window, "bind", VERSION);
 })();

@@ -1,3 +1,251 @@
+# Approval recovery checkpoint — previously verified batch
+
+- Created: 2026-10-11 12:12:57 AEDT; actual Sydney system clock.
+- Authority: user explicitly approved fresh **1, 6, 10** and GitHub publication after the three concrete proposals and separate publication question. Deployment and live operational/printing/ticket/labor/Carton actions remain held.
+- Current immutable publication snapshot: enclosing local commit, based on remote `1e9c610ab43ffd0496f0341213e1753349a0fe1c`. It preserves the **15 previously verified code passes** plus documentation 19. The source/installer validation remains **469 tests pass, 19 builds match, 70 source checks**; this snapshot changes documentation only. Root publishes committed Git objects, never unverified concurrent worker files.
+- Current work: agents implementing AFT 1, native hierarchy guard 6 and Bin native API gate 10 in the same isolated worktree with disjoint file ownership. Their working files are not part of this initial verified publication snapshot. Root builds/checkpoints each independently. Read current per-pass checkpoint for completed versus WIP work.
+- Existing failures: AFT generic4xx recovery, manual hierarchy UNKNOWN bypass, Bin legacy native filtered rows; do not call these fixed yet. Missing empty-container and extra AFT Confirm contracts remain live/evidence gates.
+- GitHub push: approved and PENDING. Prior confirmed publication at 2026-10-11 08:23:33 AEDT; last remote readback before this work confirmed `1e9c610`, unchanged. Successful new push/readback receipt follows; never infer it from this commit timestamp.
+- Exact NEXT: publish this immutable previously tested batch with expected remote head/non-force update, verify tree/head and record successful Sydney time. Continue approved 1, then 6, then 10 verification/build/checkpoints; preserve old installers if WIP. No live operational action.
+- Recovery: `/workspace/scratch/82eb845e7e24/v4-approved-work`, `v4-cleanroom`; older dirty repo untouched. Earlier full private recovery archive version5 corresponds to local `421754f`. New durable source of truth is the next verified GitHub checkpoint.
+
+## Earlier checkpoint records — history
+
+# Final approved-batch recovery checkpoint — 19
+
+- **Created:** 2026-10-11 11:32:42 AEDT; actual system clock, Australia/Sydney.
+- **Branch/base:** local `v4-cleanroom` at remote base `1e9c610ab43ffd0496f0341213e1753349a0fe1c`. The enclosing local commit is this checkpoint SHA. Latest prior implementation checkpoint: `d3b7a28184545219cc04b4cc86272127010b8765`.
+- **Last verified state:** all 15 approved code passes **2–5, 7–9, 11–18** completed offline; pass **19** recovery/readiness notes completed. Source and independently generated candidates match. No active operational WIP; interrupted worker WIP is retained only in earlier recovery commits. Parallel workers stopped at account usage limit; root finished the authorised work serially.
+- **Tests:** `npm test`: **469 passed, 0 failed/skipped/cancelled**, 10.567 seconds; +101 cases from published baseline 368. `npm run check`: **19 exact installer/source matches**, metadata/version/update/include/identity/independence/readiness checks and **70 source syntax checks** pass. Check rerun after documentation correction; `git diff --check` passes. Individual/group totals overlap; do not sum them.
+- **Current workflow:** final delivery/recovery of this approved batch. Files changed in this pass: `AGENTS.md`, `README.md`, `CHECKPOINT.md`, `review/approved-current/README.md`, `pass08.md`, `pass19.md`, `evidence.md`. The enclosing and earlier per-pass local commits are the exact source/test/installer inventories.
+- **Versions:** Master 0.1.7; Tote 0.1.4; Bind 0.1.4; Unbind/Stow 0.1.3; Sideline/ISS 0.1.7; RIVER/SIM 0.1.3; Carton 0.1.2; PO/Screenshot 0.1.1. AFT 0.1.4/Bin 0.1.1 are unchanged. All 19 versions/readiness and published-link limitations are in README.
+- **Known failures / unfinished:** held **1** ambiguous AFT HTTP400 still produces 3 Confirms/2 Ends in current mock native transport; held **6** current generated Bind still allows one native manual submission despite a same-container UNKNOWN ledger record, including one-tab use; held **10** captured native DataTables 1.9.4 exposes two applied rows but current Bin snapshots one. These bad-behaviour probes exiting 0 mean reproduced, not fixed. Other implementation gates: empty-container location proof (Drop/Stow), additional AFT Confirm semantics (AFT/ISS). Native/current auth/layout/frames/scanners/downloads/outcomes/physical printing remain unverified. No live operational action occurred.
+- **Readiness:** 11 operational COMPLETE offline, seven PARTIAL (Bin/Bind/Unbind/Drop/Stow/AFT/ISS); diagnostic COMPLETE. PARTIAL candidates are not cleared for live operational testing. No LIVE MUTATION VERIFIED claim.
+- **GitHub publication:** **HELD — no new push**. Remote branch readback at **2026-10-11 11:31:37 AEDT** confirmed `1e9c610ab43ffd0496f0341213e1753349a0fe1c`, unchanged. Previous published implementation `5101a6d5d28690b8326a558901cadf3cc7383833` confirmed at **2026-10-11 08:23:33 AEDT**. Time since that confirmed publication: **3h 9m 9s**, intentionally suspended by explicit current publication hold. No current successful push timestamp exists; do not substitute commit or private-save time.
+- **Private durable recovery:** `V4_Approved_Implementation_Review.md`, identity `libfile_2d8777a5135c819191b5e7ee348b5aad`. Version 4 was confirmed saved, created 2026-10-11 11:27:46 AEDT; final updated report is saved after this checkpoint and includes this enclosing commit, full unpublished diff, exact held harnesses and validation outputs. Earlier version 4 alone lacks these final notes. The report is review/recovery evidence, not installation/publication.
+- **Workspace:** `/workspace/scratch/82eb845e7e24/v4-approved-work`; old dirty `/workspace/scratch/82eb845e7e24/repo` is untouched. `v4/node_modules` is an untracked development symlink: never add it. V2/main and frozen V3 are untouched.
+- **Exact NEXT:** Discuss **1**, then **6**, then **10** with the user. For 1, explain fresh exact count can assist but cannot alone authorise uncertain replay; propose canonical rejection-versus-UNKNOWN correction and affected AFT/ISS regressions. For 6, distinguish unused concurrent tabs from same-tab native-form replay of UNKNOWN; propose canonical native guard, no new retry/owner system. For 10, propose only captured native dependency/API gate correction with V2 familiar placement/actions/filtering retained. Implement each only after individual explicit approval. Separately obtain GitHub publication approval for the concrete tested batch. Before any publication, fetch/read back remote and reconcile safely; never overwrite newer work/force-push.
+- **Pending approvals:** held 1/6/10; GitHub publication; deployment; any live operational/printing/ticket/labor/Carton action. Ordinary approved batch work is complete; do not broaden its approval.
+
+## Earlier local checkpoint records — history
+
+# Approved pass 18 recovery checkpoint
+
+- Created: 2026-10-11 11:25:01 AEDT, actual Sydney system clock.
+- Completed: PO 0.1.1 retired mask ownership verified; 5 source/installer cases pass. All 15 approved operational items implemented offline.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Complete whole-suite tests/source-build/metadata/whitespace checks; final 19 readiness and recovery record. Hold 1/6/10/publication.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 18 recovery checkpoint
+
+- Created: 2026-10-11 11:24:48 AEDT, actual Sydney system clock.
+- Completed: PO 0.1.1 retired mask ownership verified; 5 source/installer cases pass. All 15 approved operational items implemented offline.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Run whole-suite tests/source-build/metadata/whitespace checks; final 19 readiness and recovery record. Hold 1/6/10/publication.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 17 recovery checkpoint
+
+- Created: 2026-10-11 11:24:04 AEDT, actual Sydney system clock.
+- Completed: Tote 0.1.4 exact enrichment reuse verified; 95 shared cases pass; generated reader proves retained scans/barcode validation.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Implement PO 18 retired masking cleanup; then whole-suite verification and final 19 records.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 13 recovery checkpoint
+
+- Created: 2026-10-11 11:20:32 AEDT, actual Sydney system clock.
+- Completed: SIM 0.1.3 skips known-invalid raw-link fallback, preserves valid images/transport fallback; 26 cases pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Finish exact per-session Tote enrichment 17 and retired PO masks 18; final 19 readiness/checkpoint.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 12 recovery checkpoint
+
+- Created: 2026-10-11 11:18:12 AEDT, actual Sydney system clock.
+- Completed: Screenshot 0.1.1 restores detached style media; 8 source/installer/shared-footer cases pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Finish SIM 13, Tote 17 and PO 18, then complete whole-suite check and final recovery/readiness records.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 09 recovery checkpoint
+
+- Created: 2026-10-11 11:17:57 AEDT, actual Sydney system clock.
+- Completed: Carton 0.1.2 rendered Complete readiness verified; shared RIVER 0.1.3 remains passing; 29 tests.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Complete Screenshot 12, SIM 13, Tote 17 and PO 18; whole-suite validation and final records.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 14 recovery checkpoint
+
+- Created: 2026-10-11 11:16:37 AEDT, actual Sydney system clock.
+- Completed: Canonical explicit nonterminal hierarchy reply stays UNKNOWN; 50 shared cases pass; Bind/Unbind/Stow rebuilt.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Finish Carton 9, Screenshot 12, SIM 13, Tote 17 and PO 18; update final 19 records.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 07 recovery checkpoint
+
+- Created: 2026-10-11 11:16:17 AEDT, actual Sydney system clock.
+- Completed: Bind 0.1.3 canonical template acknowledgement and single publish verified; 20 tests pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Apply narrow explicit PENDING/PROCESSING/QUEUED rejection 14; then independent tools.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 15 recovery checkpoint
+
+- Created: 2026-10-11 11:15:01 AEDT, actual Sydney system clock.
+- Completed: Sideline/ISS 0.1.7 immediate accepted-START feedback verified; 81 shared source/installer cases pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Implement 7 Bind template validation and 14 explicit pending acknowledgement rejection; held 6 untouched.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 04 recovery checkpoint
+
+- Created: 2026-10-11 11:14:43 AEDT, actual Sydney system clock.
+- Completed: Sideline 0.1.6 native accepted-action cancellation verified; 50 source/installer fixtures pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Finish Sideline immediate feedback 15, then approved hierarchy and remaining tools.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 05 recovery checkpoint
+
+- Created: 2026-10-11 11:12:17 AEDT, actual Sydney system clock.
+- Completed: ISS 0.1.6 late ownership/readiness cancellation verified; preserves submitted UNKNOWN; 72 combined fixtures pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Implement native Sideline 4 and busy feedback 15; then remaining approved independent tools.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 03 recovery checkpoint
+
+- Created: 2026-10-11 11:12:17 AEDT, actual Sydney system clock.
+- Completed: Sideline 0.1.5 expiry ownership and fresh Run context verified; shared ISS 0.1.6 cancellation also verified in 72 combined tests.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Record pass 5 checkpoint; finish native Sideline 4, immediate busy feedback 15, then 7/9/12/13/14/17/18.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 02 recovery checkpoint
+
+- Created: 2026-10-11 11:08:39 AEDT, actual Sydney system clock.
+- Completed: Stow 0.1.2: click source and parent/native cancellation verified; 27 tests pass; native gaps retained.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Finish Sideline 3 fresh context and expiry lifetime; then 4, 5 and remaining approved passes.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 16 recovery checkpoint
+
+- Created: 2026-10-11 11:07:50 AEDT, actual Sydney system clock.
+- Completed: Measurement coalescing verified: 105 shared caller tests pass; Master 0.1.7/Tote 0.1.3 built.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Complete Stow 2, Sideline 3/4/15, ISS 5 and remaining approved fixes.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 11 recovery checkpoint
+
+- Created: 2026-10-11 11:07:26 AEDT, actual Sydney system clock.
+- Completed: SIM 0.1.2: obsolete dialogs/importers/toolbars released; 20 source and installer fixtures pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Verify Measurement 16, then Stow 2 and remaining approved corrections.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# Approved pass 08 recovery checkpoint
+
+- Created: 2026-10-11 11:07:03 AEDT, actual Sydney system clock.
+- Completed: RIVER 0.1.2: rendered field/Next readiness verified; 16 source and installer fixtures pass.
+- Verification: individual pass record and `review/approved-current/` contain reproducible tests/evidence. Offline fixtures are not live proof.
+- State: approved remaining work in progress. Last known published candidates preserved at remote `1e9c610`; unpublished candidates are isolated here.
+- Files: enclosing local commit is the exact modified-file inventory. Earlier WIP recovery commit preserves interrupted workers.
+- Publication: HELD. No new GitHub push. Latest remote readback: 2026-10-11 10:55:24 AEDT, `1e9c610`. Prior published batch confirmed 2026-10-11 08:23:33 AEDT. Push interval suspended by explicit publication hold.
+- Pending approvals: discussion items 1, 6, 10; GitHub publication/deployment/live operational holds.
+- Exact NEXT: Verify SIM 11 and Measurement 16 recovered edits; continue remaining approved passes.
+- Recovery: isolated worktree `/workspace/scratch/82eb845e7e24/v4-approved-work`, branch `v4-cleanroom`; older dirty repo untouched. Private review report includes full unpublished diff.
+
+# WIP recovery — workers interrupted
+
+- Creation: 2026-10-11 11:03:33 AEDT. Approved scopes2–5,7–9,11–18andmaintenance19; held1/6/10 andGitHubpublication/liveactions.
+- Base:1e9c610; localbranchv4-cleanroom in /workspace/scratch/82eb845e7e24/v4-approved-work. Olddirtyrepo preserved.
+- All six workers stopped on accountusage limit. Their source/test edits recovered; root continues serially.
+- WIP / NOT VERIFIED: Stow2,expiry3,ISS5,SIM11,Measurement16 partially edited. RIVER8source8newtests passing14focused beforeinterruption; installer stillold/unverified. No generatedinstaller changed.
+- Normalbaseline368passes onoriginal1e9c610; currentWIPfullsuite notyet verified.
+- Files modified: scope/docs,iss-bridge,measurement-auth,operation-bridge,river-runtime,sideline-preflight/workflow,sim-runtime,stow-runtime andnewtests. Exactlocalcommit identifies savedstate.
+- NEXT: preserveprivate reviewdiff; run focusedWIPtests, finishinterruptededits andverify independently. Rootownsversions/build/checkpoints. Do not promoteWIP.
+- Pending: discussion1/6/10; publicationapproval afterconcreteresult. No newGitHubpush.
+
+# Current approved implementation — local recovery checkpoint
+
+- Creation: 2026-10-11 10:57:56 AEDT, actual Australia/Sydney system time.
+- Development: isolated v4-cleanroom worktree at /workspace/scratch/82eb845e7e24/v4-approved-work, base remote1e9c610ab43ffd0496f0341213e1753349a0fe1c. Olderdirty7899f65workspace preserved; no merge/reset/discard.
+- Currentapproval: newpasses2–5,7–9,11–18 and maintenance19. Passes1/6/10held for discussion. Publication/deployment/liveoperationalholds remain. No newGitHubpush. Lastpriorpublishedbatch5101a6d confirmed2026-10-11 08:23:33AEDT; remote receipt1e9c610confirmedagain2026-10-11 10:55:24AEDT.
+- Work: six authorised workers implement disjoint firstunits2/3/5/8/11/16. Rootserialisesversion/build/checkpoints. See review/approved-current/README.md and individualpassNNrecords.
+- Verifiedbaseline:368normaltests/19installer-source matches/70modules from currentaudit; knownnewreproductions remainunfixed until individualrecords report otherwise.
+- WIP: approved source/testing only; existingcandidateversions unmodified at start. No liveproof.
+- Files: AGENTS.md,CHECKPOINT.md,review/approved-current/README.md; worker-owned implementation/test changes will be recorded individually.
+- ExactNEXT: finishpass2/3/5/8/11/16, run regressions, root builds verified candidates with truthfulversions andrecordscheckpoint before eachworker advances. Resolve1/6/10withuser; neverbroadenapproval.
+- Pendingapproval:1/6/10andGitHubpublicationofconcreteresult; no userinputblocks otherapprovedscopes.
+
+## Earlier publication/recovery records — historical
+
 # Approved audit implementation — publication checkpoint
 
 - Creation: 2026-10-11 08:12:16 AEDT, system clock, Australia/Sydney.

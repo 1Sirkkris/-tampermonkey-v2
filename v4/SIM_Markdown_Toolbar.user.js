@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 SIM Markdown Toolbar
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.3
 // @description Native editor formatting, snippets and attachment gallery/download controls.
 // @match https://t.corp.amazon.com/*
 // @grant none
@@ -222,17 +222,27 @@
   }
   function createSimToolbar({ window: window2, onEvidence = () => {
   } }) {
-    const d = window2.document, events = new window2.AbortController(), key = "tm-v4.sim.snippets", bars = /* @__PURE__ */ new Map(), owned = /* @__PURE__ */ new Set(), urls = /* @__PURE__ */ new Set(), collapsed = /* @__PURE__ */ new Set();
+    const d = window2.document, events = new window2.AbortController(), key = "tm-v4.sim.snippets", bars = /* @__PURE__ */ new Map(), owned = /* @__PURE__ */ new Map(), urls = /* @__PURE__ */ new Set(), collapsed = /* @__PURE__ */ new Set();
     let disposed = false, downloadController = null, imageGroup = null, modal = null, scheduled = false, attachments = null;
     const style = d.createElement("style");
     style.dataset.tmV4Style = "SIMTt";
     style.textContent = ".tm-v4-sim-bar{display:flex;align-items:center;gap:4px;margin-bottom:6px;flex-wrap:nowrap}.tm-v4-sim-bar button,.tm-v4-sim-images button{flex:0 0 auto;width:auto;min-width:0;max-width:none;padding:2px 6px;height:24px;font:11px/20px Arial;white-space:nowrap;box-sizing:border-box;cursor:pointer}.tm-v4-sim-bar select{flex:0 0 auto;min-width:180px;height:24px}.tm-v4-sim-images{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:0;list-style:none}.tm-v4-sim-images button:first-child{background:#dbeafe;border:1px solid #93c5fd;color:#1d4ed8;border-radius:4px}.tm-v4-sim-images button:last-child{background:#dcfce7;border:1px solid #86efac;color:#166534;border-radius:4px}.tm-v4-sim-modal{position:fixed;inset:0;background:#0006;display:flex;align-items:center;justify-content:center;z-index:999999;color:#111;font:13px Arial}.tm-v4-sim-modal>div{background:white;padding:16px;border-radius:6px;width:640px;max-width:95vw;max-height:90vh;overflow:auto}.tm-v4-sim-modal input,.tm-v4-sim-modal textarea{box-sizing:border-box;width:100%}.tm-v4-sim-modal textarea{height:200px}.tm-v4-sim-modal .row{display:flex;justify-content:space-between;margin-bottom:5px}.tm-v4-sim-status{font:11px Arial;color:#a33120}";
     d.head.append(style);
-    const mark = (node) => {
+    const mark = (node, cleanup) => {
       node.dataset.tmV4Script = "SIMTt";
-      owned.add(node);
+      owned.set(node, cleanup);
       return node;
     };
+    function release(node) {
+      if (!node) return;
+      const cleanup = owned.get(node);
+      owned.delete(node);
+      cleanup?.();
+      for (const child of [node, ...node.querySelectorAll("*")]) for (const event of ["onclick", "onmousedown", "onchange", "oncancel"]) child[event] = null;
+      node.remove();
+      if (modal === node) modal = null;
+      if (imageGroup === node) imageGroup = null;
+    }
     function load() {
       const raw = window2.localStorage.getItem(key);
       return raw ? normalizeSnippets(JSON.parse(raw)) : [];
@@ -273,7 +283,7 @@
       }
     }
     function show(content) {
-      modal?.remove();
+      release(modal);
       modal = mark(d.createElement("div"));
       modal.className = "tm-v4-sim-modal";
       modal.innerHTML = "<div>" + content + "</div>";
@@ -289,7 +299,7 @@
       }
       const row = index == null ? { name: "", text: "" } : rows[index];
       const node = show(`<b>${index == null ? "Add" : "Edit"} Snippet</b><p>Name</p><input data-name value="${escapeHtml(row.name)}"><p>Text</p><textarea data-text>${escapeHtml(row.text)}</textarea><button data-save>Save</button> <button data-cancel>Cancel</button><p role="status"></p>`);
-      node.querySelector("[data-cancel]").onclick = () => node.remove();
+      node.querySelector("[data-cancel]").onclick = () => release(node);
       node.querySelector("[data-save]").onclick = () => {
         try {
           const fresh = load(), entry = { name: node.querySelector("[data-name]").value.trim(), text: node.querySelector("[data-text]").value };
@@ -297,7 +307,7 @@
           if (index == null) fresh.push(entry);
           else fresh[index] = entry;
           save(fresh);
-          node.remove();
+          release(node);
         } catch (error) {
           node.querySelector("[role=status]").textContent = error.message;
         }
@@ -314,7 +324,7 @@
       node.onclick = (event) => {
         const b = event.target.closest("button");
         if (!b) return;
-        if (b.hasAttribute("data-close")) node.remove();
+        if (b.hasAttribute("data-close")) release(node);
         if (b.dataset.edit) editor(Number(b.dataset.edit));
         if (b.dataset.delete != null && window2.confirm("Delete snippet?")) {
           const fresh = load();
@@ -346,19 +356,26 @@
       }
     }
     function importSnippets() {
-      const input = mark(d.createElement("input"));
+      let reader = null;
+      const input = mark(d.createElement("input"), () => {
+        if (!reader) return;
+        reader.onload = reader.onerror = reader.onabort = null;
+        if (reader.readyState === 1) reader.abort();
+      });
       input.type = "file";
       input.accept = ".json,application/json";
       input.hidden = true;
+      input.oncancel = () => release(input);
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) {
-          input.remove();
+          release(input);
           return;
         }
-        const reader = new window2.FileReader();
+        input.onchange = null;
+        reader = new window2.FileReader();
         reader.onload = () => {
-          if (disposed) return;
+          if (disposed || !owned.has(input)) return;
           try {
             const incoming = normalizeSnippets(JSON.parse(String(reader.result)));
             if (!incoming.length) throw new Error("No snippets in import");
@@ -367,14 +384,20 @@
             report("Imported " + incoming.length + " snippets");
           } catch (error) {
             report("Import failed — existing snippets preserved: " + error.message);
+          } finally {
+            release(input);
           }
-          input.remove();
         };
-        reader.onerror = () => {
+        reader.onerror = reader.onabort = () => {
           report("Import failed");
-          input.remove();
+          release(input);
         };
-        reader.readAsText(file);
+        try {
+          reader.readAsText(file);
+        } catch (error) {
+          report("Import failed: " + error.message);
+          release(input);
+        }
       };
       d.body.append(input);
       input.click();
@@ -442,15 +465,16 @@
           try {
             button.textContent = `Downloading ${completed}/${images.length}`;
             const response = await window2.fetch(item.url, { credentials: "include", cache: "no-store", signal: itemController.signal });
-            if (!response.ok || response.redirected && !/^image\//i.test(response.headers.get("content-type") || "")) throw new Error("Attachment auth/HTTP failure");
+            const invalid = (message) => Object.assign(new Error(message), { code: "INVALID_ATTACHMENT" });
+            if (!response.ok || !/^image\//i.test(response.headers.get("content-type") || "")) throw invalid("Attachment auth/HTTP/MIME failure");
             const blob = await response.blob();
-            if (!blob.size || !/^image\//i.test(blob.type)) throw new Error("Attachment is not an image");
+            if (!blob.size || !/^image\//i.test(blob.type)) throw invalid("Attachment is not an image");
             if (controller.signal.aborted) break;
             downloadBlob(blob, item.name);
             completed++;
-          } catch {
+          } catch (error) {
             failed++;
-            if (!controller.signal.aborted && new window2.URL(item.url).origin === window2.location.origin) {
+            if (error?.code !== "INVALID_ATTACHMENT" && !controller.signal.aborted && new window2.URL(item.url).origin === window2.location.origin) {
               const link = d.createElement("a");
               link.href = item.url;
               link.download = item.name;
@@ -479,12 +503,12 @@
       if (disposed) return;
       attachments = attachmentScope(d);
       for (const [ta, bar] of bars) if (!ta.isConnected) {
-        bar.remove();
-        owned.delete(bar);
+        release(bar);
         bars.delete(ta);
       }
       for (const ta of d.querySelectorAll('textarea[data-testid="sim-markdownEditor--textArea"]')) {
         if (bars.has(ta) && bars.get(ta).isConnected) continue;
+        release(bars.get(ta));
         const bar = mark(d.createElement("div"));
         bar.className = "tm-v4-sim-bar";
         for (const command of ["Bold", "Italics", "BoldIT", "Code", "CodeBlk", "Quote", "•", "1.", "Table", "HR", "Space", "Strike"]) {
@@ -525,6 +549,7 @@
       const images = imageAttachments(window2), audit = [...d.querySelectorAll("[role=tab]")].find((node) => clean(node.textContent) === "Audit Trail"), tabs = audit?.closest("[role=tablist]");
       if (images.length && tabs) {
         if (!imageGroup?.isConnected) {
+          release(imageGroup);
           imageGroup = mark(d.createElement("li"));
           imageGroup.className = "tm-v4-sim-images";
           imageGroup.setAttribute("role", "presentation");
@@ -540,7 +565,7 @@
           const label = (index ? "Download" : "Open") + " Images (" + images.length + ")";
           if (button.textContent !== label) button.textContent = label;
         }
-      } else imageGroup?.remove();
+      } else release(imageGroup);
       for (const button of d.querySelectorAll('[class*="expand-button"][aria-expanded=true]')) for (const title of ["Ticket synopsis", "Announcements"]) if (!collapsed.has(title) && clean(button.textContent).includes(title)) {
         collapsed.add(title);
         button.click();
@@ -577,7 +602,10 @@
       downloadController?.abort();
       observer.disconnect();
       events.abort();
-      for (const node of owned) node.remove();
+      for (const node of owned.keys()) release(node);
+      bars.clear();
+      collapsed.clear();
+      attachments = null;
       style.remove();
       for (const url of urls) window2.URL.revokeObjectURL(url);
       urls.clear();
@@ -587,7 +615,7 @@
   }
 
   // sim-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.3";
   var guard = Symbol.for("tampermonkey.v4.sim.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

@@ -1,0 +1,21 @@
+import test from 'node:test';import assert from 'node:assert/strict';import{readFileSync}from'node:fs';import{JSDOM}from'jsdom';import{createIssConsole}from'../iss-runtime.mjs';import{createIssBridge}from'../iss-bridge.mjs';
+const tick=async()=>{for(let i=0;i<5;i++)await new Promise(r=>setTimeout(r,0));};
+function setup(t){const w=new JSDOM('<head></head><body>',{url:'https://fcresearch-fe.aka.amazon.com/BWU2/results#iss-console',runScripts:'outside-only'}).window;t.after(()=>w.close());w.navigator.locks={request:async(n,o,work)=>work({name:n})};return w;}
+function delayed(w){let grant;w.navigator.locks.request=(n,o,work)=>new Promise((resolve,reject)=>grant=()=>Promise.resolve(work({name:n})).then(resolve,reject));return()=>grant();}
+function bridgeFake(extra={}){return{ready:async()=>{},run:async()=>({outcome:'CONFIRMED',rows:[]}),control(){},reconnect:async()=>{},dispose(){},...extra};}
+function connect(w,peer){w.dispatchEvent(new w.MessageEvent('message',{origin:peer.origin,source:peer.frame.contentWindow,data:{protocol:'tm-v4.iss',nonce:peer.nonce,type:'ready'}}));}
+for(const close of [false,true])test('ISS '+(close?'closure':'Stop')+' before late owner creates no worker or ledger',async t=>{
+ const w=setup(t),grant=delayed(w);let calls=0;const ui=createIssConsole({window:w,version:'test',bridgeFactory:()=>bridgeFake({ready:async()=>calls++})});t.after(ui.dispose);ui.root.querySelector('[data-panel=edit] textarea').value='X000000001';const work=ui.run('edit');if(close)ui.dispose();else ui.stop('edit');grant();await work;assert.equal(calls,0);assert.equal(w.localStorage.getItem('tm-v4.iss.edit.rows'),null);
+});
+test('ISS Stop while real peer readiness waits closes frame and prevents late hello/handoff',async t=>{
+ const w=setup(t),ui=createIssConsole({window:w,version:'test',bridgeFactory:o=>createIssBridge({window:w,...o})});t.after(ui.dispose);ui.root.querySelector('[data-panel=edit] textarea').value='X000000001';const work=ui.run('edit');await tick();const peer=ui.bridge.getPeer('aft');let sends=0;peer.frame.contentWindow.postMessage=()=>sends++;ui.stop('edit');await work;peer.frame.dispatchEvent(new w.Event('load'));assert.equal(sends,0);assert.equal(w.document.querySelector('iframe'),null);assert.equal(w.localStorage.getItem('tm-v4.iss.edit.rows'),null);
+});
+test('ISS readiness cancellation is per caller and disposal rejects further worker creation',async t=>{
+ const w=setup(t),bridge=createIssBridge({window:w}),a=new w.AbortController(),b=new w.AbortController();const first=bridge.ready('aft',{signal:a.signal}),second=bridge.ready('aft',{signal:b.signal}),peer=bridge.getPeer('aft');a.abort();await assert.rejects(first,/cancelled/);assert.equal(peer.frame.isConnected,true);connect(w,peer);await second;assert.equal(peer.frame.isConnected,true);bridge.dispose();await assert.rejects(bridge.ready('aft'),/disposed/);assert.throws(()=>bridge.reconnect('aft'),/disposed/);assert.equal(w.document.querySelector('iframe'),null);
+});
+test('ISS Clear with late owner cannot write after console closes',async t=>{
+ const w=setup(t),ui=createIssConsole({window:w,version:'test',bridgeFactory:()=>bridgeFake()});t.after(ui.dispose);const grant=delayed(w),clear=ui.clear('edit');ui.dispose();grant();await clear;assert.equal(w.localStorage.getItem('tm-v4.iss.edit.rows'),null);
+});
+for(const close of [false,true])test('generated ISS delayed-owner '+(close?'closure':'Stop')+' has no background worker',async t=>{
+ const w=setup(t),grant=delayed(w);w.unsafeWindow=w;w.fetch=()=>{throw new Error('No native requests');};w.GM_xmlhttpRequest=()=>{throw new Error('No GM');};w.eval(readFileSync(new URL('../ISS_Console.user.js',import.meta.url),'utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await tick();const panel=w.document.querySelector('[data-panel=edit]');panel.querySelector('textarea').value='X000000001';panel.querySelector('[data-action=run]').click();if(close)w.dispatchEvent(new w.Event('pagehide'));else panel.querySelector('[data-action=stop]').click();grant();await tick();assert.equal(w.document.querySelector('iframe'),null);assert.equal(w.localStorage.getItem('tm-v4.iss.edit.rows'),null);w.dispatchEvent(new w.Event('pagehide'));
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 ISS Console
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.5
+// @version 0.1.7
 // @description Familiar FCR Edit/Move/Sideline with bundled native-origin workers.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -853,14 +853,30 @@
     }
     return [...map.values()];
   }
+  var ordered = (value) => Array.isArray(value) ? value.map(ordered) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
   function sidelineDateKey(source, code, ctx) {
-    return JSON.stringify([upper(source), upper(code), upper(ctx.asin), upper(ctx.fnsku), upper(ctx.fcsku), ctx.dateType, ctx.dateDetail?.shelfLife ?? null]);
+    return JSON.stringify([upper(source), upper(code), upper(ctx.asin), upper(ctx.fnsku), upper(ctx.fcsku), upper(ctx.item?.scannableId), ctx.hazmat === true, ctx.dateType, ordered(ctx.dateDetail || {})]);
   }
   function createSidelineWorkflow({ window: window2, client, preflight, pickDate, onChange = () => {
   }, onEvidence = () => {
   } }) {
     const key = "tm-v4.sideline.rows", uuid = () => window2.crypto.randomUUID();
-    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, owns = false, clearAfterSettled = false, paused = false, disposed = false, active3 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), sourceMeta = null;
+    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, owns = false, clearAfterSettled = false, paused = false, disposed = false, active3 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), dateSource = "", sourceMeta = null;
+    function setDateContext(source, codes) {
+      const next = upper(source);
+      if (next !== dateSource) {
+        dates.clear();
+        dateSource = next;
+      }
+      if (codes) {
+        const current = new Set(codes.map(upper));
+        for (const key2 of dates.keys()) if (!current.has(JSON.parse(key2)[1])) dates.delete(key2);
+      }
+    }
+    function endDateContext() {
+      dates.clear();
+      dateSource = "";
+    }
     const notify = () => onChange({ running, busy, paused, attention, message, rows: journal.rows, stopStage });
     const signal = () => {
       readController = new window2.AbortController();
@@ -981,9 +997,12 @@
     }
     async function run(mode, options = {}) {
       if (busy || disposed) return;
+      if (mode === "lazy") setDateContext(options.source, (options.items || []).map((item) => item.code));
+      else endDateContext();
       busy = true;
       stopStage = 0;
-      message = "";
+      message = "Waiting for workflow owner";
+      notify();
       try {
         await withOperationLock(window2, "tm-v4.sideline.owner", async () => {
           owns = true;
@@ -1115,7 +1134,7 @@
         attention = "";
         active3 = null;
         readController = null;
-        dates.clear();
+        endDateContext();
         notify();
       }
     }
@@ -1150,6 +1169,7 @@
     }
     function stop() {
       stopStage++;
+      endDateContext();
       if (running) {
         running = false;
         paused = false;
@@ -1185,6 +1205,7 @@
       }
     }
     async function reset() {
+      endDateContext();
       if (busy) {
         stop();
         return false;
@@ -1208,6 +1229,7 @@
     function dispose() {
       if (disposed) return;
       disposed = true;
+      endDateContext();
       running = false;
       paused = false;
       try {
@@ -1219,8 +1241,9 @@
       wake?.();
       scanResolve?.(null);
     }
-    return { run, scan, pause, stop, reset, dispose, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), hasDate: (source, code, ctx) => dates.has(sidelineDateKey(source, code, ctx)), setDate: (source, code, ctx, value) => {
+    return { run, scan, pause, stop, reset, dispose, setDateContext, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), hasDate: (source, code, ctx) => dateSource === upper(source) && dates.has(sidelineDateKey(source, code, ctx)), setDate: (source, code, ctx, value) => {
       if (!Number.isFinite(value)) throw new Error("Invalid date answer");
+      setDateContext(source);
       dates.set(sidelineDateKey(source, code, ctx), value);
     } };
   }
@@ -1342,7 +1365,7 @@
   // iss-runtime.mjs
   function createIssConsole({ window: window2, bridgeFactory, version, onEvidence = () => {
   } }) {
-    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {}, clearing = {};
+    const d = window2.document, events = new window2.AbortController(), picker = createDatePicker(window2, { owner: "ISSC" }), journals = {}, activeRows = {}, promises = {}, starts = {}, busy = {}, stopStages = {}, liveRows = {}, quantityRows = {}, clearing = {};
     let disposed = false, active3 = "edit", dateController = null, sideAttention = "", sideNativeMessage = "", sideRecoveryPending = false;
     const root = d.createElement("section");
     root.id = "tm-v4-iss";
@@ -1493,22 +1516,25 @@
         return;
       }
       busy[area] = true;
+      const start = new window2.AbortController();
+      starts[area] = start;
       stopStages[area] = 0;
       active3 = area;
       paint(area);
       promises[area] = withOperationLock(window2, "tm-v4.iss." + area + ".owner", async () => {
+        if (disposed || start.signal.aborted || stopStages[area] > 0) throw new Error("Stopped before console ownership");
         const journal = createOperationJournal({ storage: window2.localStorage, key: key(area), uuid: () => window2.crypto.randomUUID() });
         journals[area] = journal;
         if (journal.rows.some((row2) => ["UNKNOWN", "SUBMITTED"].includes(row2.state))) throw new Error("UNKNOWN console handoff retained — verify native outcome before retry");
-        await bridge.ready(kind(area));
-        if (disposed || stopStages[area] > 0) throw new Error("Stopped before native handoff");
+        await bridge.ready(kind(area), { signal: start.signal });
+        if (disposed || start.signal.aborted || stopStages[area] > 0) throw new Error("Stopped before native handoff");
         const row = journal.add([area + " " + window2.crypto.randomUUID()], { area, kind: "native-handoff", payload: input })[0];
         activeRows[area] = row;
         journal.transition(row, "SUBMITTED", "Native workflow handoff pending", { requestId: row.id });
         paint(area);
         onEvidence({ type: "iss.handoff", intent: "workflow", data: { area, phase: "SUBMITTED" } });
         try {
-          const result = await bridge.run(kind(area), input, { requestId: row.id });
+          const result = await bridge.run(kind(area), input, { requestId: row.id, signal: start.signal });
           liveRows[area] = result.rows || [];
           if (row.state === "UNKNOWN") {
             message(area, "Late native evidence received • UNKNOWN handoff retained for review");
@@ -1533,6 +1559,7 @@
         }
       }).catch((error) => message(area, error.message)).finally(() => {
         busy[area] = false;
+        if (starts[area] === start) delete starts[area];
         activeRows[area] = null;
         promises[area] = null;
         if (area === "sideline") {
@@ -1546,6 +1573,7 @@
       await promises[area];
     }
     function cancel(area) {
+      starts[area]?.abort();
       if (area === "sideline") sideRecoveryPending = false;
       bridge.control(kind(area), "stop", { area });
       if (area === "sideline") {
@@ -1569,6 +1597,7 @@
         if (disposed) return;
         try {
           await withOperationLock(window2, "tm-v4.iss." + area + ".owner", async () => {
+            if (disposed) return;
             const journal = createOperationJournal({ storage: window2.localStorage, key: key(area), uuid: () => window2.crypto.randomUUID() });
             journal.clear();
             journals[area] = journal;
@@ -1611,7 +1640,7 @@
         return;
       }
       if (button.dataset.reconnect) {
-        void bridge.reconnect(button.dataset.reconnect).catch((error) => root.querySelector(`[data-worker=${button.dataset.reconnect}]`).textContent = error.message);
+        void bridge.reconnect(button.dataset.reconnect, { signal: events.signal }).catch((error) => root.querySelector(`[data-worker=${button.dataset.reconnect}]`).textContent = error.message);
         return;
       }
       const area = button.closest("[data-panel]")?.dataset.panel;
@@ -1697,6 +1726,7 @@
     return { root, bridge, run, stop, clear, getRows: (area) => journals[area]?.rows, dispose() {
       if (disposed) return;
       disposed = true;
+      for (const controller of Object.values(starts)) controller.abort();
       for (const area of Object.keys(activeRows)) {
         const row = activeRows[area];
         if (row?.state === "SUBMITTED") try {
@@ -1733,7 +1763,18 @@
   }, onDate = async () => null, healthTimeout = 15e3, runTimeout = 12 * 60 * 1e3 }) {
     const d = window2.document, events = new window2.AbortController(), peers = /* @__PURE__ */ new Map();
     let disposed = false;
+    const cancelled = () => Object.assign(new Error("ISS worker startup cancelled"), { outcome: "REJECTED" });
+    function removePeer(item) {
+      window2.clearTimeout(item.timer);
+      item.events.abort();
+      item.frame.remove();
+      if (peers.get(item.kind) === item) peers.delete(item.kind);
+    }
+    function settleReady(item, error) {
+      for (const finish of [...item.waiters]) finish(error);
+    }
     function peer(kind) {
+      if (disposed) throw new Error("ISS bridge disposed");
       if (!ISS_TARGETS[kind]) throw new Error("Unknown ISS worker");
       let item = peers.get(kind);
       if (item) return item;
@@ -1745,36 +1786,55 @@
       frame.tabIndex = -1;
       frame.setAttribute("aria-hidden", "true");
       frame.style.cssText = "position:fixed;left:-12000px;top:0;width:1280px;height:900px;opacity:0;pointer-events:none;border:0";
-      let readyResolve, readyReject;
-      const ready = new Promise((resolve, reject) => {
-        readyResolve = resolve;
-        readyReject = reject;
-      });
-      item = { kind, nonce, origin: url.origin, frame, ready, readyResolve, readyReject, pending: /* @__PURE__ */ new Map(), readyState: false };
+      item = { kind, nonce, origin: url.origin, frame, events: new window2.AbortController(), waiters: /* @__PURE__ */ new Set(), pending: /* @__PURE__ */ new Map(), readyState: false };
       item.timer = window2.setTimeout(() => {
-        item.readyReject(Object.assign(new Error(kind.toUpperCase() + " native worker unavailable — authenticate/open native application, then reconnect"), { outcome: "REJECTED" }));
-        item.unavailable = true;
+        item.unavailable = Object.assign(new Error(kind.toUpperCase() + " native worker unavailable — authenticate/open native application, then reconnect"), { outcome: "REJECTED" });
+        settleReady(item, item.unavailable);
+        item.events.abort();
       }, healthTimeout);
       peers.set(kind, item);
       frame.addEventListener("load", () => {
+        if (disposed || peers.get(kind) !== item || item.unavailable) return;
         try {
           send(item, "hello");
         } catch (error) {
           onProgress({ kind, stage: "error", message: error.message });
         }
-      });
+      }, { signal: item.events.signal });
       frame.src = url.href;
       d.documentElement.append(frame);
       return item;
+    }
+    async function ready(kind, { signal } = {}) {
+      if (disposed) throw new Error("ISS bridge disposed");
+      if (signal?.aborted) throw cancelled();
+      const item = peer(kind);
+      if (item.unavailable) throw item.unavailable;
+      if (item.readyState) return;
+      return new Promise((resolve, reject) => {
+        const finish = (error) => {
+          item.waiters.delete(finish);
+          signal?.removeEventListener("abort", cancel);
+          if (error) reject(error);
+          else resolve();
+        }, cancel = () => {
+          finish(cancelled());
+          if (!item.readyState && !item.waiters.size && !item.pending.size) removePeer(item);
+        };
+        item.waiters.add(finish);
+        signal?.addEventListener("abort", cancel, { once: true });
+        if (signal?.aborted) cancel();
+      });
     }
     function send(item, type, data = {}) {
       if (disposed) throw new Error("ISS bridge disposed");
       item.frame.contentWindow.postMessage({ protocol: PROTOCOL, nonce: item.nonce, type, ...data }, item.origin);
     }
-    async function run(kind, payload, { requestId = window2.crypto.randomUUID() } = {}) {
-      const item = peer(kind);
-      await item.ready;
-      if (disposed) throw new Error("ISS disposed");
+    async function run(kind, payload, { requestId = window2.crypto.randomUUID(), signal } = {}) {
+      await ready(kind, { signal });
+      if (disposed) throw Object.assign(new Error("ISS disposed before native handoff"), { outcome: "REJECTED" });
+      if (signal?.aborted) throw cancelled();
+      const item = peers.get(kind);
       return new Promise((resolve, reject) => {
         const timer = window2.setTimeout(() => {
           item.pending.delete(requestId);
@@ -1807,7 +1867,7 @@
         if (item.unavailable) return;
         window2.clearTimeout(item.timer);
         item.readyState = true;
-        item.readyResolve();
+        settleReady(item);
         onProgress({ kind: item.kind, stage: "connected" });
         return;
       }
@@ -1838,17 +1898,14 @@
       }
     }
     window2.addEventListener("message", (event) => void message(event).catch((error) => onProgress({ stage: "error", message: error.message })), { signal: events.signal });
-    function reconnect(kind) {
+    function reconnect(kind, { signal } = {}) {
+      if (disposed) throw new Error("ISS bridge disposed");
       const item = peers.get(kind);
       if (item && (item.pending.size || !item.readyState && !item.unavailable)) throw new Error("Native workflow pending — reconnect would erase uncertainty");
-      if (item) {
-        window2.clearTimeout(item.timer);
-        item.frame.remove();
-        peers.delete(kind);
-      }
-      return peer(kind).ready;
+      if (item) removePeer(item);
+      return ready(kind, { signal });
     }
-    return { run, control, reconnect, ready: (kind) => peer(kind).ready, getPeer: (kind) => peers.get(kind), dispose() {
+    return { run, control, reconnect, ready, getPeer: (kind) => peers.get(kind), dispose() {
       if (disposed) return;
       for (const item of peers.values()) {
         if (item.readyState) {
@@ -1857,17 +1914,15 @@
           } catch {
           }
         }
-        window2.clearTimeout(item.timer);
-        item.readyReject(new Error("ISS disposed before worker ready"));
+        settleReady(item, new Error("ISS disposed before worker ready"));
         for (const pending of item.pending.values()) {
           window2.clearTimeout(pending.timer);
           pending.reject(Object.assign(new Error("ISS disposed after native handoff — verify outcome"), { outcome: "UNKNOWN" }));
         }
-        item.frame.remove();
+        removePeer(item);
       }
       disposed = true;
       events.abort();
-      peers.clear();
     } };
   }
   function serveIssWorker({ window: window2, kind, engine, onDispose = () => {
@@ -2974,17 +3029,26 @@
   // sideline-preflight.mjs
   function createSidelinePreflight({ window: window2, client, gmRequest, onEvidence = () => {
   } }) {
-    let enrichment;
-    return async (source, code, { signal } = {}) => {
+    let enrichment, enrichmentWarehouse;
+    return async (source, code, { signal, previous } = {}) => {
       const result = await client.item(source, code, { signal });
       if (result.kind === "red" || !result.ctx?.hazmat) return result;
       try {
-        const context = await client.bootstrap({ signal });
-        enrichment ||= createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
-        const hazard = await enrichment.hazmat(result.ctx.asin, { signal }), data = hazard.complete === true ? hazard.hazmat : null;
+        const context = await client.bootstrap({ signal }), prior = previous?.hazmatDecision;
+        const reuse = prior && ["green", "yellow"].includes(previous.kind) && prior.warehouse === context.warehouse && upper(prior.asin) === upper(result.ctx.asin) && Number.isSafeInteger(prior.level) && prior.level >= 0 && typeof prior.message === "string" && /can be processed/i.test(prior.message) && !/cannot|can't|not be processed/i.test(prior.message);
+        let data;
+        if (reuse) data = prior;
+        else {
+          if (!enrichment || enrichmentWarehouse !== context.warehouse) {
+            enrichment = createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
+            enrichmentWarehouse = context.warehouse;
+          }
+          const hazard = await enrichment.hazmat(result.ctx.asin, { signal });
+          data = hazard.complete === true ? hazard.hazmat : null;
+        }
         if (!data || !Number.isSafeInteger(data.level) || data.level < 0 || !data.message?.trim()) return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — missing validated processing decision", ctx: result.ctx };
         const blocked = /cannot|can't|not be processed/i.test(data.message), allowed2 = /can be processed/i.test(data.message) && !blocked;
-        if (allowed2) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + data.level + " — OK TO PROCESS" };
+        if (allowed2) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + data.level + " — OK TO PROCESS", hazmatDecision: { warehouse: context.warehouse, asin: upper(result.ctx.asin), level: data.level, message: data.message } };
         if (blocked) return { kind: "red", reason: "HAZMAT L" + data.level + " — NOT PROCESSABLE", ctx: result.ctx };
         return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — unrecognised processing decision", ctx: result.ctx };
       } catch (error) {
@@ -3039,7 +3103,7 @@
   }
 
   // iss-entry.mjs
-  var VERSION = "0.1.5";
+  var VERSION = "0.1.7";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.iss.installer");
   if (!page[guard]) {

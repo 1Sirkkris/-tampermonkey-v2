@@ -1,0 +1,43 @@
+✔ RIVER ignores native fields and Next under CSS display:none ancestor (136.61767ms)
+✔ RIVER ignores native fields and Next under inherited CSS visibility:hidden (32.216018ms)
+✔ RIVER ignores native fields and Next under attribute-hidden ancestor (17.606641ms)
+✔ RIVER rejects a zero-area native field even when its CSS display is visible (25.247324ms)
+✔ RIVER waits for a CSS-hidden Next to render and then advances exactly once (48.268335ms)
+✔ RIVER Stop while hidden Next is pending prevents a later reveal from submitting (29.636314ms)
+✔ RIVER rejects a Next replaced after readiness before submitting and permits deliberate fresh Run (49.552231ms)
+✔ RIVER field replacement before the first native write prevents stale writes and Next (25.978505ms)
+✔ RIVER native field replacement during input validation prevents later Next (20.904946ms)
+✖ generated RIVER ignores ASIN and Next in a CSS-hidden native ancestor (41.6883ms)
+✔ RIVER latest exact SKU line uses all three quantity components and refuses undated ambiguity/wrong identity (71.014238ms)
+✔ self-contained captured exact product retains missing PO as manual and cancellation never publishes (14.840861ms)
+✔ native ASIN writes/Next occur once, unknown transition cannot repeat; Stop clears only V4 payload (99.720962ms)
+✔ Stop during Information readiness/frame prevents every later field write and Next (69.606306ms)
+✔ related tickets/final Create remain manual and missing severity units do not invent a quantity (14.399395ms)
+✔ generated RIVER independent native UI/footer starts once with no automatic final submission and disposes (20.273011ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 814.341611
+
+✖ failing tests:
+
+test at tests/river-readiness.test.mjs:123:1
+✖ generated RIVER ignores ASIN and Next in a CSS-hidden native ancestor (41.6883ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'B000000001' !== ''
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/82eb845e7e24/v4-approved-work/v4/tests/river-readiness.test.mjs:138:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'B000000001',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

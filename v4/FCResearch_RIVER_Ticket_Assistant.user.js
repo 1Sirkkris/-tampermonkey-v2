@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 RIVER Ticket Assistant
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.3
 // @description Exact FCR handoff and native RIVER assistant with manual final gates.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -75,6 +75,11 @@
   // ui-tools.mjs
   var clean = (value2) => String(value2 ?? "").replace(/\s+/g, " ").trim();
   var upper = (value2) => clean(value2).toUpperCase();
+  function isRendered(window2, node) {
+    if (!node?.isConnected || node.closest("[hidden]")) return false;
+    const style = window2.getComputedStyle(node), rect = node.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" && rect.width > 0 && rect.height > 0;
+  }
   function evidence(window2, script, version, data) {
     try {
       const record = { script, version, ...data };
@@ -156,7 +161,8 @@
     d.body.append(root);
     d.head.append(style);
     const status = (text2) => root.querySelector("[role=status]").textContent = text2;
-    const visible = (node) => node && !node.hidden && !node.closest("[data-tm-v4-script],[hidden]") && window2.getComputedStyle(node).display !== "none" && window2.getComputedStyle(node).visibility !== "hidden", enabled = (node) => visible(node) && !node.disabled && !node.readOnly && node.getAttribute("aria-disabled") !== "true";
+    const visible = (node) => isRendered(window2, node) && !node.closest("[data-tm-v4-script]");
+    const enabled = (node) => visible(node) && !node.disabled && !node.readOnly && node.getAttribute("aria-disabled") !== "true";
     function check(step, signal) {
       if (disposed || !active2 || signal?.aborted || step !== riverStep(window2)) throw new Error("Stopped or native step changed");
     }
@@ -192,7 +198,7 @@
           }
         };
         const observer = new window2.MutationObserver(assess);
-        observer.observe(d.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "readonly", "aria-disabled", "label"] });
+        observer.observe(d.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "readonly", "aria-disabled", "label", "class", "style", "hidden"] });
         const timer = window2.setTimeout(() => finish(null, new Error("Native form readiness timeout")), timeout);
         signal?.addEventListener("abort", cancel, { once: true });
         if (signal?.aborted) cancel();
@@ -216,9 +222,11 @@
       node.dispatchEvent(new window2.Event("change", { bubbles: true, composed: true }));
       await frame(signal);
       check(step, signal);
+      if (!enabled(node)) throw new Error("Native field replaced/disabled/hidden");
       node.blur();
       await frame(signal);
       check(step, signal);
+      if (!enabled(node)) throw new Error("Native field replaced/disabled/hidden");
       if (clean(node.value) !== clean(value2)) throw new Error("Native field did not retain value");
     }
     function choice(index, step, signal) {
@@ -234,6 +242,7 @@
         return enabled(node) ? node : null;
       }, signal, 4e3);
       check(step, signal);
+      if (!enabled(button) || nextButton() !== button) throw new Error("Native Next replaced/disabled/hidden");
       if (lastSubmitted === step) throw new Error("Next already submitted for this step — wait for native transition");
       lastSubmitted = step;
       onEvidence({ type: "river.step", intent: "workflow", data: { step, stage: "next-submitted" } });
@@ -1022,7 +1031,7 @@
   }
 
   // river-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.3";
   var guard = Symbol.for("tampermonkey.v4.river.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

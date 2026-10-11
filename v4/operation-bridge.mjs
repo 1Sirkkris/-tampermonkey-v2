@@ -19,18 +19,21 @@ export function serveOperationBridge({window,mode,driver,identity,onEvidence=()=
   if(data.type==='hello'){reply('ready');return;}
   if(data.type!=='run'||busy||disposed)return;busy=true;
   try{await withOperationLock(window,lockName,async()=>{
+   if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');
    const input=data.row;if(!input||typeof input.id!=='string'||!/^(?:tsX|csX)[A-Z0-9_-]+$/i.test(clean(input.container)))throw new Error('Invalid operation request');
    identity();journal=createOperationJournal({storage:window.localStorage,key,uuid:()=>window.crypto.randomUUID()});
    if(journal.rows.some(r=>r.requestId===input.id||upper(r.container)===upper(input.container)&&['SUBMITTED','UNKNOWN','QUEUED','READING'].includes(r.state)))throw new Error('Native recovery ledger already owns this container — verify unresolved work');
    row=journal.add([input.container],{mode:mode==='move'?'drop':'unbind',destination:clean(input.destination),requestId:input.id})[0];
    journal.transition(row,'READING','Native preflight');
    const result=await driver(row,{mode:'unbind',signal:controller.signal,checkRunning:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');},beforeMutation:()=>{if(disposed||controller.signal.aborted)throw new Error('Native preflight cancelled');identity();journal.transition(row,'SUBMITTED','Submitted — native outcome pending',{operationId:row.id});onEvidence({type:'operation',intent:'mutation',phase:'SUBMITTED',operationId:row.id,data:{mode}});reply('submitted');},onPhase:phase=>reply('phase',{phase})});
+   if(disposed)return;
    journal.transition(row,'CONFIRMED','Native result confirmed');onEvidence({type:'operation',intent:'mutation',phase:'CONFIRMED',operationId:row.id,data:{mode}});reply('result',{outcome:'CONFIRMED',verifiedBy:result?.verifiedBy||'native-hierarchy-acknowledgement'});
   });}catch(error){
+   if(disposed)return;
    let outcome=row?.state==='SUBMITTED'||row?.state==='UNKNOWN'?'UNKNOWN':'REJECTED';if(row?.state==='SUBMITTED'&&error.outcome==='REJECTED')outcome='REJECTED';
    try{if(row)journal.transition(row,outcome,error.message);}catch{outcome='UNKNOWN';}
    if(row?.operationId)onEvidence({type:'operation',intent:'mutation',phase:outcome,operationId:row.operationId,data:{mode}});reply('result',{outcome,message:clean(error.message)});
-  }finally{onEvidence({type:'operation.worker',intent:'workflow',data:{mode,state:row?.state||'blocked'}});}
+  }finally{if(!disposed)onEvidence({type:'operation.worker',intent:'workflow',data:{mode,state:row?.state||'blocked'}});}
  };
  window.addEventListener('message',handle);reply('ready');
  const dispose=()=>{if(disposed)return;disposed=true;try{if(row?.state==='SUBMITTED'){journal.transition(row,'UNKNOWN','Native worker disposed after submission');onEvidence({type:'operation',intent:'mutation',phase:'UNKNOWN',operationId:row.operationId,data:{mode}});}else if(row?.state==='READING')journal.transition(row,'REJECTED','Native preflight disposed');}catch{}controller.abort();window.removeEventListener('message',handle);};
@@ -38,6 +41,7 @@ export function serveOperationBridge({window,mode,driver,identity,onEvidence=()=
 }
 export function createOperationBridge({window,timeoutMs=120000,readyMs=25000}){
  return (row,{mode,signal,beforeMutation,onPhase=()=>{},checkRunning=()=>{}})=>new Promise((resolve,reject)=>{
+  if(signal?.aborted){reject(Object.assign(new Error('Native preflight cancelled'),{outcome:'REJECTED'}));return;}checkRunning();
   const origin=mode==='move'?'https://aft-moveapp-nrt-nrt.nrt.proxy.amazon.com':'https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com';
   const nonce=window.crypto.randomUUID(),url=new window.URL(mode==='move'?'/move-container':'/unbindHierarchy',origin);
   url.searchParams.set('tmV4ParentOrigin',window.location.origin);url.hash='tm-v4-worker='+nonce;
@@ -46,6 +50,7 @@ export function createOperationBridge({window,timeoutMs=120000,readyMs=25000}){
   const fail=(message,outcome)=>Object.assign(new Error(message),{outcome});
   const cancel=()=>finish(fail(sent?'Native operation outcome unknown after disposal':'Native preflight cancelled',sent?'UNKNOWN':'REJECTED'));
   const message=event=>{
+   if(done)return;
    const data=event.data;if(event.source!==frame.contentWindow||event.origin!==origin||data?.protocol!=='tm-v4.operation'||data.nonce!==nonce)return;
    if(data.type==='ready'&&!sent){try{checkRunning();beforeMutation();sent=true;window.clearTimeout(timer);timer=window.setTimeout(()=>finish(fail('Native worker outcome timed out — verify before retry','UNKNOWN')),timeoutMs);frame.contentWindow.postMessage({protocol:'tm-v4.operation',nonce,type:'run',row:{id:row.id,container:row.container,destination:row.destination}},origin);}catch(error){finish(error);}return;}
    if(!sent)return;if(data.type==='phase')onPhase(data.phase);else if(data.type==='submitted')onPhase('SUBMITTED');else if(data.type==='result'){

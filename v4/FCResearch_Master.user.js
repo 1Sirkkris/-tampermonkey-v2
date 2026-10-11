@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V4 FCResearch Master
 // @namespace    https://github.com/1Sirkkris/tampermonkey-v4
-// @version      0.1.6
+// @version      0.1.7
 // @description  Independent native FCR sections; development checkpoint, full Master parity pending.
 // @match        http://fcresearch-fe.aka.amazon.com/*
 // @match        https://fcresearch-fe.aka.amazon.com/*
@@ -1437,7 +1437,7 @@
   }
 
   // measurement-auth.mjs
-  var MEASUREMENT_AUTH_VERSION = "0.1.2";
+  var MEASUREMENT_AUTH_VERSION = "0.1.3";
   var MEASUREMENT_AUTH_KEY = "tm-v4.measurement.auth";
   var SITE = "https://jp.item-measurement.aft.a2z.com";
   var GUARD = Symbol.for("tampermonkey.v4.measurement.capture");
@@ -1554,6 +1554,7 @@
   function createMeasurementAuth({ window: window2, storage: storage2, now = Date.now, timeoutMs = 1e4, onEvidence = () => {
   } }) {
     if (!window2?.document || !storage2 || !["get", "listen", "remove"].every((key) => typeof storage2[key] === "function") || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 3e4) throw failure2("INPUT", "Measurement auth configuration is invalid");
+    const coldAcquisitions = /* @__PURE__ */ new Map();
     function evidence2(data) {
       try {
         onEvidence({ type: "fcr.auth", script: "MEASUREMENT AUTH", version: MEASUREMENT_AUTH_VERSION, intent: "read", data: { endpoint: "measurement-auth", ...data } });
@@ -1590,67 +1591,96 @@
       } catch (cause) {
         throw failure2("STORAGE", "Measurement auth storage cannot be read", cause);
       }
-      return new Promise((resolve, reject) => {
-        let listener = null, frame = null, timer = null, settled = false;
-        const cleanup = () => {
-          if (timer != null) window2.clearTimeout(timer);
-          if (listener != null) {
-            try {
-              storage2.remove(listener);
-            } catch {
-            }
-          }
-          signal?.removeEventListener("abort", cancelled);
-          frame?.remove();
-        };
-        const finish = (error, value = null) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          evidence2({ outcome: error ? "failed" : value ? "acquired" : "unavailable", code: error?.code, stage: "native-frame", elapsedMs: Math.max(0, now() - started) });
-          if (error) reject(error);
-          else resolve(value);
-        };
-        const cancelled = () => finish(failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason));
-        const changed = () => {
-          if (settled) return;
+      let acquisition = !force && coldAcquisitions.get(previousToken);
+      if (!acquisition) {
+        acquisition = createAcquisition(url, { force, previousToken, baseline });
+        if (!force) coldAcquisitions.set(previousToken, acquisition);
+      }
+      return acquisition.subscribe(signal);
+    }
+    function createAcquisition(url, { force, previousToken, baseline }) {
+      const subscribers = /* @__PURE__ */ new Set();
+      let listener = null, frame = null, started = false, closed = false;
+      function cleanup() {
+        if (listener != null) {
           try {
-            if (force && storage2.get(MEASUREMENT_AUTH_KEY, "null") === baseline) return;
-            const value = read();
-            if (value && value.token !== previousToken) finish(null, value);
-          } catch (error) {
-            finish(error);
+            storage2.remove(listener);
+          } catch {
           }
-        };
-        const started = now();
-        signal?.addEventListener("abort", cancelled, { once: true });
+        }
+        listener = null;
+        frame?.remove();
+        frame = null;
+      }
+      function release() {
+        if (subscribers.size) return;
+        closed = true;
+        if (!force && coldAcquisitions.get(previousToken) === acquisition) coldAcquisitions.delete(previousToken);
+        cleanup();
+      }
+      function finish(error, value = null) {
+        for (const subscriber of [...subscribers]) subscriber.finish(error, value);
+      }
+      function changed() {
+        if (closed) return;
+        try {
+          if (force && storage2.get(MEASUREMENT_AUTH_KEY, "null") === baseline) return;
+          const value = read();
+          if (value && value.token !== previousToken) finish(null, value);
+        } catch (error) {
+          finish(error);
+        }
+      }
+      function start() {
+        started = true;
         try {
           listener = storage2.listen(MEASUREMENT_AUTH_KEY, changed);
-          if (settled) {
+          if (closed) {
             cleanup();
             return;
           }
-          if (signal?.aborted) {
-            cancelled();
-            return;
-          }
           if (!force) changed();
-          if (settled) return;
-          timer = window2.setTimeout(() => finish(null), timeoutMs);
+          if (closed) return;
           frame = window2.document.createElement("iframe");
           frame.dataset.tmV4Auth = "measurement";
           frame.tabIndex = -1;
           frame.setAttribute("aria-hidden", "true");
           frame.setAttribute("inert", "");
           frame.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;border:0";
-          frame.src = url;
-          if (force) frame.src = url + "&tmV4MeasurementRefresh=" + encodeURIComponent(now());
+          frame.src = force ? url + "&tmV4MeasurementRefresh=" + encodeURIComponent(now()) : url;
           evidence2({ outcome: "started", stage: "native-frame", renewal: force });
           (window2.document.body || window2.document.documentElement).append(frame);
         } catch (cause) {
           finish(cause instanceof FcrReadError ? cause : failure2("AUTH_REQUIRED", "Measurement acquisition could not start", cause));
         }
-      });
+      }
+      const acquisition = { subscribe(signal) {
+        return new Promise((resolve, reject) => {
+          const joinedAt = now();
+          let timer = null, settled = false;
+          const subscriber = { finish(error, value = null) {
+            if (settled) return;
+            settled = true;
+            if (timer != null) window2.clearTimeout(timer);
+            signal?.removeEventListener("abort", cancelled);
+            subscribers.delete(subscriber);
+            release();
+            evidence2({ outcome: error ? "failed" : value ? "acquired" : "unavailable", code: error?.code, stage: "native-frame", elapsedMs: Math.max(0, now() - joinedAt) });
+            if (error) reject(error);
+            else resolve(value);
+          } };
+          const cancelled = () => subscriber.finish(failure2("CANCELLED", "Measurement acquisition cancelled", signal.reason));
+          subscribers.add(subscriber);
+          signal?.addEventListener("abort", cancelled, { once: true });
+          if (signal?.aborted) {
+            cancelled();
+            return;
+          }
+          timer = window2.setTimeout(() => subscriber.finish(null), timeoutMs);
+          if (!started) start();
+        });
+      } };
+      return acquisition;
     }
     function watch(callback, { signal } = {}) {
       if (typeof callback !== "function") throw failure2("INPUT", "Measurement auth callback is invalid");
@@ -2338,7 +2368,7 @@
   }
 
   // master-entry.mjs
-  var VERSION = "0.1.6";
+  var VERSION = "0.1.7";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var storage = {
     get: (key, fallback) => GM_getValue(key, fallback),

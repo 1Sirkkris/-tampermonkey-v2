@@ -1,9 +1,12 @@
 import{createOperationJournal,withOperationLock}from'./operation-journal.mjs';import{clean,upper}from'./ui-tools.mjs';
 export const validSidelineContainer=value=>/^(?:csX|tsX)[A-Za-z0-9_-]+$/i.test(clean(value));
 export function parseSidelineItems(text,source,destination){const map=new Map();for(const raw of String(text).split(/\r?\n/)){const value=clean(raw),key=upper(value);if(!value||['123START',upper(source),upper(destination)].includes(key))continue;if(validSidelineContainer(value))continue;const row=map.get(key);if(row)row.quantity++;else map.set(key,{code:value,quantity:1});}return[...map.values()];}
-export function sidelineDateKey(source,code,ctx){return JSON.stringify([upper(source),upper(code),upper(ctx.asin),upper(ctx.fnsku),upper(ctx.fcsku),ctx.dateType,ctx.dateDetail?.shelfLife??null]);}
+const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
+export function sidelineDateKey(source,code,ctx){return JSON.stringify([upper(source),upper(code),upper(ctx.asin),upper(ctx.fnsku),upper(ctx.fcsku),upper(ctx.item?.scannableId),ctx.hazmat===true,ctx.dateType,ordered(ctx.dateDetail||{})]);}
 export function createSidelineWorkflow({window,client,preflight,pickDate,onChange=()=>{},onEvidence=()=>{}}){
- const key='tm-v4.sideline.rows',uuid=()=>window.crypto.randomUUID();let journal=createOperationJournal({storage:window.localStorage,key,uuid}),running=false,busy=false,owns=false,clearAfterSettled=false,paused=false,disposed=false,active=null,attentionRow=null,readController,wake,scanResolve,attention='',message='',stopStage=0,dates=new Map(),sourceMeta=null;
+ const key='tm-v4.sideline.rows',uuid=()=>window.crypto.randomUUID();let journal=createOperationJournal({storage:window.localStorage,key,uuid}),running=false,busy=false,owns=false,clearAfterSettled=false,paused=false,disposed=false,active=null,attentionRow=null,readController,wake,scanResolve,attention='',message='',stopStage=0,dates=new Map(),dateSource='',sourceMeta=null;
+ function setDateContext(source,codes){const next=upper(source);if(next!==dateSource){dates.clear();dateSource=next;}if(codes){const current=new Set(codes.map(upper));for(const key of dates.keys())if(!current.has(JSON.parse(key)[1]))dates.delete(key);}}
+ function endDateContext(){dates.clear();dateSource='';}
  const notify=()=>onChange({running,busy,paused,attention,message,rows:journal.rows,stopStage});
  const signal=()=>{readController=new window.AbortController();return readController.signal;};
  function check(){if(disposed||!running||paused)throw new Error('Workflow halted before submission');}
@@ -30,7 +33,7 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
    return;
   }
  }
- async function run(mode,options={}){if(busy||disposed)return;busy=true;stopStage=0;message='';
+ async function run(mode,options={}){if(busy||disposed)return;if(mode==='lazy')setDateContext(options.source,(options.items||[]).map(item=>item.code));else endDateContext();busy=true;stopStage=0;message='Waiting for workflow owner';notify();
   try{await withOperationLock(window,'tm-v4.sideline.owner',async()=>{owns=true;try{if(stopStage>0||disposed)return;
    journal=createOperationJournal({storage:window.localStorage,key,uuid});if(journal.rows.some(r=>['SUBMITTED','UNKNOWN'].includes(r.state)))throw new Error('UNKNOWN recovery rows require native verification before another run');
    journal.clearKnown();
@@ -53,12 +56,12 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
     }catch(error){const target=active||row;if(target.state==='SUBMITTED'){terminal(target,error.outcome==='REJECTED'?'REJECTED':'UNKNOWN',error.message);if(target.state==='UNKNOWN'){running=false;message='UNKNOWN — verify before retry';}}else if(target.state==='READING'){if(!running||paused){journal.transition(target,'QUEUED','Stopped before submission');}else journal.transition(target,'REJECTED',error.message);}notify();}
    }
    if(running&&mode==='lazy'&&options.clearSource){const batch=journal.rows.filter(r=>r.mode==='lazy'&&r.source===options.source);if(batch.length&&batch.every(r=>r.state==='CONFIRMED')){try{await close(options.source,'source-clear');}catch(error){if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN',error.message);else if(active?.state==='READING')journal.transition(active,'REJECTED',error.message);message=error.message;}}else message='Source retained: some items were not confirmed';}
-  }finally{try{if(clearAfterSettled){journal.clear();clearAfterSettled=false;}}finally{owns=false;}}});}catch(error){message=error.message;}finally{if(active?.state==='READING')try{journal.transition(active,'QUEUED','Stopped before submission');}catch{}running=false;busy=false;paused=false;attention='';active=null;readController=null;dates.clear();notify();}
+  }finally{try{if(clearAfterSettled){journal.clear();clearAfterSettled=false;}}finally{owns=false;}}});}catch(error){message=error.message;}finally{if(active?.state==='READING')try{journal.transition(active,'QUEUED','Stopped before submission');}catch{}running=false;busy=false;paused=false;attention='';active=null;readController=null;endDateContext();notify();}
  }
  function scan(code){const value=clean(code);if(attention==='predicant'){if(upper(value)===upper(attentionRow?.destination)&&scanResolve){const resolve=scanResolve;scanResolve=null;resolve(value);return true;}return validSidelineContainer(value);}if(attention==='damaged'){if(validSidelineContainer(value)&&upper(value)!==upper(attentionRow?.source)&&upper(value)!==upper(attentionRow?.destination)&&scanResolve){const resolve=scanResolve;scanResolve=null;resolve(value);return true;}return validSidelineContainer(value);}return false;}
  function pause(){if(!running||attention==='predicant'||attention==='damaged'||attention==='recovery')return;paused=!paused;if(paused&&active?.state!=='SUBMITTED')readController?.abort();if(!paused)wake?.();notify();}
  function stop(){
-  stopStage++;
+  stopStage++;endDateContext();
   if(running){running=false;paused=false;attention='';if(active?.state!=='SUBMITTED')readController?.abort();wake?.();scanResolve?.(null);message='Stopped — submitted request settles; recovery rows retained';notify();return;}
   if(stopStage>=2){
    if(owns){if(active?.state==='READING')clearAfterSettled=true;else try{journal.clear();}catch(error){message=error.message;notify();return;}dates.clear();message='Reset safe rows; submitted/UNKNOWN retained';notify();return;}
@@ -67,10 +70,10 @@ export function createSidelineWorkflow({window,client,preflight,pickDate,onChang
   }
  }
  async function reset(){
-  if(busy){stop();return false;}
+  endDateContext();if(busy){stop();return false;}
   try{await withOperationLock(window,'tm-v4.sideline.owner',()=>{journal=createOperationJournal({storage:window.localStorage,key,uuid});journal.clear();dates.clear();stopStage=0;message='Reset — UNKNOWN retained';});notify();return true;}
   catch(error){message=error.message;notify();return false;}
  }
- function dispose(){if(disposed)return;disposed=true;running=false;paused=false;try{if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN','Page disposed after submission');else if(active?.state==='READING')journal.transition(active,'QUEUED','Page disposed before submission');}catch{}readController?.abort();wake?.();scanResolve?.(null);}
- return{run,scan,pause,stop,reset,dispose,getRows:()=>journal.rows,getState:()=>({running,busy,paused,attention,message,stopStage}),hasDate:(source,code,ctx)=>dates.has(sidelineDateKey(source,code,ctx)),setDate:(source,code,ctx,value)=>{if(!Number.isFinite(value))throw new Error('Invalid date answer');dates.set(sidelineDateKey(source,code,ctx),value);}};
+ function dispose(){if(disposed)return;disposed=true;endDateContext();running=false;paused=false;try{if(active?.state==='SUBMITTED')terminal(active,'UNKNOWN','Page disposed after submission');else if(active?.state==='READING')journal.transition(active,'QUEUED','Page disposed before submission');}catch{}readController?.abort();wake?.();scanResolve?.(null);}
+ return{run,scan,pause,stop,reset,dispose,setDateContext,getRows:()=>journal.rows,getState:()=>({running,busy,paused,attention,message,stopStage}),hasDate:(source,code,ctx)=>dateSource===upper(source)&&dates.has(sidelineDateKey(source,code,ctx)),setDate:(source,code,ctx,value)=>{if(!Number.isFinite(value))throw new Error('Invalid date answer');setDateContext(source);dates.set(sidelineDateKey(source,code,ctx),value);}};
 }

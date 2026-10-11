@@ -1,0 +1,7 @@
+# Pass 3 — Sideline expiry workflow and fresh Run context
+
+Problem: draft A → B → A and removed/re-added items could recover old answers; Run reused cached native date requirements.
+Correction: the workflow owns date answers and invalidates them at source/item boundaries, completion, Reset/Clear and Stop. Run always reads native item context again; only an already positively validated exact-ASIN/same-warehouse hazard decision from the active draft is retained. Native NONE sends null, changed prompt/identity/date detail uses a new answer. Durable unresolved operation records remain separate.
+Origin: UI scanner lookup cache was also used for mutation preflight; input reset only cleared that cache and did not end workflow date ownership. No new hazard cache or second date owner, retry budget or expiry policy introduced. V2 scanner/duplicate/date usability preserved.
+Verification: four new source failures reproduced before runtime correction. Combined Sideline/ISS/suite: 72 pass, zero failures, including generated source-change and changed-native-date START, normal repeated scans/date reuse, source/item boundaries, NONE, completion/reset/Stop, and hazard provenance reassessment. Sideline 0.1.5 and shared ISS 0.1.6 built; source/installer tests, not live mutation evidence. Results in private implementation review.
+Status: offline correction verified. Native markup/date/Hazmat/scanner live acceptance pending. Publication held.

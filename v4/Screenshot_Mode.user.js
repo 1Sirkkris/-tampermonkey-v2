@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Screenshot Mode
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.0
+// @version 0.1.1
 // @description Ctrl+Q temporarily hides V4 UI and styles across supported pages.
 // @include /^https?:\/\/(?:aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com|aft-qt-[^/]+\.corp\.amazon\.com|aft-moveapp-[^/]+\.proxy\.amazon\.com|[^/]*fcresearch[^/]*|qifcr\.fe\.aftx\.amazonoperations\.app|t\.corp\.amazon\.com|aftcartonpreditorapp-tcp-nrt\.nrt\.proxy\.amazon\.com|fba-fnsku-commingling-console-(?:eu|na|jp)\.aka\.amazon\.com|river\.amazon\.com|tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com|jp\.item-measurement\.aft\.a2z\.com|fcmenu-(?:iad|nrt)-regionalized\.corp\.amazon\.com|console\.harmony\.a2z\.com)\//
 // @grant none
@@ -95,7 +95,7 @@
         d.documentElement.removeAttribute(attribute);
         observer?.disconnect();
         observer = null;
-        for (const [node, state] of styles) if (node.isConnected) {
+        for (const [node, state] of styles) {
           if (state.had) node.setAttribute("media", state.media);
           else node.removeAttribute("media");
         }
@@ -172,7 +172,7 @@
   }
 
   // screenshot-entry.mjs
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var guard = Symbol.for("tampermonkey.v4.screenshot.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

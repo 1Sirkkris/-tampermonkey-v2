@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Carton PrEditor
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Ready barcode/count Complete helper with durable no-repeat evidence.
 // @match https://aftcartonpreditorapp-tcp-nrt.nrt.proxy.amazon.com/wf*
 // @grant none
@@ -65,6 +65,11 @@
   // ui-tools.mjs
   var clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
   var upper = (value) => clean(value).toUpperCase();
+  function isRendered(window2, node) {
+    if (!node?.isConnected || node.closest("[hidden]")) return false;
+    const style = window2.getComputedStyle(node), rect = node.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" && rect.width > 0 && rect.height > 0;
+  }
   function evidence(window2, script, version, data) {
     try {
       const record = { script, version, ...data };
@@ -248,7 +253,7 @@
     }
     function readyCarton() {
       const barcode = clean(d.getElementById("input-page-barcode-container-tertiary-text")?.textContent), counts = [...clean(d.body.textContent).matchAll(/Barcodes scanned:\s*(\d+)/gi)].map((match) => Number(match[1])), button = d.getElementById("input-page-button-container-button");
-      if (!/^(?:csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})$/i.test(barcode) || counts.length !== 1 || counts[0] < 2 || !button || !button.isConnected || button.disabled || button.getAttribute("aria-disabled") === "true" || button.closest("[hidden],[aria-hidden=true]") || !/^complete\b/i.test(clean(button.textContent))) return null;
+      if (!/^(?:csx[a-z0-9]{5,}|fba[a-z0-9]{8,}|amzn[a-z0-9]{8,}|\d{16,24}|[A-Z0-9]{7,12})$/i.test(barcode) || counts.length !== 1 || counts[0] < 2 || !button || !isRendered(window2, button) || button.disabled || button.getAttribute("aria-disabled") === "true" || button.closest("[hidden],[aria-hidden=true]") || !/^complete\b/i.test(clean(button.textContent))) return null;
       return { barcode, count: counts[0], button };
     }
     async function inspect() {
@@ -305,7 +310,7 @@
         void inspect();
       });
     });
-    observer.observe(d.querySelector("#root,#app,main") || d.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["disabled", "aria-disabled"] });
+    observer.observe(d.querySelector("#root,#app,main") || d.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["disabled", "aria-disabled", "style", "class", "hidden", "aria-hidden"] });
     for (const type of ["input", "change", "keydown"]) d.addEventListener(type, () => void inspect(), { capture: true, signal: events.signal });
     void inspect();
     return { root, inspect, dispose() {
@@ -321,7 +326,7 @@
   }
 
   // carton-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var guard = Symbol.for("tampermonkey.v4.carton.installer");
   if (!window[guard]) {
     window[guard] = { version: VERSION };

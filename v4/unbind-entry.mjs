@@ -1,3 +1,3 @@
 import{installHierarchy}from'./hierarchy-entry.mjs';
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 installHierarchy(window,typeof unsafeWindow==='object'?unsafeWindow:window,'unbind',VERSION);

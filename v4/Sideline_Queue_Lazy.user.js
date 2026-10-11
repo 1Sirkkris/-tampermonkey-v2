@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Sideline Queue + Lazy
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.4
+// @version 0.1.7
 // @description Native Queue/Lazy/QTY scanners, preflight, expiry and durable outcome recovery.
 // @match https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @grant unsafeWindow
@@ -414,14 +414,30 @@
     }
     return [...map.values()];
   }
+  var ordered = (value) => Array.isArray(value) ? value.map(ordered) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
   function sidelineDateKey(source, code, ctx) {
-    return JSON.stringify([upper(source), upper(code), upper(ctx.asin), upper(ctx.fnsku), upper(ctx.fcsku), ctx.dateType, ctx.dateDetail?.shelfLife ?? null]);
+    return JSON.stringify([upper(source), upper(code), upper(ctx.asin), upper(ctx.fnsku), upper(ctx.fcsku), upper(ctx.item?.scannableId), ctx.hazmat === true, ctx.dateType, ordered(ctx.dateDetail || {})]);
   }
   function createSidelineWorkflow({ window: window2, client, preflight, pickDate, onChange = () => {
   }, onEvidence = () => {
   } }) {
     const key = "tm-v4.sideline.rows", uuid = () => window2.crypto.randomUUID();
-    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, owns = false, clearAfterSettled = false, paused = false, disposed = false, active2 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), sourceMeta = null;
+    let journal = createOperationJournal({ storage: window2.localStorage, key, uuid }), running = false, busy = false, owns = false, clearAfterSettled = false, paused = false, disposed = false, active2 = null, attentionRow = null, readController, wake, scanResolve, attention = "", message = "", stopStage = 0, dates = /* @__PURE__ */ new Map(), dateSource = "", sourceMeta = null;
+    function setDateContext(source, codes) {
+      const next = upper(source);
+      if (next !== dateSource) {
+        dates.clear();
+        dateSource = next;
+      }
+      if (codes) {
+        const current = new Set(codes.map(upper));
+        for (const key2 of dates.keys()) if (!current.has(JSON.parse(key2)[1])) dates.delete(key2);
+      }
+    }
+    function endDateContext() {
+      dates.clear();
+      dateSource = "";
+    }
     const notify = () => onChange({ running, busy, paused, attention, message, rows: journal.rows, stopStage });
     const signal = () => {
       readController = new window2.AbortController();
@@ -542,9 +558,12 @@
     }
     async function run(mode, options = {}) {
       if (busy || disposed) return;
+      if (mode === "lazy") setDateContext(options.source, (options.items || []).map((item) => item.code));
+      else endDateContext();
       busy = true;
       stopStage = 0;
-      message = "";
+      message = "Waiting for workflow owner";
+      notify();
       try {
         await withOperationLock(window2, "tm-v4.sideline.owner", async () => {
           owns = true;
@@ -676,7 +695,7 @@
         attention = "";
         active2 = null;
         readController = null;
-        dates.clear();
+        endDateContext();
         notify();
       }
     }
@@ -711,6 +730,7 @@
     }
     function stop() {
       stopStage++;
+      endDateContext();
       if (running) {
         running = false;
         paused = false;
@@ -746,6 +766,7 @@
       }
     }
     async function reset() {
+      endDateContext();
       if (busy) {
         stop();
         return false;
@@ -769,6 +790,7 @@
     function dispose() {
       if (disposed) return;
       disposed = true;
+      endDateContext();
       running = false;
       paused = false;
       try {
@@ -780,8 +802,9 @@
       wake?.();
       scanResolve?.(null);
     }
-    return { run, scan, pause, stop, reset, dispose, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), hasDate: (source, code, ctx) => dates.has(sidelineDateKey(source, code, ctx)), setDate: (source, code, ctx, value) => {
+    return { run, scan, pause, stop, reset, dispose, setDateContext, getRows: () => journal.rows, getState: () => ({ running, busy, paused, attention, message, stopStage }), hasDate: (source, code, ctx) => dateSource === upper(source) && dates.has(sidelineDateKey(source, code, ctx)), setDate: (source, code, ctx, value) => {
       if (!Number.isFinite(value)) throw new Error("Invalid date answer");
+      setDateContext(source);
       dates.set(sidelineDateKey(source, code, ctx), value);
     } };
   }
@@ -994,30 +1017,32 @@
       att.textContent = state.attention === "predicant" ? "RESCAN DESTINATION — known rejected move; destination must be confirmed cleared" : state.attention === "damaged" ? "DAMAGED DESTINATION — scan a different destination" : state.attention;
     }
     try {
-      workflow = createSidelineWorkflow({ window: window2, client, preflight: lookup, pickDate: picker.pick, onChange: change, onEvidence });
+      workflow = createSidelineWorkflow({ window: window2, client, preflight: (source, code, options) => lookup(source, code, { ...options, refresh: true }), pickDate: picker.pick, onChange: change, onEvidence });
     } catch (error) {
       status("Recovery BLOCKED: " + error.message);
     }
-    function lookup(source, code, { signal } = {}) {
+    function lookup(source, code, { signal, refresh = false } = {}) {
       if (upper(source) !== lookupSource) {
         lookupController.abort();
         lookupController = new window2.AbortController();
         lookupSource = upper(source);
         lookupCache = /* @__PURE__ */ new Map();
       }
-      const key = upper(code);
-      if (!lookupCache.has(key)) {
-        const ownSignal = lookupController.signal;
-        const promise = pool(() => preflight(source, code, { signal: ownSignal }), ownSignal);
+      const key = upper(code), cached = lookupCache.get(key);
+      if (refresh) return preflight(source, code, { signal, previous: cached?.result });
+      if (!cached) {
+        const ownSignal = lookupController.signal, entry = { result: null };
         const ownCache = lookupCache;
-        promise.then((result) => {
-          if (result.kind === "retry" && ownCache.get(key) === promise) ownCache.delete(key);
+        entry.promise = pool(() => preflight(source, code, { signal: ownSignal }), ownSignal);
+        entry.promise.then((result) => {
+          entry.result = result;
+          if (result.kind === "retry" && ownCache.get(key) === entry) ownCache.delete(key);
         }, () => {
-          if (ownCache.get(key) === promise) ownCache.delete(key);
+          if (ownCache.get(key) === entry) ownCache.delete(key);
         });
-        lookupCache.set(key, promise);
+        lookupCache.set(key, entry);
       }
-      const pending = lookupCache.get(key);
+      const pending = lookupCache.get(key).promise;
       if (!signal) return pending;
       if (signal.aborted) return Promise.reject(new Error("Preflight cancelled"));
       return new Promise((resolve, reject) => {
@@ -1120,12 +1145,17 @@
     for (const [name, input] of Object.entries(fields)) {
       input.addEventListener("input", () => {
         if (name === "source") {
+          workflow?.setDateContext(input.value);
           cancelPreflightDate();
           lookupController.abort();
           lookupController = new window2.AbortController();
           lookupCache = /* @__PURE__ */ new Map();
           lookupSource = upper(input.value);
-        } else if (name === "items" && activeDateCode && !parseSidelineItems(input.value, fields.source.value, fields.destination.value).some((item) => upper(item.code) === activeDateCode)) cancelPreflightDate();
+        } else if (name === "items") {
+          const items = parseSidelineItems(input.value, fields.source.value, fields.destination.value);
+          workflow?.setDateContext(fields.source.value, items.map((item) => item.code));
+          if (activeDateCode && !items.some((item) => upper(item.code) === activeDateCode)) cancelPreflightDate();
+        }
         persist();
       }, { signal: controller.signal });
       input.addEventListener("keydown", (event) => {
@@ -1450,7 +1480,7 @@
     }
     const tap = createNativeOperationTap({ window: window2, page: page2, paths: ["/api/move-items", "/api/close-container"], onBefore: ({ path, payload }) => {
       if (!owner) return null;
-      if (owner.done) throw new Error("Native helper operation already settled");
+      if (owner.done || !owner.row || owner.stopRequested) throw new Error("Native helper operation unavailable or stopped");
       identity();
       if (!payload || typeof payload.requestId !== "string") throw new Error("Native mutation request identity missing");
       const kind = path === "/api/move-items" ? "move" : "close";
@@ -1471,38 +1501,44 @@
     } });
     async function perform(kind, quantity, action, { timeout = 3e5 } = {}) {
       if (disposed || owner) throw new Error("Native helper busy");
-      return withOperationLock(window2, "tm-v4.sideline.owner", async () => {
-        const ledger = journal();
-        if (ledger.rows.some((r) => ["SUBMITTED", "UNKNOWN", "QUEUED", "READING"].includes(r.state))) throw new Error("Recovery rows require native verification or explicit Reset of unsubmitted work");
-        await client.bootstrap();
-        if (disposed) throw new Error("Native helper disposed before action");
-        identity();
-        if (!tap.owns()) throw new Error("Native request observation unavailable — action blocked");
-        const row = ledger.add(["native-" + kind + "-" + window2.crypto.randomUUID()], { mode: "native", kind: "native-" + kind, quantity: quantity || 0 })[0];
-        ledger.transition(row, "READING", "Awaiting native " + kind + " step");
-        let timer;
-        const response = new Promise((resolve) => owner = { kind, quantity, journal: ledger, row, resolve, done: false, submittedRequest: null });
-        const cancel = () => {
-          if (owner && !owner.done) finish({ outcome: owner.row.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: "Native helper cancelled/timed out" });
-        };
-        timer = window2.setTimeout(cancel, timeout);
-        try {
-          await action(owner);
+      const operation = { kind, quantity, controller: new window2.AbortController(), row: null, journal: null, done: false, submittedRequest: null };
+      const response = new Promise((resolve) => operation.resolve = resolve);
+      owner = operation;
+      let timer;
+      const checkStart = () => {
+        if (disposed || operation.done || operation.controller.signal.aborted) throw Object.assign(new Error("Native helper cancelled before action"), { outcome: "REJECTED" });
+      };
+      try {
+        return await withOperationLock(window2, "tm-v4.sideline.owner", async () => {
+          checkStart();
+          const ledger = journal();
+          if (ledger.rows.some((r) => ["SUBMITTED", "UNKNOWN", "QUEUED", "READING"].includes(r.state))) throw new Error("Recovery rows require native verification or explicit Reset of unsubmitted work");
+          await client.bootstrap({ signal: operation.controller.signal });
+          checkStart();
+          identity();
+          if (!tap.owns()) throw new Error("Native request observation unavailable — action blocked");
+          operation.journal = ledger;
+          operation.row = ledger.add(["native-" + kind + "-" + window2.crypto.randomUUID()], { mode: "native", kind: "native-" + kind, quantity: quantity || 0 })[0];
+          ledger.transition(operation.row, "READING", "Awaiting native " + kind + " step");
+          timer = window2.setTimeout(() => {
+            if (!operation.done) finish({ outcome: operation.row.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: "Native helper cancelled/timed out" });
+          }, timeout);
+          await action(operation);
           const result = await response;
           if (result.outcome !== "CONFIRMED") throw Object.assign(new Error(result.outcome + " — " + result.reason), { outcome: result.outcome });
           return result.reason || "CONFIRMED by typed native response";
-        } catch (error) {
-          if (owner && !owner.done) finish({ outcome: owner.row.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: error.message });
-          throw error;
-        } finally {
-          window2.clearTimeout(timer);
-          owner = null;
-          expiryController?.abort();
-        }
-      });
+        });
+      } catch (error) {
+        if (!operation.done) finish({ outcome: operation.row?.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: error.message });
+        throw error;
+      } finally {
+        window2.clearTimeout(timer);
+        if (owner === operation) owner = null;
+        expiryController?.abort();
+      }
     }
     function tryQuantity() {
-      if (!owner || owner.kind !== "move" || owner.done || owner.stopRequested) return;
+      if (!owner?.row || owner.kind !== "move" || owner.done || owner.stopRequested) return;
       const t = text();
       if (t.includes("verify item")) {
         const b2 = confirm();
@@ -1522,7 +1558,7 @@
       click(b);
     }
     async function nativeExpiry() {
-      if (disposed || expiryActive || !owner && !canAssist() || !text().match(/(?:expiration|expiry|production) date/)) return;
+      if (disposed || expiryActive || owner && !owner.row || !owner && !canAssist() || !text().match(/(?:expiration|expiry|production) date/)) return;
       const dates = dateFields();
       if (!dates || expirySeen === dates.year) return;
       expirySeen = dates.year;
@@ -1601,7 +1637,10 @@
       picker.dispose();
       if (owner) {
         owner.stopRequested = true;
-        if (owner.row.state === "READING") finish({ outcome: "REJECTED", reason: "Stopped before native submission" });
+        if (owner.row?.state !== "SUBMITTED") {
+          owner.controller.abort();
+        }
+        if (!owner.row || owner.row.state === "READING") finish({ outcome: "REJECTED", reason: "Stopped before native submission" });
         else say("SUBMITTED — waiting for native result; no further form writes");
       }
       for (const cancel of [...waits]) cancel();
@@ -1626,7 +1665,8 @@
     }, refresh, dispose() {
       if (disposed) return;
       disposed = true;
-      if (owner && !owner.done) finish({ outcome: owner.row.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: "Native helper disposed" });
+      if (owner && !owner.done) finish({ outcome: owner.row?.state === "SUBMITTED" ? "UNKNOWN" : "REJECTED", reason: "Native helper disposed" });
+      owner?.controller.abort();
       expiryController?.abort();
       picker.dispose();
       for (const cancel of [...waits]) cancel();
@@ -2021,17 +2061,26 @@
   // sideline-preflight.mjs
   function createSidelinePreflight({ window: window2, client, gmRequest, onEvidence = () => {
   } }) {
-    let enrichment;
-    return async (source, code, { signal } = {}) => {
+    let enrichment, enrichmentWarehouse;
+    return async (source, code, { signal, previous } = {}) => {
       const result = await client.item(source, code, { signal });
       if (result.kind === "red" || !result.ctx?.hazmat) return result;
       try {
-        const context = await client.bootstrap({ signal });
-        enrichment ||= createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
-        const hazard = await enrichment.hazmat(result.ctx.asin, { signal }), data = hazard.complete === true ? hazard.hazmat : null;
+        const context = await client.bootstrap({ signal }), prior = previous?.hazmatDecision;
+        const reuse = prior && ["green", "yellow"].includes(previous.kind) && prior.warehouse === context.warehouse && upper(prior.asin) === upper(result.ctx.asin) && Number.isSafeInteger(prior.level) && prior.level >= 0 && typeof prior.message === "string" && /can be processed/i.test(prior.message) && !/cannot|can't|not be processed/i.test(prior.message);
+        let data;
+        if (reuse) data = prior;
+        else {
+          if (!enrichment || enrichmentWarehouse !== context.warehouse) {
+            enrichment = createFcrEnrichment({ warehouse: context.warehouse, readJson: createGmJsonReader(gmRequest), onEvidence, uuid: () => window2.crypto.randomUUID() });
+            enrichmentWarehouse = context.warehouse;
+          }
+          const hazard = await enrichment.hazmat(result.ctx.asin, { signal });
+          data = hazard.complete === true ? hazard.hazmat : null;
+        }
         if (!data || !Number.isSafeInteger(data.level) || data.level < 0 || !data.message?.trim()) return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — missing validated processing decision", ctx: result.ctx };
         const blocked = /cannot|can't|not be processed/i.test(data.message), allowed2 = /can be processed/i.test(data.message) && !blocked;
-        if (allowed2) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + data.level + " — OK TO PROCESS" };
+        if (allowed2) return { ...result, reason: result.kind === "yellow" ? result.reason : "HAZMAT L" + data.level + " — OK TO PROCESS", hazmatDecision: { warehouse: context.warehouse, asin: upper(result.ctx.asin), level: data.level, message: data.message } };
         if (blocked) return { kind: "red", reason: "HAZMAT L" + data.level + " — NOT PROCESSABLE", ctx: result.ctx };
         return { kind: "retry", reason: "HAZMAT CHECK UNKNOWN — unrecognised processing decision", ctx: result.ctx };
       } catch (error) {
@@ -2041,7 +2090,7 @@
   }
 
   // sideline-entry.mjs
-  var VERSION = "0.1.4";
+  var VERSION = "0.1.7";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.sideline.installer");
   if (!page[guard]) {
