@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.34
+// @version      0.0.35
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.34-REBUILD';
+  const VERSION = '0.0.35-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -4294,7 +4294,10 @@
         running:!!q.running,
         message:clean(qError?.textContent || qStatus?.textContent || 'Ready'),
         current:Math.min(q.index,q.list.length),
-        total:q.list.length
+        total:q.list.length,
+        cleared:issQueueSession?.cleared || 0,
+        skipped:issQueueSession?.issues?.size || 0,
+        pending:issQueueSession?.awaitingApproval ? issQueueSession.retryPending.length : 0
       };
     }
 
@@ -4337,7 +4340,8 @@
     q.runSeq++;
     q.running = false;
     q.paused = false;
-    if (shared.owner === 'queue') shared.owner = '';
+    if (ISS_CONSOLE_WORKER) issQueueSession = null;
+    if (shared.owner === 'queue' && (!ISS_CONSOLE_WORKER || !issQueueInFlight)) shared.owner = '';
     renderQueue(note);
   }
 
@@ -4460,35 +4464,169 @@
     };
   }
 
+
+  // ISS Console's API queue is deliberately separate from the standalone UI queue.
+  // Both use the same source/close API functions; standalone behaviour stays unchanged.
+  let issQueueSession = null;
+  let issQueueInFlight = 0;
+
+  function issQueueActive(session) {
+    return issQueueSession === session && q.runSeq === session.seq && q.running;
+  }
+
+  function issQueueResult(session) {
+    const failed = [...session.issues.values()];
+    return {
+      done:session.done,
+      total:session.list.length,
+      cleared:session.cleared,
+      skipped:failed.length,
+      verify:failed.filter(item => item.kind === 'verify').length,
+      failed,
+      awaitingApproval:session.awaitingApproval,
+      retryPending:session.awaitingApproval ? session.retryPending.length : 0,
+      timedOut:!!session.timedOut
+    };
+  }
+
+  async function issQueueProcess(session, code, attempt) {
+    let stage = 'scan';
+    issQueueInFlight++;
+    try {
+      await scanSourceDirect(code);
+      if (!issQueueActive(session)) return;
+      stage = 'close';
+      await closeContainerDirect(code, true);
+      if (!issQueueActive(session)) return;
+      session.cleared++;
+      session.issues.delete(code);
+    } catch (error) {
+      if (!issQueueActive(session)) return;
+      const kind = error?.customerBound ? 'blocked'
+        : error?.outcomeUnknown ? 'verify'
+        : stage === 'scan' ? 'retryable' : 'verify';
+      // A close request might have succeeded despite an error. Never resend it.
+      const reason = clean(error?.message || String(error)).slice(0, 500) || 'Unknown error';
+      session.issues.set(code, {code, kind, reason, attempt});
+    } finally {
+      issQueueInFlight--;
+    }
+  }
+
+  async function issQueuePass(session, codes, attempt) {
+    let cursor = 0;
+    shared.queueBusy = true;
+    shared.owner = 'queue';
+    try {
+      const runWorker = async () => {
+        while (issQueueActive(session) && cursor < codes.length) {
+          if (Date.now() >= session.deadline) {
+            session.timedOut = true;
+            return;
+          }
+          const code = codes[cursor++];
+          await issQueueProcess(session, code, attempt);
+          if (!issQueueActive(session)) return;
+          if (attempt === 1) {
+            session.done++;
+            q.index = session.done;
+          }
+          q.failed = [...session.issues.values()].map(item => item.code + ' (' + item.reason + ')');
+          renderQueue(attempt === 1 ? 'first pass' : 'retry pass');
+          issSideEmitProgress(true);
+        }
+      };
+      await Promise.all(Array.from({length:Math.min(2,codes.length)}, () => runWorker()));
+    } finally {
+      shared.queueBusy = false;
+      if (shared.owner === 'queue') shared.owner = '';
+    }
+  }
+
+  function issQueueFinish(session) {
+    q.running = false;
+    session.retryPending = [];
+    session.awaitingApproval = false;
+    renderQueue(session.timedOut ? 'TIME LIMIT — review untouched containers' : 'finished');
+    issSideEmitProgress(true);
+    return issQueueResult(session);
+  }
+
   async function issSideQueueRun(payload = {}) {
+    if (issQueueInFlight || q.running) throw new Error('Previous queue is still processing a tote');
     issSideSetMode('queue');
     const controlSeq = issSideControlSeq;
-    qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
-      .map(clean).filter(Boolean).join('\n');
-
+    qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\\r?\\n/))
+      .map(clean).filter(Boolean).join('\\n');
     q.runSeq++;
-    const run = q.runSeq;
     q.list = parseContainers(qText.value);
     q.index = 0;
     q.failed = [];
     q.running = !!q.list.length;
     q.paused = false;
-    renderQueue(q.running ? 'starting API queue' : 'no containers');
-    if (!q.running) return {done:0,total:0,failed:[]};
+    const session = {
+      seq:q.runSeq, list:[...q.list], issues:new Map(), done:0, cleared:0,
+      retryPending:[], awaitingApproval:false, timedOut:false,
+      deadline:Date.now() + 10 * 60 * 1000
+    };
+    issQueueSession = session;
+    renderQueue(q.running ? 'first pass — 2 workers' : 'no containers');
+    if (!q.running) return issQueueResult(session);
 
-    queuePump(run);
-    const deadline = Date.now() + 10 * 60 * 1000;
-    while (q.running && q.runSeq === run && Date.now() < deadline) await sleep(120);
-    if (q.running && Date.now() >= deadline) {
-      issSideStopQueue('timeout');
-      throw new Error('Queue timed out');
-    }
-    if (controlSeq !== issSideControlSeq) {
+    await issQueuePass(session, session.list, 1);
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
       const error = new Error('Run cancelled');
       error.issCancelled = true;
       throw error;
     }
-    return {done:q.index,total:q.list.length,failed:[...q.failed]};
+    if (session.timedOut) {
+      for (const code of session.list.slice(session.done)) {
+        if (!session.issues.has(code)) session.issues.set(code, {
+          code, kind:'not-attempted', reason:'Queue time limit — NOT ATTEMPTED', attempt:0
+        });
+      }
+      return issQueueFinish(session);
+    }
+    const retryable = [...session.issues.values()]
+      .filter(item => item.kind === 'retryable').map(item => item.code);
+    if (retryable.length && session.issues.size > 4) {
+      session.retryPending = retryable;
+      session.awaitingApproval = true;
+      q.running = false;
+      renderQueue('AUTHORIZE RETRY in ISS Console');
+      issSideEmitProgress(true);
+      return issQueueResult(session);
+    }
+    if (retryable.length) {
+      session.deadline = Date.now() + 10 * 60 * 1000;
+      await issQueuePass(session, retryable, 2);
+    }
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
+      const error = new Error('Run cancelled');
+      error.issCancelled = true;
+      throw error;
+    }
+    return issQueueFinish(session);
+  }
+
+  async function issSideQueueRetry() {
+    const session = issQueueSession;
+    if (!session || !session.awaitingApproval || !session.retryPending.length)
+      throw new Error('No pending queue retries — start a new queue');
+    if (issQueueInFlight || q.running) throw new Error('Previous queue still active');
+    const controlSeq = issSideControlSeq;
+    const codes = [...session.retryPending];
+    session.awaitingApproval = false;
+    q.running = true;
+    session.deadline = Date.now() + 10 * 60 * 1000;
+    renderQueue('authorized retry — 2 workers');
+    await issQueuePass(session, codes, 2);
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
+      const error = new Error('Run cancelled');
+      error.issCancelled = true;
+      throw error;
+    }
+    return issQueueFinish(session);
   }
 
   function issSideReset(payload = {}) {
@@ -4499,6 +4637,7 @@
       q.list = [];
       q.index = 0;
       q.failed = [];
+      issQueueSession = null;
       qText.value = '';
       renderQueue('reset');
     } else {
@@ -4549,6 +4688,9 @@
         } else if (command === 'queue.run') {
           issSideWorkerBusy = true;
           data = await issSideQueueRun(message.payload || {});
+        } else if (command === 'queue.retry') {
+          issSideWorkerBusy = true;
+          data = await issSideQueueRetry();
         } else if (command === 'reset') {
           data = issSideReset(message.payload || {});
         } else {
@@ -4566,7 +4708,7 @@
             : (error?.issData && typeof error.issData === 'object' ? error.issData : null)
         });
       } finally {
-        if (['lazy.run','queue.run'].includes(command)) issSideWorkerBusy = false;
+        if (['lazy.run','queue.run','queue.retry'].includes(command)) issSideWorkerBusy = false;
         issSideEmitProgress(true);
       }
     });
