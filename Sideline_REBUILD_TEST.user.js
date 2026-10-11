@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.36
+// @version      0.0.37
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.36-REBUILD';
+  const VERSION = '0.0.37-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -4681,7 +4681,7 @@
         } else if (command === 'stop') {
           issSideControlSeq++;
           if (lazy.running || lazy.activeRun) issSideStopLazy();
-          if (q.running) issSideStopQueue('stopped from ISS Console');
+          if (q.running || issQueueSession?.awaitingApproval) issSideStopQueue('stopped from ISS Console');
           data = {stopped:true};
         } else if (command === 'lazy.run') {
           issSideWorkerBusy = true;
