@@ -17,7 +17,7 @@ Approved code scopes **2–5, 7–9, 11–18 are complete offline**. Pass 19 mai
 | 7 | Rejected native Bind saves tokens → existing canonical acknowledgement validator before persistence | [Completed offline](pass07.md); 20 grouped cases |
 | 8 | RIVER can write/click hidden old fields → connected rendered readiness and rechecked awaited Next | [Completed offline](pass08.md); 16 focused cases |
 | 9 | Carton can click CSS-hidden Complete → same canonical rendered readiness with existing post-owner check | [Completed offline](pass09.md); 29 Carton/RIVER grouped cases |
-| 10 | Bin misses available filtered rows beyond current page → proposal: support captured native API/dependency gate | HELD; current source/installer: 2 native rows → 1 snapshot row. Preserve V2 familiar interface/filter/actions. |
+| 10 | Bin misses available filtered rows beyond current page → proposal: support captured native API/dependency gate | [Completed offline](pass10.md);22 Bin cases + actual captured-native installer proof:2 filtered native rows →2 snapshot rows, highest quantity retained. |
 | 11 | SIM closed tools/imports retain resources → terminal release of nodes, handlers and import lifetime | [Completed offline](pass11.md); 20 grouped cases |
 | 12 | Screenshot leaves recycled style disabled → restore exact original media even when detached | [Completed offline](pass12.md); 8 grouped cases |
 | 13 | SIM known-invalid image becomes raw-link fallback → distinguish known invalid from transport-only failure | [Completed offline](pass13.md); 26 grouped cases; valid downloads and intended transport fallback retained |
@@ -34,12 +34,12 @@ Approved code scopes **2–5, 7–9, 11–18 are complete offline**. Pass 19 mai
 
 Approved candidate versions: Master 0.1.7; Tote 0.1.4; Bind 0.1.4; Unbind/Stow 0.1.3; Sideline/ISS 0.1.7; RIVER/SIM 0.1.3; Carton 0.1.2; PO/Screenshot 0.1.1. AFT 0.1.4, Bin 0.1.1 and other unchanged candidates remain byte-identical to the base where no approved shared correction applies. [Full candidate/status table](../../README.md).
 
-Known implementation gates: held 1/6/10, empty-container location proof (Drop/Stow), extra AFT Confirm semantics (AFT/ISS). Live gates include deployed markup/layout/auth/scanners/frames/locks/downloads, positive native outcomes and physical printing. Carton auto-complete remains ON as V2; installation on a ready carton can itself act and therefore needs explicit approved test scope.
+Known implementation gates: empty-container location proof (Drop/Stow), extra AFT Confirm semantics (AFT/ISS). Live gates include deployed markup/layout/auth/scanners/frames/locks/downloads, positive native outcomes and physical printing. Carton auto-complete remains ON as V2; installation on a ready carton can itself act and therefore needs explicit approved test scope.
 
 [Evidence inventory](evidence.md) distinguishes original bytes, source/history, selected KB sections, mock checks and unavailable material. Never claim all historical logs/conversations were semantically reviewed.
 
 ## Exact next action / recovery
 
-The user approved 1, 6, 10 and publication. Passes 1 and 6 are verified; checkpoint pass 6 candidates, then pass 10 captured-native installer correction. Run the final whole-suite validation. Previous 15-pass batch published/read back at cfdaaff, 2026-10-11 12:14:43 AEDT. Deployment and live actions remain held.
+The user approved 1, 6, 10 and publication. Passes1/6/10 are verified offline; checkpoint Bin10, then run the final whole-suite/source-build/metadata validation and readiness/recovery checkpoint. Previous 15-pass batch published/read back at cfdaaff, 2026-10-11 12:14:43 AEDT. Deployment and live actions remain held.
 
 Recover from this local branch and enclosing checkpoint. If scratch is unavailable, the private `V4_Approved_Implementation_Review.md` contains the complete unpublished unified diff and validation outputs; apply only to an isolated checkout of the pinned base with `git apply --check`. Preserve any older dirty/newer remote work. The old `/workspace/scratch/82eb845e7e24/repo` is untouched. There is no operational WIP in this batch; interrupted WIP remains in earlier recovery commits as history. Never add the untracked `v4/node_modules` symlink.

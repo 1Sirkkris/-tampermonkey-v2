@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name V4 Bin Check Overlay
 // @namespace https://github.com/1Sirkkris/tampermonkey-v4
-// @version 0.1.1
+// @version 0.1.2
 // @description Native filtered inventory snapshot and P-level floor overlay.
 // @match http://fcresearch-fe.aka.amazon.com/*
 // @match https://fcresearch-fe.aka.amazon.com/*
@@ -627,14 +627,17 @@
     let nodes, source = "visible DOM only";
     const jq = page2.jQuery || page2.$;
     try {
-      if (jq?.fn?.dataTable?.isDataTable?.(table)) {
-        const native = jq(table);
-        if (typeof native.DataTable === "function") {
-          nodes = native.DataTable().rows({ search: "applied" }).nodes().toArray();
-          source = "DataTables applied filter";
+      const plugin = jq?.fn?.dataTable, isDataTable = plugin?.isDataTable || plugin?.fnIsDataTable;
+      if (typeof isDataTable === "function" && isDataTable.call(plugin, table)) {
+        const native = jq(table), modern = typeof native.DataTable === "function" ? native.DataTable() : null;
+        if (typeof modern?.rows === "function") {
+          nodes = modern.rows({ search: "applied" }).nodes().toArray();
         } else if (typeof native.dataTable === "function") {
           const settings = native.dataTable().fnSettings();
-          nodes = settings.aiDisplay.map((i) => settings.aoData[i].nTr);
+          nodes = settings.aiDisplay.map((i) => settings.aoData[i]?.nTr);
+        }
+        if (nodes) {
+          if (nodes.some((node) => !node)) throw new Error("Native filtered rows not rendered");
           source = "DataTables applied filter";
         }
       }
@@ -840,7 +843,7 @@
   }
 
   // bin-entry.mjs
-  var VERSION = "0.1.1";
+  var VERSION = "0.1.2";
   var page = typeof unsafeWindow === "object" ? unsafeWindow : window;
   var guard = Symbol.for("tampermonkey.v4.bin.installer");
   if (!page[guard]) {
@@ -848,17 +851,32 @@
     installRouteLifecycle(window, () => {
       const warehouse = location.pathname.match(/^\/([A-Z0-9-]{2,12})\/results(?:\/|$)/)?.[1];
       if (!warehouse || /^#(?:fcr-tote-checker|iss-console)/.test(location.hash)) return;
-      const release = registerWatermark(window, "BINC", VERSION), emit = (data) => evidence(window, "BINC", VERSION, data);
-      const native = { jQuery: page.jQuery, $: page.$ };
+      const release = registerWatermark(window, "BINC", VERSION), emit = (data) => evidence(window, "BINC", VERSION, data), life = new window.AbortController(), loaders = /* @__PURE__ */ new WeakSet();
+      let nativeJquery;
+      const native = { get jQuery() {
+        return nativeJquery || page.jQuery || page.$;
+      } };
+      const attach = (jq) => {
+        if (!life.signal.aborted && jq) nativeJquery = jq;
+      };
+      function attachNative() {
+        const loader = page.AmazonUIPageJS || page.P;
+        if (typeof loader?.when !== "function") return;
+        try {
+          loader.now?.("jQuery").execute(attach);
+          if (!loaders.has(loader)) {
+            loader.when("jQuery").execute(attach);
+            loaders.add(loader);
+          }
+        } catch {
+        }
+      }
+      attachNative();
+      if (window.document.readyState === "loading") window.document.addEventListener("DOMContentLoaded", attachNative, { once: true, signal: life.signal });
       const reader = createFcrReader({ origin: location.origin, warehouse, DOMParser: window.DOMParser, fetch: page.fetch.bind(page), onEvidence: emit });
       const overlay = createBinOverlay({ window, page: native, reader, version: VERSION, onEvidence: emit, fetch: page.fetch.bind(page) });
-      try {
-        page.P?.now("jQuery").execute((jq) => {
-          native.jQuery = jq;
-        });
-      } catch {
-      }
       return () => {
+        life.abort();
         overlay.dispose();
         release();
       };

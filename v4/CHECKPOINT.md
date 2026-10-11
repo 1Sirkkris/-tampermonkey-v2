@@ -1,3 +1,17 @@
+# Approved pass 10 verified recovery checkpoint
+
+- Created:2026-10-11 12:27:30 AEDT; actual Australia/Sydney system clock.
+- Completed: Bin10 native private AUI dependency and modern/legacy DataTables applied-filter snapshot capability. Bin0.1.2 atomically built;22 Bin cases pass (15new), plus original captured native-code proof on actual fresh installer:2 filtered rows/1DOM ->2 snapshot rows; Lazy selects9, excludes filtered-out100. V2 familiar UI/actions/CSS retained. No extra polling/timer/native requests before click.
+- Files: bin-entry.mjs, bin-runtime.mjs, Bin_Check_Overlay.user.js, tests/bin-native-api.test.mjs, README/pass register/pass10.md/this record. Enclosing commit exact inventory.
+- Last verified state: all approved fresh1–18 code passes completed offline;19 documentation finalisation underway. AFT0.1.5/ISS0.1.8 pass1 group75; Bind0.1.5/Unbind0.1.4 and unchanged Stow0.1.3 pass6 group77. Individual totals overlap; fullsuite count pending. Prior complete-suite cfdaaff:469pass/19exactbuilds/70sourcechecks.
+- Known failures/unfinished: no known failure in completed targeted checks. Drop/Stow empty-container location and AFT/ISS extra native Confirm contracts unavailable; four operational implementations remain PARTIAL. Auth/native layout/frames/scanners/downloads/outcomes/physical output remain live gates. No LIVE MUTATION VERIFIED claim. No active operational WIP.
+- Latest confirmed GitHub push/readback:2026-10-11 12:26:48 AEDT,dd7010be98666670c994cfb1e534d2b1d62e784e, confirmed. This Bin push PENDING; successful time recorded separately after readback. Interval at creation under2minutes.
+- Exact NEXT: publish immutable Bin snapshot expected-parent/non-force; run npm test and npm run check, whitespace and final docs/counts/versions/source inventory checks. Push final recoverable readiness/checkpoint and confirmed receipt. Do not install/run operational helpers live.
+- Pending approvals:none for1–18 fixes/documentation/GitHub checkpoints. V2/V3, live operational/printing/ticket/labor/Carton actions, production deployment and materially new scope held.
+- Recovery:/workspace/scratch/82eb845e7e24/v4-approved-work, v4-cleanroom; all prior history preserved, node_modules symlink excluded. Evidence inventory distinguishes original logs/history from simulations and unavailable material.
+
+## Earlier checkpoint records — history
+
 # Approved pass 6 verified recovery checkpoint
 
 - Created: 2026-10-11 12:26:30 AEDT; actual Australia/Sydney system clock.
