@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.88
+// @version      0.1.89
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.88';
+  const VERSION = '0.1.89';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1272,6 +1272,8 @@
     if (!badge) { badge = markUi(document.createElement('span')); badge.className = 'fc-hazmat'; badge.textContent = 'Loading…'; host.appendChild(badge); }
     let button = $('.fcrm-top-recheck', host);
     if (!button) { button = markUi(document.createElement('button')); button.type = 'button'; button.className = 'fcrm-haz-refresh fcrm-top-recheck'; button.textContent = 'Pandash'; host.appendChild(button); }
+    // Install recheck immediately, including while the initial Pandash read is pending.
+    button.onclick = async () => { const current = readProductPanel(); if (current) await updateProductHazmat(current, true); };
     return { badge, button };
   }
 
@@ -1287,7 +1289,6 @@
       if (runId !== productRunId || readProductPanel()?.signature !== panel.signature) return;
       const riverReady = renderHazmatBadge(ui.badge, result, { river: true });
       setRiverTicketAction(ui.badge, riverReady);
-      ui.button.onclick = async () => { const current = readProductPanel(); if (current) await Promise.all([updateProductHazmat(current, true), annotateInventory(true)]); };
     } finally { if (force) setBusyButton(ui.button, false); }
   }
 
