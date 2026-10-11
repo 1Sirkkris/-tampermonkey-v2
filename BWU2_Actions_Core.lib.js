@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
@@ -91,7 +91,9 @@
       const login = normalizeLogin(raw);
       if (!login) continue;
 
-      const owner = element.closest('header,nav,[role="banner"],[role="navigation"],[class*="user" i],[class*="profile" i],[class*="account" i],[id*="user" i],[id*="profile" i],[id*="account" i]');
+      const owner = element.closest('header,nav,[role="banner"],[role="navigation"],[class*="user" i],[class*="profile" i],[class*="account" i],[id*="user" i],[id*="profile" i],[id*="account" i]')
+        || (element.matches?.('span.aok-float-right.a-text-bold')
+          && element.closest('.aui-nav-row .a-column.a-span-last .a-row.a-spacing-top-mini'));
       if (!owner) continue;
 
       let rect;

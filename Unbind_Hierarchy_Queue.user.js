@@ -2,11 +2,11 @@
 // @name         v2 Unbind Hierarchy Queue v1.0.1
 // @name:en      v2 Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.6
+// @version      1.1.7
 // @description  BWU2 Endless-style sequential tsX/csX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.4
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.6';
+  const VERSION = '1.1.7';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
