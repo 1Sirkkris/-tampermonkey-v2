@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.4
+// @version      0.2.5
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.4';
+  const VERSION = '0.2.5';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -965,6 +965,7 @@
       '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
+      '        <div class="iss-queue-report" data-side-queue-report hidden><div data-side-queue-summary></div><div class="iss-queue-review" data-side-queue-failures></div><button type="button" class="iss-queue-authorize" data-side-queue-approve hidden>AUTHORIZE RETRY</button><button type="button" class="iss-queue-copy" data-side-queue-copy hidden>COPY ERRORS</button></div>',
       '      </div>',
       '      <div class="iss-loading"><span class="iss-spinner"></span><b data-loading-label>Switching mode…</b></div>',
       '    </section>',
@@ -1001,6 +1002,7 @@
       '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit{grid-template-columns:repeat(2,1fr)}.iss-segment-move{grid-template-columns:repeat(3,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-edit-qty{position:relative;display:grid;gap:5px;padding:7px;border:1px solid #c3d3d9;border-radius:4px;background:#f9fcfd}.iss-panel[data-loading="1"] .iss-edit-qty{z-index:21;box-shadow:0 0 0 2px rgba(255,255,255,.92),0 2px 8px rgba(0,0,0,.10)}.iss-edit-qty[hidden]{display:none!important}.iss-edit-qty-label{font-size:9px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-edit-qty-head,.iss-edit-qty-row{display:grid;grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(72px,1fr));gap:5px;align-items:center}.iss-edit-qty-head{padding:0 4px;font-size:8px;font-weight:900;letter-spacing:.25px;color:#667583;text-align:center}.iss-edit-qty-head span:first-child{text-align:left}.iss-edit-qty-list{display:grid;gap:5px;max-height:91px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px}.iss-edit-qty-row{min-height:43px;padding:4px;border:1px solid #c5cfd6;border-radius:4px;background:#fff}.iss-edit-qty-row[data-active="1"]{border-color:#146eb4;box-shadow:inset 4px 0 #146eb4}.iss-edit-qty-sku{min-width:0;padding:0 5px;font:900 11px/1.2 Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#243746}.iss-edit-qty-value{display:grid;place-items:center;min-height:33px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:4px;background:#fff;font:900 18px/1 Consolas,monospace;color:#17262d}.iss-edit-qty-value[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}.iss-edit-qty-value[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}.iss-edit-qty-value[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
+      '.iss-queue-report{padding:8px;border:1px solid #91a3b6;background:#f8fafc;border-radius:4px;font-size:11px;color:#17262d}.iss-queue-report[hidden]{display:none!important}.iss-queue-summary{font-weight:900}.iss-queue-review{max-height:180px;overflow:auto;margin-top:5px}.iss-queue-entry{margin:3px 0;padding:5px 7px;border-left:5px solid #8b3a19;background:#fff3e7;color:#41250f;overflow-wrap:anywhere}.iss-queue-entry[data-kind="verify"]{border-left-color:#8b1d1d;background:#fff0f0}.iss-queue-entry code{font-weight:900;margin-right:5px}.iss-queue-authorize,.iss-queue-copy{margin:6px 6px 0 0;padding:8px;border:1px solid #385f84;border-radius:3px;background:#e4f0ff;color:#123960;font-weight:900;cursor:pointer}.iss-queue-authorize{background:#fff0ce;border-color:#855318;color:#58310b}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}.iss-side-items{display:none;max-height:190px;overflow:auto;border:1px solid #c7d0d8;border-radius:4px;background:#f8fafc;padding:5px;gap:5px}.iss-side-items[data-show="1"]{display:grid}.iss-side-item{padding:7px 8px;border:1px solid #cbd5e1;border-left:5px solid #64748b;border-radius:3px;background:#fff;color:#334155}.iss-side-item[data-state="READY"]{border-left-color:#146eb4;background:#eff6ff;color:#0f3d73}.iss-side-item[data-state="DATE"]{border-left-color:#f59e0b;background:#fff7ed;color:#7c2d12}.iss-side-item[data-state="MOVED"]{border-left-color:#146eb4;background:#f0f8ff;color:#0f3d73}.iss-side-item[data-state="FAILED"],.iss-side-item[data-state="INVALID"],.iss-side-item[data-state="SKIPPED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}.iss-side-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:1000}.iss-side-item-top code{font:900 12px Consolas,monospace}.iss-side-item-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;margin-top:5px;font-size:11px;line-height:1.25}.iss-side-item-meta b{font-weight:1000}.iss-side-item[data-state="FAILED"] .iss-side-item-meta b,.iss-side-item[data-state="INVALID"] .iss-side-item-meta b,.iss-side-item[data-state="SKIPPED"] .iss-side-item-meta b{color:#991b1b}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
@@ -1222,6 +1224,8 @@
     if (clearSourceButton) clearSourceButton.hidden = sidelineMode !== 'lazy';
     if (lazyDelayButton) lazyDelayButton.hidden = sidelineMode !== 'lazy';
     if (lazyMetrics) lazyMetrics.dataset.show = sidelineMode === 'lazy' ? '1' : '0';
+    const queueReport = $('[data-side-queue-report]');
+    if (queueReport) queueReport.hidden = sidelineMode !== 'queue' || !storeGet('queueReport', '');
     if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
     paintClearSourceToggle();
 
@@ -1372,6 +1376,69 @@
     }
   }
 
+
+  function paintQueueReport(result, restored = false) {
+    const report = $('[data-side-queue-report]');
+    if (!report) return;
+    if (!result) {
+      report.hidden = true;
+      storeSet('queueReport', '');
+      return;
+    }
+    const failures = Array.isArray(result.failed) ? result.failed : [];
+    const cleared = Math.max(0, Number(result.cleared) || 0);
+    const verify = failures.filter(item => item.kind === 'verify').length;
+    const blocked = failures.filter(item => item.kind === 'blocked').length;
+    const pending = !!result.awaitingApproval && !restored;
+    report.hidden = sidelineMode !== 'queue';
+    const summary = $('[data-side-queue-summary]', report);
+    if (summary) summary.textContent =
+      'Cleared ' + cleared + '/' + (Number(result.total) || 0) +
+      ' | Failed ' + failures.length + ' | Verify ' + verify +
+      (blocked ? ' | Customer-bound ' + blocked : '') +
+      (pending ? ' | ' + (Number(result.retryPending) || 0) + ' retries need approval' : '') +
+      (result.timedOut ? ' | Time limit reached' : '') +
+      (restored && result.awaitingApproval ? ' | Retry approval expired after reload' : '');
+    const list = $('[data-side-queue-failures]', report);
+    if (list) list.innerHTML = failures.map(item =>
+      '<div class="iss-queue-entry" data-kind="' + esc(item.kind || '') + '">' +
+      '<code>' + esc(item.code || '') + '</code>' +
+      esc(item.reason || 'Unspecified error') +
+      ' — ' + (item.kind === 'verify' ? 'VERIFY — NO AUTO RETRY'
+        : item.kind === 'blocked' ? 'CUSTOMER-BOUND — NOT RETRIED'
+        : item.kind === 'not-attempted' ? 'NOT ATTEMPTED'
+        : 'FAILED (attempt ' + (Number(item.attempt) || 1) + ')') +
+      '</div>'
+    ).join('');
+    const button = $('[data-side-queue-approve]', report);
+    if (button) button.hidden = !pending;
+    const copy = $('[data-side-queue-copy]', report);
+    if (copy) copy.hidden = !failures.length;
+    // Only the most recent queue report is persisted locally. Never persist a live authorization.
+    if (!restored) storeSet('queueReport', JSON.stringify(result));
+  }
+
+  async function authorizeQueueRetries() {
+    const button = $('[data-side-queue-approve]');
+    if (!button || button.hidden || sidelineRunBusy) return;
+    sidelineRunBusy = true;
+    button.disabled = true;
+    setPanelLoading('sideline', true, 'Retrying authorized totes…');
+    try {
+      const result = await rpc('sideline', 'queue.retry', {}, LONG_TIMEOUT);
+      paintQueueReport(result);
+      panelStatus('sideline',
+        'QUEUE FINISHED • ' + result.cleared + '/' + result.total + ' cleared • ' +
+        result.failed.length + ' unresolved', result.failed.length ? 'error' : 'ok');
+    } catch (error) {
+      panelStatus('sideline', 'Queue retry failed: ' + error.message, 'error');
+    } finally {
+      sidelineRunBusy = false;
+      button.disabled = false;
+      setPanelLoading('sideline', false);
+    }
+  }
+
   async function runSideline() {
     const source = clean($('[data-side-source]')?.value);
     const dest = clean($('[data-side-dest]')?.value);
@@ -1384,14 +1451,21 @@
 
     if (sidelineMode === 'queue') {
       if (!clean(itemText)) return panelStatus('sideline', 'Paste/scan containers into CONTAINERS', 'error');
-      setPanelLoading('sideline', true, 'Running queue…');
-      panelStatus('sideline', 'Starting queue…', 'working');
+      sidelineRunBusy = true;
+      paintQueueReport(null);
+      setPanelLoading('sideline', true, 'Clearing totes (2 workers)…');
+      panelStatus('sideline', 'First pass — 2 workers', 'working');
       try {
         const result = await rpc('sideline', 'queue.run', { items:itemText }, LONG_TIMEOUT);
-        panelStatus('sideline', 'DONE ✓ ' + result.done + '/' + result.total + (result.failed?.length ? ' • ' + result.failed.length + ' failed' : ''), result.failed?.length ? 'error' : 'ok');
+        paintQueueReport(result);
+        panelStatus('sideline', result.awaitingApproval
+          ? 'First pass finished — AUTHORIZE RETRY below (' + result.retryPending + ' eligible)'
+          : 'QUEUE FINISHED • ' + result.cleared + '/' + result.total + ' cleared • ' + result.failed.length + ' unresolved',
+          result.awaitingApproval ? 'attention' : result.failed.length ? 'error' : 'ok');
       } catch (error) {
         if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
       } finally {
+        sidelineRunBusy = false;
         setPanelLoading('sideline', false);
       }
       return;
@@ -1514,6 +1588,7 @@
     sidelineAttention = '';
     sidelineItemsSignature = '';
     sidelineCompletionStatus = '';
+    if (sidelineMode === 'queue') paintQueueReport(null);
     const panel = $('[data-panel="sideline"]');
     const alert = $('[data-side-alert]');
     if (panel) panel.dataset.sideAttention = '';
@@ -1715,12 +1790,24 @@
     });
     $('[data-side-items]')?.addEventListener('keydown', event => textareaScannerHandler(event, 'sideline'));
     $('[data-side-run]')?.addEventListener('click', runSideline);
+    $('[data-side-queue-approve]')?.addEventListener('click', authorizeQueueRetries);
+    $('[data-side-queue-copy]')?.addEventListener('click', async () => {
+      try {
+        const report = JSON.parse(storeGet('queueReport', '{}'));
+        const rows = Array.isArray(report.failed) ? report.failed : [];
+        await navigator.clipboard.writeText(rows.map(item => item.code + '\\t' + item.reason).join('\\n'));
+      } catch { panelStatus('sideline', 'Could not copy error list', 'error'); }
+    });
 
     for (const button of $$('[data-stop]')) button.addEventListener('click', () => stopArea(button.dataset.stop));
     for (const button of document.querySelectorAll('[data-clear]')) button.addEventListener('click', () => { void clearArea(button.dataset.clear); });
   }
 
   function hydrate() {
+    try {
+      const report = JSON.parse(storeGet('queueReport', 'null'));
+      if (report) paintQueueReport(report, true);
+    } catch {}
     $('[data-edit-source]').value = storeGet('editSource', 'Sellable');
     $('[data-edit-dest]').value = storeGet('editDest', 'Pending Research');
     $('[data-edit-source-damage]').value = storeGet('editSourceDamage', 'Defective');
