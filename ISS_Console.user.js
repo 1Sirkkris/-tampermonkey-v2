@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.5
+// @version      0.2.6
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.5';
+  const VERSION = '0.2.6';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -34,7 +34,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.32-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.36-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -1795,7 +1795,7 @@
       try {
         const report = JSON.parse(storeGet('queueReport', '{}'));
         const rows = Array.isArray(report.failed) ? report.failed : [];
-        await navigator.clipboard.writeText(rows.map(item => item.code + '\\t' + item.reason).join('\\n'));
+        await navigator.clipboard.writeText(rows.map(item => item.code + '\t' + item.reason).join('\n'));
       } catch { panelStatus('sideline', 'Could not copy error list', 'error'); }
     });
 
