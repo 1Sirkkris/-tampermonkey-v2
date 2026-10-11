@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.6
+// @version      0.2.7
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.6';
+  const VERSION = '0.2.7';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -34,7 +34,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.36-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.37-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -1555,6 +1555,12 @@
     try {
       if (area === 'edit' || area === 'move') await rpc('aft', 'stop', {}, 8000);
       else await rpc('sideline', 'stop', {}, 8000);
+      if (area === 'sideline' && sidelineMode === 'queue') {
+        try {
+          const report = JSON.parse(storeGet('queueReport', 'null'));
+          if (report?.awaitingApproval) paintQueueReport({ ...report, awaitingApproval:false, retryPending:0 });
+        } catch {}
+      }
       panelStatus(area, 'Stop requested', 'working');
     } catch (error) {
       panelStatus(area, error.message, 'error');
