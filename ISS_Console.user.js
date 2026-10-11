@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.7
+// @version      0.2.8
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.7';
+  const VERSION = '0.2.8';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -121,6 +121,7 @@
     ? storeGet('sidelineMode', 'lazy')
     : 'lazy';
   let sidelineRunBusy = false;
+  let queueAwaitingApproval = false;
   let sidelineAttention = '';
   let sidelineItemsSignature = '';
   let sidelineCompletionStatus = '';
@@ -1382,7 +1383,8 @@
     if (!report) return;
     if (!result) {
       report.hidden = true;
-      storeSet('queueReport', '');
+      queueAwaitingApproval = false;
+      if (!restored) storeSet('queueReport', '');
       return;
     }
     const failures = Array.isArray(result.failed) ? result.failed : [];
@@ -1390,6 +1392,7 @@
     const verify = failures.filter(item => item.kind === 'verify').length;
     const blocked = failures.filter(item => item.kind === 'blocked').length;
     const pending = !!result.awaitingApproval && !restored;
+    queueAwaitingApproval = pending;
     report.hidden = sidelineMode !== 'queue';
     const summary = $('[data-side-queue-summary]', report);
     if (summary) summary.textContent =
@@ -1451,8 +1454,9 @@
 
     if (sidelineMode === 'queue') {
       if (!clean(itemText)) return panelStatus('sideline', 'Paste/scan containers into CONTAINERS', 'error');
+      if (queueAwaitingApproval) return panelStatus('sideline', 'Approve pending retries or CLEAR before starting another queue', 'error');
       sidelineRunBusy = true;
-      paintQueueReport(null);
+      paintQueueReport(null, true);
       setPanelLoading('sideline', true, 'Clearing totes (2 workers)…');
       panelStatus('sideline', 'First pass — 2 workers', 'working');
       try {
@@ -1464,6 +1468,10 @@
           result.awaitingApproval ? 'attention' : result.failed.length ? 'error' : 'ok');
       } catch (error) {
         if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
+        try {
+          const previous = JSON.parse(storeGet('queueReport', 'null'));
+          if (previous) paintQueueReport(previous, true);
+        } catch {}
       } finally {
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);
