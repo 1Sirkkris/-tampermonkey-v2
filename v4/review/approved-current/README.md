@@ -13,7 +13,7 @@ Approved code scopes **2–5, 7–9, 11–18 are complete offline**. Pass 19 mai
 | 3 | Old expiry or item/date context can be reused → one workflow lifetime, refreshed Run context | [Completed offline](pass03.md); shared Sideline/ISS checks |
 | 4 | Native QTY/Clear can start after Stop → tracked unsent lifetime before ownership/bootstrap | [Completed offline](pass04.md); 50 grouped cases |
 | 5 | ISS closure/cancellation can create a late worker → one parent/peer readiness lifetime | [Completed offline](pass05.md); source/installer late-lock/load cases |
-| 6 | Native Bind/Unbind forms bypass owner/unresolved records → proposal: use canonical owner/journal guard | HELD; current generated Bind sends once for its own same-container UNKNOWN record. Concurrent tabs are not the user's workflow; the single-tab gap remains. |
+| 6 | Native Bind/Unbind forms bypass owner/unresolved records → proposal: use canonical owner/journal guard | [Completed offline](pass06.md); 77 grouped hierarchy/Stow checks. Same-tab native fetch/XHR respects UNKNOWN and owner; real worker load orders verified. |
 | 7 | Rejected native Bind saves tokens → existing canonical acknowledgement validator before persistence | [Completed offline](pass07.md); 20 grouped cases |
 | 8 | RIVER can write/click hidden old fields → connected rendered readiness and rechecked awaited Next | [Completed offline](pass08.md); 16 focused cases |
 | 9 | Carton can click CSS-hidden Complete → same canonical rendered readiness with existing post-owner check | [Completed offline](pass09.md); 29 Carton/RIVER grouped cases |
@@ -40,6 +40,6 @@ Known implementation gates: held 1/6/10, empty-container location proof (Drop/St
 
 ## Exact next action / recovery
 
-The user approved 1, 6, 10 and publication. Pass 1 is verified; finish the pass 6 shared-caller check and pass 10 captured-native installer check, independently checkpointing each. Previous 15-pass batch published/read back at cfdaaff, 2026-10-11 12:14:43 AEDT. Deployment and live actions remain held.
+The user approved 1, 6, 10 and publication. Passes 1 and 6 are verified; checkpoint pass 6 candidates, then pass 10 captured-native installer correction. Run the final whole-suite validation. Previous 15-pass batch published/read back at cfdaaff, 2026-10-11 12:14:43 AEDT. Deployment and live actions remain held.
 
 Recover from this local branch and enclosing checkpoint. If scratch is unavailable, the private `V4_Approved_Implementation_Review.md` contains the complete unpublished unified diff and validation outputs; apply only to an isolated checkout of the pinned base with `git apply --check`. Preserve any older dirty/newer remote work. The old `/workspace/scratch/82eb845e7e24/repo` is untouched. There is no operational WIP in this batch; interrupted WIP remains in earlier recovery commits as history. Never add the untracked `v4/node_modules` symlink.

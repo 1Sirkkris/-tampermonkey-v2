@@ -1,3 +1,17 @@
+# Approved pass 6 verified recovery checkpoint
+
+- Created: 2026-10-11 12:26:30 AEDT; actual Australia/Sydney system clock.
+- Completed: pass 6 canonical native Bind/Unbind lock/journal guard, XHR reuse lifetime and live SUBMITTED view; explicit existing Stow worker ownership avoids duplicate guard/queue. Bind 0.1.5 and Unbind 0.1.4 atomically built. 77 grouped hierarchy/Stow tests pass (27 new); actual generated Bind/Unbind/Stow load orders, native fetch/XHR UNKNOWN barriers, cancellation and normal queue covered. Root rerun74 passes; three canonical pending-ack cases included in saved77 run.
+- Files: Bind/Unbind entries and installers, tests/hierarchy.test.mjs and hierarchy-native-guard.test.mjs, README/pass register/pass06.md/this record. WIP source was durably saved at153fe07; enclosing commit exact verified promotion inventory.
+- Last verified prior release: AFT0.1.5/ISS0.1.8, pass1 75 cases; old complete-suite469. New whole-suite/source-build check pending until Bin checkpoint. No live operation.
+- Remaining: Bin0.1.2 source/test/candidate outside this commit,22 cases + original captured-native real installer proof pass; next checkpoint. Drop/Stow empty-container location and AFT/ISS extra native Confirm semantics unavailable. Deployed native form/auth/scanner/transport-world/physical output live gates remain. No unresolved operation erased/replayed.
+- Latest confirmed GitHub push/readback:2026-10-11 12:24:46 AEDT,153fe07c185e1d3d563056e67610f4cc950761b1, confirmed. This verified pass6 push PENDING; record successful time separately next. Interval at creation under2minutes.
+- Exact NEXT: publish immutable verified pass6 snapshot with expected head/non-force update and SHA/tree readback; checkpoint approved Bin10 source/tests/0.1.2 installer; run fullsuite and all19 metadata/source-build checks, final readiness/recovery checkpoint.
+- Pending approvals:none for1/6/10 or publication. V2/V3/live operational actions/printing/deployment held.
+- Recovery: /workspace/scratch/82eb845e7e24/v4-approved-work, v4-cleanroom. Earlier local history preserved; untracked node_modules excluded. Read current top record over historical holds.
+
+## Earlier checkpoint records — history
+
 # Approved pass 6 WIP recovery checkpoint
 
 - Created: 2026-10-11 12:24:26 AEDT; actual Australia/Sydney system clock.
