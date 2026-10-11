@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.35
+// @version      0.0.36
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.35-REBUILD';
+  const VERSION = '0.0.36-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -4502,7 +4502,9 @@
       session.issues.delete(code);
     } catch (error) {
       if (!issQueueActive(session)) return;
-      const kind = error?.customerBound ? 'blocked'
+      const customerShipment = error?.customerBound ||
+        /customer[\s-]*(?:bound[\s-]*)?shipment/i.test(clean(error?.message || ''));
+      const kind = customerShipment ? 'blocked'
         : error?.outcomeUnknown ? 'verify'
         : stage === 'scan' ? 'retryable' : 'verify';
       // A close request might have succeeded despite an error. Never resend it.
@@ -4553,11 +4555,12 @@
   }
 
   async function issSideQueueRun(payload = {}) {
+    if (issQueueSession?.awaitingApproval) throw new Error('Approve pending retries or CLEAR the queue before starting another batch');
     if (issQueueInFlight || q.running) throw new Error('Previous queue is still processing a tote');
     issSideSetMode('queue');
     const controlSeq = issSideControlSeq;
-    qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\\r?\\n/))
-      .map(clean).filter(Boolean).join('\\n');
+    qText.value = (Array.isArray(payload.items) ? payload.items : String(payload.items || '').split(/\r?\n/))
+      .map(clean).filter(Boolean).join('\n');
     q.runSeq++;
     q.list = parseContainers(qText.value);
     q.index = 0;
