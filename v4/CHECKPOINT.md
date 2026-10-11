@@ -1,3 +1,18 @@
+# Approved pass 6 WIP recovery checkpoint
+
+- Created: 2026-10-11 12:24:26 AEDT; actual Australia/Sydney system clock.
+- Current workflow: pass 6 native Bind/Unbind guard. WIP — NOT VERIFIED as a whole. Source/tests saved now before extending shared-worker checks; old verified installers intact.
+- Completed: canonical native fetch/async-XHR owner/journal guard; 44 targeted cases passed before newest worker boundary change. Native malformed/uncertain outcomes retain UNKNOWN; XHR reopen cancels earlier lifetime; busy-click display retains live SUBMITTED. Latest workerContext entry gate is not verified yet.
+- Files: hierarchy-native.mjs, hierarchy-entry.mjs, hierarchy-runtime.mjs, tests/hierarchy-native-guard.test.mjs, tests/hierarchy-template.test.mjs; pass06.md and this record. Enclosing commit exact inventory.
+- Last verified release: pass 1 AFT 0.1.5 / ISS 0.1.8, 75 grouped source/generated-installer cases, published 8083a188dd7b3950f7bd655ea28427d2e7d47104. Prior complete suite cfdaaff: 469 pass / 19 exact builds / 70 source checks. New whole-suite run pending.
+- Known failure/gate: overlapping Stow native unbind worker can otherwise be misidentified as a manual submission and blocked by its own existing lock. Existing workerContext correction needs both load-order, UNKNOWN and cancellation regressions. See pass06.md. Bind/Unbind remain PARTIAL until verified. Bin 0.1.2 source/test/installer uncommitted separately, 22 cases + original captured-native actual-installer proof pass; checkpoint after 6.
+- Latest confirmed GitHub push: 2026-10-11 12:23:47 AEDT, 8083a18, remote SHA/tree confirmed. This WIP push PENDING; successful time recorded separately next. Interval at creation under 2 minutes.
+- Exact NEXT: publish this WIP snapshot with expected remote head; finish pass 6 Stow worker integration, bump/build Bind/Unbind and verify actual installers; checkpoint verified 6, then 10. No live operation. Preserve unresolved actions and existing candidates.
+- Pending approvals: none for approved 1/6/10 or their GitHub checkpoints. Live actions/printing/deployment and materially new scope remain held. V2/V3 untouched.
+- Recovery: active v4-cleanroom worktree /workspace/scratch/82eb845e7e24/v4-approved-work; prior local histories archived; untracked node_modules excluded. Read latest top record over historical holds.
+
+## Earlier checkpoint records — history
+
 # Approved pass 1 recovery checkpoint
 
 - Created: 2026-10-11 12:23:17 AEDT; actual Australia/Sydney system clock.
