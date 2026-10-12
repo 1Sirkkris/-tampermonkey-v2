@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.3.1
+// @version      0.3.2
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.3.1';
+  const VERSION = '0.3.2';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -66,6 +66,12 @@
     if (/^tsx/i.test(id)) return `tsX${id.slice(3)}`;
     return '';
   };
+
+  // v0.1.1 had this helper; it was accidentally dropped in the v0.3.0 merge.
+  // Both native destination Enter and scanner key simulation await it.
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
   let processing = false;
   let manualBindLogin = false;
