@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.3.2
+// @version      0.4.0
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.3.2';
+  const VERSION = '0.4.0';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -44,7 +44,6 @@
   const TIMEOUT_VALIDATE_MS = 12000;
   const TIMEOUT_SUMMARY_MS = 12000;
   const TIMEOUT_MUTATION_MS = 25000;
-  const NATIVE_SEED_TIMEOUT_MS = 30000;
   const NEXT_GAP_MS = 180;
   const STATE_KEY = IS_BIND ? 'bwu2.bindQueue.state.v2' : 'bwu2.unbindQueue.state.v1';
   const DRAFT_KEY = IS_BIND ? 'bwu2.bindQueue.draft.v2' : 'bwu2.unbindQueue.draft.v1';
@@ -83,9 +82,10 @@
   let directTemplate = null;
   let bindTemplateVerified = false;
   let destinationToken = '';
-  let nativeSeq = 0;
-  const nativeHistory = [];
-  const nativeWaiters = new Set();
+  const bindActive = new Set();
+  const BIND_CONCURRENCY = 2;
+  let bindTemplateCheck = null;
+  let nativeTemplateCapture = false;
   const ui = {};
 
   if (IS_BIND) {
@@ -125,7 +125,8 @@
               : 'queued',
             phase: clean(item.phase),
             error: clean(item.error),
-            ms: Math.max(0, Number(item.ms) || 0)
+            ms: Math.max(0, Number(item.ms) || 0),
+            ambiguous: IS_BIND && !!item.ambiguous
           }))
       };
     } catch (_) {
@@ -194,6 +195,22 @@
   const counts = () => globalThis.BWU2Fleet.queueCounts(state.items);
 
   function recoverAfterReload() {
+    if (IS_BIND) {
+      const active = state.items.filter(item => item.status === 'active');
+      for (const item of active) {
+        const wasMutating = item.phase === 'bind';
+        item.status = wasMutating ? 'attention' : 'queued';
+        item.error = wasMutating ? 'UNKNOWN — page refreshed during bind; verify before retrying' : '';
+        item.ambiguous = wasMutating;
+        if (!wasMutating) item.phase = '';
+      }
+      state.running = false;
+      state.currentId = '';
+      state.phase = 'idle';
+      if (active.length) state.message = 'Recovered — verify uncertain binds before retrying';
+      saveState();
+      return;
+    }
     const active = state.items.find(item => item.status === 'active');
     if (active) {
       active.status = 'attention';
@@ -300,6 +317,7 @@
     directTemplate = null;
     destinationToken = '';
     bindTemplateVerified = false;
+    bindTemplateCheck = null;
     try { sessionStorage.removeItem(BIND_TEMPLATE_KEY); } catch (_) {}
   }
 
@@ -333,55 +351,47 @@
   }
 
   function recordBindNative(record) {
-    record.seq = ++nativeSeq;
-    nativeHistory.push(record);
-    if (nativeHistory.length > 120) nativeHistory.splice(0, nativeHistory.length - 120);
-
-    if (
-      record.path === API_VALIDATE_DEST &&
-      record.ok &&
-      clean(record.response).toUpperCase() === DESTINATION_FC
-    ) {
-      const token = clean(record.request?.destinationWarehouseId);
-      if (token) destinationToken = token;
-    }
-
-    for (const waiter of [...nativeWaiters]) {
-      if (record.seq <= waiter.afterSeq || record.path !== waiter.path) continue;
-      if (waiter.predicate && !waiter.predicate(record)) continue;
-      nativeWaiters.delete(waiter);
-      clearTimeout(waiter.timer);
-      waiter.resolve(record);
-    }
-
     trace('UNBIND_NATIVE_API', {
-      path: record.path,
-      method: record.method,
-      status: record.status,
-      ok: record.ok,
-      ms: record.ms
+      path: record.path, method: record.method,
+      status: record.status, ok: record.ok, ms: record.ms
     });
-  }
+    // Never replace genuine native opaque IDs with a displayed warehouse code.
+    if (!IS_BIND || directTemplate || nativeTemplateCapture
+        || record.path !== API_BIND || !record.ok
+        || !clean(record.response?.hostName)) return;
+    const sourceWarehouseId = clean(record.request?.sourceWarehouseId);
+    const destinationWarehouseId = clean(record.request?.destinationWarehouseId);
+    const scannableId = normalizeContainer(record.request?.scannableId);
+    if (!sourceWarehouseId || !destinationWarehouseId || !scannableId) return;
 
-  function waitBindNative(path, afterSeq, predicate = null, timeoutMs = TIMEOUT_VALIDATE_MS) {
-    for (const record of nativeHistory) {
-      if (record.seq <= afterSeq || record.path !== path) continue;
-      if (predicate && !predicate(record)) continue;
-      return Promise.resolve(record);
-    }
-
-    return new Promise((resolve, reject) => {
-      const waiter = { path, afterSeq, predicate, resolve, reject, timer: 0 };
-      waiter.timer = setTimeout(() => {
-        nativeWaiters.delete(waiter);
-        reject(new RequestError(`No native ${path} request detected`, {
-          phase: path === API_BIND ? 'bind' : 'native',
-          status: 0,
-          ambiguous: path === API_BIND
-        }));
-      }, timeoutMs);
-      nativeWaiters.add(waiter);
-    });
+    nativeTemplateCapture = true;
+    void (async () => {
+      try {
+        const check = await postJson(
+          API_VALIDATE_DEST, { destinationWarehouseId },
+          TIMEOUT_VALIDATE_MS, 'destination'
+        );
+        if (clean(check.data).toUpperCase() !== DESTINATION_FC) {
+          throw new Error('Native bind destination is not BWU1');
+        }
+        if (!directTemplate) saveBindTemplate(sourceWarehouseId, destinationWarehouseId);
+        // A genuine native bind acknowledgement means this queued tote must not be sent again.
+        const item = state.items.find(row =>
+          row.id.toLowerCase() === scannableId.toLowerCase() && row.status === 'queued'
+        );
+        if (item && !state.running) {
+          item.status = 'done'; item.phase = 'done'; item.error = ''; item.ms = 0;
+          trace('UNBIND_QUEUE_ITEM_DONE', { container: item.id, source: 'native-manual', mode: MODE });
+        }
+        state.message = 'API READY — verified native setup; press START';
+        saveState();
+        render();
+      } catch (error) {
+        trace('UNBIND_TEMPLATE_CAPTURE_FAILED', { reason: clean(error?.message || error) });
+      } finally {
+        nativeTemplateCapture = false;
+      }
+    })();
   }
 
   function installBindNativeTap() {
@@ -490,142 +500,6 @@
     }
   }
 
-  function visible(element) {
-    if (!(element instanceof Element) || !element.isConnected) return false;
-    const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return false;
-    const style = getComputedStyle(element);
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0;
-  }
-
-  function nativeDescriptor(input) {
-    let label = '';
-    try {
-      const direct = input.id ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null;
-      label = clean(direct?.textContent || input.closest('label')?.textContent || '');
-    } catch (_) {}
-    return clean([
-      label,
-      input.getAttribute('name'),
-      input.getAttribute('id'),
-      input.getAttribute('placeholder'),
-      input.getAttribute('aria-label')
-    ].filter(Boolean).join(' ')).toLowerCase();
-  }
-
-  function nativeInputs() {
-    return [...document.querySelectorAll('input[type="text"],input:not([type]),textarea,[role="combobox"]')]
-      .filter(input => !ui.panel?.contains(input) && !ui.mini?.contains(input) && visible(input));
-  }
-
-  function findDestinationInput() {
-    const rows = nativeInputs().map(input => {
-      const descriptor = nativeDescriptor(input);
-      const value = clean(input.value || input.textContent || '').toUpperCase();
-      let score = 0;
-      if (/destination/.test(descriptor)) score += 8;
-      if (/warehouse|location|site|fc/.test(descriptor)) score += 4;
-      if (value === DESTINATION_FC) score += 12;
-      return { input, score };
-    }).sort((a, b) => b.score - a.score);
-    return rows[0]?.score > 0 ? rows[0].input : (rows.length === 1 ? rows[0].input : null);
-  }
-
-  function findContainerInput() {
-    const rows = nativeInputs().map(input => {
-      const descriptor = nativeDescriptor(input);
-      let score = 0;
-      if (/container|scannable|scan|tote/.test(descriptor)) score += 10;
-      if (/destination|warehouse|location|site/.test(descriptor)) score -= 12;
-      return { input, score };
-    }).sort((a, b) => b.score - a.score);
-    return rows[0]?.score > 0 ? rows[0].input : null;
-  }
-
-  function setNativeValue(input, value) {
-    if (!input) return false;
-    try {
-      const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      if (setter) setter.call(input, value);
-      else input.value = value;
-    } catch (_) {
-      try { input.value = value; } catch (_) { return false; }
-    }
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  }
-
-  function scannerKeyboardEvent(type, key, { keyCode = 0, which = keyCode, charCode = 0, shiftKey = false } = {}) {
-    const event = new KeyboardEvent(type, {
-      key,
-      code: key === 'Enter' ? 'Enter' : (/^[A-Za-z]$/.test(key) ? `Key${key.toUpperCase()}` : ''),
-      shiftKey,
-      bubbles: true,
-      cancelable: true
-    });
-    try { Object.defineProperty(event, 'keyCode', { get: () => keyCode }); } catch (_) {}
-    try { Object.defineProperty(event, 'which', { get: () => which }); } catch (_) {}
-    try { Object.defineProperty(event, 'charCode', { get: () => charCode }); } catch (_) {}
-    return event;
-  }
-
-  async function pressNativeEnter(target) {
-    const node = target || document.body || document.documentElement;
-    node.dispatchEvent(scannerKeyboardEvent('keydown', 'Enter', { keyCode: 13, which: 13 }));
-    node.dispatchEvent(scannerKeyboardEvent('keypress', 'Enter', { keyCode: 13, which: 13, charCode: 13 }));
-    node.dispatchEvent(scannerKeyboardEvent('keyup', 'Enter', { keyCode: 13, which: 13 }));
-    await sleep(2);
-  }
-
-  async function typeScannerToBody(value) {
-    const target = document.body || document.documentElement;
-    try { target.focus?.(); } catch (_) {}
-    for (const char of String(value)) {
-      const virtualCode = /^[A-Za-z]$/.test(char) ? char.toUpperCase().charCodeAt(0) : char.charCodeAt(0);
-      const exactCharCode = char.charCodeAt(0);
-      const shiftKey = /^[A-Z]$/.test(char);
-      target.dispatchEvent(scannerKeyboardEvent('keydown', char, { keyCode: virtualCode, which: virtualCode, shiftKey }));
-      target.dispatchEvent(scannerKeyboardEvent('keypress', char, { keyCode: exactCharCode, which: exactCharCode, charCode: exactCharCode, shiftKey }));
-      target.dispatchEvent(scannerKeyboardEvent('keyup', char, { keyCode: virtualCode, which: virtualCode, shiftKey }));
-      await sleep(2);
-    }
-    await pressNativeEnter(target);
-  }
-
-  async function emitNativeScan(container) {
-    const id = normalizeContainer(container);
-    if (!id) throw new RequestError('Invalid container barcode', { phase: 'validate', status: 0 });
-    const field = findContainerInput();
-    if (field) {
-      try { field.focus(); } catch (_) {}
-      setNativeValue(field, id);
-      await pressNativeEnter(field);
-      return 'field';
-    }
-    await typeScannerToBody(id);
-    return 'body';
-  }
-
-  function requestContainer(record) {
-    return clean(record?.request?.scannableId);
-  }
-
-  function assertNativeNetwork(record, phase) {
-    if (!record) throw new RequestError(`Missing ${phase} response`, { phase, status: 0 });
-    if (!record.ok) {
-      const sessionExpired = [401, 403, 419].includes(Number(record.status));
-      throw new RequestError(sessionExpired ? 'SESSION EXPIRED — refresh page, then press START' : `HTTP ${record.status || 0}`, {
-        phase,
-        status: Number(record.status) || 0,
-        sessionExpired,
-        ambiguous: phase === 'bind'
-      });
-    }
-    return record;
-  }
-
   function assertBindValidate(data, container, status = 200) {
     if (!data || typeof data !== 'object') throw new RequestError('Unexpected validation response', { phase: 'validate', status });
     if (clean(data.warehouseId).toUpperCase() !== WAREHOUSE_ID) {
@@ -652,30 +526,6 @@
     }
   }
 
-  async function ensureNativeDestination() {
-    if (destinationToken) return true;
-    const input = findDestinationInput();
-    if (!input) throw new RequestError('BWU1 destination field was not found', { phase: 'destination', status: 0 });
-
-    const marker = nativeSeq;
-    const current = clean(input.value || input.textContent || '').toUpperCase();
-    try { input.focus(); } catch (_) {}
-    if (current !== DESTINATION_FC) setNativeValue(input, DESTINATION_FC);
-    await pressNativeEnter(input);
-
-    const result = await waitBindNative(
-      API_VALIDATE_DEST,
-      marker,
-      record => record.ok && clean(record.response).toUpperCase() === DESTINATION_FC,
-      8000
-    );
-    destinationToken = clean(result.request?.destinationWarehouseId);
-    if (!destinationToken) {
-      throw new RequestError('BWU1 validated but destination token was not captured', { phase: 'destination', status: 0 });
-    }
-    return true;
-  }
-
   async function verifyBindTemplate() {
     if (!directTemplate) return false;
     if (bindTemplateVerified) return true;
@@ -695,68 +545,11 @@
   }
 
   function setItemPhase(item, phase, message) {
-    state.phase = item.phase = phase;
+    item.phase = phase;
+    if (!IS_BIND) state.phase = phase;
     state.message = message;
     saveState();
     render();
-  }
-
-  async function seedBindTemplate(item) {
-    await ensureNativeDestination();
-    const container = item.id;
-
-    setItemPhase(item, 'validate', `Validating ${container}`);
-    const firstMarker = nativeSeq;
-    const firstTransport = await emitNativeScan(container);
-    trace('UNBIND_QUEUE_NATIVE_SCAN', { container, pass: 1, transport: firstTransport });
-
-    const validate = await waitBindNative(
-      API_VALIDATE,
-      firstMarker,
-      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
-      NATIVE_SEED_TIMEOUT_MS
-    );
-    assertNativeNetwork(validate, 'validate');
-    assertBindValidate(validate.response, container, validate.status);
-
-    const summary = await waitBindNative(
-      API_SUMMARY,
-      firstMarker,
-      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
-      NATIVE_SEED_TIMEOUT_MS
-    );
-    assertNativeNetwork(summary, 'summary');
-    assertBindSummary(summary.response, summary.status);
-
-    if (!state.running) throw new SafePauseError();
-
-    setItemPhase(item, 'bind', `Binding ${container} → ${DESTINATION_FC}`);
-    const bindMarker = nativeSeq;
-    const secondTransport = await emitNativeScan(container);
-    trace('UNBIND_QUEUE_NATIVE_SCAN', { container, pass: 2, transport: secondTransport });
-
-    const bound = await waitBindNative(
-      API_BIND,
-      bindMarker,
-      record => requestContainer(record).toLowerCase() === container.toLowerCase(),
-      NATIVE_SEED_TIMEOUT_MS
-    );
-    assertNativeNetwork(bound, 'bind');
-    assertBindMutation(bound.response, bound.status);
-
-    const sourceWarehouseId = clean(bound.request?.sourceWarehouseId);
-    const destinationWarehouseId = clean(bound.request?.destinationWarehouseId);
-    if (!destinationWarehouseId || destinationWarehouseId !== destinationToken) {
-      throw new RequestError('Bind succeeded but BWU1 destination could not be confirmed — verify container', {
-        phase: 'bind',
-        status: bound.status,
-        ambiguous: true
-      });
-    }
-    if (!sourceWarehouseId || !saveBindTemplate(sourceWarehouseId, destinationWarehouseId)) {
-      clearBindTemplate();
-      trace('UNBIND_TEMPLATE_UNAVAILABLE', { container });
-    }
   }
 
   async function processBindDirect(item) {
@@ -785,11 +578,13 @@
     if (!state.running) throw new SafePauseError();
 
     setItemPhase(item, 'bind', `Binding ${container} → ${DESTINATION_FC}`);
+    const template = directTemplate;
+    if (!template) throw new RequestError('API template unavailable', { phase: 'destination', status: 0 });
     const bound = await postJson(
       API_BIND,
       {
-        sourceWarehouseId: directTemplate.sourceWarehouseId,
-        destinationWarehouseId: directTemplate.destinationWarehouseId,
+        sourceWarehouseId: template.sourceWarehouseId,
+        destinationWarehouseId: template.destinationWarehouseId,
         scannableId: container,
         employeeLogin: login
       },
@@ -799,26 +594,39 @@
     assertBindMutation(bound.data, bound.status);
   }
 
+  async function ensureBindApiReady() {
+    if (!directTemplate) throw new RequestError('API template missing — make one native BWU1 bind', {
+      phase: 'destination', status: 0
+    });
+    if (bindTemplateVerified) return;
+    if (!bindTemplateCheck) bindTemplateCheck = verifyBindTemplate();
+    let verified;
+    try { verified = await bindTemplateCheck; }
+    finally { bindTemplateCheck = null; }
+    if (!verified || !directTemplate) {
+      throw new RequestError('Cached API destination invalid — native setup required', {
+        phase: 'destination', status: 0
+      });
+    }
+  }
+
   async function processBindItem(item) {
     const started = performance.now();
-    if (directTemplate && !bindTemplateVerified) {
-      const valid = await verifyBindTemplate();
-      if (!valid) clearBindTemplate();
-    }
-    if (!directTemplate) await seedBindTemplate(item);
-    else await processBindDirect(item);
-
+    await ensureBindApiReady();
+    if (!state.running) throw new SafePauseError();
+    await processBindDirect(item);
     clearSessionRecovery();
     item.status = 'done';
     item.phase = 'done';
     item.error = '';
+    item.ambiguous = false;
     item.ms = Math.round(performance.now() - started);
-    state.currentId = '';
-    state.phase = 'idle';
-    state.message = `BOUND ${item.id} → ${DESTINATION_FC} (${item.ms}ms) — scan next`;
+    state.message = `BOUND ${item.id} → ${DESTINATION_FC} (${item.ms}ms)`;
     saveState();
     render();
-    trace('UNBIND_QUEUE_ITEM_DONE', { container: item.id, destination: DESTINATION_FC, ms: item.ms });
+    trace('UNBIND_QUEUE_ITEM_DONE', {
+      container: item.id, destination: DESTINATION_FC, ms: item.ms, mode: MODE
+    });
   }
 
   function rememberInvalid(values) {
@@ -1107,7 +915,62 @@
     return processUnbindItem(item);
   }
 
+  function markBindAttention(item, error) {
+    if (error?.safePause) {
+      item.status = 'queued'; item.phase = ''; item.error = ''; item.ambiguous = false;
+      saveState(); render(); return;
+    }
+    item.status = 'attention';
+    const phase = clean(error?.phase || item.phase);
+    item.phase = phase;
+    item.ambiguous = !!error?.ambiguous || phase === 'bind';
+    item.error = `${item.ambiguous ? 'UNKNOWN — verify before retrying: ' : ''}${clean(error?.message || 'Needs attention')}`;
+    state.running = false;
+    state.message = `PAUSED — ${item.id}: ${item.error}`;
+    saveState(); render();
+    trace('UNBIND_QUEUE_ATTENTION', {
+      container: item.id, phase, reason: item.error,
+      ambiguous: item.ambiguous, paused: true, mode: MODE
+    });
+  }
+
+  function scheduleBindQueue() {
+    if (!state.running) return;
+    if (lockOwnedByOther()) {
+      state.running = false;
+      state.message = 'Another tab owns the Hierarchy queue';
+      saveState(); render();
+      return;
+    }
+    renewLock();
+    while (state.running && bindActive.size < BIND_CONCURRENCY) {
+      const item = nextQueued();
+      if (!item) break;
+      const key = item.id.toLowerCase();
+      if (bindActive.has(key)) break;
+      bindActive.add(key);
+      item.status = 'active';
+      item.phase = 'validate'; item.error = ''; item.ambiguous = false; item.ms = 0;
+      saveState();
+      trace('UNBIND_QUEUE_ITEM_START', { container: item.id, mode: MODE, api: true });
+      void processBindItem(item)
+        .catch(error => markBindAttention(item, error))
+        .finally(() => {
+          bindActive.delete(key);
+          if (!state.running && bindActive.size === 0) releaseLock();
+          if (state.running) scheduleBindQueue();
+          else render();
+        });
+    }
+    if (!nextQueued() && bindActive.size === 0) {
+      state.message = `RUNNING — scan next tsX/csX → ${DESTINATION_FC}`;
+      saveState();
+    }
+    render();
+  }
+
   async function runQueue() {
+    if (IS_BIND) { scheduleBindQueue(); return; }
     if (!state.running || processing) return;
     if (lockOwnedByOther()) {
       state.message = 'Queue is active in another tab';
@@ -1115,31 +978,24 @@
       return;
     }
     renewLock();
-
     const item = itemFor() || activateNext();
     if (!item) {
-      state.message = `RUNNING — scan next tsX/csX${IS_BIND ? ` → ${DESTINATION_FC}` : ''}`;
-      saveState();
-      render();
-      ui.draft?.focus();
-      return;
+      state.message = 'RUNNING — scan next tsX/csX';
+      saveState(); render(); ui.draft?.focus(); return;
     }
-
     processing = true;
-    try {
-      await processItem(item);
-    } catch (error) {
-      markAttention(item, error);
-    } finally {
+    try { await processItem(item); }
+    catch (error) { markAttention(item, error); }
+    finally {
       processing = false;
       if (!state.running) releaseLock();
       render();
     }
-
     if (state.running) setTimeout(runQueue, NEXT_GAP_MS);
   }
 
   function resumeAfterSessionReload() {
+    if (IS_BIND) return; // Manual identity and uncertain parallel writes must never auto-resume.
     const recovery = readSessionRecovery();
     if (!recovery) return;
 
@@ -1180,7 +1036,7 @@
   }
 
   function startQueue() {
-    if (state.running || processing) return;
+    if (state.running || processing || (IS_BIND && bindActive.size)) return;
     const login = refreshDetectedLogin();
     if (!login) {
       state.message = IS_BIND
@@ -1194,6 +1050,10 @@
     state.items = state.items.filter(item => item.status !== 'done');
     state.invalid = [];
     addDraftToQueue();
+    if (IS_BIND && !directTemplate) {
+      state.message = 'API SETUP REQUIRED — make ONE native BWU1 bind; script will capture identifiers';
+      saveState(); render(); return;
+    }
     if (!acquireLock()) {
       state.message = 'Another tab already owns the Hierarchy queue';
       saveState();
@@ -1219,7 +1079,9 @@
 
   function pauseQueue(reason = 'Paused safely') {
     state.running = false;
-    if (processing && isMutationPhase(state.phase)) {
+    if (IS_BIND && bindActive.size) {
+      state.message = `${reason} — ${bindActive.size} in-flight API operation(s) settling; no new binds`;
+    } else if (processing && isMutationPhase(state.phase)) {
       state.message = `${reason} — current ${mutationPhase()} will finish; no next container`;
     } else if (processing) {
       state.message = `${reason} — current check will finish; mutation blocked`;
@@ -1227,13 +1089,13 @@
       state.message = reason;
     }
     saveState();
-    if (!processing) releaseLock();
+    if (!processing && !(IS_BIND && bindActive.size)) releaseLock();
     trace('UNBIND_QUEUE_PAUSE', { reason, currentId: state.currentId, phase: state.phase, mode: MODE });
     render();
   }
 
   function clearQueue() {
-    if (processing) return;
+    if (processing || (IS_BIND && bindActive.size)) return;
     const hasDraft = !!clean(ui.draft?.value || '');
     if (!state.items.length && !hasDraft) {
       state.message = 'Queue is already clear';
@@ -1254,9 +1116,21 @@
   }
 
   function retryAttention() {
-    if (state.running || processing) return;
+    if (state.running || processing || (IS_BIND && bindActive.size)) return;
     const attention = state.items.filter(item => item.status === 'attention');
     if (!attention.length) return;
+    if (IS_BIND) {
+      const safe = attention.filter(item => !item.ambiguous && item.phase !== 'bind');
+      if (!safe.length) {
+        state.message = 'UNKNOWN binds require manual verification — not automatically requeued';
+        saveState(); render(); return;
+      }
+      for (const item of safe) {
+        item.status = 'queued'; item.phase = ''; item.error = ''; item.ambiguous = false;
+      }
+      state.message = `${safe.length} safe failure(s) requeued; ${attention.length - safe.length} uncertain retained`;
+      saveState(); render(); return;
+    }
     for (const item of attention) {
       item.status = 'queued';
       item.phase = '';
@@ -1455,20 +1329,26 @@
     ui.status.textContent = state.message;
     ui.counts.textContent =
       `${summary.queued} queued  •  ${summary.active} active  •  ${summary.done} done  •  ${summary.attention} attention`;
-    if (IS_BIND) ui.login.disabled = state.running || processing;
+    if (IS_BIND) {
+      ui.login.disabled = state.running || bindActive.size > 0;
+      ui.apiState.textContent = directTemplate
+        ? (bindTemplateVerified ? 'API READY · BWU2 → BWU1' : 'API SAVED · verifying BWU1 on START')
+        : 'API SETUP REQUIRED · perform one native BWU1 bind';
+      ui.apiState.style.color = directTemplate ? '#166534' : '#9a3412';
+    }
     ui.start.textContent = state.running ? 'RUNNING' : 'START';
-    ui.start.disabled = state.running || processing;
+    ui.start.disabled = state.running || processing || (IS_BIND && bindActive.size > 0);
     ui.start.style.opacity = ui.start.disabled ? '0.55' : '1';
     ui.pause.disabled = !state.running;
     ui.pause.style.opacity = ui.pause.disabled ? '0.55' : '1';
-    ui.clear.disabled = processing;
-    ui.retry.disabled = state.running || processing || !summary.attention;
+    ui.clear.disabled = processing || (IS_BIND && bindActive.size > 0);
+    ui.retry.disabled = state.running || processing || (IS_BIND && bindActive.size > 0) || !summary.attention;
     ui.panel.style.display = minimized ? 'none' : 'block';
     ui.mini.style.display = minimized ? 'flex' : 'none';
     ui.mini.title = processing
       ? state.message
       : state.running ? `${IS_BIND ? 'Bind' : 'Unbind'} Queue running — ${summary.queued} queued` : `Open ${IS_BIND ? 'Bind' : 'Unbind'} Queue`;
-    ui.miniRing.style.animation = processing ? 'bwu2-hierarchy-spin .75s linear infinite' : 'none';
+    ui.miniRing.style.animation = (processing || (IS_BIND && bindActive.size > 0)) ? 'bwu2-hierarchy-spin .75s linear infinite' : 'none';
     ui.miniRing.style.borderColor = summary.attention
       ? '#fdba74'
       : state.running ? '#93c5fd' : '#94a3b8';
@@ -1564,6 +1444,7 @@
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
     ));
 
+    ui.apiState = element('div', '', 'margin-bottom:6px;font:11px Arial,sans-serif;font-weight:900');
     ui.draft = element('textarea');
     ui.draft.value = savedDraft();
     ui.draft.placeholder = 'Scan or paste tsX/csX containers — one per line';
@@ -1605,7 +1486,7 @@
     ui.clear = makeButton('CLEAR', clearQueue, 'flex:1;font-size:10px');
     secondary.append(ui.retry, ui.clear);
 
-    body.append(loginRow, ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
+    body.append(loginRow, ...(IS_BIND ? [ui.apiState] : []), ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
     ui.panel.append(header, body);
     document.body.append(ui.panel, ui.mini);
 
@@ -1618,8 +1499,10 @@
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', schedulePosition, { passive: true });
 
-    if (IS_BIND && directTemplate) {
-      state.message = 'Bind API template cached — will verify before use';
+    if (IS_BIND) {
+      state.message = directTemplate
+        ? 'API template cached — verify destination on START'
+        : 'API SETUP REQUIRED — make one native BWU1 bind to capture identifiers';
       saveState();
     }
     render();
