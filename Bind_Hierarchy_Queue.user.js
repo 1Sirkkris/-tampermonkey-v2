@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.3.0
+// @version      0.3.1
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -68,6 +68,7 @@
   };
 
   let processing = false;
+  let manualBindLogin = false;
   let lockTimer = 0;
   let positionFrame = 0;
   let lastAnchorTop = 10;
@@ -238,14 +239,25 @@
     }
   }
 
-  function currentLogin() {
+  function detectedLogin() {
     return ACTIONS.resolveEmployeeLogin({ document, pageWindow: window }).login;
   }
 
+  function currentLogin() {
+    if (IS_BIND && manualBindLogin) return ACTIONS.normalizeLogin(ui.login?.value);
+    return detectedLogin();
+  }
+
   function refreshDetectedLogin() {
-    const login = currentLogin();
-    if (ui.login) ui.login.textContent = login || 'NOT DETECTED';
-    return login;
+    const detected = detectedLogin();
+    if (IS_BIND) {
+      // Explicit manual input wins; never overwrite an operator's correction.
+      if (ui.login && !manualBindLogin) ui.login.value = detected;
+      if (ui.login) ui.login.placeholder = detected ? 'Employee login' : 'ENTER EMPLOYEE LOGIN';
+      return manualBindLogin ? ACTIONS.normalizeLogin(ui.login?.value) : detected;
+    }
+    if (ui.login) ui.login.textContent = detected || 'NOT DETECTED';
+    return detected;
   }
 
 
@@ -1165,7 +1177,9 @@
     if (state.running || processing) return;
     const login = refreshDetectedLogin();
     if (!login) {
-      state.message = 'Logged-in user could not be detected — refresh/sign in';
+      state.message = IS_BIND
+        ? 'Enter your employee login above before START'
+        : 'Logged-in user could not be detected — refresh/sign in';
       saveState();
       render();
       return;
@@ -1435,6 +1449,7 @@
     ui.status.textContent = state.message;
     ui.counts.textContent =
       `${summary.queued} queued  •  ${summary.active} active  •  ${summary.done} done  •  ${summary.attention} attention`;
+    if (IS_BIND) ui.login.disabled = state.running || processing;
     ui.start.textContent = state.running ? 'RUNNING' : 'START';
     ui.start.disabled = state.running || processing;
     ui.start.style.opacity = ui.start.disabled ? '0.55' : '1';
@@ -1512,9 +1527,32 @@
       'display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;margin-bottom:7px'
     );
     loginRow.appendChild(element('strong', 'Login'));
-    ui.login = element('strong', 'Detecting…',
-      'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;font:12px Consolas,monospace;color:#0f172a'
-    );
+    ui.login = IS_BIND
+      ? element('input', null,
+        'min-width:0;width:100%;box-sizing:border-box;padding:6px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;font:12px Consolas,monospace;color:#0f172a'
+      )
+      : element('strong', 'Detecting…',
+        'min-width:0;padding:6px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;font:12px Consolas,monospace;color:#0f172a'
+      );
+    if (IS_BIND) {
+      ui.login.type = 'text';
+      ui.login.autocomplete = 'off';
+      ui.login.autocapitalize = 'off';
+      ui.login.spellcheck = false;
+      ui.login.maxLength = 32;
+      ui.login.setAttribute('aria-label', 'Employee login (editable)');
+      ui.login.title = 'Type your login if auto-detection fails. Not saved on shared computers.';
+      ui.login.addEventListener('input', () => {
+        manualBindLogin = true;
+        if (!state.running && ACTIONS.normalizeLogin(ui.login.value)
+            && /logged-in user could not be detected/i.test(state.message)) {
+          state.message = 'Login entered — press START';
+          saveState();
+          render();
+        }
+      });
+      isolateTextField(ui.login);
+    }
     refreshDetectedLogin();
     loginRow.append(ui.login, element('strong', IS_BIND ? `${WAREHOUSE_ID} → ${DESTINATION_FC} 🔒` : WAREHOUSE_ID,
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
