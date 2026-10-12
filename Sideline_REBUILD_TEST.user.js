@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.37
+// @version      0.0.38
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.37-REBUILD';
+  const VERSION = '0.0.38-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -1230,6 +1230,7 @@
 
   const lazy = {
     running:false,
+    preflightStart:null,
     paused:false,
     predicant:false,
     index:0,
@@ -1270,8 +1271,20 @@
     return `${norm(source)}\u0000${clean(barcode).toUpperCase()}`;
   }
 
+  function currentPreflightContext(generation) {
+    return generation === preflightLookup.generation &&
+      norm(lSrc.value) === preflightLookup.sourceKey;
+  }
+
+  function currentPreflightEntry(entry) {
+    return !!entry && currentPreflightContext(entry.generation) &&
+      preflightLookup.entries.get(entry.key) === entry;
+  }
+
   function resetPreflightLookups(source='') {
     preflightLookup.generation++;
+    lazy.preflightStart = null;
+    lazy.dateResolve?.(null);
     for (const controller of preflightLookup.controllers) {
       try { controller.abort(); } catch {}
     }
@@ -1301,7 +1314,7 @@
   }
 
   function finishPreflightEntry(entry, value) {
-    if (entry.settled) return;
+    if (!entry || entry.settled) return;
     entry.settled = true;
     entry.resolve(value);
   }
@@ -1309,7 +1322,7 @@
   function pumpPreflightLookups() {
     while (preflightLookup.active < LOOKUP_CONCURRENCY && preflightLookup.queue.length) {
       const entry = preflightLookup.queue.shift();
-      if (!entry || entry.generation !== preflightLookup.generation || preflightLookup.entries.get(entry.key) !== entry) {
+      if (!currentPreflightEntry(entry)) {
         finishPreflightEntry(entry,null);
         continue;
       }
@@ -1333,12 +1346,16 @@
 
         if (
           response.ok &&
-          entry.generation === preflightLookup.generation &&
-          preflightLookup.entries.get(entry.key) === entry
+          currentPreflightEntry(entry)
         ) {
           entry.response = payload;
           const baseResult = classifyPreflight(payload,entry.code);
-          entry.result = await deepenHazmatPreflight(baseResult);
+          const result = await deepenHazmatPreflight(baseResult);
+          if (!currentPreflightEntry(entry)) {
+            finishPreflightEntry(entry,null);
+            return;
+          }
+          entry.result = result;
 
           if (entry.result?.kind === 'retry') {
             preflightState.last = {
@@ -1706,9 +1723,10 @@
 
   async function pumpPreflightDates() {
     if (preflightState.dateBusy || !preflightState.dateQueue.length || lazy.running) return;
+    const generation = preflightLookup.generation;
     preflightState.dateBusy = true;
     try {
-      while (preflightState.dateQueue.length && !lazy.running) {
+      while (currentPreflightContext(generation) && preflightState.dateQueue.length && !lazy.running) {
         const next = preflightState.dateQueue.shift();
         const key = itemKey(next.code);
         const item = {code:next.code,qty:1,ctx:next.ctx,status:'DATE'};
@@ -1719,6 +1737,7 @@
           // One question per DISTINCT barcode per RUN.
           // Repeated units of the same barcode silently reuse this RUN-only answer.
           chosen = await showApiDatePicker(item);
+          if (!currentPreflightContext(generation)) return;
           if (!chosen) continue;
           preflightState.dateCache.set(key,chosen);
         }
@@ -1729,7 +1748,7 @@
         if (!lazy.running) lItems.focus();
       }
     } finally {
-      preflightState.dateBusy = false;
+      if (generation === preflightLookup.generation) preflightState.dateBusy = false;
     }
   }
 
@@ -1771,11 +1790,15 @@
     const source = syncPreflightSource();
     if (!source) return false;
 
+    const generation = preflightLookup.generation;
+
     let failedLookup = '';
     await Promise.allSettled(items.map(async item => {
       const result = await getPreflightResult(source,item.code);
       if (!result) failedLookup ||= item.code;
     }));
+
+    if (!currentPreflightContext(generation)) return false;
 
     if (failedLookup) {
       lazy.error = `PREFLIGHT LOOKUP FAILED — retry: ${failedLookup}`;
@@ -1787,6 +1810,7 @@
     while (preflightState.dateBusy || preflightState.dateQueue.length || lazy.dateResolve) {
       pumpPreflightDates();
       await sleep(50);
+      if (!currentPreflightContext(generation)) return false;
     }
     return true;
   }
@@ -3287,6 +3311,11 @@
 
   function showApiDatePicker(item) {
     const owner = lazy;
+    const generation = preflightLookup.generation;
+    const run = lazy.activeRun;
+    const current = () => generation === preflightLookup.generation &&
+      (run ? currentLazyRun(run) : currentPreflightContext(generation));
+    owner.dateResolve?.(null);
     return new Promise(resolve => {
       const ctx = item.ctx;
       const production = ctx.dateType === 'PRODUCTION_DATE';
@@ -3301,11 +3330,15 @@
       hostDoc.body.appendChild(root);
       const wrap = $('.og-wrap',root);
 
-      owner.dateResolve = value => {
-        owner.dateResolve = null;
+      let settled = false;
+      const settle = value => {
+        if (settled) return;
+        settled = true;
+        if (owner.dateResolve === settle) owner.dateResolve = null;
         root.remove();
-        resolve(value);
+        resolve(current() ? value : null);
       };
+      owner.dateResolve = settle;
 
       if (owner === lazy) setMoveCorner('lazy', 'waiting');
 
@@ -3358,6 +3391,7 @@
       }
 
       root.addEventListener('click',e=>{
+        if (settled || owner.dateResolve !== settle || !current()) return;
         const b=e.target.closest('button[data-a]');
         if(!b||b.disabled)return;
         const a=b.dataset.a,v=Number(b.dataset.v);
@@ -3369,7 +3403,7 @@
           if(!production){
             const entered=validDate(selection.month,selection.day,selection.year);
             if(!entered||!futureOrToday(entered))return;
-            owner.dateResolve?.({enteredMs:entered,finalExpirationMs:entered});
+            settle({enteredMs:entered,finalExpirationMs:entered});
             return;
           }
           renderPicker();
@@ -3379,12 +3413,12 @@
           const entered=validDate(selection.month,selection.day,selection.year);
           if(!entered || !pastOrToday(entered))return;
           const finalExpirationMs=entered+Number(ctx.dateDetail?.shelfLife||0);
-          owner.dateResolve?.({enteredMs:entered,finalExpirationMs});
+          settle({enteredMs:entered,finalExpirationMs});
           return;
         }
         if(a==='pao'){
           const entered=paoDateMs();
-          owner.dateResolve?.({enteredMs:entered,finalExpirationMs:entered});
+          settle({enteredMs:entered,finalExpirationMs:entered});
         }
       });
 
@@ -3725,7 +3759,7 @@
   }
 
   async function startLazy() {
-    if (lazy.running) return;
+    if (lazy.running || lazy.preflightStart) return;
 
     lazy.src = clean(lSrc.value);
     lazy.dest = clean(lDest.value);
@@ -3759,7 +3793,19 @@
 
     lazy.note = 'finishing preflight';
     renderLazy();
-    if (!await settlePreflightForCurrentInput()) {
+    syncPreflightSource();
+    const start = {generation:preflightLookup.generation,dest:lazy.dest};
+    lazy.preflightStart = start;
+    let ready, owned;
+    try {
+      ready = await settlePreflightForCurrentInput();
+    } finally {
+      owned = lazy.preflightStart === start;
+      if (owned) lazy.preflightStart = null;
+    }
+    if (!owned) return;
+    if (!currentPreflightContext(start.generation) || norm(lDest.value) !== norm(start.dest)) return;
+    if (!ready) {
       lazy.note = 'preflight incomplete — retry';
       renderLazy();
       return;
@@ -3851,6 +3897,7 @@
       let chosen = preflightState.dateCache.get(key) || null;
       if (!chosen) {
         chosen = await showApiDatePicker(item);
+        if (!lazy.running || !currentLazyRun(run)) return;
         if (chosen) preflightState.dateCache.set(key,chosen);
       }
       if (!chosen || !lazy.running || !currentLazyRun(run)) break;
@@ -4297,7 +4344,8 @@
         total:q.list.length,
         cleared:issQueueSession?.cleared || 0,
         skipped:issQueueSession?.issues?.size || 0,
-        pending:issQueueSession?.awaitingApproval ? issQueueSession.retryPending.length : 0
+        pending:issQueueSession?.awaitingApproval ? issQueueSession.retryPending.length : 0,
+        queueReport:issQueueSession ? issQueueResult(issQueueSession) : null
       };
     }
 
@@ -4340,7 +4388,11 @@
     q.runSeq++;
     q.running = false;
     q.paused = false;
-    if (ISS_CONSOLE_WORKER) issQueueSession = null;
+    if (ISS_CONSOLE_WORKER && issQueueSession) {
+      issQueueSession.stopped = true;
+      issQueueSession.awaitingApproval = false;
+      issQueueSession.retryPending = [];
+    }
     if (shared.owner === 'queue' && (!ISS_CONSOLE_WORKER || !issQueueInFlight)) shared.owner = '';
     renderQueue(note);
   }
@@ -4374,7 +4426,7 @@
     }
     if (issSideWorkerBusy && wanted !== issSideWorkerMode) throw new Error('Sideline worker busy');
     if (wanted !== 'queue' && q.running) issSideStopQueue('mode switched');
-    if (wanted !== 'lazy' && (lazy.running || lazy.activeRun)) issSideStopLazy('mode switched');
+    if (wanted !== 'lazy' && (lazy.running || lazy.activeRun || lazy.preflightStart || lazy.dateResolve)) issSideStopLazy('mode switched');
 
     feature.queue = wanted === 'queue';
     feature.lazy = wanted === 'lazy';
@@ -4485,23 +4537,46 @@
       failed,
       awaitingApproval:session.awaitingApproval,
       retryPending:session.awaitingApproval ? session.retryPending.length : 0,
-      timedOut:!!session.timedOut
+      timedOut:!!session.timedOut,
+      stopped:!!session.stopped,
+      running:issQueueActive(session),
+      inFlight:session.inFlight || 0
     };
+  }
+
+  function issQueueCancelled(session) {
+    session.stopped = true;
+    session.awaitingApproval = false;
+    session.retryPending = [];
+    for (const code of session.list) {
+      if (!session.completed.has(code) && !session.issues.has(code)) session.issues.set(code, {
+        code, kind:'not-attempted', reason:'Queue stopped — NOT ATTEMPTED', attempt:0
+      });
+    }
+    const error = new Error('Run cancelled');
+    error.issCancelled = true;
+    error.issData = issQueueResult(session);
+    return error;
   }
 
   async function issQueueProcess(session, code, attempt) {
     let stage = 'scan';
     issQueueInFlight++;
+    session.inFlight++;
     try {
       await scanSourceDirect(code);
-      if (!issQueueActive(session)) return;
+      if (!issQueueActive(session)) {
+        session.issues.set(code, {code, kind:'not-attempted', reason:'Stopped before close — NOT ATTEMPTED', attempt});
+        return;
+      }
       stage = 'close';
+      session.issues.set(code, {code, kind:'verify', reason:'Close submitted — confirmation pending', attempt});
+      issSideEmitProgress(true);
       await closeContainerDirect(code, true);
-      if (!issQueueActive(session)) return;
+      // STOP cancels scheduling, not the outcome of an already submitted close.
       session.cleared++;
       session.issues.delete(code);
     } catch (error) {
-      if (!issQueueActive(session)) return;
       const customerShipment = error?.customerBound ||
         /customer[\s-]*(?:bound[\s-]*)?shipment/i.test(clean(error?.message || ''));
       const kind = customerShipment ? 'blocked'
@@ -4512,6 +4587,16 @@
       session.issues.set(code, {code, kind, reason, attempt});
     } finally {
       issQueueInFlight--;
+      session.inFlight--;
+      if (attempt === 1) {
+        session.completed.add(code);
+        session.done = session.completed.size;
+      }
+      if (issQueueSession === session) {
+        q.index = session.done;
+        q.failed = [...session.issues.values()].map(item => item.code + ' (' + item.reason + ')');
+        if (!issQueueActive(session)) issSideEmitProgress(true);
+      }
     }
   }
 
@@ -4529,11 +4614,6 @@
           const code = codes[cursor++];
           await issQueueProcess(session, code, attempt);
           if (!issQueueActive(session)) return;
-          if (attempt === 1) {
-            session.done++;
-            q.index = session.done;
-          }
-          q.failed = [...session.issues.values()].map(item => item.code + ' (' + item.reason + ')');
           renderQueue(attempt === 1 ? 'first pass' : 'retry pass');
           issSideEmitProgress(true);
         }
@@ -4568,7 +4648,7 @@
     q.running = !!q.list.length;
     q.paused = false;
     const session = {
-      seq:q.runSeq, list:[...q.list], issues:new Map(), done:0, cleared:0,
+      seq:q.runSeq, list:[...q.list], issues:new Map(), completed:new Set(), done:0, cleared:0, inFlight:0,
       retryPending:[], awaitingApproval:false, timedOut:false,
       deadline:Date.now() + 10 * 60 * 1000
     };
@@ -4577,14 +4657,12 @@
     if (!q.running) return issQueueResult(session);
 
     await issQueuePass(session, session.list, 1);
-    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
-      const error = new Error('Run cancelled');
-      error.issCancelled = true;
-      throw error;
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session || session.stopped) {
+      throw issQueueCancelled(session);
     }
     if (session.timedOut) {
-      for (const code of session.list.slice(session.done)) {
-        if (!session.issues.has(code)) session.issues.set(code, {
+      for (const code of session.list) {
+        if (!session.completed.has(code) && !session.issues.has(code)) session.issues.set(code, {
           code, kind:'not-attempted', reason:'Queue time limit — NOT ATTEMPTED', attempt:0
         });
       }
@@ -4604,10 +4682,8 @@
       session.deadline = Date.now() + 10 * 60 * 1000;
       await issQueuePass(session, retryable, 2);
     }
-    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
-      const error = new Error('Run cancelled');
-      error.issCancelled = true;
-      throw error;
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session || session.stopped) {
+      throw issQueueCancelled(session);
     }
     return issQueueFinish(session);
   }
@@ -4624,10 +4700,8 @@
     session.deadline = Date.now() + 10 * 60 * 1000;
     renderQueue('authorized retry — 2 workers');
     await issQueuePass(session, codes, 2);
-    if (controlSeq !== issSideControlSeq || issQueueSession !== session) {
-      const error = new Error('Run cancelled');
-      error.issCancelled = true;
-      throw error;
+    if (controlSeq !== issSideControlSeq || issQueueSession !== session || session.stopped) {
+      throw issQueueCancelled(session);
     }
     return issQueueFinish(session);
   }
@@ -4680,7 +4754,7 @@
           data = {mode,state:issSideSnapshot()};
         } else if (command === 'stop') {
           issSideControlSeq++;
-          if (lazy.running || lazy.activeRun) issSideStopLazy();
+          if (lazy.running || lazy.activeRun || lazy.preflightStart || lazy.dateResolve) issSideStopLazy();
           if (q.running || issQueueSession?.awaitingApproval) issSideStopQueue('stopped from ISS Console');
           data = {stopped:true};
         } else if (command === 'lazy.run') {
@@ -4707,7 +4781,7 @@
           ok:false,
           error:String(error?.message || error || 'Sideline worker error'),
           data:error?.issCancelled
-            ? {cancelled:true}
+            ? {...(error.issData || {}),cancelled:true}
             : (error?.issData && typeof error.issData === 'object' ? error.issData : null)
         });
       } finally {

@@ -2,11 +2,11 @@
 // @name         v2 TEST v0.2.18 Dropzone Selector Queue
 // @name:en      v2 TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.3.4
+// @version      0.3.5
 // @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.5
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Dropzone_Selector_Queue.user.js
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.3';
+  const VERSION = '0.3.5';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('DROPZONE', VERSION);
@@ -433,12 +433,15 @@
       });
     } catch (error) {
       const status = Number(error?.status || 0);
-      const reason = error?.message || 'Move failed';
+      const reason = error?.ambiguous || status === 0
+        ? 'UNKNOWN — verify tote before retrying: ' + (error?.message || 'Move failed')
+        : error?.message || 'Move failed';
 
       // Item-specific 4xx errors can be skipped so one bad tote does not kill
       // a long queue. Auth/rate-limit/server/network failures pause the queue
       // so we do not machine-gun the same systemic failure through every tote.
       const fatal =
+        !!error?.ambiguous ||
         status === 0 ||
         status === 401 ||
         status === 403 ||

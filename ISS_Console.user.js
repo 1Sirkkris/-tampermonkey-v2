@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.8
+// @version      0.2.9
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.8';
+  const VERSION = '0.2.9';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -34,7 +34,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.37-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.38-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -600,6 +600,9 @@
   function handleProgress(message) {
     const area = message.area;
     if (!['edit','move','sideline'].includes(area)) return;
+    if (area === 'sideline' && message.mode === 'queue' && message.queueReport) {
+      paintQueueReport(message.queueReport);
+    }
 
     const attention = area === 'sideline' ? String(message.attention || '') : '';
     const needsUser = attention === 'rescan-destination';
@@ -1400,6 +1403,9 @@
       ' | Failed ' + failures.length + ' | Verify ' + verify +
       (blocked ? ' | Customer-bound ' + blocked : '') +
       (pending ? ' | ' + (Number(result.retryPending) || 0) + ' retries need approval' : '') +
+      (result.stopped ? ' | Stopped' : '') +
+      (Number(result.inFlight) ? ' | ' + result.inFlight + ' request(s) awaiting outcome' : '') +
+      (restored && result.running ? ' | Interrupted — verify pending close requests' : '') +
       (result.timedOut ? ' | Time limit reached' : '') +
       (restored && result.awaitingApproval ? ' | Retry approval expired after reload' : '');
     const list = $('[data-side-queue-failures]', report);
@@ -1417,7 +1423,8 @@
     if (button) button.hidden = !pending;
     const copy = $('[data-side-queue-copy]', report);
     if (copy) copy.hidden = !failures.length;
-    // Only the most recent queue report is persisted locally. Never persist a live authorization.
+    // Journal submitted close requests as UNKNOWN until confirmation arrives.
+    // A restored report can never authorize retries.
     if (!restored) storeSet('queueReport', JSON.stringify(result));
   }
 
@@ -1434,7 +1441,10 @@
         'QUEUE FINISHED • ' + result.cleared + '/' + result.total + ' cleared • ' +
         result.failed.length + ' unresolved', result.failed.length ? 'error' : 'ok');
     } catch (error) {
-      panelStatus('sideline', 'Queue retry failed: ' + error.message, 'error');
+      if (Array.isArray(error?.data?.failed)) paintQueueReport(error.data);
+      panelStatus('sideline', error?.data?.cancelled
+        ? 'QUEUE STOPPED • outcomes retained below'
+        : 'Queue retry failed: ' + error.message, error?.data?.cancelled ? 'attention' : 'error');
     } finally {
       sidelineRunBusy = false;
       button.disabled = false;
@@ -1467,11 +1477,18 @@
           : 'QUEUE FINISHED • ' + result.cleared + '/' + result.total + ' cleared • ' + result.failed.length + ' unresolved',
           result.awaitingApproval ? 'attention' : result.failed.length ? 'error' : 'ok');
       } catch (error) {
-        if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
-        try {
-          const previous = JSON.parse(storeGet('queueReport', 'null'));
-          if (previous) paintQueueReport(previous, true);
-        } catch {}
+        if (Array.isArray(error?.data?.failed)) {
+          paintQueueReport(error.data);
+          panelStatus('sideline', error.data.cancelled
+            ? 'QUEUE STOPPED • ' + error.data.cleared + '/' + error.data.total + ' cleared • outcomes retained below'
+            : error.message, error.data.cancelled ? 'attention' : 'error');
+        } else {
+          if (!error?.data?.cancelled) panelStatus('sideline', error.message, 'error');
+          try {
+            const previous = JSON.parse(storeGet('queueReport', 'null'));
+            if (previous) paintQueueReport(previous, true);
+          } catch {}
+        }
       } finally {
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);

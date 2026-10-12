@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
@@ -226,8 +226,8 @@
         const actual = new URL(finalUrl, globalThis.location?.href || undefined);
         const expected = new URL(requestedUrl, globalThis.location?.href || undefined);
         const trimPath = value => value.replace(/\/+$/, '') || '/';
-        unexpectedRedirect = trimPath(actual.pathname) !== trimPath(expected.pathname);
-      } catch {}
+        unexpectedRedirect = actual.origin !== expected.origin || trimPath(actual.pathname) !== trimPath(expected.pathname);
+      } catch { unexpectedRedirect = true; }
     }
 
     if (looksHtml || looksAuth || unexpectedRedirect) {
@@ -235,6 +235,17 @@
         status,
         ambiguous: true
       });
+    }
+    let payload = response?.response;
+    if (!payload || typeof payload !== 'object') {
+      try { payload = JSON.parse(raw); } catch { payload = null; }
+    }
+    if (!payload || Array.isArray(payload) || typeof payload.success !== 'boolean') {
+      throw actionError('Move outcome UNKNOWN — verify the container before retrying', 'move', { status, ambiguous:true });
+    }
+    if (payload.success !== true) {
+      const reason = clean(payload.simpleMessage || payload.detailedMessage).slice(0, 500);
+      throw actionError(reason || 'Move was rejected', 'move', { status, rejected:true });
     }
     return response;
   }

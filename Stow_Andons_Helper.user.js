@@ -5,12 +5,12 @@
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @grant        GM_xmlhttpRequest
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.4
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.5
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.10
+// @version      5.6.11
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.10';
+  const VERSION = '5.6.11';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -110,6 +110,12 @@
   let lastSussyTable = null;
   let lastUrl = location.href;
   const moveButtonFeedback = new WeakMap();
+  let moveBusy = false;
+
+  function setMoveBusy(busy) {
+    moveBusy = busy;
+    $$('.vm-tag-btn[data-drop]').forEach(button => { button.disabled = busy; });
+  }
   let unbindBusy = false;
 
   function setCookie(name, value) {
@@ -392,11 +398,12 @@
 
   function moveContainer(key, button) {
     usage(`move.${clean(key).toLowerCase() || 'unknown'}`);
-    if (button?.disabled) return;
+    if (moveBusy || button?.disabled) return;
     const container = currentContainer();
     const dest = destination(key);
     if (!container) return toast('No container in URL', true);
     if (!dest) return toast(`Bad destination for ${key}`, true);
+    setMoveBusy(true);
 
     const feedback = button ? moveButtonFeedback.get(button) : null;
     const original = feedback?.original ?? button?.textContent ?? '';
@@ -406,6 +413,7 @@
       button.textContent = 'Moving…';
     }
     const finish = (text, failed = false) => {
+      setMoveBusy(false);
       if (button) {
         button.disabled = false;
         button.textContent = text;
@@ -416,7 +424,6 @@
         }, failed ? 2200 : 1200);
         moveButtonFeedback.set(button, { original, timer });
       }
-      if (failed) toast(text, true);
       refocusSearch(80);
       refocusSearch(400);
     };
@@ -434,7 +441,9 @@
       }
     }).catch(error => {
       const status = Number(error?.status || 0);
-      finish(status ? `Failed ${status}` : clean(error?.message || 'Move failed'), true);
+      const unknown = error?.ambiguous || !status;
+      finish(unknown ? 'UNKNOWN — verify tote' : 'Move failed', true);
+      toast((unknown ? 'UNKNOWN — verify tote: ' : '') + clean(error?.message || 'Move failed'), true);
     });
   }
 
@@ -787,6 +796,7 @@
 
   function wireDropButtons(root) {
     $$('.vm-tag-btn[data-drop]', root).forEach(button => {
+      button.disabled = moveBusy;
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
