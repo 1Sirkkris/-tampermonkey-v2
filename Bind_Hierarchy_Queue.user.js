@@ -987,6 +987,11 @@
 
   function scheduleBindQueue() {
     if (!state.running) return;
+    // Do not dispatch another API mutation under an expired or changed FCR login.
+    if (!manualBindLogin && bindRunLogin && detectedLogin() !== bindRunLogin) {
+      pauseQueue('Identity changed / expired — verify login before resuming');
+      return;
+    }
     if (lockOwnedByOther()) {
       state.running = false;
       state.message = 'Another tab owns the Hierarchy queue';
