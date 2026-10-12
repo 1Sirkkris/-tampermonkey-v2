@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.4.1
+// @version      0.4.2
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -322,6 +322,7 @@
         login, source: clean(value.source).slice(0, 100), expiresAt: expiry
       };
       refreshDetectedLogin();
+      // OBS owns FCR-to-Hierarchy identity; no separately installed bridge is needed.
       // A changed or vanished automatic identity must stop NEW mutations.
       // In-flight requests keep the login captured at START and settle normally.
       if (!manualBindLogin && state.running && bindRunLogin !== detectedLogin()) {
