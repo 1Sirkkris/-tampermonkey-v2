@@ -2,7 +2,7 @@
 // @name         v2 BWU2 Identity Bridge
 // @namespace    BWU2
 // @version      0.1.0
-// @description  Share short-lived, verified FCResearch login evidence across V2 Amazon apps. No stored passwords.
+// @description  Share short-lived FCResearch login evidence across V2 Amazon apps. No stored passwords.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -54,19 +54,28 @@
   const notify = () => save(REVISION, owner + ':' + Date.now() + ':' + Math.random().toString(36).slice(2));
 
   function findFcrLogin() {
-    let result;
-    try {
-      result = action.resolveEmployeeLogin({
-        document,
-        pageWindow: typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window,
-        storage: disposableStorage,
-        allowCachedLogin: false
-      });
-    } catch { return null; }
-    const login = valid(result?.login);
-    const source = String(result?.source || '');
-    if (!login || !trustedSource(source)) return null;
-    return { login, source };
+    // A visible signed-in FCR header is preferred over ambiguous page globals.
+    // Some FCR builds expose a broad "user" object that can mask the real header
+    // when the shared resolver stops at its first candidate.
+    const page = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+    const domOnlyWindow = {
+      innerWidth: window.innerWidth,
+      getComputedStyle: node => window.getComputedStyle(node),
+      location: { hostname: location.hostname }
+    };
+    for (const candidateWindow of [domOnlyWindow, page]) {
+      let result;
+      try {
+        result = action.resolveEmployeeLogin({
+          document, pageWindow: candidateWindow,
+          storage: disposableStorage, allowCachedLogin: false
+        });
+      } catch { continue; }
+      const login = valid(result?.login);
+      const source = String(result?.source || '');
+      if (login && trustedSource(source)) return { login, source };
+    }
+    return null;
   }
 
   function publish() {
