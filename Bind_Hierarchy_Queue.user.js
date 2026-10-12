@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.4.0
+// @version      0.4.1
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -66,14 +66,10 @@
     return '';
   };
 
-  // v0.1.1 had this helper; it was accidentally dropped in the v0.3.0 merge.
-  // Both native destination Enter and scanner key simulation await it.
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   let processing = false;
   let manualBindLogin = false;
+  let bindRunLogin = '';
+  let bridgeIdentity = { status: 'missing', login: '', source: '', expiresAt: 0 };
   let lockTimer = 0;
   let positionFrame = 0;
   let lastAnchorTop = 10;
@@ -262,8 +258,28 @@
     }
   }
 
+  function freshBridgeLogin() {
+    if (bridgeIdentity.status !== 'ready'
+        || Number(bridgeIdentity.expiresAt) <= Date.now()) return '';
+    return ACTIONS.normalizeLogin(bridgeIdentity.login);
+  }
+
+  function localDetectedLogin() {
+    // Never use the host-localStorage login cache on a shared laptop.
+    return ACTIONS.resolveEmployeeLogin({
+      document, pageWindow: window,
+      storage: { setItem() {}, getItem() { return null; } },
+      allowCachedLogin: false
+    }).login;
+  }
+
   function detectedLogin() {
-    return ACTIONS.resolveEmployeeLogin({ document, pageWindow: window }).login;
+    if (IS_BIND) {
+      if (bridgeIdentity.status === 'conflict') return '';
+      const shared = freshBridgeLogin();
+      if (shared) return shared;
+    }
+    return localDetectedLogin();
   }
 
   function currentLogin() {
@@ -274,13 +290,48 @@
   function refreshDetectedLogin() {
     const detected = detectedLogin();
     if (IS_BIND) {
-      // Explicit manual input wins; never overwrite an operator's correction.
-      if (ui.login && !manualBindLogin) ui.login.value = detected;
+      // Explicit manual input always wins; never overwrite it or reset it on reload.
+      if (ui.login && !manualBindLogin && !state.running) ui.login.value = detected;
       if (ui.login) ui.login.placeholder = detected ? 'Employee login' : 'ENTER EMPLOYEE LOGIN';
-      return manualBindLogin ? ACTIONS.normalizeLogin(ui.login?.value) : detected;
+      if (ui.identitySource) {
+        const source = manualBindLogin ? 'MANUAL OVERRIDE'
+          : bridgeIdentity.status === 'conflict' ? 'CONFLICT — different FCR logins; enter manually'
+          : freshBridgeLogin() ? bridgeIdentity.source + ' · live'
+          : detected ? 'HIERARCHY LOCAL'
+          : 'NOT DETECTED — open FCR, or enter manually';
+        ui.identitySource.textContent = 'Login source: ' + source;
+        ui.identitySource.style.color = bridgeIdentity.status === 'conflict' && !manualBindLogin
+          ? '#9a3412' : detected || manualBindLogin ? '#166534' : '#9a3412';
+      }
+      return currentLogin();
     }
     if (ui.login) ui.login.textContent = detected || 'NOT DETECTED';
     return detected;
+  }
+
+  if (IS_BIND) {
+    document.addEventListener('bwu2:identity:update', event => {
+      let value;
+      try { value = JSON.parse(String(event.detail || '')); } catch { return; }
+      if (!value || !['ready', 'missing', 'conflict', 'unavailable'].includes(value.status)) return;
+      const login = ACTIONS.normalizeLogin(value.login);
+      const expiry = Number(value.expiresAt || 0);
+      bridgeIdentity = {
+        status: value.status === 'ready' && login && expiry > Date.now() && expiry < Date.now() + 60000
+          ? 'ready' : value.status === 'ready' ? 'missing' : value.status,
+        login, source: clean(value.source).slice(0, 100), expiresAt: expiry
+      };
+      refreshDetectedLogin();
+      // A changed or vanished automatic identity must stop NEW mutations.
+      // In-flight requests keep the login captured at START and settle normally.
+      if (!manualBindLogin && state.running && bindRunLogin !== detectedLogin()) {
+        pauseQueue('Identity changed / expired — verify login before resuming');
+      }
+    });
+  }
+
+  function requestSharedLogin() {
+    if (IS_BIND) document.dispatchEvent(new Event('bwu2:identity:request'));
   }
 
 
@@ -554,7 +605,7 @@
 
   async function processBindDirect(item) {
     const container = item.id;
-    const login = currentLogin();
+    const login = bindRunLogin || currentLogin();
     if (!login) throw new RequestError('Logged-in user could not be detected', { phase: 'identity', status: 0 });
 
     setItemPhase(item, 'validate', `Validating ${container}`);
@@ -1037,6 +1088,7 @@
 
   function startQueue() {
     if (state.running || processing || (IS_BIND && bindActive.size)) return;
+    requestSharedLogin();
     const login = refreshDetectedLogin();
     if (!login) {
       state.message = IS_BIND
@@ -1062,6 +1114,7 @@
     }
 
     const queued = counts().queued;
+    if (IS_BIND) bindRunLogin = login; // freeze identity for in-flight API jobs
     state.running = true;
     state.message = queued
       ? `RUNNING — ${queued} queued${IS_BIND ? ` → ${DESTINATION_FC}` : ''}`
@@ -1430,6 +1483,7 @@
       ui.login.title = 'Type your login if auto-detection fails. Not saved on shared computers.';
       ui.login.addEventListener('input', () => {
         manualBindLogin = true;
+        refreshDetectedLogin();
         if (!state.running && ACTIONS.normalizeLogin(ui.login.value)
             && /logged-in user could not be detected/i.test(state.message)) {
           state.message = 'Login entered — press START';
@@ -1444,6 +1498,7 @@
       'padding:4px 7px;border-radius:4px;background:#e2e8f0;color:#334155'
     ));
 
+    ui.identitySource = element('div', '', 'margin:-2px 0 7px 0;font:10px Arial,sans-serif;font-weight:800');
     ui.apiState = element('div', '', 'margin-bottom:6px;font:11px Arial,sans-serif;font-weight:900');
     ui.draft = element('textarea');
     ui.draft.value = savedDraft();
@@ -1486,7 +1541,7 @@
     ui.clear = makeButton('CLEAR', clearQueue, 'flex:1;font-size:10px');
     secondary.append(ui.retry, ui.clear);
 
-    body.append(loginRow, ...(IS_BIND ? [ui.apiState] : []), ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
+    body.append(loginRow, ...(IS_BIND ? [ui.identitySource, ui.apiState] : []), ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
     ui.panel.append(header, body);
     document.body.append(ui.panel, ui.mini);
 
@@ -1507,6 +1562,7 @@
     }
     render();
     positionUi();
+    requestSharedLogin();
     if (!minimized) setTimeout(() => ui.draft.focus(), 0);
     queueMicrotask(resumeAfterSessionReload);
   }
