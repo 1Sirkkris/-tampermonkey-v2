@@ -2,7 +2,7 @@
 // @name         v2 CORE v0.1.11 BWU2 Observability Core
 // @name:en      v2 CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.37
+// @version      0.1.38
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -30,7 +30,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.37';
+  const VERSION = '0.1.38';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -2145,6 +2145,179 @@
 
   }
 
+
+  // Identity relay: OBS already runs on FCResearch and the Hierarchy domain.
+  // This is OBS's own GM storage, shared across those pages; no extra userscript.
+  // Never derive a CURRENT login from a historical OBS event, a request trace,
+  // a profile/search result, or a long-lived localStorage cache.
+  function installFcrIdentityRelay() {
+    const hostname = location.hostname.toLowerCase();
+    const publisher = isFCResearch() && !location.hash.startsWith('#iss-console');
+    const subscriber = hostname === 'tx-b-hierarchy-nrt.nrt.proxy.amazon.com'
+      && /^\/bindHierarchy(?:\/|$)/i.test(location.pathname);
+    if (!publisher && !subscriber) return;
+
+    const KEY_PREFIX = 'bwu2.identityBridge.v1.publisher.';
+    const KEY_REVISION = 'bwu2.identityBridge.v1.revision';
+    const REQUEST_EVENT = 'bwu2:identity:request';
+    const UPDATE_EVENT = 'bwu2:identity:update';
+    const TTL = 45000;
+    const INTERVAL = 10000;
+    const loginPattern = /^[a-z][a-z0-9-]{2,31}$/i;
+    const excluded = /^(?:login|username|user|employee|alias|autoid|logout|signout|signin|profile|account|settings|search|inventory|history|product|container|title)$/i;
+    const normalize = value => {
+      const name = String(value ?? '').trim().toLowerCase();
+      return loginPattern.test(name) && !excluded.test(name) ? name : '';
+    };
+    const trustedSource = source => [
+      'dom:top-right-visible-login', 'dom:aui-nav-row',
+      'cookie:fcmenu-employeeId', 'dom:explicit-login',
+      'global:employeeLogin', 'global:userLogin',
+      'global:autoId', 'global:autoID'
+    ].includes(source);
+    const owner = randomId('obs_identity_');
+    const ownKey = KEY_PREFIX + owner;
+    let published = false;
+    const emitRevision = () => gmSet(KEY_REVISION, Date.now() + ':' + owner + ':' + Math.random());
+
+    function fcrCurrentLogin() {
+      const clean = value => String(value ?? '').trim();
+      const isVisible = element => {
+        try {
+          const rect = element.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || rect.height <= 0 ||
+              rect.top < -3 || rect.top > 155 ||
+              rect.left < window.innerWidth * 0.65) return false;
+          const style = getComputedStyle(element);
+          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        } catch { return false; }
+      };
+      // FCR exposes the signed-in operator in its top-right user/header controls.
+      const candidates = [];
+      for (const root of document.querySelectorAll('header,nav,[role="banner"],[role="navigation"],.aui-nav-row')) {
+        for (const node of root.querySelectorAll('a,span,strong,b,button')) {
+          if (node.children.length || !isVisible(node)) continue;
+          const name = normalize(node.textContent);
+          if (name) candidates.push({ name, left: node.getBoundingClientRect().left });
+        }
+        const explicit = clean(root.textContent).match(/\bSearch\s+([a-z][a-z0-9-]{2,31})\b/i);
+        if (explicit) {
+          const name = normalize(explicit[1]);
+          if (name) return { login: name, source: 'dom:aui-nav-row' };
+        }
+      }
+      if (candidates.length) {
+        candidates.sort((a,b) => b.left-a.left);
+        return { login: candidates[0].name, source: 'dom:top-right-visible-login' };
+      }
+      for (const selector of [
+        '[data-employee-login]', '[data-user-login]', '[data-username]', '[data-autoid]',
+        '.app-user-name', '[data-test-id="user-name"]', '.nav-user', '.user-name'
+      ]) {
+        const el = document.querySelector(selector);
+        if (!el) continue;
+        const login = normalize(
+          el.getAttribute('data-employee-login') ||
+          el.getAttribute('data-user-login') ||
+          el.getAttribute('data-username') ||
+          el.getAttribute('data-autoid') ||
+          el.value || el.textContent
+        );
+        if (login) return { login, source: 'dom:explicit-login' };
+      }
+      // Strict named identity globals only; no generic "user" objects.
+      const page = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+      for (const key of ['employeeLogin', 'userLogin', 'autoId', 'autoID']) {
+        let login = '';
+        try { login = normalize(page[key]); } catch {}
+        if (login) return { login, source: 'global:' + key };
+      }
+      // Same cookie already supported by Actions_Core; numeric badge IDs are ignored.
+      try {
+        for (const part of String(document.cookie || '').split(';')) {
+          const index = part.indexOf('=');
+          if (index < 1 || part.slice(0,index).trim().toLowerCase() !== 'fcmenu-employeeid') continue;
+          const candidate = decodeURIComponent(part.slice(index+1).trim());
+          if (!/[a-z]/i.test(candidate)) continue;
+          const login = normalize(candidate);
+          if (login) return { login, source: 'cookie:fcmenu-employeeId' };
+        }
+      } catch {}
+      return null;
+    }
+
+    function publish() {
+      const found = fcrCurrentLogin();
+      if (!found) {
+        if (published) { gmDelete(ownKey); published = false; emitRevision(); }
+        return;
+      }
+      published = gmSet(ownKey, {
+        login: found.login, source: found.source, origin: location.origin,
+        owner, at: Date.now(), version: VERSION
+      });
+      if (published) emitRevision();
+    }
+
+    function currentSnapshot() {
+      const now = Date.now();
+      const sources = [];
+      for (const key of gmKeys()) {
+        if (!key.startsWith(KEY_PREFIX)) continue;
+        const value = gmGet(key, null);
+        const at = Number(value?.at) || 0;
+        const login = normalize(value?.login);
+        if (!at || at > now + 5000 || now - at > TTL || !login || !trustedSource(value?.source)) {
+          gmDelete(key);
+          continue;
+        }
+        if (!/^https:\/\/(?:[^/]*fcresearch[^/]*|qifcr\.fe\.aftx\.amazonoperations\.app)$/i.test(String(value.origin || ''))) continue;
+        sources.push({ login, source: value.source, at });
+      }
+      const distinct = [...new Set(sources.map(value => value.login))];
+      if (distinct.length !== 1) return {
+        status: distinct.length ? 'conflict' : 'missing',
+        login: '', source: '', expiresAt: 0
+      };
+      sources.sort((a,b) => b.at - a.at);
+      return {
+        status: 'ready', login: distinct[0], source: 'FCR ' + sources[0].source,
+        expiresAt: sources[0].at + TTL
+      };
+    }
+
+    function deliver() {
+      if (!subscriber) return;
+      document.dispatchEvent(new CustomEvent(UPDATE_EVENT, {
+        detail: JSON.stringify(currentSnapshot())
+      }));
+    }
+
+    if (publisher) {
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', publish, { once: true });
+      else publish();
+      const publisherTimer = setInterval(publish, INTERVAL);
+      window.addEventListener('focus', publish);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) publish(); });
+      window.addEventListener('pagehide', () => {
+        clearInterval(publisherTimer);
+        gmDelete(ownKey);
+        emitRevision();
+      }, { once: true });
+    }
+    if (subscriber) {
+      document.addEventListener(REQUEST_EVENT, deliver);
+      const listener = gmListen(KEY_REVISION, deliver);
+      const subscriberTimer = setInterval(deliver, INTERVAL);
+      window.addEventListener('focus', deliver);
+      window.addEventListener('pagehide', () => {
+        clearInterval(subscriberTimer);
+        gmUnlisten(listener);
+      }, { once: true });
+      deliver();
+    }
+  }
+
   function bootCountSync() {
     sessionCount(true);
     countListenerId = gmListen(REVISION_KEY, () => {
@@ -2185,6 +2358,7 @@
   installActionContext();
   installPerformanceHealth();
   bootUi();
+  installFcrIdentityRelay();
 
   window.addEventListener('pagehide', () => {
     clearTimeout(fcrNetworkTimer);
