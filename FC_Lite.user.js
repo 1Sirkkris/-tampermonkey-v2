@@ -2,7 +2,7 @@
 // @name        v2 TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      v2 TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.83
+// @version      0.1.84
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -37,7 +37,7 @@
     document.documentElement.style.visibility = 'hidden';
   }
 
-  const VERSION = '0.1.83';
+  const VERSION = '0.1.84';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FC-LITE', VERSION);
 
@@ -95,25 +95,20 @@
   }
 
   function bindAuditPrint(row, rawScan, product) {
-    const codeNode = row?.querySelector?.('.scan-code');
+    const codeNode = row?.querySelector?.('.scan-code, .fcratc-system-fnsku');
     if (!codeNode) return;
     const printable = clean(rawScan || product?.fnsku || product?.fcsku || product?.asin || product?.isbn || product?.primary);
     if (!printable) return;
     codeNode.dataset.printCode = printable;
-    codeNode.title = `Click to print ${printable}`;
-    codeNode.tabIndex = 0;
-    codeNode.setAttribute('role', 'button');
+    codeNode.title = `Ctrl+click to print ${printable}`;
     const print = event => {
-      event?.preventDefault?.();
-      event?.stopPropagation?.();
+      if (!event.ctrlKey || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
       printAuditBarcode(printable, clean(product?.title || ''));
       focusScanner();
     };
     codeNode.onclick = print;
-    codeNode.onkeydown = event => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      print(event);
-    };
   }
 
   function navigateMode(url) {
@@ -980,6 +975,10 @@
     if(!systemPanel)return; systemPanel.hidden=false; systemSummary.textContent=`AMAZON RECORD • ${rows.length} row${rows.length===1?'':'s'} • ${sumQty(rows)}u`;
     if(!rows.length){systemTbody.innerHTML='<tr><td colspan="12" class="fcratc-system-message">No inventory returned</td></tr>';return;}
     systemTbody.innerHTML=rows.map((r,index)=>{const asin=upper(r.asin);return `<tr data-system-row="${index}"><td>${esc(r.container)}</td><td><span class="fcratc-asin" data-asin="${esc(asin)}">${esc(r.asin)}</span><span class="fcratc-haz" data-asin="${esc(asin)}" data-level="loading">…</span></td><td class="fcratc-system-fnsku">${esc(r.fnsku)}</td><td>${esc(r.fcsku)}</td><td>${esc(r.lpn)}</td><td class="num">${esc(r.qty)}</td><td>${esc(r.disposition)}</td><td>${esc(r.consumer)}</td><td>${esc(r.consumerId)}</td><td>${esc(r.outerLocation)}</td><td>${esc(r.outerLocationType)}</td><td class="title-cell" title="${esc(r.title)}">${esc(r.title)}</td></tr>`;}).join('');
+    for (const row of systemTbody.querySelectorAll('tr[data-system-row]')) {
+      const item = rows[Number(row.dataset.systemRow)];
+      if (clean(item?.fnsku)) bindAuditPrint(row, item.fnsku, item);
+    }
   }
 
   function hideHoverCard(){hoverSerial++;if(hoverCard)hoverCard.hidden=true;}
