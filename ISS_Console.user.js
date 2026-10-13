@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.9
+// @version      0.2.10
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.9';
+  const VERSION = '0.2.10';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -1884,14 +1884,13 @@
     if (built || !ensureDocument()) return;
     built = true;
 
-    document.title = warehouseId() + ' ISS Console';
     const style = document.createElement('style');
     style.id = 'iss-console-style';
     style.textContent = cssText();
 
     document.head.replaceChildren();
     const title = document.createElement('title');
-    title.textContent = document.title;
+    title.textContent = warehouseId() + ' ISS Console';
     document.head.append(title, style);
 
     document.body.replaceChildren();
@@ -1913,3 +1912,4 @@
 
   setTimeout(build, 0);
 })();
+
