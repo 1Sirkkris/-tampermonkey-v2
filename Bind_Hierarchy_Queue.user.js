@@ -1335,7 +1335,7 @@
   function nativeEndlessName(control) {
     const parts = [];
     const add = value => {
-      const text = String(value ?? '').replace(/\\s+/g, ' ').trim();
+      const text = String(value ?? '').replace(/\s+/g, ' ').trim();
       if (text) parts.push(text);
     };
     add(control.getAttribute?.('aria-label'));
@@ -1343,7 +1343,7 @@
     add(control.getAttribute?.('data-testid'));
     const labelledBy = String(control.getAttribute?.('aria-labelledby') || '').trim();
     if (labelledBy) {
-      for (const id of labelledBy.split(/\\s+/)) {
+      for (const id of labelledBy.split(/\s+/)) {
         add(document.getElementById(id)?.textContent);
       }
     }
@@ -1356,7 +1356,7 @@
     }
     add(control.textContent);
     // Do not infer controls from an enclosing form, heading, or styling.
-    return parts.some(part => /^(?:enable\\s+|use\\s+)?endless(?:\\s+mode)?$/i.test(part));
+    return parts.some(part => /^(?:enable\s+|use\s+)?endless(?:\s+mode)?$/i.test(part));
   }
 
   function nativeEndlessState(control) {
