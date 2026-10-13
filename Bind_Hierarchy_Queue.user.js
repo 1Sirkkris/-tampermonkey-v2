@@ -2,7 +2,7 @@
 // @name         v2 Bind Hierarchy Queue
 // @name:en      v2 Hierarchy Queue
 // @namespace    BWU2
-// @version      0.4.2
+// @version      0.4.3
 // @description  Unified BWU2 Bind/Unbind hierarchy queue. Bind is hard-locked to BWU1.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
@@ -27,7 +27,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '0.4.2';
+  const VERSION = '0.4.3';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MODE = /\/bindHierarchy(?:\/|$)/i.test(location.pathname) ? 'bind' : 'unbind';
@@ -1321,6 +1321,142 @@
     positionFrame = requestAnimationFrame(positionUi);
   }
 
+
+  // Native Endless Mode is not needed by the direct API queue. This optional,
+  // fail-closed assist affects ONLY the native UI when it exposes an
+  // explicitly labelled, state-bearing toggle. Never click an unknown control.
+  let nativeEndlessStatus = '';
+  let nativeEndlessLastTrace = '';
+  let nativeEndlessAttempts = 0;
+  let nativeEndlessLastAttemptAt = 0;
+  let nativeEndlessPendingUntil = 0;
+  let nativeEndlessCheckTimer = 0;
+
+  function nativeEndlessName(control) {
+    const parts = [];
+    const add = value => {
+      const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+      if (text) parts.push(text);
+    };
+    add(control.getAttribute?.('aria-label'));
+    add(control.getAttribute?.('title'));
+    add(control.getAttribute?.('data-testid'));
+    const labelledBy = String(control.getAttribute?.('aria-labelledby') || '').trim();
+    if (labelledBy) {
+      for (const id of labelledBy.split(/\s+/)) {
+        add(document.getElementById(id)?.textContent);
+      }
+    }
+    for (const label of control.labels || []) add(label.textContent);
+    add(control.closest?.('label')?.textContent);
+    if (control.id) {
+      for (const label of document.querySelectorAll('label[for]')) {
+        if (label.getAttribute('for') === control.id) add(label.textContent);
+      }
+    }
+    add(control.textContent);
+    // Do not infer controls from an enclosing form, heading, or styling.
+    return parts.some(part => /^(?:enable\s+|use\s+)?endless(?:\s+mode)?$/i.test(part));
+  }
+
+  function nativeEndlessState(control) {
+    if (control.disabled || control.getAttribute?.('aria-disabled') === 'true') return null;
+    if (control.matches?.('input[type="checkbox"],input[type="radio"]')) return !!control.checked;
+    const role = control.getAttribute?.('role');
+    const ariaChecked = control.getAttribute?.('aria-checked');
+    if (['switch', 'checkbox', 'radio'].includes(role) && /^(true|false)$/.test(ariaChecked || '')) {
+      return ariaChecked === 'true';
+    }
+    const ariaPressed = control.getAttribute?.('aria-pressed');
+    if (/^(true|false)$/.test(ariaPressed || '')) return ariaPressed === 'true';
+    const ariaSelected = control.getAttribute?.('aria-selected');
+    if (role === 'tab' && /^(true|false)$/.test(ariaSelected || '')) return ariaSelected === 'true';
+    return null;
+  }
+
+  function nativeEndlessVisible(control) {
+    if (!control.isConnected || control.closest?.('#bwu2-hierarchy-queue')) return false;
+    try {
+      const rect = control.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const style = getComputedStyle(control);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    } catch (_) { return false; }
+  }
+
+  function nativeEndlessReport(status, action = '') {
+    if (ui.endlessStatus && nativeEndlessStatus !== status) {
+      ui.endlessStatus.textContent = 'NATIVE ENDLESS · ' + status;
+      ui.endlessStatus.style.color = /^(ON|AUTO-ENABLED)$/.test(status) ? '#166534' : '#92400e';
+    }
+    nativeEndlessStatus = status;
+    const signature = status + ':' + action;
+    if (signature !== nativeEndlessLastTrace) {
+      nativeEndlessLastTrace = signature;
+      trace('UNBIND_ENDLESS_MODE', { status, action, nativeUiOnly: true });
+    }
+  }
+
+  function checkNativeEndless() {
+    if (!IS_BIND || !document.body) return;
+    // Only inspect explicit binary controls. Never guess from colour,
+    // button text alone, or the surrounding scan screen.
+    const controls = [...document.querySelectorAll(
+      'input[type="checkbox"],input[type="radio"],[role="switch"],[role="checkbox"],[role="radio"],[aria-pressed],[role="tab"][aria-selected]'
+    )].filter(control => nativeEndlessVisible(control) && nativeEndlessName(control));
+
+    if (!controls.length) { nativeEndlessReport('NOT FOUND'); return; }
+    if (controls.length !== 1) { nativeEndlessReport('AMBIGUOUS'); return; }
+
+    const control = controls[0];
+    const enabled = nativeEndlessState(control);
+    if (enabled === null) { nativeEndlessReport('STATE UNKNOWN'); return; }
+
+    if (enabled) {
+      if (nativeEndlessPendingUntil && Date.now() >= nativeEndlessPendingUntil) {
+        nativeEndlessReport('AUTO-ENABLED', 'confirmed');
+      } else if (!nativeEndlessPendingUntil) {
+        nativeEndlessReport('ON', 'already enabled');
+      } else {
+        nativeEndlessReport('VERIFYING');
+        return;
+      }
+      nativeEndlessPendingUntil = 0;
+      nativeEndlessAttempts = 0;
+      return;
+    }
+
+    const now = Date.now();
+    if (nativeEndlessPendingUntil && now < nativeEndlessPendingUntil) {
+      nativeEndlessReport('VERIFYING');
+      return;
+    }
+    nativeEndlessPendingUntil = 0;
+    if (nativeEndlessAttempts >= 2) {
+      nativeEndlessReport('OFF · MANUAL CHECK', 'attempts exhausted');
+      return;
+    }
+    if (now - nativeEndlessLastAttemptAt < 5000) return;
+
+    nativeEndlessAttempts++;
+    nativeEndlessLastAttemptAt = now;
+    nativeEndlessPendingUntil = now + 1200;
+    nativeEndlessReport('AUTO-ON REQUESTED', 'click ' + nativeEndlessAttempts);
+    try { control.click(); }
+    catch (error) {
+      nativeEndlessPendingUntil = 0;
+      nativeEndlessReport('OFF · MANUAL CHECK', 'control click failed');
+    }
+  }
+
+  function scheduleNativeEndlessCheck() {
+    if (!IS_BIND || nativeEndlessCheckTimer) return;
+    nativeEndlessCheckTimer = setTimeout(() => {
+      nativeEndlessCheckTimer = 0;
+      checkNativeEndless();
+    }, 160);
+  }
+
   function isolateTextField(field, onEnter) {
     const blockNativeHotkeys = event => {
       // The native hierarchy pages may treat printable keys as global menu shortcuts
@@ -1506,6 +1642,7 @@
 
     ui.identitySource = element('div', '', 'margin:-2px 0 7px 0;font:10px Arial,sans-serif;font-weight:800');
     ui.apiState = element('div', '', 'margin-bottom:6px;font:11px Arial,sans-serif;font-weight:900');
+    if (IS_BIND) ui.endlessStatus = element('div', 'NATIVE ENDLESS · CHECKING', 'margin:-3px 0 6px;font:10px Arial,sans-serif;font-weight:800;color:#92400e');
     ui.draft = element('textarea');
     ui.draft.value = savedDraft();
     ui.draft.placeholder = 'Scan or paste tsX/csX containers — one per line';
@@ -1547,7 +1684,7 @@
     ui.clear = makeButton('CLEAR', clearQueue, 'flex:1;font-size:10px');
     secondary.append(ui.retry, ui.clear);
 
-    body.append(loginRow, ...(IS_BIND ? [ui.identitySource, ui.apiState] : []), ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
+    body.append(loginRow, ...(IS_BIND ? [ui.identitySource, ui.apiState, ui.endlessStatus] : []), ui.draft, primary, ui.status, ui.counts, ui.invalid, ui.items, secondary);
     ui.panel.append(header, body);
     document.body.append(ui.panel, ui.mini);
 
@@ -1555,12 +1692,22 @@
       const nativeChange = records.some(record =>
         !ui.panel.contains(record.target) && !ui.mini.contains(record.target)
       );
-      if (nativeChange) schedulePosition();
+      if (nativeChange) {
+        schedulePosition();
+        if (IS_BIND) scheduleNativeEndlessCheck();
+      }
     });
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', schedulePosition, { passive: true });
 
     if (IS_BIND) {
+      scheduleNativeEndlessCheck();
+      const endlessTimer = setInterval(checkNativeEndless, 2000);
+      window.addEventListener('focus', scheduleNativeEndlessCheck);
+      window.addEventListener('pagehide', () => {
+        clearInterval(endlessTimer);
+        clearTimeout(nativeEndlessCheckTimer);
+      }, { once: true });
       state.message = directTemplate
         ? 'API template cached — verify destination on START'
         : 'API SETUP REQUIRED — make one native BWU1 bind to capture identifiers';
