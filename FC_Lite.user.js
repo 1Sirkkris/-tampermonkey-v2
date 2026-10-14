@@ -2,7 +2,7 @@
 // @name        v2 TEST v0.1.65 FC-Lite — Accessible MADCAT Green
 // @name:en      v2 TEST FC-Lite — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.84
+// @version      0.1.85
 // @description  Tote Audit with exact-item-only binDescription and authenticated rolling 30-day MADCAT checks.
 // @author       ChatGPT
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -1458,6 +1458,7 @@
       .fcratc-asin { color:#075eb8; font-weight:900; cursor:help; user-select:text; }
       .fcratc-asin:hover { text-decoration:underline; }
       .fcratc-haz {
+        user-select:none;
         display:inline-flex;
         align-items:center;
         justify-content:center;
