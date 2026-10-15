@@ -10,7 +10,7 @@
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
 // @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.11
+// @version      5.6.12
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,7 +24,7 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.11';
+  const VERSION = '5.6.12';
   const ACTIONS = globalThis.BWU2Actions;
   const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
@@ -630,6 +630,36 @@
     }
   }
 
+  function prepareInlineUnbindSession(container) {
+    const url = UNBIND_BASE + '/unbindHierarchy';
+    return new Promise((resolve,reject) => {
+      const fail = (message,status=0) => reject(Object.assign(new Error(message),{phase:'session',status}));
+      observe('STOW_UNBIND_SESSION_START',{container});
+      GM_xmlhttpRequest({method:'GET',url,anonymous:false,timeout:12000,
+        headers:{Accept:'text/html'},
+        onload:response=>{
+          const status = Number(response.status)||0;
+          const raw = String(response.responseText || '');
+          let samePage = false;
+          try {
+            const final = new URL(response.finalUrl || url);
+            samePage = final.origin === UNBIND_BASE && /^\/unbindHierarchy\/?$/.test(final.pathname);
+          } catch {}
+          const denied = /no permission|permission denied|access denied|not authori[sz]ed|you (?:do not|don.t) have permission/i.test(raw);
+          const authForm = /type\s*=\s*["']password["']|<form[^>]+action\s*=\s*["'][^"']*(?:login|signin|sso)/i.test(raw);
+          const ok = status>=200 && status<300 && samePage && !denied && !authForm;
+          observe('STOW_UNBIND_SESSION_RESULT',{container,status,ok,samePage,denied,authForm});
+          if (!ok) return fail('Unbind session not ready — open Unbind through App Launcher and sign in; no Unbind sent',status);
+          // The following validated JSON phases still prove API readiness. A
+          // page load alone is never considered a successful Unbind.
+          resolve(true);
+        },
+        onerror:()=>fail('Unbind session preparation failed — no Unbind sent'),
+        ontimeout:()=>fail('Unbind session preparation timed out — no Unbind sent')
+      });
+    });
+  }
+
   async function unbindCurrentContainerLocked(button, container) {
     if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
     const login = await unbindLogin();
@@ -648,6 +678,10 @@
     let finalText = original;
     let resetDelay = 1400;
     try {
+      currentPhase = 'session';
+      unbindSetBusy('Preparing session…');
+      await prepareInlineUnbindSession(container);
+      if (currentContainer() !== container) throw Object.assign(new Error('Container changed — Unbind not sent'),{phase:'session'});
       await ACTIONS.runUnbind({
         container,
         login,

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.38
+// @version      0.0.39
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.38-REBUILD';
+  const VERSION = '0.0.39-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -74,24 +74,106 @@
   const hazmatEligibilityCache = new Map();
   const hazmatEligibilityInFlight = new Map();
 
-  function gmJsonRequest(options) {
-    return new Promise((resolve,reject) => {
-      GM_xmlhttpRequest({
-        timeout:8000,
-        responseType:'json',
-        ...options,
-        onload:response => {
-          if (response.status >= 200 && response.status < 300) resolve(response.response);
-          else reject(new Error(`HTTP ${response.status || 0}`));
-        },
-        onerror:() => reject(new Error('NETWORK ERROR')),
-        ontimeout:() => reject(new Error('TIMEOUT'))
-      });
-    });
+  let sidelineRequestSeq = 0;
+
+  function traceSideline(type, data = {}) {
+    try {
+      window.postMessage({__BWU2_OBS__:true,type:'SIDELINE_' + type,
+        data:{script:'SIDELINE',version:VERSION,...data}}, location.origin);
+    } catch {}
   }
 
-  function sidelineFetch(path, options = {}) {
-    if (!ISS_LOCAL_FCR_WORKER) return fetch(path, options);
+  function sidelineIssue(message, category, extra = {}) {
+    return Object.assign(new Error(message), {category,...extra});
+  }
+
+  function readContextCurrent(entry) {
+    return !entry || currentPreflightEntry(entry);
+  }
+
+  // Only this allowlisted read path may retry. Mutation transports never do.
+  async function sidelineRead(request, context = {}) {
+    const current = () => readContextCurrent(context.entry);
+    for (let attempt=1; attempt<=2; attempt++) {
+      if (!current()) throw makeAbortError('Lookup context changed');
+      try {
+        const response = await request(attempt);
+        if (!current()) throw makeAbortError('Lookup context changed');
+        if (!response.ok || response.failureCategory) {
+          throw sidelineIssue(response.failureMessage || `HTTP ${response.status}`,
+            response.failureCategory || 'http', {status:response.status,phase:context.phase});
+        }
+        return response;
+      } catch (error) {
+        const category = error?.name === 'AbortError' ? 'cancelled' : (error?.category || 'unknown');
+        const status = Number(error?.status) || 0;
+        const transient = ['timeout','network'].includes(category)
+          || (category === 'http' && [408,429,500,502,503,504].includes(status));
+        traceSideline('LOOKUP_FAILURE', {phase:context.phase,source:context.entry?.source,
+          barcode:context.entry?.code,generation:context.entry?.generation,attempt,
+          category,status,error:String(error?.message || error).slice(0,500),retryable:transient});
+        if (attempt===2 || !transient || !current() || context.entry?.readRetryUsed) throw error;
+        if (context.entry) context.entry.readRetryUsed = true;
+        traceSideline('READ_RETRY', {phase:context.phase,source:context.entry?.source,
+          barcode:context.entry?.code,generation:context.entry?.generation,attempt:2,category,status});
+      }
+    }
+  }
+
+  async function gmJsonRequest(options, entry = null, phase = 'hazmat.lookup') {
+    const response = await sidelineRead(attempt => sidelineFetch(options.url, {
+      method:options.method || 'GET',headers:options.headers || {},body:options.data,
+      gm:true,requestTimeout:8000,signal:entry?.controller?.signal,
+      obs:{phase,attempt,entry,readOnly:true}
+    }), {entry,phase});
+    return response.json();
+  }
+
+  async function sidelineFetch(path, options = {}) {
+    const url = /^https?:\/\//i.test(String(path || '')) ? String(path) : POIROT_ORIGIN + String(path || '');
+    const endpoint = new URL(url).pathname;
+    const readOnly = options.obs?.readOnly === true ||
+      [API_SCAN_ITEM,API_SCAN_SOURCE,API_BOOTSTRAP,'/api/permissions'].includes(endpoint);
+    const request = ++sidelineRequestSeq;
+    const started = performance.now();
+    const metadata = {request,phase:options.obs?.phase || endpoint,endpoint,
+      transport:(ISS_LOCAL_FCR_WORKER || options.gm) ? 'gm' : 'fetch',
+      readOnly,attempt:options.obs?.attempt || 1,
+      source:options.obs?.entry?.source,barcode:options.obs?.entry?.code,
+      generation:options.obs?.entry?.generation};
+    traceSideline('API_REQUEST', metadata);
+    try {
+      const response = await sidelineFetchOnce(path,options);
+      const raw = await response.text();
+      let payload = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch {}
+      const final = new URL(response.url || url, url);
+      const redirected = final.origin !== new URL(url).origin || final.pathname !== endpoint;
+      const html = /^\s*</.test(raw) || /html/i.test(response.contentType || '');
+      const auth = [401,403,419].includes(Number(response.status)) || /\/(?:sso|login|signin)(?:\/|$)/i.test(final.pathname);
+      const invalidJson = !payload || typeof payload !== 'object' || Array.isArray(payload);
+      const failureCategory = auth ? 'auth' : redirected ? 'redirect' : html ? 'html'
+        : !response.ok ? 'http' : invalidJson ? 'invalid-response' : '';
+      const failureMessage = failureCategory ? `${metadata.phase}: ${failureCategory}${response.status ? ' (HTTP '+response.status+')' : ''}` : '';
+      traceSideline('API_RESULT', {...metadata,status:Number(response.status)||0,
+        ms:Math.round(performance.now()-started),redirected,html,
+        category:failureCategory || (payload?.success === false ? 'rejected' : 'response'),
+        responseType:clean(payload?.['@type']),semanticSuccess:typeof payload?.success === 'boolean' ? payload.success : undefined,
+        movementPerformed:typeof payload?.movementPerformed === 'boolean' ? payload.movementPerformed : undefined,
+        error:failureMessage || clean(payload?.errorMessage || payload?.errorCode || '').slice(0,500)});
+      return {ok:response.ok,status:response.status,url:response.url || url,
+        failureCategory,failureMessage,text:async()=>raw,json:async()=>payload};
+    } catch (error) {
+      if (!error.category) error.category = error.name === 'AbortError' ? 'cancelled' : 'network';
+      traceSideline('API_RESULT', {...metadata,status:Number(error.status)||0,
+        ms:Math.round(performance.now()-started),category:error.category,
+        error:String(error.message || error).slice(0,500),outcome:readOnly ? 'failed' : 'unknown'});
+      throw error;
+    }
+  }
+
+  function sidelineFetchOnce(path, options = {}) {
+    if (!ISS_LOCAL_FCR_WORKER && !options.gm) return fetch(path, options);
 
     const url = /^https?:\/\//i.test(String(path || ''))
       ? String(path)
@@ -125,7 +207,7 @@
         headers,
         data:body,
         anonymous:false,
-        timeout:15000,
+        timeout:options.requestTimeout || 15000,
         onload:response => {
           if (settled) return;
           settled = true;
@@ -135,6 +217,7 @@
             ok:response.status >= 200 && response.status < 300,
             status:response.status,
             url:response.finalUrl || url,
+            contentType:String(response.responseHeaders || '').match(/^content-type:\s*([^;\r\n]+)/im)?.[1] || '',
             text:async () => raw,
             json:async () => raw ? JSON.parse(raw) : null
           });
@@ -143,13 +226,13 @@
           if (settled) return;
           settled = true;
           cleanup();
-          reject(new Error(error?.error || error?.message || 'Poirot request failed'));
+          reject(sidelineIssue(error?.error || error?.message || 'Poirot request failed','network'));
         },
         ontimeout:() => {
           if (settled) return;
           settled = true;
           cleanup();
-          reject(new Error('Poirot request timed out'));
+          reject(sidelineIssue('Poirot request timed out','timeout'));
         }
       });
 
@@ -183,7 +266,7 @@
     return warehouseIdPromise;
   }
 
-  async function pandashHazmatEligibility(asinValue) {
+  async function pandashHazmatEligibility(asinValue, entry = null) {
     const asin = clean(asinValue).toUpperCase();
     const fc = await warehouseId();
     if (!/^B[A-Z0-9]{9}$/.test(asin) || !fc) throw new Error('HAZMAT LOOKUP CONTEXT MISSING');
@@ -198,7 +281,7 @@
         const bootstrap = await gmJsonRequest({
           method:'GET',
           url:`https://pandash.amazon.com/GridServlet?fc=${encodeURIComponent(fc)}`
-        });
+        },entry,'hazmat.bootstrap');
         restriction = clean(bootstrap?.restriction || 'default') || 'default';
         hazmatRestrictionCache.set(fc,restriction);
       }
@@ -213,7 +296,7 @@
         url:'https://pandash.amazon.com/GridServlet',
         headers:{'Content-Type':'application/x-www-form-urlencoded'},
         data:body
-      });
+      },entry,'hazmat.lookup');
 
       const row = Array.isArray(payload?.rows)
         ? payload.rows.find(item => clean(item?.asin).toUpperCase() === asin)
@@ -1322,70 +1405,55 @@
   function pumpPreflightLookups() {
     while (preflightLookup.active < LOOKUP_CONCURRENCY && preflightLookup.queue.length) {
       const entry = preflightLookup.queue.shift();
-      if (!currentPreflightEntry(entry)) {
-        finishPreflightEntry(entry,null);
-        continue;
-      }
-
+      if (!currentPreflightEntry(entry)) { finishPreflightEntry(entry,null); continue; }
       preflightLookup.active++;
       entry.state = 'pending';
       const controller = new AbortController();
       entry.controller = controller;
       preflightLookup.controllers.add(controller);
-
-      sidelineFetch(API_SCAN_ITEM,{
-        method:'POST',
-        credentials:'same-origin',
-        headers:{'content-type':'application/json'},
-        body:JSON.stringify(scanItemPayload(entry.source,entry.code)),
-        signal:controller.signal
-      }).then(async response => {
-        const raw = await response.text();
-        let payload = raw;
-        try { payload = raw ? JSON.parse(raw) : null; } catch {}
-
-        if (
-          response.ok &&
-          currentPreflightEntry(entry)
-        ) {
+      (async () => {
+        try {
+          const response = await sidelineRead(attempt => sidelineFetch(API_SCAN_ITEM, {
+            method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},
+            body:JSON.stringify(scanItemPayload(entry.source,entry.code)),signal:controller.signal,
+            obs:{phase:'preflight.scan',attempt,entry,readOnly:true}
+          }), {entry,phase:'preflight.scan'});
+          if (!currentPreflightEntry(entry)) throw makeAbortError('Lookup context changed');
+          const payload = await response.json();
           entry.response = payload;
-          const baseResult = classifyPreflight(payload,entry.code);
-          const result = await deepenHazmatPreflight(baseResult);
-          if (!currentPreflightEntry(entry)) {
-            finishPreflightEntry(entry,null);
-            return;
-          }
+          const result = await deepenHazmatPreflight(classifyPreflight(payload,entry.code),entry);
+          if (!currentPreflightEntry(entry)) throw makeAbortError('Lookup context changed');
+          if (result?.kind === 'retry') throw result.error || sidelineIssue(result.reason,'unknown');
           entry.result = result;
-
-          if (entry.result?.kind === 'retry') {
-            preflightState.last = {
-              kind:'red',
-              code:entry.code,
-              reason:entry.result.reason
-            };
-            renderPreflight();
-            entry.state = 'failed';
-            finishPreflightEntry(entry,null);
-            return;
-          }
-
           entry.state = 'done';
-          finishPreflightEntry(entry,entry.result);
-          onPreflightResolved(entry.code,entry.result);
-          return;
+          finishPreflightEntry(entry,result);
+          onPreflightResolved(entry.code,result);
+          traceSideline('PREFLIGHT_RESULT',{source:entry.source,barcode:entry.code,
+            generation:entry.generation,decision:result.kind,reason:result.reason});
+        } catch (error) {
+          entry.error = {message:String(error?.message || error).slice(0,500),
+            category:error?.name === 'AbortError' ? 'cancelled' : (error?.category || 'unknown'),
+            status:Number(error?.status)||0};
+          entry.state = entry.error.category === 'cancelled' ? 'cancelled' : 'failed';
+          finishPreflightEntry(entry,null);
+          if (currentPreflightEntry(entry)) {
+            preflightState.last = {kind:'red',code:entry.code,reason:'CHECK FAILED — '+entry.error.message};
+            renderPreflight();
+          }
+          traceSideline('PREFLIGHT_RESULT',{source:entry.source,barcode:entry.code,
+            generation:entry.generation,decision:'blocked',...entry.error});
+        } finally {
+          preflightLookup.controllers.delete(controller);
+          preflightLookup.active = Math.max(0,preflightLookup.active-1);
+          // Keep failed entries until an explicit START or a new context. New
+          // scans must not turn one allowed retry into an endless retry loop.
+          if (!currentPreflightEntry(entry) && preflightLookup.entries.get(entry.key) === entry) {
+            preflightLookup.entries.delete(entry.key);
+          }
+          pumpPreflightLookups();
+          if (ISS_CONSOLE_WORKER) issSideEmitProgress(true);
         }
-
-        finishPreflightEntry(entry,null);
-      }).catch(() => {
-        finishPreflightEntry(entry,null);
-      }).finally(() => {
-        preflightLookup.controllers.delete(controller);
-        preflightLookup.active = Math.max(0,preflightLookup.active-1);
-        if (entry.state !== 'done' && preflightLookup.entries.get(entry.key) === entry) {
-          preflightLookup.entries.delete(entry.key);
-        }
-        pumpPreflightLookups();
-      });
+      })();
     }
   }
 
@@ -1633,12 +1701,12 @@
     return {kind:'green',reason:'GOOD TO GO',ctx};
   }
 
-  async function deepenHazmatPreflight(result) {
+  async function deepenHazmatPreflight(result, entry = null) {
     const ctx = result?.ctx;
     if (!ctx?.ok || ctx.hazmat !== true || result.kind === 'red') return result;
 
     try {
-      const hazmat = await pandashHazmatEligibility(ctx.asin);
+      const hazmat = await pandashHazmatEligibility(ctx.asin,entry);
       if (hazmat.allowed) {
         return {
           ...result,
@@ -1658,6 +1726,7 @@
       return {
         kind:'retry',
         reason:`HAZMAT CHECK FAILED — ${clean(error?.message || error || 'RETRY')}`,
+        error,
         ctx
       };
     }
@@ -1723,6 +1792,7 @@
 
   async function pumpPreflightDates() {
     if (preflightState.dateBusy || !preflightState.dateQueue.length || lazy.running) return;
+    if (ISS_CONSOLE_WORKER && !lazy.preflightStart) return;
     const generation = preflightLookup.generation;
     preflightState.dateBusy = true;
     try {
@@ -1745,7 +1815,7 @@
         preflightState.last = {kind:'yellow',code:next.code,reason:`DATE ${dateLabel(chosen.enteredMs)} — READY`};
         renderPreflight();
         setMoveCorner('lazy','idle');
-        if (!lazy.running) lItems.focus();
+        if (!ISS_CONSOLE_WORKER && !lazy.running) lItems.focus();
       }
     } finally {
       if (generation === preflightLookup.generation) preflightState.dateBusy = false;
@@ -1801,7 +1871,8 @@
     if (!currentPreflightContext(generation)) return false;
 
     if (failedLookup) {
-      lazy.error = `PREFLIGHT LOOKUP FAILED — retry: ${failedLookup}`;
+      const failure = preflightLookup.entries.get(preflightLookupKey(source,failedLookup))?.error;
+      lazy.error = `PREFLIGHT CHECK FAILED — ${failedLookup}: ${failure?.message || 'lookup incomplete'}`;
       preflightState.last = {kind:'red',code:failedLookup,reason:'LOOKUP FAILED — RETRY'};
       renderPreflight();
       return false;
@@ -2229,7 +2300,7 @@
     $('#sh-og-expiry')?.remove();
     setLazyRunningIndicator(false);
     renderLazy();
-    setTimeout(() => lSrc.focus(), 0);
+    if (!ISS_CONSOLE_WORKER) setTimeout(() => lSrc.focus(), 0);
   }
 
   function setLazyInputCollapsed(collapsed, { focusItems = false } = {}) {
@@ -2237,7 +2308,7 @@
     if (!lazy.inputCollapsed) clearLazyCollapsedScanBuffer();
     renderLazy();
 
-    if (focusItems && !lazy.inputCollapsed) {
+    if (!ISS_CONSOLE_WORKER && focusItems && !lazy.inputCollapsed) {
       setTimeout(() => lItems.focus(), 0);
     }
   }
@@ -2990,7 +3061,7 @@
     lazyRecoveryEvent('PREDICANT_DETECTED', item);
     renderLazy();
 
-    if (!lazy.inputCollapsed) lItems.focus();
+    if (!ISS_CONSOLE_WORKER && !lazy.inputCollapsed) lItems.focus();
     lPredicantCard?.scrollIntoView?.({block:'nearest', inline:'nearest'});
 
     while (currentLazyRun(run) && lazy.running) {
@@ -3174,6 +3245,7 @@
       }
 
       item.status = 'MOVED';
+      traceSideline('MOVE_RESULT',{source:lazy.src,destination:lazy.dest,barcode:item.code,qty:totalQty,outcome:'confirmed'});
       if (predicantRetry) {
         lazyRecoveryEvent('MOVE_OK', item);
         clearLazyRecovery();
@@ -3791,6 +3863,10 @@
       return;
     }
 
+    // START is the user's explicit retry boundary; background scans retain failures.
+    for (const [key,entry] of preflightLookup.entries) {
+      if (entry.state === 'failed' || entry.state === 'cancelled') preflightLookup.entries.delete(key);
+    }
     lazy.note = 'finishing preflight';
     renderLazy();
     syncPreflightSource();
@@ -3949,8 +4025,9 @@
     renderLazy();
 
     const finalNote = lazy.note;
+    const completedGeneration = preflightLookup.generation;
     setTimeout(() => {
-      if (lazy.running || lazy.activeRun) return;
+      if (lazy.running || lazy.activeRun || preflightLookup.generation !== completedGeneration) return;
       lazy.src = '';
       lazy.dest = '';
       lazy.sourceMeta = null;
@@ -3966,7 +4043,7 @@
       lDest.classList.remove('good','bad');
       lazy.note = finalNote;
       renderLazy();
-      lSrc.focus();
+      if (!ISS_CONSOLE_WORKER) lSrc.focus();
     }, 180);
   }
 
@@ -4334,7 +4411,114 @@
     })).filter(entry => entry.qty > 0);
   }
 
+  let issSideDraft = null;
+  let issSideRunRevision = 0;
+  let issSideClearJob = null;
+  const ISS_CLEAR_PENDING_KEY = 'sidelineRebuild.clear.pending.v1.';
+
+  function issSideDraftSnapshot() {
+    const rows = parseItems(lItems.value).map(item => {
+      const entry = preflightLookup.entries.get(preflightLookupKey(lSrc.value,item.code));
+      const result = entry?.result;
+      const status = entry?.state === 'failed' ? 'LOOKUP_FAILED'
+        : result?.kind === 'red' ? 'INVALID' : result?.kind === 'yellow' ? 'DATE'
+        : result?.kind === 'green' ? 'READY' : 'CHECKING';
+      return {code:item.code,qty:item.qty,status,asin:result?.ctx?.asin || '',
+        fnsku:result?.ctx?.fnsku || '',dateType:result?.ctx?.dateType || '',
+        issue:entry?.error?.message || result?.reason || ''};
+    });
+    const bad = rows.filter(row => ['INVALID','LOOKUP_FAILED'].includes(row.status));
+    const checking = rows.filter(row => row.status === 'CHECKING');
+    const dates = rows.filter(row => row.status === 'DATE');
+    return {draft:true,revision:issSideDraft?.revision,mode:'lazy',running:false,
+      source:clean(lSrc.value),dest:clean(lDest.value),items:rows,
+      current:0,total:rows.length,pending:checking.length,
+      metrics:{total:sumQty(rows),unique:rows.length,moved:0,remaining:sumQty(rows)},
+      message:bad.length ? bad.map(row=>`${row.code} — ${row.issue}`).join(' • ')
+        : checking.length ? `Checking ${checking.length} item${checking.length===1?'':'s'}…`
+        : dates.length ? 'Date required — choose at START' : rows.length ? 'All checked items ready' : 'Ready',
+      error:bad.length > 0,
+      aside:rows.filter(row=>row.status==='INVALID').map(row=>({code:row.code,reason:row.issue,qty:row.qty}))};
+  }
+
+  function issSideDraftSync(payload = {}) {
+    if (issSideDraft && Number(payload.revision) < Number(issSideDraft.revision)) return {ignored:true};
+    if (issSideWorkerBusy || lazy.running || lazy.activeRun || lazy.preflightStart || issSideClearJob) {
+      throw new Error('Sideline is processing — draft not replaced');
+    }
+    issSideSetMode('lazy');
+    const source = clean(payload.source), dest = clean(payload.dest);
+    const changed = !issSideDraft || norm(source)!==norm(issSideDraft.source) || norm(dest)!==norm(issSideDraft.dest);
+    if (changed) resetLazy('New ISS preflight context');
+    lSrc.value = source;
+    lDest.value = dest;
+    lItems.value = (Array.isArray(payload.items) ? payload.items : []).map(clean).filter(Boolean).join('\n');
+    issSideDraft = {revision:payload.revision,source,dest};
+    lazy.src = source;
+    lazy.dest = dest;
+    lazy.items = parseItems(lItems.value);
+    syncPreflightSource();
+    const wanted = new Set(lazy.items.map(item=>preflightLookupKey(source,item.code)));
+    for (const [key,entry] of preflightLookup.entries) {
+      if (!wanted.has(key)) {
+        preflightLookup.entries.delete(key);
+        entry.controller?.abort();
+        finishPreflightEntry(entry,null);
+      }
+    }
+    if (validContainer(source)) {
+      queuePreflightLookups(lazy.items);
+      syncPreflightOccurrences(lazy.items);
+    }
+    issSideEmitProgress(true);
+    return {revision:payload.revision};
+  }
+
+  async function issSideClearContainer(payload = {}) {
+    const container = clean(payload.container);
+    if (!validContainer(container)) throw new Error('CC requires a valid tsX/csX container');
+    if (lazy.running || lazy.activeRun || lazy.preflightStart || q.running || issQueueInFlight || issSideClearJob) {
+      throw new Error('A workflow is active — CC not sent');
+    }
+    if (!navigator.locks?.request) throw new Error('Browser tab lock unavailable — CC not sent');
+    const key = ISS_CLEAR_PENDING_KEY + norm(container);
+    const controlSeq = issSideControlSeq;
+    const job = {container,submitted:false};
+    issSideClearJob = job;
+    resetPreflightLookups();
+    issSideDraft = null;
+    try {
+      return await navigator.locks.request('bwu2-v2-sideline-clear', {ifAvailable:true}, async lock => {
+        if (!lock) throw new Error('Another container clear is active — CC not sent');
+        if (localStorage.getItem(key) && payload.verifiedRetry !== true) {
+          const error = new Error('Previous clear outcome UNKNOWN — verify container before another clear');
+          error.issData = {clearUnknown:true,container};
+          throw error;
+        }
+        traceSideline('CLEAR_START',{container,field:payload.field,revision:payload.revision});
+        await scanSourceDirect(container);
+        if (controlSeq !== issSideControlSeq) throw makeAbortError('CC stopped before close — not sent');
+        // A submitted close owns its result even if STOP is pressed afterward.
+        localStorage.setItem(key,JSON.stringify({at:Date.now(),container}));
+        job.submitted = true;
+        await closeContainerDirect(container,true);
+        localStorage.removeItem(key);
+        traceSideline('CLEAR_RESULT',{container,confirmed:true});
+        return {container,cleared:true};
+      });
+    } catch (error) {
+      const unknown = job.submitted || !!error?.issData?.clearUnknown;
+      traceSideline('CLEAR_RESULT',{container,confirmed:false,unknown,
+        error:String(error?.message || error).slice(0,500)});
+      error.issData = {...(error.issData || {}),container,clearUnknown:unknown};
+      throw error;
+    } finally {
+      if (issSideClearJob === job) issSideClearJob = null;
+    }
+  }
+
   function issSideSnapshot() {
+    if (issSideDraft && !issSideWorkerBusy && !lazy.running && !lazy.preflightStart && !issSideClearJob && issSideWorkerMode === 'lazy') return issSideDraftSnapshot();
     if (issSideWorkerMode === 'queue') {
       return {
         mode:'queue',
@@ -4356,7 +4540,8 @@
       running:!!lazy.running,
       message:clean(lazy.error || lazy.note || 'Ready'),
       attention:predicantRecovery ? 'predicant-recovery' : (lazy.predicant ? 'rescan-destination' : ''),
-      current:Math.min(lazy.index + (lazy.running ? 1 : 0), lazy.items.length),
+      revision:issSideRunRevision,
+      current:lazy.items.filter(item => ['MOVED','FAILED','INVALID','SKIPPED','UNKNOWN'].includes(item.status)).length,
       total:lazy.items.length,
       metrics:issSideLazyMetrics(lazy.items),
       aside:issSideAsideEntries(),
@@ -4399,6 +4584,7 @@
 
   function issSideStopLazy(note='stopped from ISS Console') {
     issSideControlSeq++;
+    issSideDraft = null;
     cancelLazyRun();
     resetPreflightLookups();
     clearMoveCorner('lazy');
@@ -4438,8 +4624,20 @@
   }
 
   async function issSideLazyRun(payload = {}) {
+    for (const container of [payload.source,payload.dest]) {
+      if (localStorage.getItem(ISS_CLEAR_PENDING_KEY + norm(container))) {
+        const error = new Error('Previous clear outcome UNKNOWN for '+clean(container)+' — verify before START');
+        error.issData = {clearUnknown:true,container:clean(container)};
+        throw error;
+      }
+    }
     issSideSetMode('lazy');
-    resetLazy('ISS Console ready');
+    const source = clean(payload.source), dest = clean(payload.dest);
+    const reuse = issSideDraft && payload.revision === issSideDraft.revision
+      && norm(source) === norm(issSideDraft.source) && norm(dest) === norm(issSideDraft.dest);
+    if (!reuse) resetLazy('ISS Console ready');
+    issSideRunRevision = payload.revision || 0;
+    issSideDraft = null;
     const controlSeq = issSideControlSeq;
 
     lSrc.value = clean(payload.source);
@@ -4456,7 +4654,10 @@
       localStorage.setItem(LAZY_DELAY_KEY, lazy.delayEnabled ? '1' : '0');
     }
     lazy.nextMoveAt = 0;
-    refreshItems();
+    // Do not re-register occurrences already checked while scanning.
+    lazy.items = parseItems(lItems.value);
+    if (!reuse) refreshItems();
+    else renderLazy();
     issSideEmitProgress(true);
 
     await startLazy();
@@ -4709,6 +4910,7 @@
   function issSideReset(payload = {}) {
     const mode = clean(payload.mode || issSideWorkerMode || 'lazy').toLowerCase();
     issSideControlSeq++;
+    issSideDraft = null;
     if (mode === 'queue') {
       issSideStopQueue('reset');
       q.list = [];
@@ -4757,6 +4959,11 @@
           if (lazy.running || lazy.activeRun || lazy.preflightStart || lazy.dateResolve) issSideStopLazy();
           if (q.running || issQueueSession?.awaitingApproval) issSideStopQueue('stopped from ISS Console');
           data = {stopped:true};
+        } else if (command === 'preflight.sync') {
+          data = issSideDraftSync(message.payload || {});
+        } else if (command === 'container.clear') {
+          issSideWorkerBusy = true;
+          data = await issSideClearContainer(message.payload || {});
         } else if (command === 'lazy.run') {
           issSideWorkerBusy = true;
           data = await issSideLazyRun(message.payload || {});
@@ -4785,7 +4992,7 @@
             : (error?.issData && typeof error.issData === 'object' ? error.issData : null)
         });
       } finally {
-        if (['lazy.run','queue.run','queue.retry'].includes(command)) issSideWorkerBusy = false;
+        if (['lazy.run','queue.run','queue.retry','container.clear'].includes(command)) issSideWorkerBusy = false;
         issSideEmitProgress(true);
       }
     });

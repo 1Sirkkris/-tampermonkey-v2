@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.10
+// @version      0.2.11
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.10';
+  const VERSION = '0.2.11';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -34,7 +34,7 @@
   const WORKER_READY_TIMEOUT = 15000;
   const WORKER_HEARTBEAT_MS = 2 * 60 * 1000;
   const SIDELINE_START_TRIGGER = '123START';
-  const SIDELINE_EXPECTED_VERSION = '0.0.38-REBUILD';
+  const SIDELINE_EXPECTED_VERSION = '0.0.39-REBUILD';
 
   try { window.stop(); } catch {}
   if (document.documentElement) {
@@ -127,6 +127,131 @@
   let sidelineCompletionStatus = '';
   let built = false;
 
+  let sidelineDraftRevision = 0;
+  let sidelineActiveRevision = 0;
+  let sidelineDraftTimer = 0;
+  let sidelineDraftInFlight = false;
+  let sidelineDraftDirty = false;
+  let sidelineDraftComplete = false;
+  let sidelineClearBusy = false;
+  const sidelineClearUnknown = new Set();
+
+  function sidelineDraftPayload(complete = false) {
+    const source = clean($('[data-side-source]')?.value);
+    const dest = clean($('[data-side-dest]')?.value);
+    let text = $('[data-side-items]')?.value || '';
+    if (!complete && !/\r?\n$/.test(text)) text = text.slice(0, Math.max(0,text.lastIndexOf('\n')+1));
+    return {source,dest,items:collectLazyLines(text,source,dest),revision:sidelineDraftRevision};
+  }
+
+  function invalidateSidelineDraft() {
+    sidelineDraftRevision++;
+    clearTimeout(sidelineDraftTimer);
+    sidelineDraftTimer = 0;
+    sidelineDraftDirty = false;
+  }
+
+  function noteSidelineDraft(complete = false, immediate = false) {
+    sidelineDraftRevision++;
+    sidelineDraftDirty = true;
+    sidelineDraftComplete = complete;
+    if (!sidelineRunBusy && !sidelineClearBusy) {
+      sidelineCompletionStatus = '';
+      paintLazyMetricsFromInput();
+    }
+    paintContainerClearButtons();
+    clearTimeout(sidelineDraftTimer);
+    if (sidelineMode !== 'lazy' || sidelineRunBusy || sidelineClearBusy) return;
+    sidelineDraftTimer = setTimeout(flushSidelineDraft,immediate ? 0 : 120);
+  }
+
+  async function flushSidelineDraft() {
+    if (sidelineDraftInFlight || !sidelineDraftDirty || sidelineRunBusy || sidelineClearBusy || sidelineMode !== 'lazy') return;
+    const payload = sidelineDraftPayload(sidelineDraftComplete);
+    sidelineDraftDirty = false;
+    sidelineDraftInFlight = true;
+    try {
+      await rpc('sideline','preflight.sync',payload,15000);
+      observe('PREFLIGHT_SYNC',{revision:payload.revision,source:payload.source,
+        total:payload.items.length,unique:new Set(payload.items.map(upper)).size});
+    } catch (error) {
+      if (payload.revision === sidelineDraftRevision && !sidelineRunBusy && !sidelineClearBusy) {
+        panelStatus('sideline','Preflight unavailable • '+error.message,'error');
+      }
+    } finally {
+      sidelineDraftInFlight = false;
+      if (sidelineDraftDirty && !sidelineRunBusy && !sidelineClearBusy) void flushSidelineDraft();
+    }
+  }
+
+  function handleSidelineDraft(message) {
+    if (sidelineMode !== 'lazy' || sidelineRunBusy || sidelineClearBusy
+      || message.revision !== sidelineDraftRevision) return;
+    const payload = sidelineDraftPayload(true);
+    if (upper(message.source)!==upper(payload.source) || upper(message.dest)!==upper(payload.dest)) return;
+    renderSidelineItems(message.items || [],false);
+    // Draft input owns unit counts; a worker's empty/older list never does.
+    paintLazyMetricsFromInput();
+    panelStatus('sideline',message.message || 'Ready',message.error ? 'error' : message.pending ? 'working' : 'ok');
+    observe('PREFLIGHT_VISIBLE',{revision:message.revision,pending:message.pending || 0,
+      issues:(message.items || []).filter(item=>['INVALID','LOOKUP_FAILED','DATE'].includes(item.status))
+        .map(item=>({code:item.code,status:item.status,reason:item.issue}))});
+  }
+
+  function sidelineMutationPending() {
+    return sidelineRunBusy || sidelineClearBusy || ['aft','sideline'].some(worker =>
+      [...workers[worker].pending.values()].some(pending => !['ping','mode','preflight.sync'].includes(pending.command)));
+  }
+
+  function paintContainerClearButtons() {
+    for (const button of $$('[data-container-clear]')) {
+      const field = button.dataset.containerClear;
+      const input = $('[data-side-'+(field==='source' ? 'source' : 'dest')+']');
+      button.hidden = sidelineMode !== 'lazy';
+      button.disabled = sidelineMutationPending() || !validContainer(input?.value);
+      button.textContent = sidelineClearUnknown.has(upper(input?.value)) ? 'CC ?' : 'CC';
+    }
+  }
+
+  async function clearSidelineContainer(field) {
+    if (sidelineMode !== 'lazy' || sidelineMutationPending()) return;
+    const input = $('[data-side-'+(field==='source' ? 'source' : 'dest')+']');
+    const container = clean(input?.value);
+    if (!validContainer(container)) return panelStatus('sideline','CC requires tsX/csX','error');
+    let verifiedRetry = false;
+    if (sidelineClearUnknown.has(upper(container))) {
+      verifiedRetry = window.confirm('Previous clear outcome UNKNOWN for '+container+
+        '. Have you verified its current state and decided another clear is required?');
+      if (!verifiedRetry) return;
+    }
+    const focus = document.activeElement;
+    invalidateSidelineDraft();
+    sidelineClearBusy = true;
+    paintContainerClearButtons();
+    $('[data-side-run]').disabled = true;
+    for (const node of $$('[data-side-mode],[data-clear="sideline"]')) node.disabled = true;
+    panelStatus('sideline','Clearing '+field.toUpperCase()+' • '+container+'…','working');
+    observe('CLEAR_REQUEST',{field,container,revision:sidelineDraftRevision});
+    try {
+      const result = await rpc('sideline','container.clear',
+        {container,field,revision:sidelineDraftRevision,verifiedRetry},45000);
+      if (result?.cleared !== true || upper(result?.container)!==upper(container)) throw new Error('Clear response unconfirmed — verify container');
+      sidelineClearUnknown.delete(upper(container));
+      panelStatus('sideline',field.toUpperCase()+' '+container+' cleared ✓','ok');
+    } catch (error) {
+      if (error?.data?.clearUnknown || /UNKNOWN|unconfirmed|timed out/i.test(error.message)) sidelineClearUnknown.add(upper(container));
+      panelStatus('sideline',error.message,'error');
+    } finally {
+      sidelineClearBusy = false;
+      $('[data-side-run]').disabled = false;
+      for (const node of $$('[data-side-mode],[data-clear="sideline"]')) node.disabled = false;
+      paintContainerClearButtons();
+      focus?.focus?.({preventScroll:true});
+      // Preserve the draft, but all checks must follow the changed container state.
+      if (!sidelineClearUnknown.has(upper(container))) noteSidelineDraft(true,true);
+    }
+  }
+
   function nextRpcId(worker) {
     rpcSeq++;
     return worker + ':' + Date.now() + ':' + rpcSeq;
@@ -157,8 +282,13 @@
     pending.timer = setTimeout(() => {
       if (pending.timedOut) return;
       pending.timedOut = true;
-      observe('RPC_TIMEOUT', { worker, command:pending.command, outcome:'unknown' });
-      pending.reject(new Error(pending.command + ' timed out — worker outcome UNKNOWN; wait for completion or verify before retry'));
+      const readOnly = ['ping','preflight.sync'].includes(pending.command);
+      observe('RPC_TIMEOUT', { worker, command:pending.command, outcome:readOnly ? 'failed' : 'unknown' });
+      if (readOnly) state.pending.delete(id);
+      paintContainerClearButtons();
+      pending.reject(new Error(pending.command + (readOnly
+        ? ' timed out — read-only check failed'
+        : ' timed out — worker outcome UNKNOWN; wait for completion or verify before retry')));
       // Keep ownership. A late worker result clears this UNKNOWN lock instead
       // of becoming orphaned while the worker may still be mutating.
     }, pending.timeoutMs);
@@ -195,6 +325,7 @@
         lastProgressAt:Date.now()
       };
       state.pending.set(id, pending);
+      paintContainerClearButtons();
       armRpcTimeout(worker, id, pending);
       try {
         workerFrame(worker).postMessage({
@@ -207,6 +338,7 @@
       } catch (error) {
         clearTimeout(pending.timer);
         state.pending.delete(id);
+        paintContainerClearButtons();
         reject(error);
       }
     });
@@ -305,6 +437,8 @@
     if (['aft','sideline'].includes(worker) && !['ping','stop'].includes(command)) {
       await ensureWorkerHealthy(worker);
     }
+    if (worker === 'sideline' && ['preflight.sync','lazy.run','container.clear'].includes(command)
+      && state.version !== SIDELINE_EXPECTED_VERSION) throw new Error('Update Sideline to '+SIDELINE_EXPECTED_VERSION+' and refresh');
     return rpcRaw(worker, command, payload, timeout);
   }
 
@@ -516,6 +650,8 @@
   function sidelineItemStateLabel(item) {
     const status = upper(item?.status || '');
     if (status === 'READY') return '✓ READY';
+    if (status === 'CHECKING') return '… CHECKING';
+    if (status === 'LOOKUP_FAILED') return '⚠ CHECK FAILED';
     if (status === 'DATE') return '⚠ ' + (upper(item?.dateType || '') === 'PRODUCTION_DATE' ? 'PRODUCTION DATE' : 'EXPIRATION DATE') + ' REQUIRED';
     if (status === 'RESOLVING') return '… CHECKING';
     if (status === 'MOVING') return '→ MOVING';
@@ -600,6 +736,10 @@
   function handleProgress(message) {
     const area = message.area;
     if (!['edit','move','sideline'].includes(area)) return;
+    if (area === 'sideline' && message.mode === 'lazy') {
+      if (message.draft) { handleSidelineDraft(message); return; }
+      if (!sidelineRunBusy || message.revision !== sidelineActiveRevision) return;
+    }
     if (area === 'sideline' && message.mode === 'queue' && message.queueReport) {
       paintQueueReport(message.queueReport);
     }
@@ -712,7 +852,7 @@
         // READY already proves the worker is alive. Avoid a health-ping -> READY
         // loop racing a second mode command into an active Lazy run.
         rpcRaw('sideline', 'mode', { mode: sidelineMode }, 15000)
-          .then(() => syncSidelineModeUi(false))
+          .then(() => { syncSidelineModeUi(false); if (sidelineMode === 'lazy') noteSidelineDraft(false,true); })
           .catch(error => panelStatus('sideline', error.message, 'error'));
       }
       return;
@@ -775,6 +915,7 @@
           : undefined
       });
       handleProgress(message);
+      paintContainerClearButtons();
       return;
     }
 
@@ -958,10 +1099,11 @@
       '      <div class="iss-panel-head"><div><strong class="iss-panel-title">SIDELINE</strong><span class="iss-panel-subtitle">Container workflow</span></div><span class="iss-engine" data-side-engine>' + esc(sidelineMode.toUpperCase()) + '</span></div>',
       '      <div class="iss-panel-body">',
       '        <div class="iss-segment iss-segment-side" data-side-modes><button type="button" data-side-mode="queue">QUEUE</button><button type="button" data-side-mode="lazy">LAZY</button></div>',
-      '        <label class="iss-field"><span data-side-source-label>SOURCE</span><input data-side-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
+      '        <div class="iss-field"><span id="iss-side-source-label" data-side-source-label>SOURCE</span><div class="iss-container-row"><input data-side-source aria-labelledby="iss-side-source-label" autocomplete="off" spellcheck="false" placeholder="tsX / csX"><button type="button" class="iss-container-clear" data-container-clear="source" title="Clear source container — double-click" aria-label="Clear source container. Double-click only.">CC</button></div></div>',
       '        <div class="iss-flow-arrow">↓</div>',
-      '        <label class="iss-field"><span>DESTINATION</span><input data-side-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
+      '        <div class="iss-field"><span id="iss-side-dest-label">DESTINATION</span><div class="iss-container-row"><input data-side-dest aria-labelledby="iss-side-dest-label" autocomplete="off" spellcheck="false" placeholder="tsX / csX"><button type="button" class="iss-container-clear" data-container-clear="destination" title="Clear destination container — double-click" aria-label="Clear destination container. Double-click only.">CC</button></div></div>',
       '        <div class="iss-flow-arrow">↓</div>',
+      '        <div class="iss-container-hint">CC · Double-click to clear container</div>',
       '        <label class="iss-field iss-grow"><span data-side-items-label>ITEM BARCODES</span><textarea data-side-items spellcheck="false" placeholder="Scan or paste one per line"></textarea></label>',
       '        <div class="iss-side-metrics" data-side-lazy-metrics><div class="iss-side-metric"><span>TOTAL UNITS</span><b data-side-metric="total">0</b></div><div class="iss-side-metric"><span>UNIQUE ITEMS</span><b data-side-metric="unique">0</b></div><div class="iss-side-metric"><span>MOVED</span><b data-side-metric="moved">0</b></div><div class="iss-side-metric"><span>REMAINING</span><b data-side-metric="remaining">0</b></div></div>',
       '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
@@ -1005,6 +1147,7 @@
       '.iss-choice-group{display:grid;gap:4px}.iss-choice-state{grid-template-columns:repeat(3,minmax(0,1fr))}.iss-choice-damage{grid-template-columns:repeat(2,minmax(0,1fr))}.iss-choice-group button{min-width:0;height:34px;padding:0 5px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-choice-group button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-choice-group button:hover:not(:disabled){background:#e7edf2}.iss-choice-group button[data-active="1"]:hover{background:#365f7e}',
       '.iss-segment{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:2px}.iss-segment-edit{grid-template-columns:repeat(2,1fr)}.iss-segment-move{grid-template-columns:repeat(3,1fr)}.iss-segment-side{grid-template-columns:repeat(4,1fr)}.iss-segment button{height:31px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-segment button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-segment button:hover:not(:disabled){background:#e7edf2}.iss-segment button[data-active="1"]:hover{background:#365f7e}',
       '.iss-edit-qty{position:relative;display:grid;gap:5px;padding:7px;border:1px solid #c3d3d9;border-radius:4px;background:#f9fcfd}.iss-panel[data-loading="1"] .iss-edit-qty{z-index:21;box-shadow:0 0 0 2px rgba(255,255,255,.92),0 2px 8px rgba(0,0,0,.10)}.iss-edit-qty[hidden]{display:none!important}.iss-edit-qty-label{font-size:9px;font-weight:900;letter-spacing:.35px;color:#536171}.iss-edit-qty-head,.iss-edit-qty-row{display:grid;grid-template-columns:minmax(120px,1.25fr) repeat(3,minmax(72px,1fr));gap:5px;align-items:center}.iss-edit-qty-head{padding:0 4px;font-size:8px;font-weight:900;letter-spacing:.25px;color:#667583;text-align:center}.iss-edit-qty-head span:first-child{text-align:left}.iss-edit-qty-list{display:grid;gap:5px;max-height:91px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px}.iss-edit-qty-row{min-height:43px;padding:4px;border:1px solid #c5cfd6;border-radius:4px;background:#fff}.iss-edit-qty-row[data-active="1"]{border-color:#146eb4;box-shadow:inset 4px 0 #146eb4}.iss-edit-qty-sku{min-width:0;padding:0 5px;font:900 11px/1.2 Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#243746}.iss-edit-qty-value{display:grid;place-items:center;min-height:33px;border:1px solid #9fb0b7;border-top-width:3px;border-radius:4px;background:#fff;font:900 18px/1 Consolas,monospace;color:#17262d}.iss-edit-qty-value[data-tone="s"]{border-top-color:#146eb4;background:#eef6ff}.iss-edit-qty-value[data-tone="p"]{border-top-color:#c56a00;background:#fff6e8}.iss-edit-qty-value[data-tone="u"]{border-top-color:#5d6670;background:#f3f5f6}',
+      '.iss-container-row{display:grid;grid-template-columns:minmax(0,1fr) 49px;gap:7px}.iss-container-row input{min-width:0}.iss-container-clear{height:38px;padding:0!important;background:#fff4e8!important;color:#85440b!important;border-color:#c8925e!important}.iss-container-hint{text-align:right;color:#536171;font-size:11px;margin-top:-3px}.iss-side-item[data-state="LOOKUP_FAILED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-queue-report{padding:8px;border:1px solid #91a3b6;background:#f8fafc;border-radius:4px;font-size:11px;color:#17262d}.iss-queue-report[hidden]{display:none!important}.iss-queue-summary{font-weight:900}.iss-queue-review{max-height:180px;overflow:auto;margin-top:5px}.iss-queue-entry{margin:3px 0;padding:5px 7px;border-left:5px solid #8b3a19;background:#fff3e7;color:#41250f;overflow-wrap:anywhere}.iss-queue-entry[data-kind="verify"]{border-left-color:#8b1d1d;background:#fff0f0}.iss-queue-entry code{font-weight:900;margin-right:5px}.iss-queue-authorize,.iss-queue-copy{margin:6px 6px 0 0;padding:8px;border:1px solid #385f84;border-radius:3px;background:#e4f0ff;color:#123960;font-weight:900;cursor:pointer}.iss-queue-authorize{background:#fff0ce;border-color:#855318;color:#58310b}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
@@ -1232,6 +1375,9 @@
     if (queueReport) queueReport.hidden = sidelineMode !== 'queue' || !storeGet('queueReport', '');
     if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
     paintClearSourceToggle();
+    paintContainerClearButtons();
+    const ccHint = $('.iss-container-hint');
+    if (ccHint) ccHint.hidden = sidelineMode !== 'lazy';
 
     if (run) {
       run.disabled = false;
@@ -1453,6 +1599,7 @@
   }
 
   async function runSideline() {
+    if (sidelineClearBusy) return panelStatus('sideline','Wait for the CC result before starting','error');
     const source = clean($('[data-side-source]')?.value);
     const dest = clean($('[data-side-dest]')?.value);
     const itemText = $('[data-side-items]')?.value || '';
@@ -1502,7 +1649,10 @@
       if (upper(source) === upper(dest)) return panelStatus('sideline', 'Source and destination cannot match', 'error');
       if (!items.length) return panelStatus('sideline', 'Scan/paste at least one item', 'error');
 
+      invalidateSidelineDraft();
+      sidelineActiveRevision = sidelineDraftRevision;
       sidelineRunBusy = true;
+      paintContainerClearButtons();
       sidelineCompletionStatus = '';
       sidelineItemsSignature = '';
       paintLazyMetrics(lazyMetricsFromLines(items));
@@ -1514,7 +1664,11 @@
       setPanelLoading('sideline', true, 'Running Lazy…', { lock:false });
       panelStatus('sideline', 'Starting Lazy…', 'working');
       try {
+        const revision = sidelineActiveRevision;
+        await rpc('sideline','preflight.sync',{source,dest,items,revision},15000);
+        if (sidelineDraftRevision !== revision) throw new Error('Inputs changed — press START again');
         const result = await rpc('sideline', 'lazy.run', {
+          revision,
           source,
           dest,
           items,
@@ -1550,6 +1704,10 @@
           panelStatus('sideline', sidelineCompletionStatus, 'ok');
         }
       } catch (error) {
+        if (error?.data?.clearUnknown) {
+          sidelineClearUnknown.add(upper(error.data.container));
+          paintContainerClearButtons();
+        }
         if (!error?.data?.cancelled) {
           const aside = Array.isArray(error?.data?.aside) ? error.data.aside : [];
           if (aside.length) {
@@ -1572,11 +1730,14 @@
       } finally {
         sidelineRunBusy = false;
         setPanelLoading('sideline', false);
+        paintContainerClearButtons();
+        if (sidelineDraftDirty) void flushSidelineDraft();
       }
     }
   }
 
   async function stopArea(area) {
+    if (area === 'sideline') invalidateSidelineDraft();
     try {
       if (area === 'edit' || area === 'move') await rpc('aft', 'stop', {}, 8000);
       else await rpc('sideline', 'stop', {}, 8000);
@@ -1593,6 +1754,8 @@
   }
 
   async function clearArea(area) {
+    if (area === 'sideline' && sidelineClearBusy) return panelStatus('sideline','Wait for the CC result before resetting','error');
+    if (area === 'sideline') invalidateSidelineDraft();
     if (area === 'edit') {
       const items = $('[data-edit-items]');
       if (items) items.value = '';
@@ -1739,6 +1902,7 @@
     el.value = before + '\n' + after;
     const caret = before.length + 1;
     el.setSelectionRange?.(caret, caret);
+    if (area === 'sideline') noteSidelineDraft(true,true);
   }
 
   function wireEvents() {
@@ -1820,6 +1984,10 @@
       $('[data-side-items]')?.focus();
     });
     $('[data-side-items]')?.addEventListener('keydown', event => textareaScannerHandler(event, 'sideline'));
+    for (const button of $$('[data-container-clear]')) {
+      button.addEventListener('mousedown',event=>event.preventDefault());
+      button.addEventListener('dblclick',event=>{ event.preventDefault(); void clearSidelineContainer(button.dataset.containerClear); });
+    }
     $('[data-side-run]')?.addEventListener('click', runSideline);
     $('[data-side-queue-approve]')?.addEventListener('click', authorizeQueueRetries);
     $('[data-side-queue-copy]')?.addEventListener('click', async () => {
@@ -1869,9 +2037,12 @@
       box.dispatchEvent(new Event('change', { bubbles:true }));
     });
     for (const el of document.querySelectorAll('[data-side-source],[data-side-dest],[data-side-items]')) {
-      el.addEventListener('input', () => {
-        if (sidelineMode === 'lazy' && !sidelineRunBusy) paintLazyMetricsFromInput();
+      el.addEventListener('input', event => {
+        if (sidelineMode !== 'lazy') return;
+        noteSidelineDraft(event.inputType === 'insertFromPaste');
+        if (sidelineRunBusy && el.matches('[data-side-source],[data-side-dest]')) void rpc('sideline','stop',{},8000).catch(()=>{});
       });
+      el.addEventListener('change',()=>{ if (sidelineMode === 'lazy') noteSidelineDraft(true,true); });
     }
 
     syncEditUi(false);

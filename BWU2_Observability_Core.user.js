@@ -2,7 +2,7 @@
 // @name         v2 CORE v0.1.11 BWU2 Observability Core
 // @name:en      v2 CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.38
+// @version      0.1.39
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -30,7 +30,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.38';
+  const VERSION = '0.1.39';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -1705,7 +1705,9 @@
         message: scrubText(event.message || event.error?.message || 'error'),
         filename: sanitizeUrl(event.filename || ''),
         line: event.lineno || 0,
-        column: event.colno || 0
+        column: event.colno || 0,
+        errorName:scrubText(event.error?.name || ''),
+        stack:scrubText(String(event.error?.stack || '').slice(0,2500))
       });
     }, true);
 
@@ -1896,6 +1898,10 @@
 
       const eventType = String(type || 'event').slice(0, 80);
       if (eventType === 'ISS_CONSOLE_WORKER_PROGRESS') return recordWorkerProgress(data);
+      if (/^SIDELINE_(?:API_REQUEST|API_RESULT|LOOKUP_FAILURE|READ_RETRY|PREFLIGHT_RESULT|CLEAR_START|CLEAR_RESULT|MOVE_RESULT)$/.test(eventType)) {
+        return add(`script.${eventType}`,{...data,operationKind:data?.readOnly === true ? 'read'
+          : data?.readOnly === false ? 'write' : /(?:MOVE|CLEAR)_/.test(eventType) ? 'write' : 'check'});
+      }
       return add(`script.${eventType}`, data);
     };
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.46
+// @version      0.9.47
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -16,13 +16,23 @@
 (() => {
   'use strict';
 
-  const ISS_CONSOLE_WORKER = location.hash.startsWith('#iss-console-worker');
+  function trustedIssOrigin(value) {
+    try {
+      const url = new URL(value);
+      return /^https?:$/.test(url.protocol) && (url.hostname === 'qifcr.fe.aftx.amazonoperations.app'
+        || /^(?:fcresearch-[a-z0-9-]+\.aka|qi-fcresearch-[a-z0-9-]+\.corp)\.amazon\.com$/i.test(url.hostname));
+    } catch { return false; }
+  }
+  // The parent-assigned frame name survives native /end navigation and hash loss.
+  // Backend commands still require the trusted parent Window and exact origin.
+  const ISS_CONSOLE_WORKER = window.parent !== window &&
+    (location.hash.startsWith('#iss-console-worker') || window.name === 'iss-console-aft-worker');
   if (window.top !== window.self && !ISS_CONSOLE_WORKER) return; // ignore ordinary app iframes; allow trusted ISS Console worker
   if (window.__bwu2AftEditSkuMove) return;
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.46';
+  const VERSION = '0.9.47';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -1200,11 +1210,21 @@
 
     parseEachQueue(text) {
       const items = [];
-      for (const raw of String(text || '').split(/\r?\n/)) {
-        const line = norm(raw);
+      const lines = String(text || '').split(/\r?\n/);
+      const locationOk = value => /^(?:(?:ts|cs)x[a-z0-9_-]+|P-[A-Z0-9-]+|pa[A-Z0-9_-]+)$/i.test(value);
+      const itemOk = value => /^(?:[A-Z0-9]{10}|LPN[A-Z0-9]{6,24}|\d{8}|\d{12,14})$/i.test(value);
+      for (let index=0; index<lines.length; index++) {
+        const line = norm(lines[index]);
         if (!line) continue;
         const [location = '', asin = '', fnsku = ''] = line.split(/\s+/);
-        if (location && asin) items.push({ location, asin, fnsku: fnsku || asin });
+        const reason = !locationOk(location) ? 'invalid container/location'
+          : !itemOk(asin) ? 'invalid ASIN/barcode'
+          : fnsku && !itemOk(fnsku) ? 'invalid FNSKU/barcode (a quantity is not a barcode)' : '';
+        if (reason) {
+          traceAft('AFT_INPUT_BLOCKED',{mode:'each',row:index+1,reason});
+          throw new Error(`Row ${index+1}: ${reason}. Expected TOTE ASIN [FNSKU]. No edit sent.`);
+        }
+        items.push({ location, asin, fnsku: fnsku || asin });
       }
       return items;
     },
@@ -1959,7 +1979,9 @@
 
     async startEachDirect() {
       if (this.directBusy || this.mode !== 'each') return;
-      const items = this.parseEachQueue($('[data-list]', this.panel)?.value);
+      let items;
+      try { items = this.parseEachQueue($('[data-list]', this.panel)?.value); }
+      catch (error) { this.status(error.message); return; }
       if (!items.length) return this.status('Paste TOTE ASIN rows');
       const meta = {
         desiredState: $('[data-state]', this.panel).value,
@@ -3958,6 +3980,8 @@
     const desiredState = String(payload.destState || 'Pending Research');
     const desiredDamage = String(payload.destDamage || 'Defective');
 
+    const parsedEach = mode === 'each' ? Edit.parseEachQueue(rawItems) : null;
+    if (parsedEach && (!parsedEach.length || parsedEach.length > 500)) throw new Error('EACH requires 1–500 valid TOTE ASIN [FNSKU] rows — no edit sent');
     await issWorkerEnsureMode(`edit:${mode}`);
     Edit.stopRequested = false;
     Edit.directBusy = true;
@@ -3965,7 +3989,7 @@
 
     try {
       if (mode === 'each') {
-        const items = Edit.parseEachQueue(rawItems);
+        const items = parsedEach;
         if (!items.length) throw new Error('EACH needs: TOTE ASIN [FNSKU] — one row per item');
         if (items.length > 500) throw new Error('Edit queue too large');
 
@@ -4151,7 +4175,7 @@
     window.addEventListener('message', async event => {
       const message = event.data;
       if (
-        !/fcresearch|qifcr\.fe\.aftx\.amazonoperations\.app/i.test(event.origin || '') ||
+        event.source !== window.parent || !trustedIssOrigin(event.origin) ||
         message?.type !== 'ISS_CONSOLE_RPC' ||
         message?.worker !== 'aft'
       ) return;
