@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.47
+// @version      0.9.48
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -32,7 +32,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.47';
+  const VERSION = '0.9.48';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -3001,7 +3001,7 @@
       const qtyMode = this.getQtyMode();
       const requestedQty = qtyMode === 'user' ? this.readUserQty() : null;
 
-      if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(source)) return this.status('Invalid source container');
+      if (!/^(?:(?:ts|cs)x[0-9a-z]+|P-[0-9]+-[A-Z0-9]+)$/i.test(source)) return this.status('Invalid source container');
       if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(dest)) return this.status('Invalid destination container');
       if (low(source) === low(dest)) return this.status('Source and destination cannot match');
       if (!barcodes.length) return this.status('Scan/paste at least one item barcode');
@@ -4081,7 +4081,7 @@
     const qtyMode = uiMode === 'qty' ? 'user' : 'all';
     const requestedQty = qtyMode === 'user' ? Number(payload.qty) : null;
 
-    if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(source)) throw new Error('Invalid source container');
+    if (!/^(?:(?:ts|cs)x[0-9a-z]+|P-[0-9]+-[A-Z0-9]+)$/i.test(source)) throw new Error('Invalid source container');
     if (!/^(?:ts|cs)x[0-9a-z]+$/i.test(dest)) throw new Error('Invalid destination container');
     if (low(source) === low(dest)) throw new Error('Source and destination cannot match');
     if (!items.length) throw new Error('No Move items');
