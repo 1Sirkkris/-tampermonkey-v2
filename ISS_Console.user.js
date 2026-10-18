@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN ISS Console
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.11
+// @version      0.2.12
 // @description  Standalone OEM-style ISS console for EditItems, MoveItems and Sideline.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.11';
+  const VERSION = '0.2.12';
   const HASH = '#iss-console';
   if (location.hash !== HASH) return;
   if (window.__bwu2IssConsole) return;
@@ -51,12 +51,15 @@
   const clean = value => String(value ?? '').replace(/\u00a0/g, ' ').trim();
   const upper = value => clean(value).toUpperCase();
   const validContainer = value => /^(?:ts|cs)x[0-9a-z_-]+$/i.test(clean(value));
+  // P-bin locations are valid as MOVE sources, never as MOVE destinations or Sideline containers.
+  const validMoveSource = value => validContainer(value) || /^P-[0-9]+-[A-Z0-9]+$/i.test(clean(value));
 
   function requireContainerField(area, input, label) {
     const value = clean(input?.value);
-    if (validContainer(value)) return value;
+    const isMoveSource = area === 'move' && label === 'SOURCE';
+    if ((isMoveSource ? validMoveSource(value) : validContainer(value))) return value;
 
-    panelStatus(area, label + ' must start with tsX or csX', 'error');
+    panelStatus(area, label + (isMoveSource ? ' must be tsX, csX or a P-bin' : ' must start with tsX or csX'), 'error');
     observe('CONTAINER_INPUT_BLOCKED', {
       area,
       field:String(label || '').toLowerCase(),
@@ -1085,7 +1088,7 @@
       '      <div class="iss-panel-body">',
       '        <div class="iss-segment iss-segment-move" data-move-modes><button type="button" data-move-mode="all">ALL</button><button type="button" data-move-mode="each">EACH</button><button type="button" data-move-mode="qty">QTY</button></div>',
       '        <label class="iss-inline-field" data-move-qty-wrap><span>QTY</span><input type="number" min="1" max="999999" data-move-qty></label>',
-      '        <label class="iss-field"><span>SOURCE</span><input data-move-source autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
+      '        <label class="iss-field"><span>SOURCE</span><input data-move-source autocomplete="off" spellcheck="false" placeholder="tsX / csX / P-bin"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
       '        <label class="iss-field"><span>DESTINATION</span><input data-move-dest autocomplete="off" spellcheck="false" placeholder="tsX / csX"></label>',
       '        <div class="iss-flow-arrow">↓</div>',
@@ -1472,7 +1475,7 @@
     const items = collectLines($('[data-move-items]')?.value);
     const qty = Number($('[data-move-qty]')?.value);
 
-    if (!validContainer(source)) return panelStatus('move', 'Invalid source container', 'error');
+    if (!validMoveSource(source)) return panelStatus('move', 'Invalid source container', 'error');
     if (!validContainer(dest)) return panelStatus('move', 'Invalid destination container', 'error');
     if (upper(source) === upper(dest)) return panelStatus('move', 'Source and destination cannot match', 'error');
     if (!items.length) return panelStatus('move', 'Scan/paste at least one item', 'error');
