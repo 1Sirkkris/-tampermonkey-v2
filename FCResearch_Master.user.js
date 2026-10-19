@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.93
+// @version      0.1.95
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.93';
+  const VERSION = '0.1.95';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -429,11 +429,11 @@
       .fcrm-stealth-trigger { display:inline; padding:0; margin:0; border:0; background:transparent; color:rgba(0,0,0,.72); font:inherit; font-weight:inherit; cursor:pointer; white-space:nowrap; user-select:text; }
       .fcrm-stealth-trigger:hover { text-decoration:underline; }
       .fc-hazmat,.fc-badge,.fc-madcat-badge,.fc-size-badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:12px; font:800 12px/1.4 Arial,sans-serif; color:#000; vertical-align:middle; }
-      .fc-hazmat { margin-left:9px; user-select:none; pointer-events:none; }
+      .fc-hazmat { margin-left:9px; user-select:none; pointer-events:auto; }
       .fc-hazmat.fc-river-l0 { pointer-events:auto; cursor:pointer; }
       .fc-hazmat.fc-river-l0:hover { text-decoration:underline; }
       .fc-hazmat.fc-river-l0[aria-busy="true"] { cursor:wait; opacity:.72; }
-      .fc-badge { margin-left:6px; user-select:none; pointer-events:none; }
+      .fc-badge { margin-left:6px; user-select:none; pointer-events:auto; }
       .fc-madcat-badge { margin-left:8px; border:0; user-select:none; }
       .fcrm-madcat-yes { background:#4ade80; color:#111827; }
       .fcrm-madcat-no,.fcrm-madcat-history-no { background:#ef4444; color:#111827; }
@@ -1216,13 +1216,33 @@
     }
     const level = clampLevel(result[0]);
     const message = String(result[1] || '');
+    // Pandash level alone is not a processing permission (notably L0).
+    // Interpret only explicit server text; leave unfamiliar results unverified.
+    const messageText = message.replace(/&#(?:39|x27);|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
+    const canProcess = /\bcan be processed\b/i.test(messageText) && !/\bcannot be processed\b/i.test(messageText);
+    let badgeText;
+    if (level === 0) {
+      const review = /under.{0,35}review|couldn.?t be classified|could not be classified|additional information to classify|not enough.{0,40}information to classify|ticket to Product Compliance Hazmat/i.test(messageText);
+      badgeText = canProcess ? 'L0 · OK' : review ? 'L0 · REVIEW' : 'L0 · UNKNOWN';
+    } else if (level === 4) {
+      badgeText = canProcess ? 'L4 · OK' : 'L4 · REVIEW';
+    } else if (level === 5) {
+      badgeText = /\bcannot be processed\b/i.test(messageText) && /\bhigh hazmat FC\b/i.test(messageText) ? 'L5 · TRANSFER' : 'L5 · REVIEW';
+    } else if (level === 6) {
+      badgeText = /\bprohibited\b|\bcannot be processed in Australia\b/i.test(messageText) ? 'L6 · BLOCKED' : 'L6 · REVIEW';
+    } else {
+      // Unchanged presentation for other levels.
+      badgeText = inventory ? `L${level}${canProcess ? ' ✅' : ''}` : `L${level}${canProcess ? ' ✅' : ' 🚫'}`;
+    }
     badge.style.background = LEVEL_COLORS[level] || LEVEL_COLORS[0];
-    badge.textContent = inventory ? `L${level}${message.includes('can be processed') ? ' ✅' : ''}` : `L${level}${message.includes('can be processed') ? ' ✅' : ' 🚫'}`;
+    badge.textContent = badgeText;
     const clickable = river && level === 0;
     badge.classList.toggle('fc-river-l0', clickable);
     badge.setAttribute('role', clickable ? 'button' : 'status');
-    if (clickable) { badge.tabIndex = 0; badge.title = 'Create Hazmat RIVER ticket'; }
-    else { badge.removeAttribute('tabindex'); badge.title = ''; }
+    if (clickable) badge.tabIndex = 0;
+    else badge.removeAttribute('tabindex');
+    badge.title = (messageText.trim() || 'Pandash returned no classification message; recheck before processing.')
+      + (clickable ? '\nClick to create Hazmat RIVER ticket' : '');
     return clickable;
   }
 
@@ -1685,4 +1705,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startMaster, { once: true });
   else startMaster();
 })();
+
 
