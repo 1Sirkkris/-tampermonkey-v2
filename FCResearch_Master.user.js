@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.95
+// @version      0.1.96
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.95';
+  const VERSION = '0.1.96';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1223,16 +1223,19 @@
     let badgeText;
     if (level === 0) {
       const review = /under.{0,35}review|couldn.?t be classified|could not be classified|additional information to classify|not enough.{0,40}information to classify|ticket to Product Compliance Hazmat/i.test(messageText);
-      badgeText = canProcess ? 'L0 · OK' : review ? 'L0 · REVIEW' : 'L0 · UNKNOWN';
+      badgeText = canProcess ? 'L0 · PROCESS ME!' : review ? 'L0 · REVIEW' : 'L0 · UNKNOWN';
     } else if (level === 4) {
       badgeText = canProcess ? 'L4 · OK' : 'L4 · REVIEW';
     } else if (level === 5) {
       badgeText = /\bcannot be processed\b/i.test(messageText) && /\bhigh hazmat FC\b/i.test(messageText) ? 'L5 · TRANSFER' : 'L5 · REVIEW';
     } else if (level === 6) {
-      badgeText = /\bprohibited\b|\bcannot be processed in Australia\b/i.test(messageText) ? 'L6 · BLOCKED' : 'L6 · REVIEW';
+      badgeText = /\bprohibited\b|\bcannot be processed in Australia\b/i.test(messageText) ? 'L6 · DESTROY/LIQUIDATE' : 'L6 · REVIEW';
+    } else if (level === 7) {
+      const maqFull = /\bMAQ\b/i.test(messageText) && /\b(?:maximum capacity|capacity reached|capacity exceeded|capacity full)\b/i.test(messageText);
+      badgeText = maqFull ? 'L7 · MAQ FULL - TRANSSHIP TO BWU1' : 'L7 · REVIEW';
     } else {
-      // Unchanged presentation for other levels.
-      badgeText = inventory ? `L${level}${canProcess ? ' ✅' : ''}` : `L${level}${canProcess ? ' ✅' : ' 🚫'}`;
+      // Preserve level, and spell out approved processing status without colour-only ticks.
+      badgeText = canProcess ? `L${level} · OK` : (inventory ? `L${level}` : `L${level} 🚫`);
     }
     badge.style.background = LEVEL_COLORS[level] || LEVEL_COLORS[0];
     badge.textContent = badgeText;
