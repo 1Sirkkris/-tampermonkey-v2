@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.43
+// @version      0.2.44
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -25,7 +25,7 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.43';
+  const VERSION = '0.2.44';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
@@ -56,7 +56,9 @@
   const HISTORY_TTL = 2 * 60 * 1000;
   const HAZ_SUCCESS_TTL = 6 * 60 * 60 * 1000;
   const HAZ_RESTRICTION_TTL = 30 * 60 * 1000;
-  const HAZMAT_RETRY_DELAYS_MS = [500, 1500];
+  const HAZMAT_TOTAL_BUDGET_MS = 30000;
+  const HAZMAT_RETRY_DELAY_MS = 1500;
+  const HAZMAT_MAX_ATTEMPTS = 2;
   const REQUEST_TIMEOUT_MS = 15000;
   const NATIVE_INVENTORY_PREVIEW_TTL_MS = 30 * 1000;
   const NATIVE_INVENTORY_WAIT_MS = 3000;
@@ -1213,20 +1215,47 @@
     }
   }
 
-  async function hazmatRequestWithRetry(options, label='Pandash') {
+  function hazmatFailureKind(error) {
+    const message = clean(error?.message || error || '');
+    const status = Number(message.match(/\bHTTP (\d{3})\b/i)?.[1] || 0);
+    if (status === 429) return 'rate-limit';
+    if (status === 401 || status === 403 || status === 419 || /\blogin\b|\bauth(?:entication|orization)?\b|session|redirect/i.test(message)) return 'auth';
+    if (status === 408 || status >= 500 && status <= 599 || /timed out|timeout/i.test(message)) return 'transient';
+    if (status >= 400 && status < 500) return 'client';
+    if (/request failed|network|connection|aborted/i.test(message) || !status) return 'transient';
+    return 'other';
+  }
+
+  function hazmatRemainingMs(deadline) {
+    return Math.max(0, deadline - Date.now());
+  }
+
+  function hazmatRequestOptions(options, deadline) {
+    const timeout = Math.min(REQUEST_TIMEOUT_MS, hazmatRemainingMs(deadline));
+    if (timeout < 250) throw new Error('Pandash total lookup budget exhausted');
+    return { ...options, timeout };
+  }
+
+  async function hazmatRetryDelay(deadline) {
+    if (hazmatRemainingMs(deadline) < HAZMAT_RETRY_DELAY_MS + 250) return false;
+    await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAY_MS));
+    return hazmatRemainingMs(deadline) >= 250;
+  }
+
+  async function hazmatRequestWithRetry(options, label='Pandash', deadline) {
     let lastError = null;
-    // Configuration can fall back; do not multiply slow network timeouts.
-    for (let attempt = 0; attempt <= 1; attempt++) {
-      try { return await hazmatRequestOnce(options, 'restriction'); }
-      catch (error) {
+    for (let attempt = 0; attempt < HAZMAT_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await hazmatRequestOnce(hazmatRequestOptions(options, deadline), 'restriction');
+      } catch (error) {
         lastError = error;
-        const status = Number(String(error?.message || '').match(/\bHTTP (\d{3})\b/)?.[1] || 0);
-        if (attempt === 1 || (status >= 400 && status < 500 && status !== 408 && status !== 429)) break;
+        const kind = hazmatFailureKind(error);
+        recordUsage(`hazmat.restriction.failure.${kind}`);
+        if (kind !== 'transient' || attempt > 0 || !(await hazmatRetryDelay(deadline))) break;
         recordUsage('network.hazmat.restriction.retry');
-        await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAYS_MS[attempt]));
       }
     }
-    throw new Error(`${label} failed after retries: ${clean(lastError?.message || lastError || 'request failed')}`);
+    throw new Error(`${label} failed: ${clean(lastError?.message || lastError || 'request failed')}`);
   }
   async function fetchHazmat(asinValue, force = false) {
     const asin = upper(asinValue);
@@ -1267,58 +1296,65 @@
 
     const work = (async () => {
       stats.hazNetwork++;
+      const startedAt = Date.now();
+      const deadline = startedAt + HAZMAT_TOTAL_BUDGET_MS;
 
-      async function readRestriction(refresh = false) {
-        if (!refresh) {
-          let saved = null;
-          try { saved = GM_getValue(hazLevelKey(fc), null); } catch {}
-          if (saved && typeof saved === 'object'
-              && Date.now() - Number(saved.ts) < HAZ_RESTRICTION_TTL
-              && /^[a-z0-9_-]{1,80}$/i.test(String(saved.value || ''))) return saved.value;
-        }
+      async function readRestriction() {
+        let saved = null;
+        try { saved = GM_getValue(hazLevelKey(fc), null); } catch {}
+        if (saved && typeof saved === 'object'
+            && Date.now() - Number(saved.ts) < HAZ_RESTRICTION_TTL
+            && /^[a-z0-9_-]{1,80}$/i.test(String(saved.value || ''))
+            && String(saved.value).toLowerCase() !== 'default') return saved.value;
         try {
           const response = await hazmatRequestWithRetry({
             method: 'GET',
             url: `https://pandash.amazon.com/GridServlet?fc=${encodeURIComponent(fc)}`,
             responseType: 'json'
-          }, 'Pandash restriction lookup');
+          }, 'Pandash restriction lookup', deadline);
           const value = response.response?.restriction;
-          if (!/^[a-z0-9_-]{1,80}$/i.test(String(value || ''))) {
+          if (!/^[a-z0-9_-]{1,80}$/i.test(String(value || ''))
+              || String(value).toLowerCase() === 'default') {
             throw new Error('Pandash restriction configuration unavailable');
           }
           const restriction = String(value);
           try { GM_setValue(hazLevelKey(fc), { value: restriction, ts: Date.now() }); } catch {}
           return restriction;
         } catch (error) {
-          if (/HTTP (?:401|403|419)|login|auth/i.test(String(error?.message || ''))) throw error;
-          recordUsage('hazmat.restriction.fallback');
-          return 'default';
+          const kind = hazmatFailureKind(error);
+          recordUsage(`hazmat.restriction.unavailable.${kind}`);
+          if (kind === 'auth') throw error;
+          // No verified FC capability: do not fall back to Retail/default or guess a level.
+          return null;
         }
       }
-      // Force bypasses the ASIN cache, not the 30-minute validated FC restriction.
-      let restriction = await readRestriction(false);
-      let refreshRestriction = false;
+      // Force bypasses the exact-ASIN cache, not the 30-minute validated FC restriction.
+      const restriction = await readRestriction();
+      if (!restriction) {
+        recordUsage('hazmat.lookup.skipped.unverified_fc');
+        recordUsage('hazmat.lookup.duration', Date.now() - startedAt);
+        return null;
+      }
 
-      for (let attempt = 0; attempt <= HAZMAT_RETRY_DELAYS_MS.length; attempt++) {
+      for (let attempt = 0; attempt < HAZMAT_MAX_ATTEMPTS; attempt++) {
         if (attempt) {
-          recordUsage('hazmat.incomplete.retry');
-          await new Promise(resolve => setTimeout(resolve, HAZMAT_RETRY_DELAYS_MS[attempt - 1]));
-          if (attempt === 1 && refreshRestriction) restriction = await readRestriction(true);
+          if (!(await hazmatRetryDelay(deadline))) break;
+          recordUsage('hazmat.lookup.retry');
+          recordUsage('network.hazmat.lookup.retry');
         }
         let response;
         try {
-        response = await hazmatRequestOnce({
-          method: 'POST',
-          url: 'https://pandash.amazon.com/GridServlet',
-          data: `language=default&source=${encodeURIComponent(restriction)}-hazmat-FC&marketPlaces=${MARKETPLACE}&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`,
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          responseType: 'json'
-        }, 'lookup');
+          response = await hazmatRequestOnce(hazmatRequestOptions({
+            method: 'POST',
+            url: 'https://pandash.amazon.com/GridServlet',
+            data: `language=default&source=${encodeURIComponent(restriction)}-hazmat-FC&marketPlaces=${MARKETPLACE}&asins=${encodeURIComponent(asin)}&rows=1&page=1&fc=${encodeURIComponent(fc)}`,
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            responseType: 'json'
+          }, deadline), 'lookup');
         } catch (error) {
-          const status = Number(String(error?.message || '').match(/\bHTTP (\d{3})\b/)?.[1] || 0);
-          if (status >= 400 && status < 500 && status !== 408 && status !== 429) throw error;
-          if (attempt >= HAZMAT_RETRY_DELAYS_MS.length) throw error;
-          recordUsage('network.hazmat.lookup.retry');
+          const kind = hazmatFailureKind(error);
+          recordUsage(`hazmat.lookup.failure.${kind}`);
+          if (kind !== 'transient' || attempt === HAZMAT_MAX_ATTEMPTS - 1) throw error;
           continue;
         }
 
@@ -1332,6 +1368,7 @@
         }
         const contentType = String(response.responseHeaders || '').match(/^content-type:\s*([^;\r\n]+)/im)?.[1] || '';
         if (redirected || /html/i.test(contentType)) {
+          recordUsage('hazmat.lookup.failure.auth');
           throw new Error('Pandash session or unexpected redirect — refresh authentication');
         }
         const rows = response.response?.rows;
@@ -1346,14 +1383,16 @@
           hazMemory.set(key, { ts: Date.now(), ttl: HAZ_SUCCESS_TTL, value });
           writeHazStored(fc, asin, { ts: Date.now(), ok: true, value });
           recordUsage('hazmat.exact.success');
+          if (attempt) recordUsage('hazmat.lookup.retry.recovered');
+          recordUsage('hazmat.lookup.duration', Date.now() - startedAt);
           return value;
         }
         recordUsage(Array.isArray(rows) ? 'hazmat.exact.missing' : 'hazmat.response.invalid');
-        refreshRestriction = true;
-        if (attempt < HAZMAT_RETRY_DELAYS_MS.length) recordUsage('network.hazmat.lookup.retry');
       }
 
       // No exact, validated response: UNKNOWN. Never cache this as L0 or N/A.
+      recordUsage('hazmat.lookup.unverified');
+      recordUsage('hazmat.lookup.duration', Date.now() - startedAt);
       return null;
     })();
 
