@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.97
+// @version      0.1.98
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.97';
+  const VERSION = '0.1.98';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1199,6 +1199,7 @@
     if (!badge) return false;
     if (result === HAZMAT_LOOKUP_ERROR) {
       badge.style.background = LEVEL_COLORS[6];
+      badge.style.color = '';
       badge.textContent = 'Hazmat ERROR';
       badge.classList.remove('fc-river-l0');
       badge.setAttribute('role', 'status');
@@ -1208,6 +1209,7 @@
     }
     if (!result) {
       badge.style.background = LEVEL_COLORS[0];
+      badge.style.color = '';
       badge.textContent = 'Hazmat UNKNOWN';
       badge.classList.remove('fc-river-l0');
       badge.setAttribute('role', 'status');
@@ -1238,7 +1240,9 @@
       // Preserve level, and spell out approved processing status without colour-only ticks.
       badgeText = canProcess ? `L${level} · OK` : (inventory ? `L${level}` : `L${level} 🚫`);
     }
-    badge.style.background = LEVEL_COLORS[level] || LEVEL_COLORS[0];
+    // L6 only: less intense red with high-contrast white text; other levels stay unchanged.
+    badge.style.background = level === 6 ? '#991B1B' : (LEVEL_COLORS[level] || LEVEL_COLORS[0]);
+    badge.style.color = level === 6 ? '#fff' : '';
     badge.textContent = badgeText;
     const clickable = river && level === 0;
     badge.classList.toggle('fc-river-l0', clickable);
@@ -1384,6 +1388,7 @@
         }
         badge.textContent = 'Hazmat checking…';
         badge.style.background = LEVEL_COLORS[0];
+        badge.style.color = '';
       }
     }
     await runWithConcurrency(work, MAX_PARALLEL, async ({ asin, pills }) => {
