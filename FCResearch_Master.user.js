@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.96
+// @version      0.1.97
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.96';
+  const VERSION = '0.1.97';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1186,7 +1186,8 @@
   async function getHazmat(id, force = false) {
     if (!isAsin(id)) return null;
     try {
-      const result = await coreRequest('hazmat', { asin: normaliseAsin(id), force });
+      // Data Core has a 30-second shared hazmat budget; give its response 5 seconds to arrive.
+      const result = await coreRequest('hazmat', { asin: normaliseAsin(id), force }, 35000);
       const hazmat = result?.hazmat;
       return hazmat ? [Number(hazmat.level || 0), String(hazmat.message || '')] : null;
     } catch {
