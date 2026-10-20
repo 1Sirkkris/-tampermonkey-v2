@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.48
+// @version      0.9.49
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -32,7 +32,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.48';
+  const VERSION = '0.9.49';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -424,6 +424,13 @@
       #aftm-control{top:76px;right:10px;width:278px;font-size:11px}#aftm-control .ctrl-head{width:100%;border:0;border-radius:0;background:#36545c;color:#fff;padding:6px 8px;display:flex;justify-content:space-between}#aftm-control .ctrl-body{padding:6px;display:grid;gap:6px;background:#eef1f2}#aftm-control[data-open="0"]{width:auto;min-width:102px}#aftm-control[data-open="0"] .ctrl-body{display:none}.ctrl-toggle{border:1px solid #9ca9ae;border-radius:5px;padding:5px 7px;background:#fff;color:#263238;text-align:left}.ctrl-toggle[data-on="1"]{background:#2f6f63;color:#fff;border-color:#25594f}.ctrl-toggle[data-on="0"]{background:#e8ecee;color:#59656b}.ctrl-toggle[data-active="1"]{box-shadow:inset 0 0 0 1px #fff8,0 0 0 1px #25594f}.ctrl-mode-group{display:grid;gap:4px;padding:5px;border:1px solid #bec9cd;border-radius:6px;background:#f8fbfc}.ctrl-mode-label{font-size:9px;font-weight:900;letter-spacing:.45px;color:#596a72}.ctrl-mode-grid{display:grid;gap:4px}.ctrl-mode-grid[data-area="edit"]{grid-template-columns:repeat(4,minmax(0,1fr))}.ctrl-mode-grid[data-area="move"]{grid-template-columns:repeat(3,minmax(0,1fr))}.ctrl-mode{min-width:0;padding:5px 3px;border:1px solid #9ca9ae;border-radius:5px;background:#fff;color:#263238;font-size:10px;font-weight:800}.ctrl-mode[data-active="1"]{background:#2f6f63;color:#fff;border-color:#25594f;box-shadow:inset 0 0 0 1px #fff8}.ctrl-mode[data-pending="1"]{background:#dce9f5;color:#174f7a;border-color:#4380ad}.ctrl-mode:disabled{opacity:.55;cursor:not-allowed}.ctrl-mode-status{min-height:25px;padding:5px 6px;border:1px solid #c4d0d4;border-radius:5px;background:#e8f2f5;font-size:10px;font-weight:800;color:#41545c}.ctrl-mode-status[data-kind="ok"]{border-color:#35836f;background:#dcefe8;color:#164d41}.ctrl-mode-status[data-kind="warn"]{border-color:#d38a19;background:#fff0cf;color:#5c3a00}.ctrl-note{font-size:10px;color:#68757b;padding:0 2px}
     `;
     style.textContent += `
+      #aftm-datelot{max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto}
+      #aftm-datelot .exp-methods{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+      #aftm-datelot .exp-method{padding:7px;border:1px solid #8fa2aa;border-radius:5px;background:#fff;color:#26343a}
+      #aftm-datelot .exp-method[data-active="1"]{background:#225d67;color:#fff;border-color:#17444b;box-shadow:inset 0 0 0 1px #fff7}
+      #aftm-datelot [data-exp-container-mode],#aftm-datelot [data-exp-asin-mode]{display:grid;gap:7px}
+      #aftm-datelot .exp-containers{height:128px;min-height:80px;resize:vertical;font:12px/1.45 Consolas,monospace}
+      #aftm-datelot .exp-note{font-size:11px;color:#52616a}
       #aftm-move .move-qty{display:grid;gap:5px;padding:7px;border:1px solid #b3c0c5;border-radius:6px;background:#eaf1f3}
       #aftm-move .move-qty-title{font-size:11px;font-weight:800;color:#30444c}
       #aftm-move .move-qty-row{display:grid;grid-template-columns:64px 64px minmax(0,1fr);gap:6px}
@@ -471,6 +478,7 @@
       skuMin: 'aftm_sku_min',
       eachMin: 'aftm_each_min',
       dateMin: 'aftm_date_min',
+      dateMethod: 'aftm_date_method',
       skuRecoveryNotice: 'aftm_sku_recovery_notice'
     },
 
@@ -1018,18 +1026,41 @@
         </div>
 
         <div class="body">
-          <label>
-            Tote
-            <input data-cont autocomplete="off" placeholder="tsX / csX">
-          </label>
-
-          <div class="exp-grid-head">
-            <span>ASIN / FNSKU / UPC / EAN</span>
-            <span>Desired date</span>
+          <div class="exp-methods" role="group" aria-label="Date queue method">
+            <button type="button" class="exp-method" data-exp-method-value="container">By container</button>
+            <button type="button" class="exp-method" data-exp-method-value="asin">By ASIN</button>
           </div>
 
-          <div class="exp-rows" data-exp-rows></div>
-          <button class="exp-add" data-add-row>+ ADD ROW</button>
+          <div data-exp-container-mode>
+            <label>
+              Container / bin
+              <input data-cont autocomplete="off" placeholder="P-… / tsX / csX">
+            </label>
+
+            <div class="exp-grid-head">
+              <span>ASIN / FNSKU / UPC / EAN</span>
+              <span>Desired date</span>
+            </div>
+
+            <div class="exp-rows" data-exp-rows></div>
+            <button type="button" class="exp-add" data-add-row>+ ADD ROW</button>
+          </div>
+
+          <div data-exp-asin-mode hidden>
+            <div class="aftm-row">
+              <label>ASIN
+                <input data-exp-asin autocomplete="off" maxlength="10" placeholder="B0G6WSK3Z8">
+              </label>
+              <label>Desired date
+                <input data-exp-shared-date type="date">
+              </label>
+            </div>
+            <label>
+              <span data-exp-container-count>Containers / bins</span>
+              <textarea class="exp-containers" data-exp-containers autocomplete="off" placeholder="P-9-F020W803&#10;P-9-F020W801&#10;P-8-F851W771"></textarea>
+            </label>
+            <div class="exp-note">Paste the Container column or full FCR table. Duplicates skipped; completed containers leave the list.</div>
+          </div>
 
           <div class="aftm-status" data-status>Idle</div>
 
@@ -1114,6 +1145,17 @@
         $('[data-code]', row)?.focus();
       };
 
+      for (const button of $$('[data-exp-method-value]', panel)) {
+        button.onclick = () => {
+          if (this.directBusy) return;
+          this.paintExpirationMethod(button.dataset.expMethodValue);
+          this.status('Idle');
+        };
+      }
+      $('[data-exp-containers]', panel).addEventListener('input', () => this.updateExpirationContainerCount(panel));
+      const method = localStorage.getItem(this.keys.dateMethod) === 'asin' ? 'asin' : 'container';
+      this.paintExpirationMethod(method, panel);
+
       wireMin(panel, this.keys.dateMin);
 
       $('[data-run]', panel).onclick = () => {
@@ -1131,6 +1173,7 @@
       $('[data-exp-busy-stop]', panel).onclick = requestDatelotStop;
 
       $('[data-clear]', panel).onclick = () => {
+        if (this.directBusy) return;
         this.clear('Cleared', true);
         rowsEl.innerHTML = '';
         for (let i = 0; i < 4; i++) makeRow();
@@ -1150,6 +1193,9 @@
       if (this.clearBtn) this.clearBtn.disabled = false;
 
       if (this.mode === 'datelot') {
+        if (this.clearBtn) this.clearBtn.disabled = running;
+        $$('input,textarea,[data-add-row],[data-exp-method-value]', this.panel)
+          .forEach(el => { el.disabled = running; });
         const busy = $('[data-exp-busy]', this.panel);
         if (busy) busy.hidden = !running;
         if (this.busyStatusEl && running) {
@@ -2219,6 +2265,59 @@
     },
 
 
+    expirationMethod() {
+      return this.panel?.dataset.expMethod === 'asin' ? 'asin' : 'container';
+    },
+
+    paintExpirationMethod(method, panel = this.panel) {
+      if (!panel) return;
+      method = method === 'asin' ? 'asin' : 'container';
+      panel.dataset.expMethod = method;
+      $('[data-exp-container-mode]', panel).hidden = method !== 'container';
+      $('[data-exp-asin-mode]', panel).hidden = method !== 'asin';
+      for (const button of $$('[data-exp-method-value]', panel)) {
+        const selected = button.dataset.expMethodValue === method;
+        button.dataset.active = selected ? '1' : '0';
+        button.setAttribute('aria-pressed', String(selected));
+      }
+      localStorage.setItem(this.keys.dateMethod, method);
+      this.updateExpirationContainerCount(panel);
+    },
+
+    parseExpirationContainers(raw) {
+      const pattern = /^(?:P-[A-Z0-9]+(?:-[A-Z0-9]+)+|(?:ts|cs)x[0-9a-z]+)$/i;
+      const unique = new Map();
+      for (const rawLine of String(raw || '').split(/\r\n?|\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const columns = line.split('\t').map(norm);
+        // A full FCR table repeats the outer location and contains item/quantity
+        // columns. Only its first column is a work target. A row containing only
+        // container cells can also be pasted horizontally.
+        const tokens = line.includes('\t')
+          ? (columns.every(value => pattern.test(value)) ? columns : [columns[0]])
+          : line.split(/[\s,;]+/);
+        for (const token of tokens) {
+          if (/^containers?$/i.test(token)) continue;
+          if (!pattern.test(token)) throw new Error(`Invalid container: ${token.slice(0, 45)} • use P-… / tsX / csX`);
+          const key = low(token);
+          if (!unique.has(key)) unique.set(key, token);
+        }
+      }
+      return [...unique.values()];
+    },
+
+    updateExpirationContainerCount(panel = this.panel) {
+      const count = panel && $('[data-exp-container-count]', panel);
+      if (!count) return;
+      try {
+        const containers = this.parseExpirationContainers($('[data-exp-containers]', panel)?.value);
+        count.textContent = `Containers / bins • ${containers.length} unique`;
+      } catch (error) {
+        count.textContent = String(error?.message || error);
+      }
+    },
+
     parseExpirationRows() {
       if (!this.panel) return [];
       return $$('.exp-row', this.panel)
@@ -2233,6 +2332,11 @@
       const match = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (!match) throw new Error(`Invalid date: ${date || 'blank'}`);
       const [, year, month, day] = match;
+      const parsed = new Date(`${date}T00:00:00Z`);
+      if (+year < 1 || parsed.getUTCFullYear() !== +year ||
+          parsed.getUTCMonth() + 1 !== +month || parsed.getUTCDate() !== +day) {
+        throw new Error(`Invalid date: ${date}`);
+      }
       return JSON.stringify({
         'year-input': year,
         'month-input': month,
@@ -2295,9 +2399,9 @@
 
     async runDatelotItem(session, item, index, total) {
       let objectId = session.objectId;
-      const prefix = `${index}/${total} ${item.asin}`;
+      const prefix = `${index}/${total} ${item.location} • ${item.asin}`;
 
-      this.status(`${prefix} • tote`);
+      this.status(`${prefix} • container`);
       await EditApi.action(objectId, 'Input', item.location, 'Datelot container', {
         timeout: 120000
         });
@@ -2330,7 +2434,7 @@
         const fresh = await this.acquireDatelotObject(objectId);
         objectId = fresh.objectId;
 
-        this.status(`${prefix} • restart tote`);
+        this.status(`${prefix} • restart container`);
         await EditApi.action(objectId, 'Input', item.location, 'Datelot container restart', {
           timeout: 120000
         });
@@ -2377,7 +2481,7 @@
       return { objectId };
     },
 
-    async runExpirationQueue(items) {
+    async runExpirationQueue(items, onConfirmed = null) {
       const started = performance.now();
       let done = 0;
       let oldObjectId = '';
@@ -2385,11 +2489,18 @@
       for (let i = 0; i < items.length; i++) {
         if (this.stopRequested) throw new Error('Stopped by user');
 
-        const session = await this.acquireDatelotObject(oldObjectId);
-        const result = await this.runDatelotItem(session, items[i], i + 1, items.length);
-        oldObjectId = result.objectId;
+        try {
+          const session = await this.acquireDatelotObject(oldObjectId);
+          const result = await this.runDatelotItem(session, items[i], i + 1, items.length);
+          oldObjectId = result.objectId;
+        } catch (error) {
+          const uncertain = error?.aftActionSubmitted ? ' • outcome unknown; verify this container before retry' : '';
+          error.message = `${items[i].location} • ${done}/${items.length} done • ${String(error?.message || error)}${uncertain}`;
+          throw error;
+        }
 
         done++;
+        onConfirmed?.(items.slice(done));
         this.status(`${done}/${items.length} done`);
 
         try { await EditApi.end(oldObjectId); } catch {}
@@ -2399,45 +2510,59 @@
       this.status(`DONE ✓ ${done}/${items.length} • ${seconds}s`);
     },
 
-    async startExpiration() {
-      if (this.directBusy || this.mode !== 'datelot') return;
+    buildExpirationQueue() {
+      if (this.expirationMethod() === 'asin') {
+        const asin = norm($('[data-exp-asin]', this.panel)?.value).toUpperCase();
+        const date = norm($('[data-exp-shared-date]', this.panel)?.value);
+        if (!/^[A-Z0-9]{10}$/.test(asin)) throw new Error('Enter a 10-character ASIN');
+        this.datePayload(date);
+        const containers = this.parseExpirationContainers($('[data-exp-containers]', this.panel)?.value);
+        if (!containers.length) throw new Error('Paste containers / bins');
+        return containers.map(location => ({ location, asin, date }));
+      }
 
       const location = norm($('[data-cont]', this.panel)?.value);
       const rows = this.parseExpirationRows();
 
-      if (!location) {
-        this.status('Enter tote');
-        return;
-      }
-      if (!rows.length) {
-        this.status('Enter ASIN / FNSKU / UPC / EAN + date');
-        return;
-      }
+      if (!location) throw new Error('Enter container / bin');
+      if (!rows.length) throw new Error('Enter ASIN / FNSKU / UPC / EAN + date');
 
       const missing = rows.find(item => !item.asin || !/^\d{4}-\d{2}-\d{2}$/.test(item.date));
-      if (missing) {
-        this.status('Every item needs a date');
-        return;
-      }
+      if (missing) throw new Error('Every item needs a date');
 
       const unique = new Map();
       for (const item of rows) {
+        this.datePayload(item.date);
         const key = low(item.asin);
         const existing = unique.get(key);
         if (existing && existing.date !== item.date) {
-          this.status(`Duplicate ${item.asin} has different dates`);
-          return;
+          throw new Error(`Duplicate ${item.asin} has different dates`);
         }
         if (!existing) unique.set(key, item);
       }
 
-      const items = [...unique.values()].map(item => ({
+      return [...unique.values()].map(item => ({
         location,
         asin: item.asin,
         date: item.date
       }));
+    },
 
-      await this.directRun(() => this.runExpirationQueue(items));
+    async startExpiration() {
+      if (this.directBusy || this.mode !== 'datelot' || !this.panel) return;
+      let items;
+      try { items = this.buildExpirationQueue(); }
+      catch (error) { this.status(String(error?.message || error)); return; }
+
+      const panel = this.panel;
+      const containers = this.expirationMethod() === 'asin' ? $('[data-exp-containers]', panel) : null;
+      const onConfirmed = containers ? remaining => {
+        containers.value = remaining.map(item => item.location).join('\n');
+        this.updateExpirationContainerCount(panel);
+      } : null;
+      // Both input methods use the same sequential, verified Datelot workflow.
+      // No automatic retries are added for date changes.
+      await this.directRun(() => this.runExpirationQueue(items, onConfirmed));
     },
 
   };
@@ -4286,3 +4411,4 @@
     else start();
   }
 })();
+
