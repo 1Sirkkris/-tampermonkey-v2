@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.98
+// @version      0.1.99
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.98';
+  const VERSION = '0.1.99';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -1226,7 +1226,11 @@
     let badgeText;
     if (level === 0) {
       const review = /under.{0,35}review|couldn.?t be classified|could not be classified|additional information to classify|not enough.{0,40}information to classify|ticket to Product Compliance Hazmat/i.test(messageText);
-      badgeText = canProcess ? 'L0 · PROCESS ME!' : review ? 'L0 · REVIEW' : 'L0 · UNKNOWN';
+      const inactiveMarketplaceProcess = /\bASIN is not active in (?:the )?selected marketplace\b/i.test(messageText)
+        && /\bno specific FC action needed\b/i.test(messageText)
+        && /\bplease process units\b/i.test(messageText);
+      badgeText = inactiveMarketplaceProcess ? 'L0 · NOT ACTIVE - PROCESS ME!'
+        : canProcess ? 'L0 · PROCESS ME!' : review ? 'L0 · REVIEW' : 'L0 · UNKNOWN';
     } else if (level === 4) {
       badgeText = canProcess ? 'L4 · OK' : 'L4 · REVIEW';
     } else if (level === 5) {
