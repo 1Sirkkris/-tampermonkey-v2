@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch Master — Accessible MADCAT Green
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.99
+// @version      0.1.100
 // @description  Automatic exact-item binDescription plus authenticated rolling 30-day MADCAT checks.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -23,7 +23,7 @@
   if (window.__bwu2FcrMaster || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2FcrMaster = true;
 
-  const VERSION = '0.1.99';
+  const VERSION = '0.1.100';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('FCR MASTER', VERSION);
 
@@ -41,6 +41,7 @@
   const SECTION_AUTO_DEFAULTS = new Set(['product', 'inventory']);
   const SECTION_LOAD_TOGGLE_ATTR = 'data-fcrm-section-toggle';
   const SECTION_LOAD_ROW_ATTR = 'data-fcrm-section-row';
+  const SECTION_NAV_SELECTOR = '#side-bar #sections-list';
   const SECTION_LOAD_XHR = new WeakMap();
   const SECTION_DEFS = [
     ['product', 'Product'],
@@ -571,7 +572,7 @@
     for (const def of SECTION_DEFS) {
       const label = sectionLabelNode(host, def);
       const row = sectionRowNode(label, host);
-      if (!row) continue;
+      if (!row || !host.contains(row) || row === host) continue;
       row.setAttribute(SECTION_LOAD_ROW_ATTR, def.endpoint);
       if (!row.dataset.fcrmLazyBound) {
         row.dataset.fcrmLazyBound = '1';
@@ -612,9 +613,19 @@
       return;
     }
     if (!document.body) return;
-    const heading = findNativeSectionsHeading();
-    const host = findNativeSectionsHost(heading);
-    if (heading && host) ensureInlineSectionToggles(host);
+    // Restrict controls to FCResearch's native right-hand SECTIONS list.
+    // Remove controls/row markers previously injected into matching main-page headings.
+    const host = $(SECTION_NAV_SELECTOR);
+    $$(`[${SECTION_LOAD_TOGGLE_ATTR}]`).forEach(button => {
+      if (!host?.contains(button)) button.remove();
+    });
+    $$(`[${SECTION_LOAD_ROW_ATTR}]`).forEach(row => {
+      if (!host?.contains(row)) {
+        row.removeAttribute(SECTION_LOAD_ROW_ATTR);
+        row.removeAttribute('data-fcrm-section-enabled');
+      }
+    });
+    if (host) ensureInlineSectionToggles(host);
     renderSectionLoadControls();
   }
 
