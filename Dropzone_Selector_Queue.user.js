@@ -2,8 +2,8 @@
 // @name         v2 TEST v0.2.18 Dropzone Selector Queue
 // @name:en      v2 TEST Dropzone Selector Queue
 // @namespace    MONKIES
-// @version      0.3.5
-// @description  TEST: Dropzone Selector + direct sequential MoveContainer API queue; stable queue rendering and throttled page detection.
+// @version      0.3.6
+// @description  TEST: Dropzone Selector + direct 2-worker MoveContainer API queue; stable queue rendering and throttled page detection.
 // @include      /^https?:\/\/aft-moveapp-[^\/.]+(?:\.nrt)?\.proxy\.amazon\.com\/move-container(?:[\/?#]|$)/
 // @grant        GM_xmlhttpRequest
 // @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.5
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.3.5';
+  const VERSION = '0.3.6';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('DROPZONE', VERSION);
@@ -37,6 +37,8 @@
   const QUEUE_REQUEST_TIMEOUT_MS = 15000;
   const QUEUE_NEXT_GAP_MS = 180;
 
+  const MAX_MOVE_WORKERS = 2;
+  const activeMoves = new Set();
   let queueRequestActive = false;
   let queueState = loadQueueState();
 
@@ -239,7 +241,7 @@
   }
 
   function clearQueueDone() {
-    if (queueState.running) return;
+    if (queueState.running || queueRequestActive) return;
     queueState.items = queueState.items.filter(x => x.status !== 'done');
     if (queueState.currentId && !queueItem(queueState.currentId)) queueState.currentId = '';
     queueState.message = 'Completed rows cleared';
@@ -248,7 +250,7 @@
   }
 
   function clearQueueAll() {
-    if (queueState.running) return;
+    if (queueState.running || queueRequestActive) return;
     queueState = defaultQueueState();
     setQueueDraft('');
     saveQueueState();
@@ -270,24 +272,17 @@
     renderQueueState();
   }
 
-  function markCurrentAttention(reason, pause = false) {
-    const current = queueItem();
-    if (current) {
-      current.status = 'attention';
-      current.error = String(reason || 'Needs attention');
-    }
-
-    const failedId = current?.id || '';
-    queueState.currentId = '';
-    queueState.phase = 'idle';
-
+  function markMoveAttention(item, reason, pause = false) {
+    if (!item) return;
+    item.status = 'attention';
+    item.error = String(reason || 'Needs attention');
+    const failedId = item.id;
     if (pause) {
       queueState.running = false;
       queueState.message = `Paused: ${reason}`;
     } else {
       queueState.message = `Skipped ${failedId}: ${reason}`;
     }
-
     saveQueueState();
     traceQueue('MOVECONTAINER_QUEUE_ATTENTION', {
       container: failedId,
@@ -301,20 +296,18 @@
   function activateNextQueueItem() {
     const next = nextQueuedItem();
     if (!next) return null;
-
     next.status = 'active';
     next.error = '';
-    queueState.currentId = next.id;
-    queueState.phase = 'api_move';
+    // Multiple moves are owned by their rows; there is no single currentId.
+    queueState.currentId = '';
+    queueState.phase = 'idle';
     queueState.message = `Moving ${next.id} → ${queueState.lockedDz}`;
     saveQueueState();
-
     traceQueue('MOVECONTAINER_QUEUE_ITEM_START', {
       container: next.id,
       destination: queueState.lockedDz,
       engine: 'direct-api'
     });
-
     renderQueueState();
     return next;
   }
@@ -396,72 +389,62 @@
     });
   }
 
-  async function runQueueDirect() {
-    if (!queueState.running || queueRequestActive) return;
-
-    let current = queueItem();
-    if (!current) {
-      current = activateNextQueueItem();
-      if (!current) {
-        finishQueue();
-        return;
-      }
-    }
-
-    queueRequestActive = true;
-    renderQueueState();
-
-    try {
-      const result = await directMoveRequest(current.id, queueState.lockedDz);
-
-      // API confirmed the move. Even if user hit PAUSE while the request was
-      // in-flight, this completed row is safe to mark done; we simply do not
-      // advance until RUN is pressed again.
-      current.status = 'done';
-      current.error = '';
-      queueState.currentId = '';
-      queueState.phase = 'idle';
-      queueState.message = `✓ ${current.id} moved (${result.ms}ms)`;
-      saveQueueState();
-
-      traceQueue('MOVECONTAINER_QUEUE_ITEM_DONE', {
-        container: current.id,
-        destination: queueState.lockedDz,
-        status: result.status,
-        ms: result.ms,
-        engine: 'direct-api'
-      });
-    } catch (error) {
-      const status = Number(error?.status || 0);
-      const reason = error?.ambiguous || status === 0
-        ? 'UNKNOWN — verify tote before retrying: ' + (error?.message || 'Move failed')
-        : error?.message || 'Move failed';
-
-      // Item-specific 4xx errors can be skipped so one bad tote does not kill
-      // a long queue. Auth/rate-limit/server/network failures pause the queue
-      // so we do not machine-gun the same systemic failure through every tote.
-      const fatal =
-        !!error?.ambiguous ||
-        status === 0 ||
-        status === 401 ||
-        status === 403 ||
-        status === 429 ||
-        status >= 500;
-
-      markCurrentAttention(reason, fatal);
-    } finally {
-      queueRequestActive = false;
-      renderQueueState();
-    }
-
+  function runQueueDirect() {
     if (!queueState.running) return;
 
-    if (!nextQueuedItem()) {
-      finishQueue();
-      return;
+    while (queueState.running && activeMoves.size < MAX_MOVE_WORKERS) {
+      const current = activateNextQueueItem();
+      if (!current) break;
+
+      const key = current.id.toLowerCase();
+      activeMoves.add(key);
+      queueRequestActive = true;
+      renderQueueState();
+      const destination = queueState.lockedDz;
+
+      void directMoveRequest(current.id, destination).then(result => {
+        // PAUSE does not discard responses to already-submitted moves.
+        current.status = 'done';
+        current.error = '';
+        queueState.message = `✓ ${current.id} moved (${result.ms}ms)`;
+        saveQueueState();
+
+        traceQueue('MOVECONTAINER_QUEUE_ITEM_DONE', {
+          container: current.id,
+          destination,
+          status: result.status,
+          ms: result.ms,
+          engine: 'direct-api'
+        });
+      }).catch(error => {
+        const status = Number(error?.status || 0);
+        const reason = error?.ambiguous || status === 0
+          ? 'UNKNOWN — verify tote before retrying: ' + (error?.message || 'Move failed')
+          : error?.message || 'Move failed';
+
+        const fatal =
+          !!error?.ambiguous ||
+          status === 0 ||
+          status === 401 ||
+          status === 403 ||
+          status === 429 ||
+          status >= 500;
+
+        markMoveAttention(current, reason, fatal);
+      }).finally(() => {
+        activeMoves.delete(key);
+        queueRequestActive = activeMoves.size > 0;
+        saveQueueState();
+        renderQueueState();
+
+        if (!queueState.running) return; // PAUSE or fatal error: drain only.
+        if (!nextQueuedItem() && activeMoves.size === 0) finishQueue();
+        else if (nextQueuedItem() && activeMoves.size < MAX_MOVE_WORKERS)
+          setTimeout(runQueueDirect, QUEUE_NEXT_GAP_MS);
+      });
     }
 
-    setTimeout(runQueueDirect, QUEUE_NEXT_GAP_MS);
+    if (queueState.running && !nextQueuedItem() && activeMoves.size === 0) finishQueue();
   }
 
   function startQueue() {
@@ -521,22 +504,19 @@
   // A refresh while a move is mid-flight is deliberately NOT auto-resubmitted.
   // The list survives, but the uncertain active row is marked for attention.
   function recoverQueueAfterReload() {
-    const current = queueItem();
-    const uncertain = !!(
-      current &&
-      (current.status === 'active' || queueState.phase === 'api_move')
-    );
-    if (!queueState.running && !uncertain) return;
+    const active = queueState.items.filter(item => item.status === 'active');
+    if (!queueState.running && !active.length && queueState.phase !== 'api_move') return;
 
-    if (uncertain) {
-      current.status = 'attention';
-      current.error = 'Page refreshed with move outcome unknown — verify before retry';
+    // Every in-flight request is uncertain after a refresh, not just one tote.
+    for (const item of active) {
+      item.status = 'attention';
+      item.error = 'UNKNOWN — page refreshed during move; verify tote before retry';
     }
     queueState.running = false;
     queueState.currentId = '';
     queueState.phase = 'idle';
-    queueState.message = uncertain
-      ? 'Queue preserved after refresh — UNKNOWN row requires verification'
+    queueState.message = active.length
+      ? `Queue preserved — ${active.length} uncertain move(s) need verification`
       : 'Queue preserved after refresh';
     saveQueueState();
   }
