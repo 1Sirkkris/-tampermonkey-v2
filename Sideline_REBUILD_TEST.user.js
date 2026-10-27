@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.39
+// @version      0.0.40
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.39-REBUILD';
+  const VERSION = '0.0.40-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -1096,6 +1096,7 @@
   );
 
   const qText = $('textarea', queuePanel), qStatus = $('.sh-status', queuePanel), qError = $('.sh-error', queuePanel);
+  const qStop = $('[data-a="stop"]', queuePanel), qPause = $('[data-a="pause"]', queuePanel);
 
   function parseContainers(text) {
     const seen = new Set();
@@ -1108,6 +1109,9 @@
   }
 
   function renderQueue(note='') {
+    setTextIfChanged(qStop, q.running ? 'Stop' : 'Clear');
+    qStop.title = q.running ? 'Stop the Tote Queue' : 'Clear the Tote Queue list and status (no container action)';
+    setTextIfChanged(qPause, q.paused ? 'Resume' : 'Pause');
     const cur = q.list[q.index] || '—';
     setTextIfChanged(qStatus, `${q.running ? (q.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'} | ${Math.min(q.index,q.list.length)}/${q.list.length} | Current: ${cur}${note ? ' | '+note : ''}`);
     setTextIfChanged(qError, q.failed.length ? `Errors: ${q.failed.join(', ')}` : '');
@@ -1196,11 +1200,33 @@
     }
 
     if (action === 'stop') {
+      if (q.running) {
+        q.runSeq++;
+        q.running = false;
+        q.paused = false;
+        if (shared.owner === 'queue') shared.owner = '';
+        renderQueue('stopped');
+        return;
+      }
+      // Clearing the UI must never hide an operation still settling in the API.
+      if (shared.queueBusy || (ISS_CONSOLE_WORKER && issQueueInFlight)) {
+        renderQueue('request still in flight — verify before clearing');
+        return;
+      }
       q.runSeq++;
-      q.running = false;
+      q.index = 0;
+      q.list = [];
+      q.failed = [];
       q.paused = false;
-      if (shared.owner === 'queue') shared.owner = '';
-      renderQueue('stopped');
+      qText.value = '';
+      if (ISS_CONSOLE_WORKER && issQueueSession) {
+        issQueueSession.stopped = true;
+        issQueueSession.awaitingApproval = false;
+        issQueueSession.retryPending = [];
+        issQueueSession = null;
+        issSideEmitProgress(true);
+      }
+      renderQueue('cleared');
     }
   };
   renderQueue();
