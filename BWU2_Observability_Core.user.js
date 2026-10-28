@@ -2,7 +2,7 @@
 // @name         v2 CORE v0.1.11 BWU2 Observability Core
 // @name:en      v2 CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.39
+// @version      0.1.40
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -30,7 +30,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.39';
+  const VERSION = '0.1.40';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -931,6 +931,81 @@
     }
   }
 
+
+  // Passive FCR history capture; never request data or export unsanitized rows.
+  let fcrHistoryHeaders = [];
+  function recordFcrHistoryEvidence(base, rawUrl, body, responseText) {
+    const url = parsedUrl(rawUrl);
+    if (!url || !/\/results\/inventory-history(?:-more)?\/?$/i.test(url.pathname) || !base.ok || !responseText) return;
+    try {
+      const raw = String(responseText);
+      let doc = new DOMParser().parseFromString(raw, 'text/html');
+      let table = doc.querySelector('#table-inventory-history');
+      let rows = table ? [...table.querySelectorAll('tbody tr')] : [];
+      if (!rows.length && /<tr\b/i.test(raw)) {
+        doc = new DOMParser().parseFromString('<table><tbody>' + raw + '</tbody></table>', 'text/html');
+        table = doc.querySelector('table');
+        rows = [...table.querySelectorAll('tbody tr')];
+      }
+      let headers = [...(table?.querySelectorAll('thead th') || [])]
+        .map(cell => String(cell.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60));
+      if (headers.length) fcrHistoryHeaders = headers;
+      else if (rows[0]?.cells?.length === fcrHistoryHeaders.length) headers = fcrHistoryHeaders;
+      const col = re => headers.findIndex(name => re.test(name));
+      const fromCol = col(/\b(?:old|previous|from|source)\b.*\b(?:bin|container|location)\b|\b(?:bin|container|location)\b.*\b(?:old|previous|from|source)\b/i);
+      const toCol = col(/\b(?:new|to|destination)\b.*\b(?:bin|container|location)\b|\b(?:bin|container|location)\b.*\b(?:new|to|destination)\b/i);
+      const timeCol = col(/\b(?:date|time|timestamp)\b/i);
+      const actionCol = col(/\b(?:action|event|operation|activity|transaction|reason)\b/i);
+      const statusCol = col(/\b(?:status|outcome|result)\b/i);
+      const itemCol = col(/\b(?:fnsku|fcsku|asin|barcode|scannable|lpn|item id|unit id)\b/i);
+      const cell = (cells, i) => i < 0 ? '' : String(cells[i]?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+      const kind = v => /^tsx[A-Z0-9_-]+$/i.test(v) ? 'tsx-tote'
+        : /^P-1-D/i.test(v) ? 'p1-damage'
+          : /^P-\d+-(?:[A-Z]\d{3}){1,4}$/i.test(v) ? 'p-bin'
+            : /^P-/i.test(v) ? 'p-prefixed-other' : 'other';
+      let search = '';
+      try { search = new URLSearchParams(typeof body === 'string' ? body : '').get('s') || ''; } catch {}
+      const directionKnown = fromCol >= 0 && toCol >= 0;
+      let candidateRows = 0, unverifiedPairs = 0;
+      const matches = [];
+      for (const [index, row] of rows.slice(0, 1500).entries()) {
+        if (!/tsx/i.test(row.textContent || '') || !/P-/i.test(row.textContent || '')) continue;
+        const cells = [...row.cells];
+        let from = cell(cells, fromCol), to = cell(cells, toCol);
+        if (!directionKnown) {
+          // A same-row pair without Old/New headers does NOT prove movement direction.
+          from = cells.map(c => String(c.textContent || '').trim()).find(v => kind(v) === 'tsx-tote') || '';
+          to = cells.map(c => String(c.textContent || '').trim()).find(v => ['p-bin','p-prefixed-other'].includes(kind(v))) || '';
+        }
+        if (kind(from) !== 'tsx-tote' || !['p-bin','p-prefixed-other','p1-damage'].includes(kind(to))) continue;
+        if (directionKnown) candidateRows++; else unverifiedPairs++;
+        if (matches.length >= 24) continue;
+        const action = cell(cells, actionCol), status = cell(cells, statusCol), date = cell(cells, timeCol), item = cell(cells, itemCol);
+        matches.push({
+          row: index,
+          direction: directionKnown ? 'headers' : 'unknown',
+          fromKind: kind(from), toKind: kind(to),
+          fromRef: fingerprint(from.toUpperCase(), 'bin'),
+          toRef: fingerprint(to.toUpperCase(), 'bin'),
+          itemRef: item ? fingerprint(item.toUpperCase(), 'item') : '',
+          date: /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/.test(date) ? scrubText(date.slice(0, 60)) : '',
+          action: /\bstow(?:ed|ing)?\b/i.test(action) ? 'stow' : /\bmove(?:d|ment)?\b/i.test(action) ? 'move' : /\bpick(?:ed|ing)?\b/i.test(action) ? 'pick' : 'other-or-unknown',
+          outcome: /\b(?:success|successful|complete|completed)\b/i.test(status) ? 'success' : /\b(?:fail|failed|error)\b/i.test(status) ? 'failure' : 'unknown'
+        });
+      }
+      add('fcr.history.stow-evidence', {
+        path: sanitizePath(url.pathname),
+        requestRef: search ? fingerprint(search.toUpperCase(), 'search') : '',
+        headers: headers.map(scrubText).slice(0, 30),
+        directionKnown, rows: rows.length, inspected: Math.min(rows.length, 1500),
+        candidateRows, unverifiedPairs, matches,
+        truncated: rows.length > 1500 || candidateRows + unverifiedPairs > matches.length
+      });
+    } catch (error) {
+      add('fcr.history.capture-error', { message: scrubText(error?.message || error) });
+    }
+  }
+
   function recordFcrNetwork(base, rawUrl, body, responseText = '', contentType = '') {
     const url = parsedUrl(rawUrl);
     const path = url?.pathname || '';
@@ -945,6 +1020,7 @@
       stat.maxMs = Math.max(stat.maxMs, Number(base.ms || 0));
     }
     fcrNetworkStats.set(key, stat);
+    recordFcrHistoryEvidence(base, rawUrl, body, responseText);
 
     clearTimeout(fcrNetworkTimer);
     fcrNetworkTimer = setTimeout(flushFcrNetworkSummary, FCR_NETWORK_QUIET_MS);
