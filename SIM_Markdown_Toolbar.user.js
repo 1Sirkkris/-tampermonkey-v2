@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        v2 MAIN v5.1.10 SIM Markdown Toolbar
+// @name        v2 MAIN v5.1.11 SIM Markdown Toolbar
 // @name:en      v2 MAIN SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.10
+// @version      5.1.11
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -14,7 +14,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "5.1.10";
+    const VERSION = "5.1.11";
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIM', VERSION);
 
@@ -270,19 +270,21 @@
                 height: 24px;
             }
             .${IMAGE_ACTIONS_CLASS} {
-                position: fixed;
-                top: 148px;
-                right: 12px;
-                z-index: 1000;
-                display: flex;
+                display: inline-flex;
                 align-items: center;
                 gap: 4px;
-                max-width: calc(100vw - 24px);
-                padding: 5px;
-                background: #fff;
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+                flex: 0 0 auto;
+                margin-left: auto;
+                padding: 0 8px 0 6px;
+            }
+            .sim-image-actions-header {
+                display: flex !important;
+                align-items: center;
+                min-width: 0;
+            }
+            @media (max-width: 640px) {
+                .${IMAGE_ACTIONS_CLASS} { gap: 2px; padding-right: 4px; }
+                .${IMAGE_ACTIONS_CLASS} button { padding-inline: 4px; }
             }
 
             .${IMAGE_BUTTON_CLASS},
@@ -820,14 +822,24 @@
     }
 
     function ensureImageActionsGroup() {
+        // The action pair belongs beside Announcements, outside the clickable
+        // collapse button. Moving the existing group preserves its handlers.
+        const headerButton = Array.from(document.querySelectorAll("button,[role='button']"))
+            .find(el => /^Announcements$/i.test((el.textContent || "").trim()) &&
+                (el.matches('[class*="expand-button"]') || el.getAttribute("aria-expanded") !== null));
+        if (!headerButton || !headerButton.parentElement) return null;
+
+        const host = headerButton.parentElement;
         let group = document.querySelector("." + IMAGE_ACTIONS_CLASS);
         if (!group) {
             group = document.createElement("div");
             group.className = IMAGE_ACTIONS_CLASS;
             group.setAttribute("role", "group");
             group.setAttribute("aria-label", "Ticket image attachments");
+            group.addEventListener("click", event => event.stopPropagation());
         }
-        if (group.parentElement !== document.body) document.body.appendChild(group);
+        if (group.parentElement !== host) host.appendChild(group);
+        host.classList.add("sim-image-actions-header");
         return group;
     }
 
