@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        v2 MAIN v5.1.5 SIM Markdown Toolbar
+// @name        v2 MAIN v5.1.10 SIM Markdown Toolbar
 // @name:en      v2 MAIN SIM Markdown Toolbar
 // @namespace    http://tampermonkey.net/
-// @version      5.1.9
+// @version      5.1.10
 // @description  SIM Markdown toolbar + table helper + snippets/import/export + open/download attachment images
 // @match        https://t.corp.amazon.com/*
 // @grant        GM_getValue
@@ -14,7 +14,7 @@
 (function () {
     "use strict";
 
-    const VERSION = "5.1.9";
+    const VERSION = "5.1.10";
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIM', VERSION);
 
@@ -270,13 +270,19 @@
                 height: 24px;
             }
             .${IMAGE_ACTIONS_CLASS} {
-                display: inline-flex;
+                position: fixed;
+                top: 148px;
+                right: 12px;
+                z-index: 1000;
+                display: flex;
                 align-items: center;
                 gap: 4px;
-                flex: 0 0 auto;
-                margin-left: 8px;
-                padding: 0;
-                list-style: none;
+                max-width: calc(100vw - 24px);
+                padding: 5px;
+                background: #fff;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
             }
 
             .${IMAGE_BUTTON_CLASS},
@@ -815,25 +821,13 @@
 
     function ensureImageActionsGroup() {
         let group = document.querySelector("." + IMAGE_ACTIONS_CLASS);
-        const auditTab = findAuditTrailTab();
-
-        if (!auditTab) return null;
-
-        const tabList = auditTab.closest('[role="tablist"]');
-        if (!tabList) return null;
-
-        const auditItem = auditTab.closest('li,[role="presentation"]') || auditTab;
-
         if (!group) {
-            group = document.createElement("li");
+            group = document.createElement("div");
             group.className = IMAGE_ACTIONS_CLASS;
-            group.setAttribute("role", "presentation");
+            group.setAttribute("role", "group");
+            group.setAttribute("aria-label", "Ticket image attachments");
         }
-
-        if (group.parentElement !== tabList || group.previousElementSibling !== auditItem) {
-            auditItem.insertAdjacentElement("afterend", group);
-        }
-
+        if (group.parentElement !== document.body) document.body.appendChild(group);
         return group;
     }
 
