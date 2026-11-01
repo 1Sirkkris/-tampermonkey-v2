@@ -1,14 +1,12 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.7';
   const ROOT = globalThis;
   if (ROOT.BWU2Actions?.version === VERSION) return;
 
-  const TRUSTED_LOGIN_KEY = 'bwu2.actions.trustedEmployeeLogin.v1';
   const LOGIN_RE = /^[a-z][a-z0-9-]{2,31}$/i;
   const RESERVED_LOGINS = /^(?:login|username|user|employee|alias|autoid|logout|logoff|signout|sign-out|signin|sign-in|profile|account|settings)$/i;
-  const TRUSTED_LOGIN_TTL_MS = 12 * 60 * 60 * 1000;
 
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -18,183 +16,98 @@
     return login;
   }
 
-  function findLoginInObject(value, depth = 0) {
-    if (!value || typeof value !== 'object' || depth > 1) return '';
-    for (const key of ['employeeLogin', 'userLogin', 'username', 'login', 'alias', 'autoId', 'autoID']) {
-      const found = normalizeLogin(value[key]);
-      if (found) return found;
-    }
-    for (const [key, child] of Object.entries(value).slice(0, 24)) {
-      if (!/(?:current|employee|user|profile|identity|operator)/i.test(key)) continue;
-      if (/(?:token|secret|cookie|auth|csrf|session)/i.test(key)) continue;
-      const found = findLoginInObject(child, depth + 1);
-      if (found) return found;
-    }
-    return '';
-  }
+  const identityClients = new WeakMap();
+  const LOGIN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const FCR_LOGIN_URL = 'https://fcresearch-fe.aka.amazon.com/BWU2/results';
 
-  function readCookie(doc, wanted) {
-    try {
-      for (const rawPart of String(doc?.cookie || '').split(';')) {
-        const part = rawPart.trim();
-        const split = part.indexOf('=');
-        if (split < 1) continue;
-        if (clean(part.slice(0, split)).toLowerCase() !== wanted.toLowerCase()) continue;
-        let value = clean(part.slice(split + 1));
-        try { value = decodeURIComponent(value); } catch {}
-        return value;
+  function createIdentityClient(options = {}) {
+    const doc = options.document || globalThis.document;
+    const page = options.pageWindow || globalThis.window;
+    if (identityClients.has(doc)) return identityClients.get(doc);
+    const REQUEST = 'fcr-data-core:identity:request';
+    const UPDATE = 'fcr-data-core:identity:update';
+    const missing = () => ({ login: '', source: '', capturedAt: 0, expiresAt: 0 });
+    let value = missing(), expiryTimer = 0, dialog = null, providerSeen = false;
+    const subscribers = new Set();
+
+    function get() {
+      const now = Date.now();
+      return value.login && value.capturedAt <= now && value.expiresAt > now ? { ...value } : missing();
+    }
+    function refresh() { doc.dispatchEvent(new Event(REQUEST)); return get(); }
+    function notify() { for (const fn of subscribers) fn(get()); }
+    function closePrompt() {
+      if (dialog) { dialog.close(); dialog.remove(); dialog = null; }
+    }
+    function receive(event) {
+      let next;
+      try { next = JSON.parse(event.detail); } catch { return; }
+      if (next?.schema !== 1 || next?.owner !== 'FCR Data Core') return;
+      providerSeen = true;
+      const login = normalizeLogin(next.login);
+      const at = Number(next.capturedAt), expiry = Number(next.expiresAt), now = Date.now();
+      const valid = next.status === 'ready' && login && Number.isFinite(at) && at > 0 && at <= now
+        && expiry === at + LOGIN_TTL_MS && expiry > now;
+      const incoming = valid ? { login, source: 'FCR Data Core', capturedAt: at, expiresAt: expiry } : missing();
+      if (JSON.stringify(incoming) === JSON.stringify(value)) return;
+      value = incoming;
+      clearTimeout(expiryTimer);
+      if (value.login) {
+        closePrompt();
+        expiryTimer = setTimeout(() => { value = missing(); notify(); }, expiry - now + 1);
       }
-    } catch {}
-    return '';
-  }
-
-  function saveTrustedLogin(storage, login, source, host = '') {
-    const value = normalizeLogin(login);
-    if (!value || !storage) return value;
-    try {
-      storage.setItem(TRUSTED_LOGIN_KEY, JSON.stringify({
-        login: value,
-        source: clean(source),
-        host: clean(host).toLowerCase(),
-        at: Date.now()
-      }));
-    } catch {}
-    return value;
-  }
-
-  function readTrustedLogin(storage, host = '') {
-    if (!storage) return '';
-    try {
-      const saved = JSON.parse(storage.getItem(TRUSTED_LOGIN_KEY) || 'null');
-      const at = Number(saved?.at || 0);
-      if (!at || Date.now() - at > TRUSTED_LOGIN_TTL_MS) return '';
-      const wantedHost = clean(host).toLowerCase();
-      const savedHost = clean(saved?.host).toLowerCase();
-      if (wantedHost && savedHost && wantedHost !== savedHost) return '';
-      return normalizeLogin(saved?.login);
-    } catch {
-      return '';
+      queueMicrotask(notify);
     }
-  }
-
-  function visibleHeaderLogin(doc, pageWindow) {
-    const viewportWidth = Number(pageWindow?.innerWidth || doc?.documentElement?.clientWidth || 0);
-    if (!viewportWidth || !doc?.querySelectorAll) return '';
-
-    const blocked = /^(?:search|profile|refresh|settings|sections|inventory|history|product|employee|events|problem|problems|shipment|receive|container|items|title|bwui?2|logout|logoff|signout|sign-in|signin|account)$/i;
-    const candidates = [];
-
-    for (const element of doc.querySelectorAll('a,span,strong,b,button,div')) {
-      if (element.children?.length) continue;
-      const raw = clean(element.textContent);
-      if (!raw || raw !== raw.toLowerCase() || blocked.test(raw)) continue;
-      const login = normalizeLogin(raw);
-      if (!login) continue;
-
-      const owner = element.closest('header,nav,[role="banner"],[role="navigation"],[class*="user" i],[class*="profile" i],[class*="account" i],[id*="user" i],[id*="profile" i],[id*="account" i]')
-        || (element.matches?.('span.aok-float-right.a-text-bold')
-          && element.closest('.aui-nav-row .a-column.a-span-last .a-row.a-spacing-top-mini'));
-      if (!owner) continue;
-
-      let rect;
-      try { rect = element.getBoundingClientRect(); } catch { continue; }
-      if (!rect || rect.width <= 0 || rect.height <= 0) continue;
-      if (rect.top < -2 || rect.top > 140) continue;
-      if (rect.left < viewportWidth * 0.68) continue;
-
-      const style = pageWindow?.getComputedStyle?.(element);
-      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) continue;
-
-      candidates.push({ login, left: rect.left, top: rect.top });
+    function prompt() {
+      if (refresh().login || !doc.body) return;
+      const existing = doc.getElementById('bwu2-fcr-login-prompt');
+      if (existing) return;
+      dialog = doc.createElement('dialog');
+      dialog.id = 'bwu2-fcr-login-prompt';
+      markUi(dialog);
+      dialog.setAttribute('aria-label', 'Refresh your FCR login');
+      dialog.style.cssText = 'max-width:380px;padding:22px;border:2px solid #334155;border-radius:12px;background:#fff;color:#0f172a;font:15px Arial,sans-serif;box-shadow:0 12px 45px #0006';
+      const title = doc.createElement('strong');
+      title.textContent = 'Refresh your FCR login';
+      const text = doc.createElement('p');
+      text.textContent = providerSeen
+        ? 'Your saved username is missing or over seven days old. Open FCR, then return here. Your queued work is kept; press Start or Unbind when ready.'
+        : 'Enable or update your existing FCR Data Core script, then reload this app and open FCR. Your queued work is kept.';
+      const link = doc.createElement('a');
+      link.textContent = 'Open FCR';
+      link.href = FCR_LOGIN_URL;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.cssText = 'display:inline-block;padding:10px 16px;background:#1d4ed8;color:white;border-radius:6px;text-decoration:none;font-weight:bold';
+      const later = doc.createElement('button');
+      later.type = 'button'; later.textContent = 'Later';
+      later.style.cssText = 'margin-left:12px;padding:9px';
+      later.addEventListener('click', closePrompt);
+      dialog.addEventListener('cancel', event => { event.preventDefault(); closePrompt(); });
+      dialog.append(title, text, link, later);
+      doc.body.appendChild(dialog);
+      dialog.showModal();
     }
-
-    candidates.sort((a, b) => (b.left - a.left) || (a.top - b.top));
-    return candidates[0]?.login || '';
+    function requireLogin() {
+      const login = refresh().login;
+      if (!login) prompt();
+      return login;
+    }
+    doc.addEventListener(UPDATE, receive);
+    page.addEventListener('focus', refresh);
+    page.addEventListener('pageshow', refresh);
+    doc.addEventListener('visibilitychange', () => { if (!doc.hidden) { refresh(); notify(); } });
+    page.addEventListener('pagehide', () => { clearTimeout(expiryTimer); closePrompt(); });
+    const client = Object.freeze({ get, refresh, prompt, requireLogin,
+      subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); }
+    });
+    identityClients.set(doc, client);
+    queueMicrotask(refresh);
+    return client;
   }
 
   function resolveEmployeeLogin(options = {}) {
-    const doc = options.document || globalThis.document;
-    const pageWindow = options.pageWindow || globalThis.window || ROOT;
-    const storage = options.storage || globalThis.localStorage;
-    const remember = (candidate, source) => {
-      const login = normalizeLogin(candidate);
-      if (!login) return null;
-      saveTrustedLogin(storage, login, source, pageWindow?.location?.hostname || '');
-      return { login, source };
-    };
-
-    const globals = [
-      ['employeeLogin', pageWindow?.employeeLogin],
-      ['userLogin', pageWindow?.userLogin],
-      ['autoId', pageWindow?.autoId],
-      ['autoID', pageWindow?.autoID],
-      ['currentUser', pageWindow?.currentUser],
-      ['user', pageWindow?.user],
-      ['employee', pageWindow?.employee],
-      ['bootstrapData', pageWindow?.bootstrapData],
-      ['__INITIAL_STATE__', pageWindow?.__INITIAL_STATE__]
-    ];
-    for (const [name, value] of globals) {
-      const found = typeof value === 'string' ? normalizeLogin(value) : findLoginInObject(value);
-      const result = remember(found, `global:${name}`);
-      if (result) return result;
-    }
-
-    const selectors = [
-      '.app-user-name',
-      '[data-test-id="user-name"]',
-      '.nav-user',
-      '.user-name',
-      '[data-employee-login]',
-      '[data-user-login]',
-      '[data-username]',
-      '[data-autoid]',
-      'meta[name="employeeLogin"]',
-      'meta[name="username"]',
-      'meta[name="autoid"]'
-    ];
-    for (const selector of selectors) {
-      const element = doc?.querySelector?.(selector);
-      if (!element) continue;
-      const candidate =
-        element.dataset?.employeeLogin ||
-        element.dataset?.userLogin ||
-        element.dataset?.username ||
-        element.dataset?.autoid ||
-        element.value ||
-        element.content ||
-        element.textContent;
-      const result = remember(candidate, `dom:${selector}`);
-      if (result) return result;
-    }
-
-    const visibleLogin = remember(visibleHeaderLogin(doc, pageWindow), 'dom:top-right-visible-login');
-    if (visibleLogin) return visibleLogin;
-
-    for (const row of doc?.querySelectorAll?.('.aui-nav-row') || []) {
-      const match = clean(row.textContent).match(/\bSearch\s+([a-z][a-z0-9-]{2,31})\b/i);
-      const result = remember(match?.[1], 'dom:aui-nav-row');
-      if (result) return result;
-    }
-
-    for (const cookieName of ['employeeLogin', 'userLogin', 'username', 'autoid']) {
-      const result = remember(readCookie(doc, cookieName), `cookie:${cookieName}`);
-      if (result) return result;
-    }
-
-    // FC Menu exposes an employee identifier cookie. Only accept it when it
-    // actually looks like a login alias; numeric badge IDs are deliberately ignored.
-    const fcMenuEmployee = readCookie(doc, 'fcmenu-employeeId');
-    if (/[a-z]/i.test(fcMenuEmployee)) {
-      const result = remember(fcMenuEmployee, 'cookie:fcmenu-employeeId');
-      if (result) return result;
-    }
-
-    if (options.allowCachedLogin === true) {
-      const cached = readTrustedLogin(storage, pageWindow?.location?.hostname || '');
-      if (cached) return { login: cached, source: 'trusted-cache' };
-    }
-    return { login: '', source: '' };
+    return createIdentityClient(options).get();
   }
 
   function responseHeader(response, name) {
@@ -338,6 +251,7 @@
     version: VERSION,
     normalizeLogin,
     resolveEmployeeLogin,
+    createIdentityClient,
     runUnbind,
     movePayload,
     moveContainer,

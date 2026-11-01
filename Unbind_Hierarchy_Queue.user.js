@@ -2,11 +2,11 @@
 // @name         v2 Unbind Hierarchy Queue v1.0.1
 // @name:en      v2 Unbind Hierarchy Queue
 // @namespace    BWU2
-// @version      1.1.7
+// @version      1.1.9
 // @description  BWU2 Endless-style sequential tsX/csX hierarchy unbind queue using the proven native backend flow.
 // @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @grant        none
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.4
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.7
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
 // @downloadURL  https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Unbind_Hierarchy_Queue.user.js
@@ -22,7 +22,7 @@
   // Keep the base @name above permanently fixed: Tampermonkey uses it with
   // @namespace as the update identity. Display versions belong here,
   // @version, @name:en, and the UI only.
-  const VERSION = '1.1.7';
+  const VERSION = '1.1.9';
   const ACTIONS = globalThis.BWU2Actions;
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('UNBIND', VERSION);
@@ -45,6 +45,9 @@
   const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const CONTAINER_PATTERN = /^(?:tsX|csX)[A-Za-z0-9_-]+$/i;
 
+  const { clean } = globalThis.BWU2Fleet;
+  const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
+
   let processing = false;
   let lockTimer = 0;
   let positionFrame = 0;
@@ -52,10 +55,7 @@
   let minimized = loadMinimized();
   let state = loadState();
   const ui = {};
-
-  const { clean } = globalThis.BWU2Fleet;
-
-  const normalizeContainer = value => globalThis.BWU2Fleet.normalizeContainer(value, CONTAINER_PATTERN);
+  const identity = ACTIONS.createIdentityClient({ document, pageWindow: window });
 
   function defaultState() {
     return {
@@ -203,7 +203,7 @@
   }
 
   function currentLogin() {
-    return ACTIONS.resolveEmployeeLogin({ document, pageWindow: window }).login;
+    return identity.get().login;
   }
 
   function refreshDetectedLogin() {
@@ -211,6 +211,18 @@
     if (ui.login) ui.login.textContent = login || 'NOT DETECTED';
     return login;
   }
+
+  identity.subscribe(() => {
+    refreshDetectedLogin();
+    if (currentLogin() && !state.running && /open FCR|logged-in user could not be detected/i.test(state.message)) {
+      state.message = 'Login ready — press START';
+      saveState(); render();
+    }
+    if (state.running && !currentLogin()) {
+      pauseQueue('Open FCR to refresh login, then press START');
+      identity.prompt();
+    }
+  });
 
   function rememberInvalid(values) {
     const seen = new Set(state.invalid.map(value => value.toLowerCase()));
@@ -356,6 +368,13 @@
   }
 
   function markAttention(item, error) {
+    if (error?.safePause) {
+      item.status = 'queued'; item.phase = ''; item.error = '';
+      state.currentId = ''; state.phase = 'idle';
+      pauseQueue('Login changed / expired — open FCR, then press START');
+      identity.prompt();
+      return;
+    }
     if (error?.sessionExpired) {
       const phase = clean(error.phase);
       const previous = readSessionRecovery();
@@ -467,6 +486,9 @@
         unbind: API_UNBIND
       },
       onPhase: phase => {
+        if (phase === 'unbind' && currentLogin() !== login) {
+          throw Object.assign(new Error('Login changed / expired — Unbind not sent'), { safePause: true, phase: 'identity' });
+        }
         state.phase = item.phase = phase;
         state.message = messages[phase] || phase;
         saveState();
@@ -493,6 +515,11 @@
     if (lockOwnedByOther()) {
       state.message = 'Queue is active in another tab';
       render();
+      return;
+    }
+    if (!currentLogin()) {
+      pauseQueue('Open FCR to refresh login, then press START');
+      identity.prompt();
       return;
     }
     renewLock();
@@ -562,9 +589,11 @@
 
   function startQueue() {
     if (state.running || processing) return;
+    identity.refresh();
     const login = refreshDetectedLogin();
     if (!login) {
-      state.message = 'Logged-in user could not be detected — refresh/sign in';
+      identity.prompt();
+      state.message = 'Open FCR to refresh login, then press START';
       saveState();
       render();
       return;
@@ -962,6 +991,8 @@
 
     render();
     positionUi();
+    identity.refresh();
+    setTimeout(() => { if (!currentLogin()) identity.prompt(); }, 1500);
     if (!minimized) setTimeout(() => ui.draft.focus(), 0);
     queueMicrotask(resumeAfterSessionReload);
   }

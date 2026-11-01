@@ -1,16 +1,20 @@
 // ==UserScript==
 // @name         V2 | TEST FCR Data Core — MADCAT Auto Auth
 // @namespace    https://github.com/1Sirkkris
-// @version      0.2.44
+// @version      0.2.45
 // @description  Strict binDescription plus shift-cached global 30-day raw MADCAT with on-demand Measurement auth and fallback.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @include      /^https:\/\/jp\.item-measurement\.aft\.a2z\.com\//
+// @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/bindHierarchy*
+// @match        https://tx-b-hierarchy-nrt.nrt.proxy.amazon.com/unbindHierarchy*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @grant        unsafeWindow
 // @connect      aft-poirot-website-nrt.nrt.proxy.amazon.com
 // @connect      pandash.amazon.com
@@ -25,8 +29,12 @@
 
   if (location.hash.startsWith('#iss-console')) return;
 
-  const VERSION = '0.2.44';
+  const VERSION = '0.2.45';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
+  installFcrLoginCache();
+  // On hierarchy pages this existing script supplies login only.
+  if (location.hostname === 'tx-b-hierarchy-nrt.nrt.proxy.amazon.com') return;
+
   const MEASUREMENT_SITE_HOST = 'jp.item-measurement.aft.a2z.com';
   const MEASUREMENT_API_HOST = 'o0avbo02yl.execute-api.ap-northeast-1.amazonaws.com';
   const MEASUREMENT_AUTH_KEY = 'fcr-data-core:measurement-auth-v1';
@@ -129,6 +137,136 @@
   let measurementAuthAcquirePromise = null;
 
   const { clean, upper } = globalThis.BWU2Fleet;
+
+  function installFcrLoginCache() {
+    if (window.top !== window.self) return;
+    const fcr = /(?:^|\.)[^.]*fcresearch[^.]*\./i.test(location.hostname)
+      || location.hostname === 'qifcr.fe.aftx.amazonoperations.app';
+    const hierarchy = location.hostname === 'tx-b-hierarchy-nrt.nrt.proxy.amazon.com'
+      && /^\/(?:un)?bindHierarchy(?:\/|$)/i.test(location.pathname);
+    if (!fcr && !hierarchy) return;
+    if (window.__bwu2FcrLoginCache) return;
+    window.__bwu2FcrLoginCache = true;
+    const KEY = 'fcr-data-core:operator-v1';
+    const REQUEST = 'fcr-data-core:identity:request';
+    const UPDATE = 'fcr-data-core:identity:update';
+    const TTL = 7 * 24 * 60 * 60 * 1000;
+    const DAY = 24 * 60 * 60 * 1000;
+    const normalize = value => {
+      const login = String(value || '').trim().toLowerCase();
+      return /^[a-z][a-z0-9-]{2,31}$/.test(login)
+        && !/^(?:search|login|username|user|employee|logout|signout|signin|profile|account|settings)$/.test(login) ? login : '';
+    };
+    let listener = null, expiryTimer = 0, dailyTimer = 0, observer = null;
+    let discoveryTimer = 0, captureTimer = 0, active = false, discoveryDeadline = 0;
+
+    function snapshot() {
+      let saved;
+      try { saved = GM_getValue(KEY, null); } catch {}
+      const login = normalize(saved?.login);
+      const capturedAt = Number(saved?.capturedAt);
+      const now = Date.now();
+      const valid = saved?.schema === 1 && login && Number.isFinite(capturedAt)
+        && capturedAt > 0 && capturedAt <= now && now - capturedAt < TTL;
+      return {
+        schema: 1, owner: 'FCR Data Core', status: valid ? 'ready' : 'missing',
+        login: valid ? login : '', capturedAt: valid ? capturedAt : 0,
+        expiresAt: valid ? capturedAt + TTL : 0
+      };
+    }
+
+    function deliver() {
+      if (!active) return;
+      const value = snapshot();
+      clearTimeout(expiryTimer);
+      if (value.status === 'ready') expiryTimer = setTimeout(deliver, value.expiresAt - Date.now() + 1);
+      // String detail crosses Firefox's isolated/page-world boundary safely.
+      document.dispatchEvent(new CustomEvent(UPDATE, { detail: JSON.stringify(value) }));
+    }
+
+    function headerLogin() {
+      // Read only the signed-in FCR header, never item history, generic globals,
+      // cookies, other scripts' UI or an employee being searched for.
+      for (const header of document.querySelectorAll('.aui-nav-row,header,nav,[role="banner"],[role="navigation"]')) {
+        if (header.closest('[data-bwu2-ui]')) continue;
+        for (const node of header.querySelectorAll('span.aok-float-right.a-text-bold,[data-employee-login],[data-user-login],.app-user-name,[data-test-id="user-name"],.nav-user,.user-name')) {
+          if (node.closest('[data-bwu2-ui]')) continue;
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+          const login = normalize(node.getAttribute('data-employee-login') || node.getAttribute('data-user-login') || node.textContent);
+          if (login) return login;
+        }
+      }
+      return '';
+    }
+
+    function capture() {
+      if (!active || !fcr || document.hidden) return;
+      const login = headerLogin();
+      if (!login) return; // A loading page is not a new identity observation.
+      let old;
+      try { old = GM_getValue(KEY, null); } catch {}
+      const now = Date.now();
+      // Avoid repeated writes from header animation. Only observing FCR can
+      // advance capturedAt; subscriber requests and cached reads never do.
+      if (old?.schema !== 1 || old?.login !== login || !Number.isFinite(old?.capturedAt)
+          || now < old.capturedAt || now - old.capturedAt >= 60000) {
+        try { GM_setValue(KEY, { schema: 1, login, capturedAt: now }); } catch {}
+      }
+      deliver();
+    }
+
+    function observeHeader() {
+      if (!active || !fcr) return;
+      observer?.disconnect();
+      clearTimeout(discoveryTimer);
+      const headers = [...document.querySelectorAll('.aui-nav-row,header,nav,[role="banner"],[role="navigation"]')]
+        .filter(node => !node.closest('[data-bwu2-ui]'));
+      observer = new MutationObserver(() => {
+        clearTimeout(captureTimer);
+        captureTimer = setTimeout(() => {
+          if (!headers.length) observeHeader();
+          capture();
+        }, 150);
+      });
+      if (headers.length) {
+        for (const header of headers) observer.observe(header, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-employee-login','data-user-login','class','style'] });
+      } else if (document.documentElement && Date.now() < discoveryDeadline) {
+        // Only while discovering a late-loading header; never poll the full page.
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        discoveryTimer = setTimeout(() => observer?.disconnect(), discoveryDeadline - Date.now());
+      }
+    }
+
+    function refresh() { discoveryDeadline = Date.now() + 30000; observeHeader(); capture(); deliver(); }
+    function daily() {
+      capture();
+      dailyTimer = setTimeout(daily, DAY);
+    }
+    function start() {
+      if (active) { refresh(); return; }
+      active = true;
+      listener = GM_addValueChangeListener(KEY, deliver);
+      refresh();
+      if (fcr) dailyTimer = setTimeout(daily, DAY);
+    }
+    function stop() {
+      active = false;
+      if (listener !== null) GM_removeValueChangeListener(listener);
+      listener = null;
+      observer?.disconnect();
+      for (const timer of [expiryTimer, dailyTimer, discoveryTimer, captureTimer]) clearTimeout(timer);
+    }
+    document.addEventListener(REQUEST, deliver);
+    document.addEventListener('DOMContentLoaded', refresh, { once: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    window.addEventListener('focus', refresh);
+    window.addEventListener('hashchange', refresh);
+    window.addEventListener('pagehide', stop);
+    window.addEventListener('pageshow', start);
+    start();
+  }
 
   function measurementIdentifierCandidate(value) {
     const candidate = upper(value);

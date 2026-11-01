@@ -5,12 +5,11 @@
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
 // @grant        GM_xmlhttpRequest
-// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.5
+// @require      https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/BWU2_Actions_Core.lib.js?v=0.1.7
 // @connect      aft-moveapp-nrt-nrt.nrt.proxy.amazon.com
 // @connect      tx-b-hierarchy-nrt.nrt.proxy.amazon.com
-// @connect      w.amazon.com
 // @connect      localhost
-// @version      5.6.12
+// @version      5.6.13
 // @description  TEST: FCResearch/FC-Lite helper with Tote Audit dropzone controls and duplicate-FNSKU/FCSKU conflict alerts.
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/1Sirkkris/-tampermonkey-v2/main/Stow_Andons_Helper.user.js
@@ -24,9 +23,9 @@
   if (window.__bwu2StowAndonsHelper) return;
   window.__bwu2StowAndonsHelper = true;
 
-  const VERSION = '5.6.12';
+  const VERSION = '5.6.13';
   const ACTIONS = globalThis.BWU2Actions;
-  const PAGE_WINDOW = typeof unsafeWindow === 'object' && unsafeWindow ? unsafeWindow : window;
+  const identity = ACTIONS.createIdentityClient({ document, pageWindow: window });
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('STOW', VERSION);
 
@@ -447,44 +446,8 @@
     });
   }
 
-  function cacheUnbindLogin(login, source = '') {
-    const value = clean(login).toLowerCase();
-    if (!/^[a-z][a-z0-9-]{2,31}$/i.test(value)) return '';
-    try {
-      localStorage.setItem('bwu2.actions.trustedEmployeeLogin.v1', JSON.stringify({
-        login: value,
-        source: clean(source),
-        at: Date.now()
-      }));
-    } catch {}
-    return value;
-  }
-
-  function wikiLogin() {
-    return new Promise(resolve => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url: 'https://w.amazon.com/bin/view/Main/',
-        timeout: 10000,
-        anonymous: false,
-        onload: response => {
-          const html = String(response.responseText || '');
-          const match =
-            html.match(/[?&]userAlias=([a-z][a-z0-9-]{2,31})/i) ||
-            html.match(/\b(?:currentUser|userAlias|employeeLogin)\s*[:=]\s*["']([a-z][a-z0-9-]{2,31})["']/i) ||
-            html.match(/\bdata-(?:user|employee)-(?:alias|login)=["']([a-z][a-z0-9-]{2,31})["']/i);
-          resolve(cacheUnbindLogin(match?.[1] || '', 'wiki-current-user'));
-        },
-        onerror: () => resolve(''),
-        ontimeout: () => resolve('')
-      });
-    });
-  }
-
   async function unbindLogin() {
-    const local = ACTIONS.resolveEmployeeLogin({ document, pageWindow: PAGE_WINDOW }).login;
-    if (local) return cacheUnbindLogin(local, 'local');
-    return wikiLogin();
+    return identity.requireLogin();
   }
 
   function inlineUnbindResponseShape(phase, data, container) {
@@ -663,7 +626,7 @@
   async function unbindCurrentContainerLocked(button, container) {
     if (!/^(?:ts|cs)X[A-Z0-9]+$/i.test(container)) return toast('Unbind requires tsX/csX', true);
     const login = await unbindLogin();
-    if (!login) return toast('Could not detect Amazon login', true);
+    if (!login) return toast('Open FCR to refresh login, then click Unbind again', true);
 
     usage('unbind');
     const runStarted = performance.now();
@@ -692,6 +655,10 @@
           unbind: UNBIND_URL
         },
         onPhase: phase => {
+          if (phase === 'unbind' && identity.get().login !== login) {
+            identity.prompt();
+            throw Object.assign(new Error('Login changed / expired — open FCR; Unbind not sent'), { phase: 'identity' });
+          }
           currentPhase = phase;
           unbindSetBusy(phase === 'validate' ? 'Validating…'
             : phase === 'summary' ? 'Checking…' : 'Unbinding…');
@@ -768,7 +735,8 @@
         finalText = 'Failed';
         resetDelay = 2000;
         const phase = clean(error?.phase || '');
-        toast(`Unbind failed${phase ? ` (${phase})` : ''}`, true);
+        toast(phase === 'identity' ? clean(error.message)
+          : `Unbind failed${phase ? ` (${phase})` : ''}`, true);
       }
     } finally {
       unbindSetBusy(finalText);
