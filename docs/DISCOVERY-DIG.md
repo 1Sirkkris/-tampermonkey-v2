@@ -1,153 +1,24 @@
-# DISCOVERY-DIG.md — Tampermonkey V2 Improvement Discovery
+# Script Discovery Dig — approved 1 November 2026
 
-## PURPOSE
+Use only for an explicitly requested or scheduled Discovery Dig. This playbook follows the maintained operating contract; it does not grant implementation or publication permission.
 
-This is a specialist read-only discovery playbook, not a competing agent rulebook.
+Read the repository-root WORKER_START_HERE.md and Master_Agent_Operating_Contract.txt. Resolve source and task records through Tampermonkey_Current_State.md. Use co-located approved files; do not substitute archived branch instructions or assume access to private history.
 
-`AGENTS.md` remains authoritative.
+Review approximately the previous two weeks of relevant changes, user discussions, failures, tests, original OBS evidence and captured XHR/fetch/API behaviour. Start with active, frequently used or high-friction workflows. Compare current source with newer delivered candidates and recorded user acceptance before calling an issue unresolved. A recent file timestamp or version number alone does not prove installation.
 
-Use this file only when the user explicitly requests a Discovery Dig or the scheduled Discovery Dig runs.
+Find safe ways to reduce repeated actions, waiting, page loads, DOM work, polling, duplicate requests and manual recovery. Check existing state, data, shared helpers and proven APIs before proposing another mechanism. Never invent endpoints or treat an anecdote as evidence that an API works. Preserve intended differences between workflows.
 
-The goal is to find safe, evidence-backed ways to make the user's real workflows faster, easier, more reliable and less dependent on fragile browser/UI automation.
+Rank by practical user time saved, reliability, performance and recovery benefit, weighed against implementation risk. Correctness and data integrity are mandatory. Include only evidence-backed opportunities; separate confirmed defects from hypotheses and stylistic preferences. Avoid speculative rewrites and cleanup merely because code is old or unusual.
 
-Do not implement production changes during a Discovery Dig unless the user separately authorizes them.
+Read-only: do not modify production code, install, publish, commit/push, run operational mutations or add diagnostic instrumentation. Propose the smallest safe test when evidence is missing; use existing OBS capture where relevant. Never retry an uncertain state-changing action to gather evidence.
 
-## OBJECTIVE
+Return the strongest 1–3 opportunities, each with:
 
-Find the best practical opportunities to reduce:
+- Current: the user's present friction.
+- Possible: the proposed improvement.
+- Gain: the practical benefit; mark estimates.
+- Evidence: current source/version and relevant original evidence.
+- Proof needed: smallest safe test or missing observation.
+- Risk: only material regression or operational risk.
 
-- user actions
-- waiting
-- page loads/reloads
-- repeated scans/clicks/copy-paste
-- fixed sleeps and DOM waits
-- fragile selectors and UI sequencing
-- unnecessary rendering
-- unnecessary or duplicate requests
-- large/repeated data pulls
-- polling/listener overhead
-- manual recovery work
-- repeated navigation between tools
-
-Do not assume the current implementation is best merely because it works.
-
-Do not assume an API, endpoint or direct mechanism exists. Discover it from evidence.
-
-## DISCOVERY TARGETS
-
-Inspect recent work, active scripts and directly relevant application behaviour for opportunities such as:
-
-- DOM/UI automation replaceable by a proven existing XHR/fetch/API request
-- data already available in application state, HTML, storage or an earlier response
-- requests that can be safely suppressed, reduced, cached or deduplicated
-- repeated full-page/product/inventory pulls that are not needed for the actual workflow
-- fixed waits replaceable by deterministic events or state
-- polling replaceable by event-driven behaviour
-- several UI actions replaceable by one deterministic operation
-- unnecessary page navigation or refreshes
-- repeated manual copy/paste or classification
-- old implementations retained only because a better mechanism was not previously known
-- new evidence from the last two weeks that changes what is technically possible
-
-Always ask:
-
-**Is there a more direct, safer or faster way to achieve the same real-world result?**
-
-## FORENSIC WINDOW
-
-For a scheduled dig, review the most relevant evidence from approximately the previous two weeks, including where accessible:
-
-- recent commits/diffs
-- scripts changed or repeatedly discussed
-- user-reported friction
-- testing outcomes
-- recurring failures/recovery steps
-- newly captured XHR/fetch/API behaviour
-- performance complaints or waits
-- repeated manual user actions
-- known next-enhancement candidates
-
-Do not manufacture opportunities from unrelated code merely to fill the report.
-
-## METHOD
-
-1. Map the current workflow in plain operational terms.
-2. Identify the biggest real user-time, reliability or performance waste.
-3. Inspect what the page/application is actually doing underneath that step.
-4. Look for a more direct mechanism.
-5. Gather enough evidence to establish that the mechanism genuinely exists.
-6. Estimate the likely user benefit.
-7. Identify material correctness/data-integrity/regression risk.
-8. Define the smallest safe experiment needed to prove or reject it.
-9. Keep unproven experiments separate from stable deployed behaviour.
-10. Stop after the strongest opportunities are identified.
-
-## PRIORITY
-
-Rank findings in this order:
-
-`User time saved → Reliability gain → Performance gain → Recovery gain → Implementation risk`
-
-Correctness and data integrity remain mandatory and override every optimization benefit.
-
-Prefer one high-value proven opportunity over many speculative ideas.
-
-## SAFE EXPERIMENT DESIGN
-
-When an opportunity is promising but not proven, design the dumbest safe test that answers the question.
-
-The user is not expected to understand the technical mechanism.
-
-Explain any required test as:
-
-**What we are testing:** one plain-English sentence.
-
-**Do this:** the smallest numbered operator steps using exact visible labels.
-
-**Good result:** what should visibly happen.
-
-**Bad result:** what means stop.
-
-Do not make the user inspect code, DevTools, payloads or architecture when existing capture/observability tooling can gather the evidence instead.
-
-## SCOPE CONTROL
-
-Discovery is deliberately broader than a normal bug fix, but it is not unlimited.
-
-- Focus on active/recent/high-friction workflows first.
-- Do not redesign unrelated scripts.
-- Do not chase theoretical micro-optimizations.
-- Do not propose cleanup merely because code looks ugly.
-- Do not recommend a rewrite without evidence that the current mechanism is materially limiting the workflow.
-- Do not implement findings during the dig without separate authorization.
-- Maximum three final opportunities.
-
-## OUTPUT
-
-Do not send a technical story.
-
-Return only the top 1–3 evidence-backed opportunities.
-
-For each:
-
-**Current:** what sucks now.
-
-**Possible:** better method in plain English.
-
-**Gain:** why the user should care.
-
-**Evidence:** why this is a real opportunity rather than a guess.
-
-**Proof needed:** smallest safe test/evidence required before implementation.
-
-**Risk:** material risk only; omit if negligible.
-
-Finish with:
-
-**Best pick:** the single opportunity with the strongest benefit-to-risk ratio.
-
-If nothing worthwhile is found, say:
-
-`No worthwhile discovery this cycle.`
-
-Do not invent findings to make the dig look productive.
+Finish with one Best pick. Stop optional research once it cannot change the ranking, recommendation or material risk. If accessible evidence supports no worthwhile opportunity, say exactly: `No worthwhile discovery this cycle.` If required sources are unavailable, state the access limitation instead of presenting an incomplete review as a clean result.
