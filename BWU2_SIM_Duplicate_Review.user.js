@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BWU2 SIM Duplicate Review
 // @namespace    bwu2.local.sim.duplicate-review.test
-// @version      0.3.23
+// @version      0.3.24
 // @description  ISS duplicate discovery with exact ASIN/RPI-set checks (order ignored); original one-click ISS and two-step manual closures preserved.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (function () {
     'use strict';
-    const VER='0.3.23', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
+    const VER='0.3.24', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
     const GRAPH='https://sim-ticketing-graphql-fleet.corp.amazon.com/graphql';
     const WAVE='https://wave.qubit.amazon.dev/api/graphql';
     const WAVE_PAGE='https://wave.qubit.amazon.dev/command-center/ISS';
@@ -684,20 +684,63 @@
     // Unbounded concurrency would risk triggering SIM throttling and SSO failures.
     const MAX_SIM_READS_PER_LANE=10;
     const titleQueue=[],queuedTitles=new Set();let titleWorkers=0;
+    // OBS receives only counters/durations; no SIM IDs, request bodies or titles.
+    let simDiag={waveSessionMs:0,waveCsvMs:0,waveParseMs:0,firstGroupReadyMs:null,
+      titleRunStart:0,uiRenderCount:0,uiRenderTotalMs:0,uiRenderPeakMs:0,
+      uiRenderRecent:[],httpStatuses:{},httpGraphqlErrors:0,httpNetworkErrors:0,
+      httpTimeouts:0};
+    function percentile(values,p){if(!values.length)return 0;
+      const sorted=values.slice().sort((a,b)=>a-b);
+      return Math.round(sorted[Math.ceil(sorted.length*p)-1]);}
+    function noteSimHttp(status,kind){
+      if(Number.isFinite(status)){
+        const key=String(Math.round(status));simDiag.httpStatuses[key]=(simDiag.httpStatuses[key]||0)+1;
+      }
+      if(kind==='graphql')simDiag.httpGraphqlErrors++;
+      else if(kind==='network')simDiag.httpNetworkErrors++;
+      else if(kind==='timeout')simDiag.httpTimeouts++;
+    }
+    function noteRender(ms,count){
+      simDiag.uiRenderCount++;simDiag.uiRenderTotalMs+=ms;
+      simDiag.uiRenderPeakMs=Math.max(simDiag.uiRenderPeakMs,ms);
+      simDiag.uiRenderRecent.push(ms);
+      if(simDiag.uiRenderRecent.length>60)simDiag.uiRenderRecent.shift();
+      if(count>0&&simDiag.titleRunStart&&simDiag.firstGroupReadyMs===null){
+        simDiag.firstGroupReadyMs=Math.round(performance.now()-simDiag.titleRunStart);
+        if(titleLane.completed)emitReadRates('titles',titleLane,'first-group-ready');
+      }
+    }
     function newReadLane(initial){return {limit:initial,min:2,max:MAX_SIM_READS_PER_LANE,
       started:performance.now(),completed:0,failed:0,throttled:0,cache:0,reused:0,
+      inFlight:0,peakInFlight:0,lastSampleAt:performance.now(),lastSampleCount:0,
       window:[],recent:[],lastEmitted:0};}
     let titleLane=newReadLane(8);
     function emitReadRates(stage,lane,reason){
       // OBS v0.1.41 listens for bwu2-observability:event. Only aggregate, nonsensitive metrics.
       const times=lane.recent.slice().sort((a,b)=>a-b),count=times.length;
       const elapsed=Math.max(0.001,(performance.now()-lane.started)/1000);
+      const now=performance.now(),sampleElapsed=Math.max(.001,(now-lane.lastSampleAt)/1000);
+      const recentThroughput=+(Math.max(0,lane.completed-lane.lastSampleCount)/sampleElapsed).toFixed(2);
+      lane.lastSampleAt=now;lane.lastSampleCount=lane.completed;
       const data={script:'SIM_DUPLICATE_REVIEW',version:VER,stage,reason,readOnly:true,
         concurrencyTarget:lane.limit,concurrencyMaximum:lane.max,completed:lane.completed,
         failures:lane.failed,throttleSignals:lane.throttled,cacheHits:lane.cache,
         joinedReads:lane.reused,readsPerSecond:+(lane.completed/elapsed).toFixed(2),
+        recentReadsPerSecond:recentThroughput,
         averageMs:count?Math.round(times.reduce((a,b)=>a+b,0)/count):0,
-        p95Ms:count?Math.round(times[Math.ceil(count*.95)-1]):0};
+        p95Ms:count?Math.round(times[Math.ceil(count*.95)-1]):0,
+        sampleSize:count,activeReads:lane.inFlight,peakActiveReads:lane.peakInFlight,
+        activeWorkers:stage==='titles'?titleWorkers:(state.idScan?.workers||0),
+        queued:stage==='titles'?titleQueue.length:Math.max(0,(state.idScan?.queue.length||0)-(state.idScan?.index||0)),
+        waveSessionMs:simDiag.waveSessionMs,waveCsvMs:simDiag.waveCsvMs,waveParseMs:simDiag.waveParseMs,
+        firstGroupReadyMs:simDiag.firstGroupReadyMs,
+        uiRenderCount:simDiag.uiRenderCount,
+        uiRenderAverageMs:simDiag.uiRenderCount?Math.round(simDiag.uiRenderTotalMs/simDiag.uiRenderCount):0,
+        uiRenderP95Ms:percentile(simDiag.uiRenderRecent,.95),
+        uiRenderPeakMs:Math.round(simDiag.uiRenderPeakMs),
+        httpStatusCounts:{...simDiag.httpStatuses},
+        graphqlFailures:simDiag.httpGraphqlErrors,
+        networkFailures:simDiag.httpNetworkErrors,timeoutFailures:simDiag.httpTimeouts};
       try{window.dispatchEvent(new CustomEvent('bwu2-observability:event',
         {detail:{type:'SIM_DUPLICATE_READ_RATE',data}}));}catch(_){}
     }
@@ -726,8 +769,10 @@
       if(previewCache.has(t.id)){if(lane)lane.cache++;return loadReadOnly(t);}
       if(previewReads.has(t.id)){if(lane)lane.reused++;return loadReadOnly(t);}
       const start=performance.now();
+      if(lane){lane.inFlight++;lane.peakInFlight=Math.max(lane.peakInFlight,lane.inFlight);}
       try{const v=await loadReadOnly(t);observeRead(stage,lane,performance.now()-start,true,null);return v;}
       catch(e){observeRead(stage,lane,performance.now()-start,false,e);throw e;}
+      finally{if(lane)lane.inFlight=Math.max(0,lane.inFlight-1);}
     }
     function pumpTitles(){
       if(state.busy||ui.panel.style.display!=='block')return;
@@ -770,7 +815,9 @@
       }finally{
         titleWorkers--;
         if(state.data&&titleQueue.length&&state.data===titleQueue[0].data)pumpTitles();
-        if(!titleWorkers){emitReadRates('titles',titleLane,'finished-or-paused');
+        if(!titleWorkers){
+          const complete=!titleQueue.length&&state.data&&autoTitleProgress().done>=autoTitleProgress().total;
+          emitReadRates('titles',titleLane,complete?'finished':state.busy?'paused-write':ui.panel.style.display!=='block'?'paused-hidden':'paused');
           if(state.idScan?.started&&!state.idScan.done)resumeIdentityScan();}
       }
     }
@@ -950,14 +997,20 @@
     function comment(master){return 'Hi Team,\n\nResolving due to duplicate TT.\n\nRef: '+SIM+master.id+'\n\nRegards';}
     function request(url,operationName,query,variables){return new Promise((resolve,reject)=>{
       if(typeof GM_xmlhttpRequest!=='function'){reject(Error('Tampermonkey network permission unavailable.'));return;}
+      const traceRead=url===GRAPH&&operationName==='issueOverview';
       let ended=false;const done=(cb,x)=>{if(!ended){ended=true;cb(x);}};
       try{GM_xmlhttpRequest({method:'POST',url,anonymous:false,withCredentials:true,timeout:30000,
         headers:{'Content-Type':'application/json',Accept:'application/json',...(url===GRAPH?{Origin:'https://t.corp.amazon.com',Referer:'https://t.corp.amazon.com/'}:{})},
         data:JSON.stringify({operationName,query,variables}),
-        onload:r=>{if(!r||r.status!==200)return done(reject,Error('HTTP '+(r?r.status:0)+' — stop; check manually.'));
-          try{const j=JSON.parse(r.responseText);if(j.errors&&j.errors.length)return done(reject,Error(j.errors.map(e=>e.message).join('; ')));if(!j.data)return done(reject,Error('Empty GraphQL reply.'));done(resolve,j.data);}catch(e){done(reject,e);}},
-        onerror:()=>done(reject,Error('Network error — uncertain result. No retry.')),
-        ontimeout:()=>done(reject,Error('Timeout — uncertain result. No retry.'))});
+        onload:r=>{if(traceRead)noteSimHttp(r?.status||0);
+          if(!r||r.status!==200)return done(reject,Error('HTTP '+(r?r.status:0)+' — stop; check manually.'));
+          try{const j=JSON.parse(r.responseText);
+            if(j.errors&&j.errors.length){if(traceRead)noteSimHttp(null,'graphql');return done(reject,Error(j.errors.map(e=>e.message).join('; ')));}
+            if(!j.data){if(traceRead)noteSimHttp(null,'graphql');return done(reject,Error('Empty GraphQL reply.'));}
+            done(resolve,j.data);
+          }catch(e){if(traceRead)noteSimHttp(null,'graphql');done(reject,e);}},
+        onerror:()=>{if(traceRead)noteSimHttp(null,'network');done(reject,Error('Network error — uncertain result. No retry.'));},
+        ontimeout:()=>{if(traceRead)noteSimHttp(null,'timeout');done(reject,Error('Timeout — uncertain result. No retry.'));}});
       }catch(e){done(reject,e);}
     });}
     function sim(name,query,variables){return request(GRAPH,name,query,variables);}
@@ -979,12 +1032,17 @@
       state.waveBusy=true;ui.fetch.disabled=true;
       try{
         status('Starting Wave session (read-only)…');
+        const waveStart=performance.now();
         const session=await warmWaveSession();
+        const sessionMs=Math.round(performance.now()-waveStart);
         status('Fetching BWU2 Wave data… ('+session+')');
         // Exactly one GraphQL CSV fetch: no blind retries or authentication bypass.
-        const d=await wave();
+        const csvStart=performance.now(),d=await wave();
+        const csvMs=Math.round(performance.now()-csvStart);
         if(typeof d.generateCsv!=='string')throw Error('Wave did not return CSV text.');
         setData(d.generateCsv,'Wave API (BWU2)',true);
+        simDiag.waveSessionMs=sessionMs;simDiag.waveCsvMs=csvMs;
+        emitReadRates('titles',titleLane,'wave-loaded');
       }catch(e){
         status('Wave startup failed: '+(e.message||e)+'. If Wave needs interactive SSO, open Wave normally and retry. No automatic retries.',true);
       }finally{state.waveBusy=false;ui.fetch.disabled=false;}
@@ -1259,9 +1317,12 @@
       }).finally(()=>{state.active=null;state.busy=false;render();if(state.idScan?.started&&!state.idScan.done)resumeIdentityScan();else warmTitles(state.data);});
     }
     function render(){
+      const renderingAt=performance.now();let readyGroups=0;
+      try{
       hidePreview();ui.results.replaceChildren();
       if(!state.data){ui.stats.textContent='Fetch BWU2 from Wave or load an ISS CSV.';closeInspector();return;}
       const groups=filteredGroups();updateAutoProgress(groups.length);
+      readyGroups=groups.filter(g=>g.tickets.every(t=>g.titles?.has(t.id))).length;
       const wrap=mk('div',null,'dr-grid'),table=mk('table',null,'dr-compact');
       const head=mk('tr');for(const label of ['Product / workflow','Oldest · KEEP','Newer','Comparison / status','Inspect & actions'])head.append(mk('th',label));
       table.append(head);
@@ -1313,6 +1374,7 @@
         row.append(product,oldest,newer,evidence,actions);table.append(row);
       }
       wrap.append(table);ui.results.append(wrap);
+      }finally{noteRender(performance.now()-renderingAt,readyGroups);}
     }
     function updateAutoProgress(displayed){
       if(!state.data)return;
@@ -1341,7 +1403,13 @@
     }
     function setData(csv,source,verified){
       if(state.busy)throw Error('Cannot load data during a SIM write.');
-      const data=parseWave(csv);hidePreview();closeInspector();previewCache.clear();titleQueue.length=0;queuedTitles.clear();titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
+      const parseStart=performance.now(),data=parseWave(csv);
+      const parseMs=Math.round(performance.now()-parseStart);
+      hidePreview();closeInspector();previewCache.clear();titleQueue.length=0;queuedTitles.clear();
+      simDiag={waveSessionMs:0,waveCsvMs:0,waveParseMs:parseMs,firstGroupReadyMs:null,titleRunStart:performance.now(),
+        uiRenderCount:0,uiRenderTotalMs:0,uiRenderPeakMs:0,uiRenderRecent:[],
+        httpStatuses:{},httpGraphqlErrors:0,httpNetworkErrors:0,httpTimeouts:0};
+      titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
       data.verified=!!verified;data.source=source;state.data=data;
       status('Loaded '+source+'. SIM titles/owners checked automatically for candidates. Existing ISS one-click closures unchanged; other ISS-owned workflows allow two-step manual review.');
       updateFilters();render();warmTitles(data);
