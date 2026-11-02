@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.21
+// @version      0.3.23
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -22,7 +22,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.21';
+  const VERSION = '0.3.23';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -36,7 +36,7 @@
   const DOM_DEBOUNCE_MS = 120;
   const RIVER_WORKFLOW_Q0 = '3654ec14-7232-4f65-84c3-87927cdb4d0c';
   const RIVER_WORKFLOW_ID = '0dbb253e-c43a-4a8b-a316-e32b8ab9be21'; // Australia
-  const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order';
+  const RELEVANT_CAPTURE_SELECTOR = '#table-purchase-order-item,#table-purchase-order,#table-inventory';
 
   const { clean } = globalThis.BWU2Fleet;
   const norm = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -210,6 +210,44 @@
       });
     }
     return { state: rows.length ? 'available' : 'empty', rows };
+  }
+
+  // Fallback is deliberately exact: never combine quantities from different ASIN/FNSKU rows.
+  function matchingInventoryQuantity(root, identity) {
+    const table = root.querySelector('#table-inventory');
+    if (!table) return { state: 'pending' };
+    const headers = tableHeaders(table);
+    const asinCol = columnIndex(headers, 'asin');
+    const fnskuCol = columnIndex(headers, 'fnsku');
+    const quantityCol = columnIndex(headers, 'quantity');
+    if (asinCol < 0 || fnskuCol < 0 || quantityCol < 0) return { state: 'unavailable', reason: 'inventory-columns-missing' };
+    const asin = code(identity.asin);
+    const fnsku = code(identity.fnsku);
+    if (!asin || !fnsku) return { state: 'unavailable', reason: 'asin-fnsku-not-known' };
+    let total = 0;
+    let matches = 0;
+    for (const row of table.querySelectorAll('tbody tr')) {
+      const cells = [...row.children].filter(cell => cell.matches?.('td,th'));
+      if (code(cells[asinCol]?.textContent) !== asin || code(cells[fnskuCol]?.textContent) !== fnsku) continue;
+      const quantity = numericCell(cells[quantityCol]?.textContent);
+      if (quantity === null || !Number.isSafeInteger(quantity)) return { state: 'unavailable', reason: 'invalid-inventory-quantity' };
+      total += quantity;
+      matches++;
+    }
+    return matches && Number.isSafeInteger(total) && total > 0
+      ? { state: 'available', quantity: total, matches }
+      : { state: 'unavailable', reason: matches ? 'zero-inventory' : 'no-matching-inventory' };
+  }
+
+  function applyInventoryFallback(capture, root = document) {
+    if (capture.state.quantity.state !== 'pending') return false;
+    // A PO quantity always takes precedence; inventory fallback only after the PO checks finish.
+    const result = matchingInventoryQuantity(root, capture.identity || {});
+    if (result.state !== 'available') return false;
+    resolveField(capture.state, 'quantity', result.quantity, null);
+    capture.quantityMode = 'matching-inventory-total';
+    emit('capture.quantity.fallback', { source: 'inventory', matchedRows: result.matches, quantity: result.quantity });
+    return true;
   }
 
   function rowMatchStrength(row, identity) {
@@ -513,6 +551,14 @@
       if (poResult?.html) detailRoot = parseDocument(poResult.html);
       applyPoSelection(capture, itemRoot, detailRoot);
     }
+    if (capture.state.quantity.state === 'pending') {
+      applyInventoryFallback(capture);
+      if (capture.state.quantity.state === 'pending') {
+        const inventoryResult = await fetchSectionOnce(capture, 'inventory');
+        if (capture.done) return;
+        if (inventoryResult?.html) applyInventoryFallback(capture, parseDocument(inventoryResult.html));
+      }
+    }
     for (const field of unresolvedFields(capture.state)) resolveField(capture.state, field, null, field === 'quantity' ? null : 'N/A');
     finishCapture(capture);
   }
@@ -546,7 +592,7 @@
     cancelCoreCapture();
     activeCapture = capture;
     GM_setValue(KEY, null);
-    emit('capture.started', { fields: CAPTURE_FIELDS.length, quantitySource: 'latest-po-matching-line' });
+    emit('capture.started', { fields: CAPTURE_FIELDS.length, quantitySource: 'latest-po-line-then-matching-inventory' });
     refreshCaptureFromDom(capture);
     if (capture.done) return;
     const root = document.querySelector('#results-content') || document.body || document.documentElement;
@@ -760,6 +806,37 @@
     element.blur();
     await nextPaint(1);
     return clean(element.value) === clean(nextValue);
+  }
+
+  // RIVER title uses a different controlled field from the other Information W1 inputs.
+  // Browser editing commands exercise its edit path more closely than assigning .value.
+  // They are still scripted operations, not trusted physical keystrokes.
+  async function setTitleByBrowserEditing(element, value) {
+    if (!element || !visible(element) || controlDisabled(element) || element.readOnly) return false;
+    const title = String(value ?? '');
+    const editable = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+    if (!editable || typeof document.execCommand !== 'function') return setInformationValue(element, title);
+    element.focus({ preventScroll: true });
+    await nextPaint(1);
+    element.select();
+    const seeded = document.execCommand('insertText', false, 'a');
+    await nextPaint(1);
+    if (!seeded || element.value !== 'a') {
+      emit('automation.action', { step: 'information', action: 'title-browser-edit-unavailable' });
+      return setInformationValue(element, title);
+    }
+    element.select();
+    const inserted = document.execCommand('insertText', false, title);
+    await nextPaint(2);
+    if (!inserted || element.value !== title) {
+      emit('automation.action', { step: 'information', action: 'title-browser-edit-failed' });
+      return false;
+    }
+    element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    element.blur();
+    await nextPaint(2);
+    emit('automation.action', { step: 'information', action: 'title-browser-edit', acceptedInDom: element.value === title });
+    return element.value === title;
   }
 
   async function waitForInformationReady(values) {
@@ -1060,13 +1137,11 @@
           await new Promise(resolve => setTimeout(resolve, 500));
           if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
         }
-        if (!await setInformationValue(element, value)) throw new Error(`Information W1 ${fieldName} did not retain.`);
+        const retained = fieldName === 'title'
+          ? await setTitleByBrowserEditing(element, value)
+          : await setInformationValue(element, value);
+        if (!retained) throw new Error(`Information W1 ${fieldName} did not retain.`);
         if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
-        if (fieldName === 'title') {
-          if (!await setInformationValue(element, `${String(value ?? '')} `)) throw new Error('Information W1 title space nudge did not retain.');
-          if (generation !== riverGeneration || pageKind() !== 'information') return { wait: false };
-          emit('automation.action', { step: page, action: 'title-space-nudge' });
-        }
         filled++;
         emit('automation.action', { step: page, action: 'fill-field', field: fieldName, available: clean(value) !== 'N/A' });
       }
