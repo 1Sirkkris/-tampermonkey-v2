@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BWU2 SIM Duplicate Review
 // @namespace    bwu2.local.sim.duplicate-review.test
-// @version      0.3.22
+// @version      0.3.23
 // @description  ISS duplicate discovery with exact ASIN/RPI-set checks (order ignored); original one-click ISS and two-step manual closures preserved.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (function () {
     'use strict';
-    const VER='0.3.22', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
+    const VER='0.3.23', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
     const GRAPH='https://sim-ticketing-graphql-fleet.corp.amazon.com/graphql';
     const WAVE='https://wave.qubit.amazon.dev/api/graphql';
     const WAVE_PAGE='https://wave.qubit.amazon.dev/command-center/ISS';
@@ -112,18 +112,47 @@
       #bwu-dr-panel .dr-rpi-bad{color:#ffb9ad}
       #bwu-dr-panel .dr-rpi-wait{color:#fbd47b}
       #bwu-dr-preview .dr-preview-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:38vh;overflow-y:auto;padding:10px;background:#0d2033;border:1px solid #435d7a;border-radius:6px;line-height:1.45;user-select:text}
+
+      #bwu-dr-panel .dr-compact{width:100%;border-collapse:collapse;table-layout:auto;margin:12px 0}
+      #bwu-dr-panel .dr-compact th,#bwu-dr-panel .dr-compact td{padding:11px 9px;border-bottom:1px solid #39506a;text-align:left;vertical-align:middle}
+      #bwu-dr-panel .dr-compact th{color:#acc4df;font-size:12px;font-weight:600}
+      #bwu-dr-panel .dr-compact tr:hover td{background:#182f48}
+      #bwu-dr-panel .dr-compact .dr-asin{font-weight:700;font-size:13px;overflow-wrap:anywhere}
+      #bwu-dr-panel .dr-small{color:#abc3de;font-size:11px;line-height:1.5}
+      #bwu-dr-panel .dr-compact .dr-mini{padding:6px 9px;font-size:12px}
+      #bwu-dr-panel .dr-compact .dr-risk{color:#ffc882;font-size:12px;font-weight:700}
+      #bwu-dr-panel .dr-compact .dr-ok{color:#bbdecf;font-size:12px}
+      #bwu-dr-panel .dr-compact .dr-actions-cell{min-width:170px}
+      #bwu-dr-panel .dr-compact .dr-actions-cell button{padding:6px 9px;font-size:12px;margin:2px 3px 2px 0}
+      #bwu-dr-panel .dr-compact .dr-muted-button{font-size:11px;opacity:.78}
+      #bwu-dr-inspector{display:none;position:fixed;z-index:2147483555;right:max(3vw,18px);top:12vh;width:min(700px,calc(100vw - 36px));height:min(65vh,540px);border-radius:11px;border:1px solid #789ec3;background:#10243a;color:#eaf4ff;box-shadow:0 16px 50px #000c;overflow:hidden;flex-direction:column}
+      #bwu-dr-inspector .dr-insp-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #466482;gap:8px}
+      #bwu-dr-inspector .dr-insp-layout{display:grid;grid-template-columns:170px minmax(0,1fr);min-height:0;flex:1}
+      #bwu-dr-inspector .dr-insp-nav{overflow:auto;padding:8px;background:#1b324a;border-right:1px solid #466482}
+      #bwu-dr-inspector .dr-insp-detail{padding:14px;overflow:auto;overflow-wrap:anywhere;white-space:normal;min-width:0}
+      #bwu-dr-inspector .dr-insp-item{display:flex;gap:5px;align-items:center;margin:3px 0}
+      #bwu-dr-inspector .dr-insp-item button{flex:1;text-align:left;font-size:12px;padding:8px;border:1px solid transparent;background:transparent}
+      #bwu-dr-inspector .dr-insp-item button:hover,#bwu-dr-inspector .dr-insp-item button:focus-visible,#bwu-dr-inspector .dr-insp-item button.dr-insp-active{background:#305576;border:1px solid #6396c0}
+      #bwu-dr-inspector .dr-insp-item a{font-size:12px;padding:8px;display:inline-block;flex-shrink:0}
+      #bwu-dr-inspector .dr-insp-detail h3{font-size:14px;margin:6px 0}
+      #bwu-dr-inspector .dr-insp-body{white-space:pre-wrap;background:#0c1b2b;border:1px solid #405b78;border-radius:7px;padding:10px;line-height:1.5;font-size:12px;user-select:text}
+      #bwu-dr-inspector .dr-insp-label{font-size:11px;color:#abc3de;margin-bottom:8px}
+      #bwu-dr-inspector .dr-insp-risk{color:#ffbc86;font-weight:700;font-size:12px;padding:8px;border:1px solid #a97733;border-radius:6px;margin:8px 0}
+      #bwu-dr-inspector .dr-insp-close{padding:5px 9px}
+      @media(max-width:680px){#bwu-dr-panel .dr-compact{min-width:650px}#bwu-dr-inspector .dr-insp-layout{grid-template-columns:105px minmax(0,1fr)}#bwu-dr-inspector .dr-insp-nav{padding:4px}#bwu-dr-inspector .dr-insp-detail{padding:8px}}
     `;
     const style=document.createElement('style');style.textContent=CSS;(document.head||document.documentElement).appendChild(style);
     function mk(tag,text,cls){const n=document.createElement(tag);if(text!=null)n.textContent=String(text);if(cls)n.className=cls;return n;}
     function btn(text,cb){const n=mk('button',text);n.type='button';n.addEventListener('click',cb);return n;}
     const ui={launcher:btn('BWU2 Duplicate Review',()=>{
       ui.panel.style.display=ui.panel.style.display==='block'?'none':'block';
-      if(ui.panel.style.display!=='block')hidePreview();
+      if(ui.panel.style.display!=='block'){hidePreview();closeInspector();}
       // Load only when the user opens the review. Never issue Wave calls on unrelated SIM pages.
       else if(!state.data&&!state.waveBusy&&!state.busy)void fetchWaveData();
       else if(state.data&&!state.busy){if(state.idScan?.started&&!state.idScan.done)resumeIdentityScan();else warmTitles(state.data);}
     }),version:mk('span','DUP v'+VER+' · READY'),panel:mk('section'),preview:mk('div')};
     ui.launcher.id='bwu-dr-launch';ui.version.id='bwu-dr-version';ui.panel.id='bwu-dr-panel';ui.preview.id='bwu-dr-preview';ui.preview.setAttribute('role','tooltip');
+    ui.inspector=mk('section');ui.inspector.id='bwu-dr-inspector';ui.inspector.setAttribute('role','dialog');ui.inspector.setAttribute('aria-label','Read-only SIM ticket inspector');
     const state={data:null,busy:false,attempted:new Set(),active:null,waveBusy:false,idScan:null};
     // Hover previews are informational only. Cached data is NEVER used for closure preflight.
     const previewCache=new Map(),previewReads=new Map();
@@ -199,6 +228,8 @@
       if(ids?.shipment)line('Shipment',ids.shipment);
       if(ids?.secondary)line('Request ref',ids.secondary);
       if(ids?.po)line('PO',ids.po);
+      if(ids?.fnsku)line('FNSKU',ids.fnsku);
+      if(ids?.fcsku)line('FCSKU',ids.fcsku);
       if(ids?.rpiScoped){const match=rpiMatchFor(group,ticket);if(match)line('RPI comparison',match.text);line('RPIs',ids.rpiKey?ids.rpis.join(', '):'Missing or unreadable — cannot match');}
       const msg=mk('div',message,'dr-preview-message'+(warning?' dr-preview-warning':''));box.append(msg);
     }
@@ -284,11 +315,12 @@
       const secondary=relabel?relabel[2].toUpperCase():'';
       const po=field(/(?:^|\n)\s*(?:PO|Purchase\s+Order(?:\s+Number)?)\s*[:#-]\s*([A-Z0-9]{5,30})/im);
       const caseId=field(/\bCase\s*ID\s*[:#-]\s*([A-Z0-9]{6,30})/i);
-      const fnsku=field(/\bFNSKU\s*[:#-]\s*(X[0-9A-Z]{6,20})/i);
+      const fnsku=field(/(?:^|\n)\s*FNSKU\s*[:#-]\s*([A-Z0-9]{8,20})/im);
+      const fcsku=field(/(?:^|\n)\s*FCSKU\s*[:#-]\s*([A-Z0-9]{8,20})/im);
       const tracking=field(/\bTracking(?:\s+Number)?\s*[:#-]\s*([A-Z0-9]{7,32})/i);
       const rpi=extractRpis(source);
       const rpiScoped=rpi.rpiPresent||/\bRPIs?\b|\bProblem\s+Receive\s+Liquidation\b/i.test([title,record?.ticket?.item,record?.issue?.extensions?.tt?.item].join(' '));
-      return {ean:distinct.length===1?distinct[0]:'',eanDisplay:distinct.length===1?(eans[0]||''):'',ambiguousEAN:distinct.length>1,shipment,secondary,po,caseId,fnsku,tracking,...rpi,rpiScoped,rpiAsin:rpiScoped?rpiAsin(record):''};
+      return {ean:distinct.length===1?distinct[0]:'',eanDisplay:distinct.length===1?(eans[0]||''):'',ambiguousEAN:distinct.length>1,shipment,secondary,po,caseId,fnsku,fcsku,tracking,...rpi,rpiScoped,rpiAsin:rpiScoped?rpiAsin(record):''};
     }
     function identityFor(t){const record=previewCache.get(t.id);return record?extractIdentifiers(record):null;}
     function isGenericCatalog(title,item){return /\bitem\s+not\s+in\s+catalog\b/i.test(clean(title)+' '+clean(item));}
@@ -302,7 +334,7 @@
         else if(A.rpiAsin!==B.rpiAsin)reasons.push('Different ASINs for RPI tickets — not duplicates.');
       }
       if(A.ambiguousEAN||B.ambiguousEAN)reasons.push('Multiple EAN/UPC values require manual investigation');
-      for(const [key,label] of [['ean','EAN/UPC'],['shipment','FBA shipment'],['secondary','Re-label reference'],['po','PO'],['caseId','Case ID'],['tracking','Tracking']]){
+      for(const [key,label] of [['ean','EAN/UPC'],['shipment','FBA shipment'],['secondary','Re-label reference'],['po','PO'],['caseId','Case ID'],['fnsku','FNSKU'],['fcsku','FCSKU'],['tracking','Tracking']]){
         if(A[key]&&B[key]&&A[key]!==B[key])reasons.push('Different '+label+' ('+A[key]+' vs '+B[key]+')');
       }
       return {A,B,reasons};
@@ -317,10 +349,41 @@
       }
       return true;
     }
+    // Explicit ASINs in SIM title/description and structured metadata trump
+    // Wave's general ASIN bucket. Different explicit products are never duplicates.
+    function simAsinEvidence(record){
+      const title=clean(record?.issue?.title),body=clean(record?.issue?.description);
+      const values=[];
+      const structured=clean(record?.issue?.extensions?.tt?.asin).toUpperCase();
+      if(/^[A-Z0-9]{10}$/.test(structured))values.push(structured);
+      const re=/(?:^|[\s\[(])ASIN\s*[:#-]?\s*([A-Z0-9]{10})(?=$|[\s\])},;])/gim;
+      for(const source of [title,body])for(const m of source.matchAll(re))values.push(m[1].toUpperCase());
+      return [...new Set(values)];
+    }
+    function explicitProductConflict(a,b){
+      const left=simAsinEvidence(a),right=simAsinEvidence(b);
+      if(left.length>1||right.length>1)return 'SIM ticket has conflicting ASIN fields.';
+      if(left.length&&right.length&&left[0]!==right[0])return 'Different SIM ASINs ('+left[0]+' vs '+right[0]+').';
+      return '';
+    }
+    function groupProductConflict(g){
+      const records=g.tickets.map(t=>previewCache.get(t.id));
+      if(records.some(x=>!x))return '';
+      // Every candidate pair must agree; a missing identifier cannot bridge
+      // two otherwise contradictory tickets in the same Wave bucket.
+      for(let i=0;i<records.length;i++)for(let j=i+1;j<records.length;j++){
+        const conflict=explicitProductConflict(records[i],records[j]);
+        if(conflict)return conflict;
+        const {reasons}=conflictIdentifiers(records[i],records[j]);
+        if(reasons.length)return reasons[0];
+      }
+      return '';
+    }
     // Ticket metadata must be reacquired for EACH closure preflight: all browser
     // caches are informational and cannot authorise a mutation.
     function identityVerdict(a,b,g,manual){
       const x=conflictIdentifiers(a,b),problems=[...x.reasons],warnings=[];
+      const productConflict=explicitProductConflict(a,b);if(productConflict)problems.push(productConflict);
       if(g.rpiKey&&(x.A.rpiKey!==g.rpiKey||x.B.rpiKey!==g.rpiKey||x.A.rpiAsin!==g.rpiAsin||x.B.rpiAsin!==g.rpiAsin))problems.push('ASIN/RPI set changed since discovery; reload candidates.');
       if((x.A.rpiScoped||x.B.rpiScoped)&&!x.reasons.length)warnings.push('Same ASIN and full RPI set confirmed ('+x.A.rpis.length+' codes; order ignored).');
       if(isRelabel(a.issue.title)||isRelabel(b.issue.title)){
@@ -337,6 +400,17 @@
         if(g.identKind==='asin'&&(lower(a.ticket.asin)!==lower(b.ticket.asin)||lower(a.ticket.asin)!==lower(g.identValue)))problems.push('Same Wave ASIN could not be verified.');
         if(g.identKind==='rpi'&&(x.A.rpiAsin+'|'+x.A.rpiKey!==g.identValue||x.B.rpiAsin+'|'+x.B.rpiKey!==g.identValue))problems.push('Same ASIN and full RPI set were not confirmed by fresh SIM reads.');
       }
+      if(!g.identifierGroup&&has(g.asin)){
+        for(const [label,record] of [['Oldest',a],['Newer',b]]){
+          const evidence=simAsinEvidence(record);
+          if(evidence.length&&evidence[0]!==clean(g.asin).toUpperCase())
+            problems.push(label+' SIM ASIN differs from Wave group ASIN.');
+        }
+      }
+      if(!manual&&Boolean(x.A.po)!==Boolean(x.B.po))
+        problems.push('PO present on only one ticket — manual review required.');
+      if(!manual&&(Boolean(x.A.fnsku)!==Boolean(x.B.fnsku)||Boolean(x.A.fcsku)!==Boolean(x.B.fcsku)))
+        problems.push('FNSKU/FCSKU present on only one ticket — manual review required.');
       if(!manual&&(!x.A.ean!==!x.B.ean)&&(!x.A.ambiguousEAN&&!x.B.ambiguousEAN))warnings.push('One EAN/UPC is missing; manual review recommended.');
       return {problems,warnings};
     }
@@ -521,12 +595,14 @@
     function stableView(g){
       const key=ignoreKey(g);const old=viewGroups.get(key);
       if(!old){viewGroups.set(key,g);return g;}
-      // Preserve result/progress objects across list redraws and title refreshes.
-      for(const f of ['outcomes','progress','runError','closureBlocked','closureBlockReason','requiresManualIdentifier']){
-        if(f==='closureBlocked'||f==='closureBlockReason'||f==='requiresManualIdentifier')continue;
-        if(old[f]!==undefined)g[f]=old[f];
+      // Keep the SAME live object for the same exact ticket membership. During
+      // preflight, the UI and task must observe one progress/outcome state.
+      // Refresh only discovery metadata; never replace active result or UI refs.
+      for(const field of Object.keys(g)){
+        if(['view','outcomes','progress','runError'].includes(field))continue;
+        old[field]=g[field];
       }
-      viewGroups.set(key,g);return g;
+      return old;
     }
     function filteredGroups(){
       if(!state.data)return [];
@@ -565,6 +641,16 @@
         g.closureBlocked=part.closureBlocked||tickets[0].id!==part.oldest.id;
         g.closureBlockReason=g.closureBlocked?'Original oldest excluded by filter/stronger identifier matching':'';
         if(!isIgnored(g))groups.push(stableView(g));
+      }
+      // Keep processing results visible after comment/closure invalidates the
+      // informational cache. Do not offer a new write for attempted ticket IDs.
+      const listed=new Set(groups.map(ignoreKey));
+      for(const old of viewGroups.values()){
+        if(!old.outcomes?.size||isIgnored(old)||!groupVisible(old))continue;
+        const key=ignoreKey(old);
+        if(listed.has(key))continue;
+        if(!old.tickets.every(t=>state.data.entries.some(x=>x.id===t.id)))continue;
+        groups.push(old);listed.add(key);
       }
       return groups;
     }
@@ -617,7 +703,7 @@
     }
     function observeRead(stage,lane,elapsed,ok,error){
       if(!lane)return;
-      const throttled=/(?:\bHTTP\s+(?:429|503)\b|throttl|rate.limit)/i.test(clean(error?.message));
+      const throttled=/(?:\bHTTP\s+(?:429|503)\b|throttl|rate.limit|too many requests|quota)/i.test(clean(error?.message));
       lane.completed++;if(!ok)lane.failed++;if(throttled)lane.throttled++;
       lane.recent.push(elapsed);if(lane.recent.length>40)lane.recent.shift();
       lane.window.push({elapsed,ok,throttled});
@@ -774,6 +860,84 @@
       // No click action: never interfere with the separate Resolve button.
       parent.append(trigger);
     }
+    // Hover or click one Inspect button per group. Ticket navigation is immediate;
+    // only its selected ticket's overview is loaded (no speculative fan-out).
+    let inspectorGroup=null,inspectorToken=0,inspectorPinned=false,inspectorHideTimer=0;
+    function closeInspector(){
+      clearTimeout(inspectorHideTimer);inspectorHideTimer=0;
+      inspectorPinned=false;inspectorGroup=null;inspectorToken++;
+      ui.inspector.style.display='none';
+    }
+    function queueInspectorHide(){
+      clearTimeout(inspectorHideTimer);
+      if(!inspectorPinned)inspectorHideTimer=setTimeout(closeInspector,400);
+    }
+    function inspectorTicket(g,t,number,button){
+      const token=++inspectorToken;
+      if(inspectorGroup!==g)return;
+      ui.inspector.querySelectorAll('.dr-insp-nav button').forEach(b=>b.classList.toggle('dr-insp-active',b===button));
+      const doc=ui.inspector.querySelector('.dr-insp-detail');
+      if(!doc)return;
+      doc.replaceChildren();
+      doc.append(mk('div',(number===0?'OLDEST · KEEP OPEN':'NEWER #'+number+' · READ-ONLY'),'dr-insp-label'));
+      const link=mk('a',t.id);link.href=SIM+t.id;link.target='_blank';link.rel='noopener noreferrer';doc.append(link);
+      const renderRecord=(record,detail)=>{
+        if(token!==inspectorToken||inspectorGroup!==g||!doc.isConnected)return;
+        doc.replaceChildren();
+        doc.append(mk('div',(number===0?'OLDEST · KEEP OPEN':'NEWER #'+number+' · READ-ONLY'),'dr-insp-label'));
+        const a=mk('a',t.id);a.href=SIM+t.id;a.target='_blank';a.rel='noopener noreferrer';doc.append(a);
+        if(!record){doc.append(mk('div',detail,'dr-insp-risk'));return;}
+        const issue=record.issue,fields=issue.extensions?.tt||{};
+        doc.append(mk('h3',clean(issue.title)||'SIM title unavailable'));
+        doc.append(mk('div','Owner: '+(clean(fields.assignedGroup)||'UNVERIFIED')+' · Created: '+dateOnly(t.created),'dr-insp-label'));
+        const evidence=simAsinEvidence(record);
+        const productIssue=evidence.length>1?'Conflicting ASIN fields in this ticket':evidence.length&&g.asin&&evidence[0]!==clean(g.asin).toUpperCase()?'SIM ASIN '+evidence[0]+' differs from Wave ASIN '+g.asin:'';
+        if(productIssue)doc.append(mk('div',productIssue+' — never bulk resolve','dr-insp-risk'));
+        const id=extractIdentifiers(record);
+        const details=['Wave ASIN: '+(g.asin||'—'),'SIM ASIN: '+(evidence.join(', ')||'not confirmed'),
+          'PO: '+(id.po||'—'),'FNSKU: '+(id.fnsku||'—'),'FCSKU: '+(id.fcsku||'—'),'EAN/UPC: '+(id.eanDisplay||'—'),
+          'Shipment: '+(id.shipment||'—'), 'RPI codes: '+(id.rpis?.length||0)];
+        doc.append(mk('div',details.join(' · '),'dr-insp-label'));
+        if(id.rpiScoped){const compare=rpiMatchFor(g,t);if(compare)doc.append(mk('div',compare.text,compare.cls==='dr-rpi-ok'?'dr-ok':'dr-insp-risk'));}
+        doc.append(mk('div','Full SIM description:','dr-insp-label'));
+        doc.append(mk('div',clean(issue.description)||'No description returned','dr-insp-body'));
+      };
+      const cached=previewCache.get(t.id);
+      if(cached){renderRecord(cached);return;}
+      if(state.busy){renderRecord(null,'Read-only preview paused while resolving tickets');return;}
+      doc.append(mk('div','Loading SIM overview…','dr-insp-label'));
+      // Shared request cache deduplicates title loading and inspector hover reads.
+      void loadReadOnly(t).then(record=>{if(token!==inspectorToken||inspectorGroup!==g)return;setTitle(g,t,record);renderRecord(record);})
+        .catch(e=>renderRecord(null,'SIM overview unavailable: '+(e.message||e)));
+    }
+    function openInspector(g,pin=false){
+      clearTimeout(inspectorHideTimer);
+      if(inspectorGroup===g&&pin&&inspectorPinned){closeInspector();return;}
+      inspectorPinned=pin||inspectorPinned&&inspectorGroup===g;
+      if(inspectorGroup===g&&ui.inspector.style.display==='flex')return;
+      inspectorGroup=g;
+      ui.inspector.replaceChildren();
+      const head=mk('div',null,'dr-insp-head');
+      const label=mk('strong',(g.identifierGroup?g.identifierLabel:g.asin?'ASIN '+g.asin:'Exact SIM title')+' · '+g.tickets.length+' tickets');
+      const close=btn('Close',closeInspector);close.className='dr-insp-close';
+      head.append(label,close);
+      const layout=mk('div',null,'dr-insp-layout'),nav=mk('nav',null,'dr-insp-nav'),doc=mk('div',null,'dr-insp-detail');
+      const keep=mk('div','0 = oldest · protected','dr-insp-label');nav.append(keep);
+      for(let i=0;i<g.tickets.length;i++){
+        const t=g.tickets[i],row=mk('div',null,'dr-insp-item');
+        const trigger=btn(i===0?'0 · Oldest':'#'+i+' · Newer',()=>inspectorTicket(g,t,i,trigger));
+        trigger.title='Hover for full ticket overview';
+        trigger.addEventListener('mouseenter',()=>inspectorTicket(g,t,i,trigger));
+        trigger.addEventListener('focus',()=>inspectorTicket(g,t,i,trigger));
+        const a=mk('a','↗');a.href=SIM+t.id;a.target='_blank';a.rel='noopener noreferrer';a.title='Open SIM ticket '+t.id;
+        row.append(trigger,a);nav.append(row);
+      }
+      layout.append(nav,doc);ui.inspector.append(head,layout);ui.inspector.style.display='flex';
+      inspectorTicket(g,g.oldest,0,nav.querySelector('button'));
+    }
+    ui.inspector.addEventListener('mouseenter',()=>clearTimeout(inspectorHideTimer));
+    ui.inspector.addEventListener('mouseleave',queueInspectorHide);
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&inspectorGroup)closeInspector();});
     // Durable write-intent barrier survives refresh. Never replay an uncertain mutation.
     const MARK='BWU2_DR_ATTEMPT_';
     function stage(id){
@@ -924,6 +1088,7 @@
     function verifyPair(a,b,g){
       const problems=[],warnings=[];const older=a.ticket,newer=b.ticket;
       if(older.id===newer.id||!g.orderOk||older.ms===null||newer.ms===null||older.ms>=newer.ms)problems.push('Oldest/newer order cannot be verified.');
+      const productConflict=explicitProductConflict(a,b);if(productConflict)problems.push(productConflict);
       for(const [name,x] of [['Oldest',a],['Newer',b]]){
         if(x.owner!=='iss-bwu2')problems.push(name+' SIM group is '+(x.owner||'UNVERIFIED')+' (required ISS-BWU2).');
         const item=lower(x.issue.extensions?.tt?.item);if(has(item)&&item!==lower(g.item))problems.push(name+' SIM workflow disagrees with Wave.');
@@ -951,6 +1116,7 @@
     function verifyManualPair(a,b,g){
       const problems=[],warnings=[],older=a.ticket,newer=b.ticket;
       if(older.id===newer.id||!g.orderOk||older.ms===null||newer.ms===null||older.ms>=newer.ms)problems.push('Oldest/newer ticket order cannot be verified.');
+      const productConflict=explicitProductConflict(a,b);if(productConflict)problems.push(productConflict);
       for(const [name,x] of [['Oldest',a],['Newer',b]]){
         if(x.owner!=='iss-bwu2')problems.push(name+' is assigned to '+(x.owner||'UNVERIFIED')+'; manual resolution requires ISS-BWU2 ownership.');
         if(has(x.issue.extensions?.tt?.closureCode))problems.push(name+' already has a closure code.');
@@ -1006,6 +1172,8 @@
     function runGroup(g,manual=false){
       if(!state.data?.verified||state.busy||!g.orderOk||g.closureBlocked||isIgnored(g)||(!manual&&!eligibleForClosure(g))||!groupVisible(g))return;
       if(g.tickets.some(t=>titleExcluded(g.titles?.get(t.id)||'')))return;
+      if(groupProductConflict(g))return; // Known different SIM ASINs cannot start closure.
+      if(!manual&&g.tickets.every(t=>g.titles?.has(t.id))&&new Set(g.tickets.map(t=>titleKey(g.titles.get(t.id)))).size>1)return; // Different titles require manual confirmation.
       const master=g.oldest,candidates=g.tickets.slice(1).filter(t=>!attempted(t.id));
       if(!candidates.length)return;
       const loaded=state.data;
@@ -1028,18 +1196,26 @@
       const task=(async()=>{
         const passed=[],manualReview=[];let skipped=0,done=0,active=null;
         const oldest=await readTicket(master);
+        previewCache.set(master.id,oldest); // Display-only; mutations always use fresh reads.
         g.simTitle=clean(oldest.issue.title)||g.item;
         setTitle(g,master,oldest);
         for(const t of candidates){
           if(run.stopRequested)break;
           try{
             const newer=await readTicket(t);
+            previewCache.set(t.id,newer); // Show fresh contradictions to the reviewer.
             setTitle(g,t,newer);
             const verdict=manual?verifyManualPair(oldest,newer,g):verifyPair(oldest,newer,g);
             if(verdict.ok){passed.push(t);if(manual)manualReview.push({ticket:t,title:clean(newer.issue.title),owner:newer.owner,warnings:verdict.warnings});update(t,verdict.warnings.length?'Verified · '+verdict.warnings.join('; '):'Verified · ready');}
             else{skipped++;update(t,'SKIPPED · '+verdict.problems.join('; '),'dr-error');}
           }catch(e){skipped++;update(t,'SKIPPED · '+(e.message||String(e)),'dr-error');}
           info('Verified '+passed.length+' / '+candidates.length+' · skipped '+skipped);
+        }
+        // Do not write a partial group when any newer ticket fails fresh checks.
+        if(skipped){
+          for(const t of passed)update(t,'NOT STARTED · group verification inconsistent','dr-error');
+          info('BLOCKED · '+skipped+' newer tickets failed checks · no writes started',true);
+          return;
         }
         if(loaded!==state.data)throw Error('Wave data changed. No writes started.');
         if(run.stopRequested){for(const t of passed)update(t,'NOT STARTED · cancelled');info('CANCELLED before writes · oldest untouched');return;}
@@ -1084,73 +1260,71 @@
     }
     function render(){
       hidePreview();ui.results.replaceChildren();
-      if(!state.data){ui.stats.textContent='Fetch BWU2 from Wave or load an ISS CSV.';return;}
-      const groups=filteredGroups();
-      updateAutoProgress(groups.length);
+      if(!state.data){ui.stats.textContent='Fetch BWU2 from Wave or load an ISS CSV.';closeInspector();return;}
+      const groups=filteredGroups();updateAutoProgress(groups.length);
+      const wrap=mk('div',null,'dr-grid'),table=mk('table',null,'dr-compact');
+      const head=mk('tr');for(const label of ['Product / workflow','Oldest · KEEP','Newer','Comparison / status','Inspect & actions'])head.append(mk('th',label));
+      table.append(head);
       for(const g of groups){
-        const box=mk('div',null,'dr-group');g.view={rows:new Map(),titles:new Map(),owners:new Map(),rpis:new Map(),progress:null,warning:null};
-        const head=mk('div',null,'dr-head'),name=mk('strong',g.identifierGroup?g.identifierLabel:g.asin?'ASIN '+g.asin:'Exact SIM title match (Wave ASIN missing)'),count=mk('span',g.tickets.length+' tickets · '+Math.max(0,g.tickets.length-1)+' newer','dr-count');
-        head.append(name,count);box.append(head);
-        box.append(mk('div',g.identifierGroup?'Wave types: '+g.waveTypes.join(' / '):'Type: '+g.item,'dr-meta'));
-        if(g.rpiKey)box.append(mk('div','Same ASIN · identical '+g.rpiKey.split(',').length+' RPIs (order ignored): '+g.rpiKey.split(',').join(', '),'dr-meta dr-identifier'));
-        if(g.identifierGroup)box.append(mk('div','Shared identifier, not proof of the same issue · two-step manual review only','dr-identifier'));
-        const shipmentWarning=mk('div','', 'dr-note');g.view.warning=shipmentWarning;box.append(shipmentWarning);
-        box.append(mk('div',eligibleForClosure(g)&&!g.closureBlocked?'ISS-BWU2 closure workflow · live ownership checked before every write':'MANUAL REVIEW ONLY · 2-step verification and confirmation required for this Wave workflow/blank ASIN'+(g.closureBlockReason?' · '+g.closureBlockReason:''),'dr-meta'+(eligibleForClosure(g)&&!g.closureBlocked?'':' dr-review-only')));
-        if(!g.orderOk)box.append(mk('div','Oldest ticket cannot be uniquely established — resolving disabled','dr-note'));
-        if(!has(g.bin)||g.bin==='VARIES')box.append(mk('div',g.bin==='VARIES'?'Different bins · informational':'Bin not supplied · informational','dr-note'));
-        const grid=mk('div',null,'dr-grid'),table=mk('table'),hdr=mk('tr');
-        for(const label of ['Ticket','Created','SIM Ticket Title','Action / Result'])hdr.append(mk('th',label));table.append(hdr);
-        for(const t of g.tickets){
-          const row=mk('tr'),cell=mk('td'),a=mk('a',t.id.slice(0,8)+'…');
-          a.href=SIM+t.id;a.target='_blank';a.rel='noopener noreferrer';a.title=t.id;
-          const ticketCell=mk('span',null,'dr-ticket');ticketCell.append(a);addPreviewTrigger(ticketCell,t,g);cell.append(ticketCell);
-          const titleCell=mk('td'),title=mk('div',g.titles?.get(t.id)||g.titleFailures?.get(t.id)||'Checking SIM title…','dr-ticket-title'+(g.titles?.has(t.id)?'':' dr-title-wait'));
-          const owner=mk('div',previewCache.has(t.id)?'SIM group: '+(clean(previewCache.get(t.id).issue?.extensions?.tt?.assignedGroup)||'UNVERIFIED'):'SIM group: awaiting read','dr-owner');
-          title.title='Hover to view full SIM ticket description';title.style.cursor='help';title.addEventListener('mouseenter',()=>showPreview(title,t,g));title.addEventListener('mouseleave',hidePreview);
-          const rpiIndicator=mk('div','','dr-rpi-match');
-          titleCell.append(title,owner,rpiIndicator);g.view.titles.set(t.id,title);g.view.owners.set(t.id,owner);g.view.rpis.set(t.id,rpiIndicator);
-          row.append(cell,mk('td',dateOnly(t.created)),titleCell);
-          const outcome=mk('td');
-          if(t.id===g.oldest.id){outcome.textContent='KEEP OPEN · OLDEST';outcome.className='dr-keep';}
-          else if(stage(t.id)==='verified'){outcome.textContent='VERIFIED RESOLVED';outcome.className='dr-good';}
-          else if(g.outcomes?.has(t.id)){
-            const result=g.outcomes.get(t.id);outcome.textContent=result.text;outcome.className=result.kind||'';
-          }
-          else if(attempted(t.id)){outcome.textContent='PREVIOUS ATTEMPT · check SIM';outcome.className='dr-error';}
-          else{outcome.textContent=eligibleForClosure(g)&&!g.closureBlocked?'Candidate · verify on Resolve':'Manual candidate · 2-step review';outcome.className=eligibleForClosure(g)&&!g.closureBlocked?'dr-pending':'dr-review-only';}
-          g.view.rows.set(t.id,outcome);row.append(outcome);table.append(row);
-        }
-        grid.append(table);box.append(grid);
-        updateShipmentWarning(g);
-        updateRpiDisplays(g);
-        const actions=mk('div',null,'dr-group-actions');
-        const pending=g.tickets.slice(1).filter(t=>!attempted(t.id)).length;
-        if(g.orderOk&&state.data.verified&&pending&&!g.closureBlocked){
-          if(eligibleForClosure(g)){
-            const b=btn('Resolve '+pending+' newer '+(pending===1?'ticket':'tickets')+' + comment',()=>runGroup(g));
-            b.className='dr-primary';b.disabled=state.busy;actions.append(b);
+        g.view={rows:new Map(),titles:new Map(),owners:new Map(),rpis:new Map(),progress:null,warning:null};
+        const row=mk('tr');
+        const product=mk('td'),primary=mk('div',g.identifierGroup?g.identifierLabel:g.asin||'Exact SIM title match','dr-asin');
+        product.append(primary,mk('div',g.item+(g.identifierGroup?' · '+g.cat:''),'dr-small'));
+        if(g.rpiKey)product.append(mk('div',g.rpiKey.split(',').length+' identical RPIs (order independent)','dr-small'));
+        const oldest=mk('td'),keep=mk('a',g.oldest.id.slice(0,8)+'…');
+        keep.href=SIM+g.oldest.id;keep.target='_blank';keep.rel='noopener noreferrer';keep.title=g.oldest.id;
+        oldest.append(keep,mk('div','Protected original · '+dateOnly(g.oldest.created),'dr-small'));
+        const newer=mk('td');
+        const pend=g.tickets.slice(1).filter(t=>!attempted(t.id));
+        newer.append(mk('strong',String(pend.length)+' newer'));
+        const completed=g.tickets.slice(1).filter(t=>stage(t.id)==='verified').length;
+        if(completed)newer.append(mk('div',completed+' already resolved','dr-small'));
+        const evidence=mk('td');
+        const conflict=groupProductConflict(g);
+        const titles=g.tickets.map(t=>clean(g.titles?.get(t.id)));
+        const differs=titles.every(Boolean)&&new Set(titles).size>1;
+        const waiting=g.tickets.some(t=>!g.titles?.has(t.id));
+        const unsafe=!!conflict||!g.orderOk||!!g.closureBlocked;
+        const finished=g.tickets.slice(1).every(t=>stage(t.id)==='verified');
+        const allAttempted=g.tickets.slice(1).every(t=>attempted(t.id));
+        const health=mk('div',finished?'COMPLETE · all newer tickets verified resolved':allAttempted?'ATTEMPTED · inspect SIM before retry':conflict?'BLOCKED · '+conflict:!g.orderOk?'Original ordering uncertain':g.closureBlocked?'Blocked · '+(g.closureBlockReason||'manual investigation required'):waiting?'Loading SIM ticket overviews…':differs?'SIM titles differ · inspect':g.identifierGroup?'Matching identifier · manual review':'Candidate · inspect before resolution',unsafe||differs||allAttempted?'dr-risk':'dr-ok');
+        evidence.append(health);
+        const outcomes=g.tickets.slice(1).map(t=>g.outcomes?.get(t.id)?.text).filter(Boolean);
+        if(outcomes.length)evidence.append(mk('div',outcomes.length+' ticket updates · inspect individual tickets','dr-small'));
+        const actions=mk('td',null,'dr-actions-cell');
+        const inspect=btn('Inspect '+g.tickets.length,()=>openInspector(g,true));inspect.className='dr-mini';
+        inspect.title='Hover to review oldest and every newer SIM ticket';
+        inspect.addEventListener('mouseenter',()=>openInspector(g));inspect.addEventListener('mouseleave',queueInspectorHide);
+        inspect.addEventListener('focus',()=>openInspector(g));actions.append(inspect);
+        if(g.orderOk&&state.data.verified&&pend.length&&!g.closureBlocked&&!conflict){
+          if(eligibleForClosure(g)&&!differs){
+            const b=btn('Resolve '+pend.length,()=>runGroup(g));b.className='dr-primary';b.title='Fresh SIM verification before any comment or closure';b.disabled=state.busy||waiting;actions.append(b);
           }else{
-            const b=btn('Manual Resolve… (2-step)',()=>runGroup(g,true));
-            b.className='dr-manual';b.disabled=state.busy;actions.append(b);
+            const b=btn('Manual review',()=>runGroup(g,true));b.className='dr-manual';b.disabled=state.busy||waiting;actions.append(b);
           }
         }
+        const ignore=btn('Ignore',()=>ignoreGroup(g));ignore.className='dr-muted-button';ignore.disabled=state.busy;actions.append(ignore);
         if(state.active?.group===g){
           const stop=btn(state.active.stopRequested?'Stopping…':state.active.phase==='checking'?'Cancel checks':state.active.phase==='confirming'?'Cancel manual review':'Stop after current',()=>{
-            if(state.active?.group!==g)return;
-            state.active.stopRequested=true;g.progress='Stop requested · will not start another write';render();
+            if(state.active?.group!==g)return;state.active.stopRequested=true;g.progress='Stop requested · will not start another write';render();
           });stop.disabled=state.active.stopRequested;actions.append(stop);
         }
-        const dismiss=btn('Ignore group',()=>ignoreGroup(g));dismiss.className='dr-muted-button';dismiss.disabled=state.busy;actions.append(dismiss);
-        const message=mk('span',g.progress||'','dr-progress'+(g.runError?' dr-error':''));g.view.progress=message;actions.append(message);
-        box.append(actions);ui.results.append(box);
+        const progress=mk('div',g.progress||'','dr-small'+(g.runError?' dr-error':''));g.view.progress=progress;actions.append(progress);
+        row.append(product,oldest,newer,evidence,actions);table.append(row);
       }
+      wrap.append(table);ui.results.append(wrap);
     }
     function updateAutoProgress(displayed){
       if(!state.data)return;
       const p=autoTitleProgress();
       const ready=displayed===undefined?filteredGroups().length:displayed;
       ui.stats.textContent=state.data.total+' Wave rows · '+state.data.excluded+' BWU2-ICQA type excluded · '+ready+' candidate groups after title filters · '+state.data.fallback+' blank-ASIN rows';
-      if(ui.autoProgress)ui.autoProgress.textContent=p.done<p.total?'Checking SIM titles automatically: '+p.done+'/'+p.total+' tickets · adaptive '+titleLane.limit+'/'+titleLane.max+' target'+(p.failed?' · '+p.failed+' unavailable':'') : 'SIM title checks: '+p.done+'/'+p.total+' completed'+(p.failed?' · '+p.failed+' unavailable':'');
+      const networkSeconds=Math.max(.001,(performance.now()-titleLane.started)/1000);
+      const rate=(titleLane.completed/networkSeconds).toFixed(1);
+      const durations=titleLane.recent.slice().sort((a,b)=>a-b);
+      const p95=durations.length?Math.round(durations[Math.ceil(durations.length*.95)-1]):0;
+      const metrics=' · '+rate+' network reads/s · p95 '+p95+'ms · '+titleWorkers+' active / '+titleLane.limit+' target';
+      if(ui.autoProgress)ui.autoProgress.textContent=p.done<p.total?'Checking SIM titles: '+p.done+'/'+p.total+' tickets'+metrics+(p.failed?' · '+p.failed+' unavailable':'') : 'SIM title checks: '+p.done+'/'+p.total+' completed'+metrics+(p.failed?' · '+p.failed+' unavailable':'');
     }
     function updateIgnoredUI(){
       if(!ui.ignoredList)return;
@@ -1167,7 +1341,7 @@
     }
     function setData(csv,source,verified){
       if(state.busy)throw Error('Cannot load data during a SIM write.');
-      const data=parseWave(csv);hidePreview();previewCache.clear();titleQueue.length=0;queuedTitles.clear();titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
+      const data=parseWave(csv);hidePreview();closeInspector();previewCache.clear();titleQueue.length=0;queuedTitles.clear();titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
       data.verified=!!verified;data.source=source;state.data=data;
       status('Loaded '+source+'. SIM titles/owners checked automatically for candidates. Existing ISS one-click closures unchanged; other ISS-owned workflows allow two-step manual review.');
       updateFilters();render();warmTitles(data);
@@ -1252,7 +1426,7 @@
     updateIgnoredUI();
     ui.message=mk('div','Existing ISS work: one-click comments and closures only after fresh SIM verification. Other Wave workflows: two-step manual review; live ISS ownership required.','dr-status');
     ui.stats=mk('div','', 'dr-status');ui.autoProgress=mk('div','','dr-auto-progress');ui.identityStatus=mk('div','Optional barcode/identifier discovery: press Scan to compare tickets across different titles.','dr-id-scan');ui.results=mk('div');
-    ui.panel.append(close,heading,mk('div','Wave duplicate discovery · 12 filter categories · Advanced optional. BWU2-ICQA type excluded. Other SIM owners visible for review; live ISS ownership still required for manual resolution.','dr-note'),toolbar,ui.filterPane,ui.message,ui.stats,ui.autoProgress,ui.identityStatus,ui.results);
+    ui.panel.append(close,heading,mk('div','Wave duplicate discovery · 12 filter categories · Advanced optional. BWU2-ICQA type excluded. Other SIM owners visible for review; live ISS ownership still required for manual resolution.','dr-note'),toolbar,ui.filterPane,ui.message,ui.stats,ui.autoProgress,ui.identityStatus,ui.results,ui.inspector);
     function init(){mount();if(!document.documentElement)return;observer=new MutationObserver(()=>mount());
       observer.observe(document.documentElement,{childList:true});
       if(document.body){watchedBody=document.body;observer.observe(watchedBody,{childList:true});}
