@@ -2,7 +2,7 @@
 // @name         v2 CORE v0.1.11 BWU2 Observability Core
 // @name:en      v2 CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.42
+// @version      0.1.43
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -186,7 +186,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.42';
+  const VERSION = '0.1.43';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -2196,6 +2196,51 @@
     }, true);
   }
 
+  // SIM Duplicate Review emits bounded, read-only aggregate measurements.
+  // This listener requires no extra HTTP requests and records no ticket contents.
+  let simDuplicateMonitorReady = false;
+  function recordSimDuplicateRate(data) {
+    if (!data || data.script !== 'SIM_DUPLICATE_REVIEW' || data.readOnly !== true) return false;
+    if (!['titles', 'identifiers'].includes(data.stage)) return false;
+    const integer = (key, max = 1000000) => {
+      const n = Number(data[key]);
+      return Number.isFinite(n) && n >= 0 ? Math.min(Math.round(n), max) : 0;
+    };
+    const decimal = (key, max = 10000) => {
+      const n = Number(data[key]);
+      return Number.isFinite(n) && n >= 0 ? Math.min(Math.round(n * 100) / 100, max) : 0;
+    };
+    const httpStatusCounts = {};
+    if (data.httpStatusCounts && typeof data.httpStatusCounts === 'object') {
+      for (const [status, count] of Object.entries(data.httpStatusCounts)) {
+        if (/^[1-5]\d\d$/.test(status)) httpStatusCounts[status] = Math.min(1000000,Math.max(0,Math.round(Number(count)||0)));
+      }
+    }
+    const snapshot = {
+      script:'SIM_DUPLICATE_REVIEW',version:scrubText(data.version || '').slice(0, 20),
+      readOnly:true,stage:data.stage,reason:scrubText(data.reason || '').slice(0, 45),
+      concurrencyTarget:integer('concurrencyTarget', 100),concurrencyMaximum:integer('concurrencyMaximum', 100),
+      activeWorkers:integer('activeWorkers', 100),activeReads:integer('activeReads', 100),
+      peakActiveReads:integer('peakActiveReads', 100),queued:integer('queued'),
+      completed:integer('completed'),failures:integer('failures'),throttleSignals:integer('throttleSignals'),
+      cacheHits:integer('cacheHits'),joinedReads:integer('joinedReads'),sampleSize:integer('sampleSize', 1000),
+      readsPerSecond:decimal('readsPerSecond'),recentReadsPerSecond:decimal('recentReadsPerSecond'),
+      averageMs:integer('averageMs'),p95Ms:integer('p95Ms'),
+      waveSessionMs:integer('waveSessionMs'),waveCsvMs:integer('waveCsvMs'),waveParseMs:integer('waveParseMs'),
+      firstGroupReadyMs:data.firstGroupReadyMs == null ? null : integer('firstGroupReadyMs'),uiRenderCount:integer('uiRenderCount'),
+      uiRenderAverageMs:integer('uiRenderAverageMs'),uiRenderP95Ms:integer('uiRenderP95Ms'),
+      uiRenderPeakMs:integer('uiRenderPeakMs'),httpStatusCounts,
+      graphqlFailures:integer('graphqlFailures'),networkFailures:integer('networkFailures'),
+      timeoutFailures:integer('timeoutFailures')
+    };
+    if (!simDuplicateMonitorReady) {
+      simDuplicateMonitorReady = true;
+      add('sim.duplicate.monitor.ready', { obsVersion:VERSION,duplicateVersion:snapshot.version,
+        note:'Read-only aggregate events received; no individual request bodies captured' });
+    }
+    return add('script.SIM_DUPLICATE_READ_RATE', snapshot);
+  }
+
   function installScriptBus() {
     const emit = (type, data = {}) => {
       const version = data && typeof data === 'object' ? scrubText(data.version || '') : '';
@@ -2210,6 +2255,7 @@
       }
 
       const eventType = String(type || 'event').slice(0, 80);
+      if (eventType === 'SIM_DUPLICATE_READ_RATE') return recordSimDuplicateRate(data);
       if (eventType === 'ISS_CONSOLE_WORKER_PROGRESS') return recordWorkerProgress(data);
       if (/^SIDELINE_(?:API_REQUEST|API_RESULT|LOOKUP_FAILURE|READ_RETRY|PREFLIGHT_RESULT|CLEAR_START|CLEAR_RESULT|MOVE_RESULT)$/.test(eventType)) {
         return add(`script.${eventType}`,{...data,operationKind:data?.readOnly === true ? 'read'
