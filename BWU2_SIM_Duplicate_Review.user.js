@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BWU2 SIM Duplicate Review
 // @namespace    bwu2.local.sim.duplicate-review.test
-// @version      0.3.24
+// @version      0.3.25
 // @description  ISS duplicate discovery with exact ASIN/RPI-set checks (order ignored); original one-click ISS and two-step manual closures preserved.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (function () {
     'use strict';
-    const VER='0.3.24', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
+    const VER='0.3.25', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
     const GRAPH='https://sim-ticketing-graphql-fleet.corp.amazon.com/graphql';
     const WAVE='https://wave.qubit.amazon.dev/api/graphql';
     const WAVE_PAGE='https://wave.qubit.amazon.dev/command-center/ISS';
@@ -113,8 +113,27 @@
       #bwu-dr-panel .dr-rpi-wait{color:#fbd47b}
       #bwu-dr-preview .dr-preview-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:38vh;overflow-y:auto;padding:10px;background:#0d2033;border:1px solid #435d7a;border-radius:6px;line-height:1.45;user-select:text}
 
-      #bwu-dr-panel .dr-compact{width:100%;border-collapse:collapse;table-layout:auto;margin:12px 0}
-      #bwu-dr-panel .dr-compact th,#bwu-dr-panel .dr-compact td{padding:11px 9px;border-bottom:1px solid #39506a;text-align:left;vertical-align:middle}
+      /* The review actions must never hide beyond a horizontal scrollbar. */
+      #bwu-dr-panel .dr-grid{overflow-x:hidden;width:100%}
+      #bwu-dr-panel .dr-compact{width:100%;min-width:0;border-collapse:collapse;table-layout:fixed;margin:12px 0}
+      #bwu-dr-panel .dr-compact th,#bwu-dr-panel .dr-compact td{padding:10px 6px;border-bottom:1px solid #39506a;text-align:left;vertical-align:middle;overflow-wrap:anywhere}
+      #bwu-dr-panel .dr-compact th:nth-child(1){width:38px}
+      #bwu-dr-panel .dr-compact th:nth-child(2){width:20%}
+      #bwu-dr-panel .dr-compact th:nth-child(3){width:15%}
+      #bwu-dr-panel .dr-compact th:nth-child(4){width:9%}
+      #bwu-dr-panel .dr-compact th:nth-child(5){width:27%}
+      #bwu-dr-panel .dr-compact th:nth-child(6){width:22%}
+      #bwu-dr-panel .dr-compact .dr-select input{width:17px;height:17px;accent-color:#8fbfff;cursor:pointer}
+      #bwu-dr-panel .dr-compact .dr-actions-cell{min-width:0}
+      #bwu-dr-panel .dr-compact .dr-actions-cell button{margin:2px 2px 2px 0;padding:6px 8px}
+      #bwu-dr-panel .dr-compact .dr-compare-trigger{font-weight:700;border:1px solid #84b4de;background:#254c6e;color:#fff;white-space:nowrap}
+      #bwu-dr-panel .dr-compact .dr-risk{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+      #bwu-dr-panel .dr-batchbar{position:sticky;bottom:0;z-index:4;background:#102940;border-top:1px solid #6886a5;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-radius:0 0 8px 8px}
+      #bwu-dr-panel .dr-batchbar button{padding:7px 11px}
+      #bwu-dr-panel .dr-batchbar button:disabled{opacity:.48;cursor:not-allowed}
+      #bwu-dr-panel .dr-batchbar .dr-batchhint{color:#fbd18e;flex:1;min-width:170px;font-size:12px}
+      #bwu-dr-manual-overlay .dr-batch-entry{padding:7px 0;border-bottom:1px solid #48627b}
+      #bwu-dr-panel .dr-compact .dr-note-small{font-size:11px;color:#b9cfe4}
       #bwu-dr-panel .dr-compact th{color:#acc4df;font-size:12px;font-weight:600}
       #bwu-dr-panel .dr-compact tr:hover td{background:#182f48}
       #bwu-dr-panel .dr-compact .dr-asin{font-weight:700;font-size:13px;overflow-wrap:anywhere}
@@ -122,12 +141,12 @@
       #bwu-dr-panel .dr-compact .dr-mini{padding:6px 9px;font-size:12px}
       #bwu-dr-panel .dr-compact .dr-risk{color:#ffc882;font-size:12px;font-weight:700}
       #bwu-dr-panel .dr-compact .dr-ok{color:#bbdecf;font-size:12px}
-      #bwu-dr-panel .dr-compact .dr-actions-cell{min-width:170px}
+      #bwu-dr-panel .dr-compact .dr-actions-cell{min-width:0}
       #bwu-dr-panel .dr-compact .dr-actions-cell button{padding:6px 9px;font-size:12px;margin:2px 3px 2px 0}
       #bwu-dr-panel .dr-compact .dr-muted-button{font-size:11px;opacity:.78}
-      #bwu-dr-inspector{display:none;position:fixed;z-index:2147483555;right:max(3vw,18px);top:12vh;width:min(700px,calc(100vw - 36px));height:min(65vh,540px);border-radius:11px;border:1px solid #789ec3;background:#10243a;color:#eaf4ff;box-shadow:0 16px 50px #000c;overflow:hidden;flex-direction:column}
+      #bwu-dr-inspector{display:none;position:fixed;z-index:2147483555;right:max(2vw,12px);top:8vh;width:min(980px,calc(100vw - 24px));height:min(82vh,740px);border-radius:11px;border:1px solid #789ec3;background:#10243a;color:#eaf4ff;box-shadow:0 16px 50px #000c;overflow:hidden;flex-direction:column}
       #bwu-dr-inspector .dr-insp-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #466482;gap:8px}
-      #bwu-dr-inspector .dr-insp-layout{display:grid;grid-template-columns:170px minmax(0,1fr);min-height:0;flex:1}
+      #bwu-dr-inspector .dr-insp-layout{display:grid;grid-template-columns:135px minmax(0,1fr);min-height:0;flex:1}
       #bwu-dr-inspector .dr-insp-nav{overflow:auto;padding:8px;background:#1b324a;border-right:1px solid #466482}
       #bwu-dr-inspector .dr-insp-detail{padding:14px;overflow:auto;overflow-wrap:anywhere;white-space:normal;min-width:0}
       #bwu-dr-inspector .dr-insp-item{display:flex;gap:5px;align-items:center;margin:3px 0}
@@ -139,7 +158,16 @@
       #bwu-dr-inspector .dr-insp-label{font-size:11px;color:#abc3de;margin-bottom:8px}
       #bwu-dr-inspector .dr-insp-risk{color:#ffbc86;font-weight:700;font-size:12px;padding:8px;border:1px solid #a97733;border-radius:6px;margin:8px 0}
       #bwu-dr-inspector .dr-insp-close{padding:5px 9px}
-      @media(max-width:680px){#bwu-dr-panel .dr-compact{min-width:650px}#bwu-dr-inspector .dr-insp-layout{grid-template-columns:105px minmax(0,1fr)}#bwu-dr-inspector .dr-insp-nav{padding:4px}#bwu-dr-inspector .dr-insp-detail{padding:8px}}
+      #bwu-dr-inspector .dr-insp-comparison{width:100%;border-collapse:collapse;table-layout:fixed;margin:10px 0;font-size:12px}
+      #bwu-dr-inspector .dr-insp-comparison td,#bwu-dr-inspector .dr-insp-comparison th{border-bottom:1px solid #3e5872;padding:6px 8px;text-align:left;overflow-wrap:anywhere}
+      #bwu-dr-inspector .dr-insp-comparison th{color:#bcd3ea}
+      #bwu-dr-inspector .dr-insp-comparison .dr-diff{background:#51312b;color:#ffe0ad;font-weight:700}
+      #bwu-dr-inspector .dr-insp-descriptions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+      #bwu-dr-inspector .dr-insp-description{min-width:0}
+      #bwu-dr-inspector .dr-insp-description .dr-insp-body{max-height:230px;overflow:auto}
+      #bwu-dr-inspector .dr-insp-compare-label{color:#c5d9ef;font-weight:700;margin:8px 0}
+      @media(max-width:700px){#bwu-dr-inspector .dr-insp-layout{grid-template-columns:104px minmax(0,1fr)}#bwu-dr-inspector .dr-insp-descriptions{grid-template-columns:1fr}#bwu-dr-panel .dr-compact .dr-actions-cell button{font-size:11px;padding:4px 6px}#bwu-dr-panel .dr-compact th:nth-child(5){width:24%}#bwu-dr-panel .dr-compact th:nth-child(6){width:24%}}
+      @media(max-width:680px){#bwu-dr-inspector .dr-insp-nav{padding:4px}#bwu-dr-inspector .dr-insp-detail{padding:8px}}
     `;
     const style=document.createElement('style');style.textContent=CSS;(document.head||document.documentElement).appendChild(style);
     function mk(tag,text,cls){const n=document.createElement(tag);if(text!=null)n.textContent=String(text);if(cls)n.className=cls;return n;}
@@ -154,6 +182,7 @@
     ui.launcher.id='bwu-dr-launch';ui.version.id='bwu-dr-version';ui.panel.id='bwu-dr-panel';ui.preview.id='bwu-dr-preview';ui.preview.setAttribute('role','tooltip');
     ui.inspector=mk('section');ui.inspector.id='bwu-dr-inspector';ui.inspector.setAttribute('role','dialog');ui.inspector.setAttribute('aria-label','Read-only SIM ticket inspector');
     const state={data:null,busy:false,attempted:new Set(),active:null,waveBusy:false,idScan:null};
+    const selectedReviews=new Set(); // visual review selection, not automatic permission to write
     // Hover previews are informational only. Cached data is NEVER used for closure preflight.
     const previewCache=new Map(),previewReads=new Map();
     // Ignore an exact candidate membership, not an ASIN forever: new Wave tickets
@@ -923,44 +952,69 @@
       const token=++inspectorToken;
       if(inspectorGroup!==g)return;
       ui.inspector.querySelectorAll('.dr-insp-nav button').forEach(b=>b.classList.toggle('dr-insp-active',b===button));
-      const doc=ui.inspector.querySelector('.dr-insp-detail');
-      if(!doc)return;
+      const doc=ui.inspector.querySelector('.dr-insp-detail');if(!doc)return;
       doc.replaceChildren();
-      doc.append(mk('div',(number===0?'OLDEST · KEEP OPEN':'NEWER #'+number+' · READ-ONLY'),'dr-insp-label'));
-      const link=mk('a',t.id);link.href=SIM+t.id;link.target='_blank';link.rel='noopener noreferrer';doc.append(link);
-      const renderRecord=(record,detail)=>{
+      doc.append(mk('div','Comparing protected oldest with '+(number===0?'oldest':`newer #${number}`)+' · READ-ONLY','dr-insp-label'));
+      const oldest=g.oldest;
+      const needed=number===0?[oldest]:[oldest,t];
+      const show=(records)=>{
         if(token!==inspectorToken||inspectorGroup!==g||!doc.isConnected)return;
         doc.replaceChildren();
-        doc.append(mk('div',(number===0?'OLDEST · KEEP OPEN':'NEWER #'+number+' · READ-ONLY'),'dr-insp-label'));
-        const a=mk('a',t.id);a.href=SIM+t.id;a.target='_blank';a.rel='noopener noreferrer';doc.append(a);
-        if(!record){doc.append(mk('div',detail,'dr-insp-risk'));return;}
-        const issue=record.issue,fields=issue.extensions?.tt||{};
-        doc.append(mk('h3',clean(issue.title)||'SIM title unavailable'));
-        doc.append(mk('div','Owner: '+(clean(fields.assignedGroup)||'UNVERIFIED')+' · Created: '+dateOnly(t.created),'dr-insp-label'));
-        const evidence=simAsinEvidence(record);
-        const productIssue=evidence.length>1?'Conflicting ASIN fields in this ticket':evidence.length&&g.asin&&evidence[0]!==clean(g.asin).toUpperCase()?'SIM ASIN '+evidence[0]+' differs from Wave ASIN '+g.asin:'';
-        if(productIssue)doc.append(mk('div',productIssue+' — never bulk resolve','dr-insp-risk'));
-        const id=extractIdentifiers(record);
-        const details=['Wave ASIN: '+(g.asin||'—'),'SIM ASIN: '+(evidence.join(', ')||'not confirmed'),
-          'PO: '+(id.po||'—'),'FNSKU: '+(id.fnsku||'—'),'FCSKU: '+(id.fcsku||'—'),'EAN/UPC: '+(id.eanDisplay||'—'),
-          'Shipment: '+(id.shipment||'—'), 'RPI codes: '+(id.rpis?.length||0)];
-        doc.append(mk('div',details.join(' · '),'dr-insp-label'));
-        if(id.rpiScoped){const compare=rpiMatchFor(g,t);if(compare)doc.append(mk('div',compare.text,compare.cls==='dr-rpi-ok'?'dr-ok':'dr-insp-risk'));}
-        doc.append(mk('div','Full SIM description:','dr-insp-label'));
-        doc.append(mk('div',clean(issue.description)||'No description returned','dr-insp-body'));
+        const recordOld=records[0],recordNew=records[1]||null;
+        const headers=mk('div','Full ticket comparison · oldest is always protected','dr-insp-compare-label');doc.append(headers);
+        const table=mk('table',null,'dr-insp-comparison');
+        const row=(label,left,right,conflict=false)=>{
+          const tr=mk('tr');const a=mk('td',label),b=mk('td',left||'—'),c=mk('td',right||'—');
+          if(conflict){b.className='dr-diff';c.className='dr-diff';}
+          tr.append(a,b,c);table.append(tr);
+        };
+        const title=(r)=>clean(r?.issue?.title);
+        const field=(r,k)=>r?extractIdentifiers(r)?.[k]||'':'';
+        const asin=(r)=>r?simAsinEvidence(r).join(', '):'';
+        const sel=number===0?recordOld:recordNew;
+        const th=mk('tr');for(const h of ['Field','0 · Oldest (KEEP)',number===0?'Select a newer ticket':'#'+number+' · Newer (REVIEW)'])th.append(mk('th',h));table.append(th);
+        const compare=(label,extract)=>{const a=extract(recordOld),b=sel&&number!==0?extract(sel):'';
+          row(label,a,b,!!(b&&a&&a!==b));};
+        compare('SIM title',title);
+        compare('ASIN',asin);
+        compare('FNSKU',r=>field(r,'fnsku'));
+        compare('FCSKU',r=>field(r,'fcsku'));
+        compare('PO',r=>field(r,'po'));
+        compare('Shipment',r=>field(r,'shipment'));
+        compare('EAN/UPC',r=>field(r,'eanDisplay'));
+        compare('RPI set',r=>r?extractIdentifiers(r).rpis.join(', '):'');
+        compare('SIM owner',r=>clean(r?.issue?.extensions?.tt?.assignedGroup));
+        doc.append(table);
+        if(recordNew&&explicitProductConflict(recordOld,recordNew))doc.append(mk('div',explicitProductConflict(recordOld,recordNew)+' · RESOLUTION BLOCKED','dr-insp-risk'));
+        const panes=mk('div',null,'dr-insp-descriptions');
+        for(const [r,n,id] of [[recordOld,'0 · OLDEST',oldest.id],[number===0?null:recordNew,'#'+number+' · NEWER',t.id]]){
+          const side=mk('section',null,'dr-insp-description');
+          const header=mk('div',n,'dr-insp-compare-label'),link=mk('a',id+' ↗');link.href=SIM+id;link.target='_blank';link.rel='noopener noreferrer';
+          side.append(header,link);
+          side.append(mk('div',r?clean(r.issue.description)||'No SIM description':number===0?'Hover a numbered newer ticket on the left.':'SIM overview unavailable','dr-insp-body'));
+          panes.append(side);
+        }
+        doc.append(panes);
       };
-      const cached=previewCache.get(t.id);
-      if(cached){renderRecord(cached);return;}
-      if(state.busy){renderRecord(null,'Read-only preview paused while resolving tickets');return;}
-      doc.append(mk('div','Loading SIM overview…','dr-insp-label'));
-      // Shared request cache deduplicates title loading and inspector hover reads.
-      void loadReadOnly(t).then(record=>{if(token!==inspectorToken||inspectorGroup!==g)return;setTitle(g,t,record);renderRecord(record);})
-        .catch(e=>renderRecord(null,'SIM overview unavailable: '+(e.message||e)));
+      doc.append(mk('div','Loading oldest and newer SIM overviews…','dr-insp-label'));
+      // Read-only shared cache: no additional fan-out beyond the selected pair.
+      void Promise.all(needed.map(x=>loadReadOnly(x))).then(show).catch(e=>{
+        if(token!==inspectorToken||inspectorGroup!==g)return;
+        doc.replaceChildren();doc.append(mk('div','SIM overview unavailable: '+(e.message||e),'dr-insp-risk'));
+      });
     }
-    function openInspector(g,pin=false){
+    function openInspector(g,pin=false,trigger=null){
       clearTimeout(inspectorHideTimer);
       if(inspectorGroup===g&&pin&&inspectorPinned){closeInspector();return;}
       inspectorPinned=pin||inspectorPinned&&inspectorGroup===g;
+      if(inspectorPinned||!trigger){
+        ui.inspector.style.top='8vh';ui.inspector.style.height='min(82vh,740px)';
+      }else{
+        const rect=trigger.getBoundingClientRect(),below=window.innerHeight-rect.bottom-16,above=rect.top-16;
+        const placeBelow=below>=Math.min(330,above),room=Math.max(140,placeBelow?below:above);
+        const height=Math.min(470,room-8),top=placeBelow?rect.bottom+8:rect.top-height-8;
+        ui.inspector.style.top=Math.max(6,top)+'px';ui.inspector.style.height=Math.max(135,height)+'px';
+      }
       if(inspectorGroup===g&&ui.inspector.style.display==='flex')return;
       inspectorGroup=g;
       ui.inspector.replaceChildren();
@@ -980,7 +1034,8 @@
         row.append(trigger,a);nav.append(row);
       }
       layout.append(nav,doc);ui.inspector.append(head,layout);ui.inspector.style.display='flex';
-      inspectorTicket(g,g.oldest,0,nav.querySelector('button'));
+      const firstNewer=nav.querySelectorAll('button')[1];
+      inspectorTicket(g,g.tickets[1]||g.oldest,g.tickets.length>1?1:0,firstNewer||nav.querySelector('button'));
     }
     ui.inspector.addEventListener('mouseenter',()=>clearTimeout(inspectorHideTimer));
     ui.inspector.addEventListener('mouseleave',queueInspectorHide);
@@ -1305,7 +1360,7 @@
         info((run.stopRequested?'STOPPED':'COMPLETE')+' · '+done+' verified resolved · '+skipped+' skipped · oldest untouched');
         status((g.identifierGroup?g.identifierLabel:'ASIN '+g.asin)+': '+done+' verified resolved; oldest untouched.');
       })();
-      task.catch(e=>{
+      return task.then(()=>candidates.every(t=>stage(t.id)==='verified')).catch(e=>{
         const message=e.message||String(e);
         for(const t of candidates){
           const current=g.outcomes.get(t.id)?.text||'';
@@ -1314,66 +1369,108 @@
         }
         info('STOP · '+message+' · No automatic write retries.',true);
         status('STOP '+(g.identifierGroup?g.identifierLabel:'ASIN '+g.asin)+': '+message,true);
+        return false;
       }).finally(()=>{state.active=null;state.busy=false;render();if(state.idScan?.started&&!state.idScan.done)resumeIdentityScan();else warmTitles(state.data);});
+    }
+    function canBatchResolve(g){
+      return !!(state.data?.verified&&!state.busy&&g.orderOk&&!g.closureBlocked&&
+        !groupProductConflict(g)&&!isIgnored(g)&&eligibleForClosure(g)&&
+        g.tickets.every(t=>!!g.titles?.get(t.id))&&
+        new Set(g.tickets.map(t=>titleKey(g.titles.get(t.id)))).size===1&&
+        g.tickets.slice(1).some(t=>!attempted(t.id)));
+    }
+    function batchSelected(groups){
+      const selected=groups.filter(g=>selectedReviews.has(ignoreKey(g)));
+      if(!selected.length||state.busy)return;
+      if(selected.some(g=>!canBatchResolve(g))){status('Selected group includes an unresolved identity/title conflict. Compare it first; no writes started.',true);return;}
+      // An explicit per-group mapping is required before ANY writes.
+      const overlay=mk('div');overlay.id='bwu-dr-manual-overlay';
+      const dialog=mk('div',null,'dr-manual-dialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+      dialog.append(mk('h3','Confirm selected duplicate groups'));
+      let total=0;
+      for(const g of selected){
+        const count=g.tickets.slice(1).filter(t=>!attempted(t.id)).length;total+=count;
+        dialog.append(mk('div','KEEP oldest: '+g.oldest.id+' · Resolve '+count+' newer · '+(g.asin||g.item),'dr-batch-entry'));
+      }
+      dialog.append(mk('div','All '+total+' newer tickets receive separate comments referencing their own oldest ticket. Fresh identity/ownership checks run per group. Stop on a failed group; no automatic write retries.','dr-manual-alert'));
+      const buttons=mk('div',null,'dr-manual-buttons');const no=btn('Cancel',()=>finish(false)),yes=btn('Confirm '+total+' newer',()=>finish(true));yes.className='dr-manual-confirm';buttons.append(no,yes);dialog.append(buttons);overlay.append(dialog);
+      const onKey=e=>{if(e.key==='Escape'){e.preventDefault();finish(false);}};
+      const finish=ok=>{window.removeEventListener('keydown',onKey,true);overlay.remove();if(ok)void processBatch(selected);};
+      window.addEventListener('keydown',onKey,true);document.body.append(overlay);no.focus();
+    }
+    async function processBatch(groups){
+      for(const g of groups){
+        if(!canBatchResolve(g)){status('Stopped batch: candidate changed or became unsafe. No more groups started.',true);break;}
+        const ok=await runGroup(g);
+        if(!ok){status('Stopped batch: a group was not fully verified. No further groups started.',true);break;}
+        selectedReviews.delete(ignoreKey(g));
+      }
+      render();
     }
     function render(){
       const renderingAt=performance.now();let readyGroups=0;
       try{
-      hidePreview();ui.results.replaceChildren();
-      if(!state.data){ui.stats.textContent='Fetch BWU2 from Wave or load an ISS CSV.';closeInspector();return;}
-      const groups=filteredGroups();updateAutoProgress(groups.length);
-      readyGroups=groups.filter(g=>g.tickets.every(t=>g.titles?.has(t.id))).length;
-      const wrap=mk('div',null,'dr-grid'),table=mk('table',null,'dr-compact');
-      const head=mk('tr');for(const label of ['Product / workflow','Oldest · KEEP','Newer','Comparison / status','Inspect & actions'])head.append(mk('th',label));
-      table.append(head);
-      for(const g of groups){
-        g.view={rows:new Map(),titles:new Map(),owners:new Map(),rpis:new Map(),progress:null,warning:null};
-        const row=mk('tr');
-        const product=mk('td'),primary=mk('div',g.identifierGroup?g.identifierLabel:g.asin||'Exact SIM title match','dr-asin');
-        product.append(primary,mk('div',g.item+(g.identifierGroup?' · '+g.cat:''),'dr-small'));
-        if(g.rpiKey)product.append(mk('div',g.rpiKey.split(',').length+' identical RPIs (order independent)','dr-small'));
-        const oldest=mk('td'),keep=mk('a',g.oldest.id.slice(0,8)+'…');
-        keep.href=SIM+g.oldest.id;keep.target='_blank';keep.rel='noopener noreferrer';keep.title=g.oldest.id;
-        oldest.append(keep,mk('div','Protected original · '+dateOnly(g.oldest.created),'dr-small'));
-        const newer=mk('td');
-        const pend=g.tickets.slice(1).filter(t=>!attempted(t.id));
-        newer.append(mk('strong',String(pend.length)+' newer'));
-        const completed=g.tickets.slice(1).filter(t=>stage(t.id)==='verified').length;
-        if(completed)newer.append(mk('div',completed+' already resolved','dr-small'));
-        const evidence=mk('td');
-        const conflict=groupProductConflict(g);
-        const titles=g.tickets.map(t=>clean(g.titles?.get(t.id)));
-        const differs=titles.every(Boolean)&&new Set(titles).size>1;
-        const waiting=g.tickets.some(t=>!g.titles?.has(t.id));
-        const unsafe=!!conflict||!g.orderOk||!!g.closureBlocked;
-        const finished=g.tickets.slice(1).every(t=>stage(t.id)==='verified');
-        const allAttempted=g.tickets.slice(1).every(t=>attempted(t.id));
-        const health=mk('div',finished?'COMPLETE · all newer tickets verified resolved':allAttempted?'ATTEMPTED · inspect SIM before retry':conflict?'BLOCKED · '+conflict:!g.orderOk?'Original ordering uncertain':g.closureBlocked?'Blocked · '+(g.closureBlockReason||'manual investigation required'):waiting?'Loading SIM ticket overviews…':differs?'SIM titles differ · inspect':g.identifierGroup?'Matching identifier · manual review':'Candidate · inspect before resolution',unsafe||differs||allAttempted?'dr-risk':'dr-ok');
-        evidence.append(health);
-        const outcomes=g.tickets.slice(1).map(t=>g.outcomes?.get(t.id)?.text).filter(Boolean);
-        if(outcomes.length)evidence.append(mk('div',outcomes.length+' ticket updates · inspect individual tickets','dr-small'));
-        const actions=mk('td',null,'dr-actions-cell');
-        const inspect=btn('Inspect '+g.tickets.length,()=>openInspector(g,true));inspect.className='dr-mini';
-        inspect.title='Hover to review oldest and every newer SIM ticket';
-        inspect.addEventListener('mouseenter',()=>openInspector(g));inspect.addEventListener('mouseleave',queueInspectorHide);
-        inspect.addEventListener('focus',()=>openInspector(g));actions.append(inspect);
-        if(g.orderOk&&state.data.verified&&pend.length&&!g.closureBlocked&&!conflict){
-          if(eligibleForClosure(g)&&!differs){
-            const b=btn('Resolve '+pend.length,()=>runGroup(g));b.className='dr-primary';b.title='Fresh SIM verification before any comment or closure';b.disabled=state.busy||waiting;actions.append(b);
-          }else{
-            const b=btn('Manual review',()=>runGroup(g,true));b.className='dr-manual';b.disabled=state.busy||waiting;actions.append(b);
+        hidePreview();ui.results.replaceChildren();
+        if(!state.data){ui.stats.textContent='Fetch BWU2 from Wave or load an ISS CSV.';closeInspector();return;}
+        const groups=filteredGroups();updateAutoProgress(groups.length);
+        readyGroups=groups.filter(g=>g.tickets.every(t=>g.titles?.has(t.id))).length;
+        const wrap=mk('div',null,'dr-grid'),table=mk('table',null,'dr-compact');
+        const head=mk('tr');for(const label of ['Select','Product / workflow','Oldest · KEEP','Newer','Comparison / status','Compare / actions'])head.append(mk('th',label));
+        table.append(head);
+        for(const g of groups){
+          const key=ignoreKey(g);
+          g.view={rows:new Map(),titles:new Map(),owners:new Map(),rpis:new Map(),progress:null,warning:null};
+          const row=mk('tr');
+          const select=mk('td',null,'dr-select'),check=document.createElement('input');check.type='checkbox';
+          check.checked=selectedReviews.has(key);check.disabled=state.busy;check.title='Select this entire group for review (oldest is protected)';
+          check.setAttribute('aria-label','Select group '+(g.asin||g.item)+' for review');
+          check.addEventListener('change',()=>{if(check.checked)selectedReviews.add(key);else selectedReviews.delete(key);render();});
+          select.append(check);
+          const product=mk('td'),primary=mk('div',g.identifierGroup?g.identifierLabel:g.asin||'Exact SIM title match','dr-asin');
+          product.append(primary,mk('div',g.item+(g.identifierGroup?' · '+g.cat:''),'dr-small'));
+          if(g.rpiKey)product.append(mk('div',g.rpiKey.split(',').length+' identical RPIs','dr-small'));
+          const oldest=mk('td'),keep=mk('a',g.oldest.id.slice(0,8)+'…');
+          keep.href=SIM+g.oldest.id;keep.target='_blank';keep.rel='noopener noreferrer';keep.title=g.oldest.id;
+          oldest.append(keep,mk('div','Protected · '+dateOnly(g.oldest.created),'dr-small'));
+          const newer=mk('td');const pend=g.tickets.slice(1).filter(t=>!attempted(t.id));
+          newer.append(mk('strong',String(pend.length)+' newer'));
+          const completed=g.tickets.slice(1).filter(t=>stage(t.id)==='verified').length;
+          if(completed)newer.append(mk('div',completed+' resolved','dr-small'));
+          const evidence=mk('td');const conflict=groupProductConflict(g);
+          const titles=g.tickets.map(t=>clean(g.titles?.get(t.id)));
+          const differs=titles.every(Boolean)&&new Set(titles).size>1;
+          const waiting=g.tickets.some(t=>!g.titles?.has(t.id));
+          const unsafe=!!conflict||!g.orderOk||!!g.closureBlocked;
+          const finished=g.tickets.slice(1).every(t=>stage(t.id)==='verified');
+          const allAttempted=g.tickets.slice(1).every(t=>attempted(t.id));
+          const health=mk('div',finished?'COMPLETE':allAttempted?'ATTEMPTED · check SIM':conflict?'BLOCKED · '+conflict:!g.orderOk?'Uncertain original ordering':g.closureBlocked?'BLOCKED · '+(g.closureBlockReason||'manual investigation'):waiting?'Loading ticket overviews…':differs?'SIM titles differ · manual review':g.identifierGroup?'Identifier match · manual review':'Ready for review',unsafe||differs||allAttempted?'dr-risk':'dr-ok');
+          evidence.append(health);
+          const actions=mk('td',null,'dr-actions-cell');
+          const inspect=btn('Compare '+g.tickets.length,()=>openInspector(g,true));inspect.className='dr-compare-trigger';
+          inspect.title='Hover to compare the oldest and any newer ticket side by side';
+          inspect.addEventListener('mouseenter',()=>openInspector(g,false,inspect));inspect.addEventListener('mouseleave',queueInspectorHide);
+          inspect.addEventListener('focus',()=>openInspector(g,false,inspect));actions.append(inspect);
+          if(g.orderOk&&state.data.verified&&pend.length&&!g.closureBlocked&&!conflict){
+            if(eligibleForClosure(g)&&!differs){
+              const b=btn('Resolve '+pend.length,()=>runGroup(g));b.className='dr-primary';b.title='Fresh SIM verification before any comment or closure';b.disabled=state.busy||waiting;actions.append(b);
+            }else{
+              const b=btn('Manual review',()=>runGroup(g,true));b.className='dr-manual';b.disabled=state.busy||waiting;actions.append(b);
+            }
           }
+          const ignore=btn('Ignore',()=>ignoreGroup(g));ignore.className='dr-muted-button';ignore.disabled=state.busy;actions.append(ignore);
+          const progress=mk('div',g.progress||'','dr-small'+(g.runError?' dr-error':''));g.view.progress=progress;actions.append(progress);
+          row.append(select,product,oldest,newer,evidence,actions);table.append(row);
         }
-        const ignore=btn('Ignore',()=>ignoreGroup(g));ignore.className='dr-muted-button';ignore.disabled=state.busy;actions.append(ignore);
-        if(state.active?.group===g){
-          const stop=btn(state.active.stopRequested?'Stopping…':state.active.phase==='checking'?'Cancel checks':state.active.phase==='confirming'?'Cancel manual review':'Stop after current',()=>{
-            if(state.active?.group!==g)return;state.active.stopRequested=true;g.progress='Stop requested · will not start another write';render();
-          });stop.disabled=state.active.stopRequested;actions.append(stop);
-        }
-        const progress=mk('div',g.progress||'','dr-small'+(g.runError?' dr-error':''));g.view.progress=progress;actions.append(progress);
-        row.append(product,oldest,newer,evidence,actions);table.append(row);
-      }
-      wrap.append(table);ui.results.append(wrap);
+        wrap.append(table);ui.results.append(wrap);
+        const selected=groups.filter(g=>selectedReviews.has(ignoreKey(g))),total=selected.reduce((n,g)=>n+g.tickets.slice(1).filter(t=>!attempted(t.id)).length,0);
+        const eligible=selected.length>0&&selected.every(canBatchResolve);
+        const bar=mk('div',null,'dr-batchbar');
+        const summary=mk('strong',selected.length+' groups · '+total+' newer tickets selected');
+        const hint=mk('span',!selected.length?'Select groups to review or resolve':eligible?'All selected groups can undergo fresh checks before resolution':'Some selected groups are BLOCKED or need manual review. Inspect them; bulk resolution disabled.','dr-batchhint');
+        const review=btn('Compare selected',()=>{if(selected.length)openInspector(selected[0],true);});review.disabled=!selected.length||state.busy;
+        const resolve=btn('Review & resolve '+total,()=>batchSelected(groups));resolve.className='dr-primary';resolve.disabled=!eligible||!total;
+        const clear=btn('Clear selection',()=>{selectedReviews.clear();render();});clear.disabled=!selected.length||state.busy;
+        bar.append(summary,hint,review,resolve,clear);ui.results.append(bar);
       }finally{noteRender(performance.now()-renderingAt,readyGroups);}
     }
     function updateAutoProgress(displayed){
@@ -1409,7 +1506,7 @@
       simDiag={waveSessionMs:0,waveCsvMs:0,waveParseMs:parseMs,firstGroupReadyMs:null,titleRunStart:performance.now(),
         uiRenderCount:0,uiRenderTotalMs:0,uiRenderPeakMs:0,uiRenderRecent:[],
         httpStatuses:{},httpGraphqlErrors:0,httpNetworkErrors:0,httpTimeouts:0};
-      titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
+      titleLane=newReadLane(8);state.idScan=null;viewGroups.clear();selectedReviews.clear();if(ui.identityScan)ui.identityScan.disabled=false;scanStatus('Optional: scan selected Wave tickets for shared EAN/UPC across titles.');
       data.verified=!!verified;data.source=source;state.data=data;
       status('Loaded '+source+'. SIM titles/owners checked automatically for candidates. Existing ISS one-click closures unchanged; other ISS-owned workflows allow two-step manual review.');
       updateFilters();render();warmTitles(data);
@@ -1433,7 +1530,7 @@
       }
       ui.filteredCount.textContent=d?(d.total-d.excluded).toLocaleString()+' rows available (before UI filters)':'Load Wave data to see counts';
     }
-    const heading=mk('h2','BWU2 SIM Duplicate Review — v'+VER);const close=btn('Close',()=>{ui.panel.style.display='none';hidePreview();});close.style.cssFloat='right';
+    const heading=mk('h2','BWU2 SIM Duplicate Review — v'+VER);const close=btn('Close',()=>{ui.panel.style.display='none';hidePreview();closeInspector();});close.style.cssFloat='right';
     const toolbar=mk('div',null,'dr-toolbar'),fetch=btn('Fetch BWU2 from Wave',()=>void fetchWaveData()),
       load=btn('Load CSV',()=>file.click()),file=document.createElement('input');file.type='file';file.accept='.csv,.tsv,text/csv';file.style.display='none';
     ui.fetch=fetch;
