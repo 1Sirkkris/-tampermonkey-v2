@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | TEST FCResearch → RIVER Ticket Assistant
 // @namespace    https://github.com/1Sirkkris
-// @version      0.3.20
+// @version      0.3.21
 // @description  Event-driven Hazmat/L0 capture plus RIVER workflow-state recognition from page-info; no inventory-wide quantity hunt.
 // @include      /^https?:\/\/(?:[^\/]*fcresearch[^\/]*|qifcr\.fe\.aftx\.amazonoperations\.app)\//
 // @match        https://river.amazon.com/*
@@ -22,7 +22,7 @@
   if (window.__bwu2RiverAssistant) return;
   window.__bwu2RiverAssistant = true;
 
-  const VERSION = '0.3.20';
+  const VERSION = '0.3.21';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('RIVER', VERSION);
 
@@ -806,8 +806,15 @@
 
   function clickChoiceIndex(index, step) {
     const choices = choiceCandidates();
-    const element = choices[index - 1];
-    if (!element) throw new Error(`Option ${index} not found (${choices.length} choices visible).`);
+    const semantic = {
+      pandash: /went through dg review.*(?:couldn.t be classified|lacks dg information)/i,
+      issue: /fc inbound issue/i,
+      sortability: /the asin is sortable/i
+    }[step];
+    const element = semantic
+      ? choices.find(candidate => semantic.test(associatedLabel(candidate) || candidate.textContent || ''))
+      : choices[index - 1];
+    if (!element) throw new Error(`Expected ${step} option not found (${choices.length} choices visible).`);
     const input = element.matches?.('input[type="radio"]') ? element : element.querySelector?.('input[type="radio"]');
     emit('automation.action', { step, action: 'choice', option: index, choices: choices.length, controlId: clean((input || element).id || '') });
     (input || element).click();
@@ -817,7 +824,7 @@
     const select = [...document.querySelectorAll('select')].find(visible);
     if (!select) throw new Error('Dropdown not found.');
     const options = [...select.options].filter(option => !option.disabled && !option.hidden);
-    const option = options[index - 1];
+    const option = step === 'images' ? options.find(option => norm(option.textContent) === 'yes') : options[index - 1];
     if (!option) throw new Error(`Dropdown Option ${index} not found (${options.length} options visible).`);
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
     if (setter) setter.call(select, option.value);
@@ -831,12 +838,17 @@
   function nextButton() {
     return [...document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]')]
       .filter(visible)
-      .find(candidate => norm(candidate.innerText || candidate.textContent || candidate.value || candidate.getAttribute('aria-label') || '') === 'next') || null;
+      .find(candidate => {
+        if (candidate.closest('#bwu2-river-assistant')) return false;
+        const label = norm(candidate.innerText || candidate.textContent || candidate.value || candidate.getAttribute('aria-label') || '');
+        return label === 'next' || label === 'confirm continue';
+      }) || null;
   }
 
   function next(step) {
     const element = nextButton();
-    if (!element) throw new Error('Next button not found.');
+    if (!element) throw new Error('Workflow continue button not found.');
+    if (controlDisabled(element)) throw new Error('Workflow continue button not enabled.');
     emit('automation.action', { step, action: 'next' });
     element.click();
   }
@@ -876,7 +888,7 @@
     if (/(^|\W)asin(\W|$)/.test(route)) return 'asin';
     if (/issue.?at.?fc/.test(route)) return 'issue';
     if (/pandash|dangerous|dg review/.test(route)) return 'pandash';
-    if (field(['units impacted', 'shipments impacted'])) return 'severity';
+    if (field(['units impacted', 'shipments impacted', 'total sort units impacted', 'total shipments impacted'])) return 'severity';
     if (field(['physical location of the units', 'inventory cost per unit', 'vendor code / seller id'])) return 'information';
     if (field(['type asin here', 'asin'])) return 'asin';
     if (choiceCandidates().some(element => /the asin is sortable|the asin is non-sortable/i.test(associatedLabel(element) || element.textContent || ''))) return 'sortability';
@@ -998,13 +1010,17 @@
     if (page === 'pandash') {
       clickChoiceIndex(2, page);
       status.textContent = 'PANDASH • Option 2 selected • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'issue') {
       clickChoiceIndex(1, page);
       status.textContent = 'ISSUE • Option 1 selected • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'asin') {
@@ -1013,7 +1029,9 @@
       if (!setValue(field(['type asin here', 'asin']), asin)) throw new Error('ASIN field not found/retained.');
       emit('automation.action', { step: page, action: 'fill', field: 'asin', available: true });
       status.textContent = 'ASIN entered • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'related') {
@@ -1063,31 +1081,38 @@
     if (page === 'sortability') {
       clickChoiceIndex(1, page);
       status.textContent = 'SORTABILITY • Option 1 selected • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'severity') {
-      const shipments = field(['shipments impacted', 'number of shipments impacted']);
+      const shipments = field(['shipments impacted', 'number of shipments impacted', 'total shipments impacted']);
       if (!Number.isFinite(Number(payload.inventoryQuantity)) || Number(payload.inventoryQuantity) <= 0) {
         if (shipments) setValue(shipments, 0);
         emit('manual.pause', { step: page, reason: payload.quantityMode || 'quantity-unavailable' });
         status.textContent = 'PAUSED • PO quantity unavailable/0. Enter Units impacted manually, then click Next.';
         return { wait: false };
       }
-      const units = field(['units impacted', 'number of units impacted']);
+      const units = field(['units impacted', 'number of units impacted', 'total sort units impacted', 'total non sort units impacted']);
       if (!setValue(units, Number(payload.inventoryQuantity)) || !setValue(shipments, 0)) throw new Error('Quantity fields not found/retained.');
       emit('automation.action', { step: page, action: 'fill-severity', quantityAvailable: true, shipments: 0, source: 'latest-po-matching-line' });
       status.textContent = 'PO-line quantity + shipments filled • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'images') {
       selectDropdownIndex(2, page);
       status.textContent = 'Dropdown Option 2 selected • advancing…';
-      next(page);
+      const enabledNext = await waitForNextEnabled();
+      if (generation !== riverGeneration || pageKind() !== page) return { wait: false };
+      enabledNext.click();
       return { wait: true, previous: page };
     }
     if (page === 'create') {
+      clearStepWatch();
       emit('done', { finalSubmissionManual: true });
       status.textContent = 'DONE • final Create Issue submission remains manual.';
       return { wait: false };
