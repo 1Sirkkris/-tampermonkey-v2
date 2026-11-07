@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2.5 | TEST BWU2 ISS Drive Runtime
 // @namespace    https://github.com/1Sirkkris/iss-drive
-// @version      2.5.4
+// @version      2.5.5
 // @description  Standalone Drive ISS runtime; pinned EDIT/MOVE and Sideline engines, scoped to one HTML file.
 // @match        https://drive-render.corp.amazon.com/view/krmclenn@/BWU2_ISS_Console.html*
 // @match        https://drive-render.corp.amazon.com/view/krmclenn%40/BWU2_ISS_Console.html*
@@ -16,12 +16,12 @@
 'use strict';
 /* Network and protocol boundary. No request URL or request body comes from the HTML UI. */
 const ISS_DRIVE_PROTOCOL = 'bwu2-iss-drive/1';
-const ISS_DRIVE_VERSION = '2.5.4';
+const ISS_DRIVE_VERSION = '2.5.5';
 const ISS_DRIVE_ORIGIN = 'https://drive-render.corp.amazon.com';
 const ISS_DRIVE_PATH = '/view/krmclenn@/BWU2_ISS_Console.html';
 // A DOM event with a JSON-string payload works across Firefox's userscript sandbox.
 // Requests are read-only, accepted only in this top-level Drive document.
-const ISS_DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.4';
+const ISS_DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.5';
 const ISS_AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
 const ISS_POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 const issDriveFragment = new URLSearchParams(location.hash.slice(1));
@@ -378,7 +378,7 @@ if (ISS_DRIVE_WORKER === 'aft') {
   window.__bwu2AftEditSkuMove = true;
 
 
-  const VERSION = '0.9.48';
+  const VERSION = '0.9.50';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -420,7 +420,7 @@ if (ISS_DRIVE_WORKER === 'aft') {
   ];
   const EDIT_QTY_PATTERNS = {
     sellable: /\b(?:Inventory|Sellable)\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
-    'pending research': /\bPending Research\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
+    'pending research': /\bPending[\s_]+Research\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
     unsellable: /\bUnsellable\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i
   };
 
@@ -431,24 +431,42 @@ if (ISS_DRIVE_WORKER === 'aft') {
   };
 
   async function post(path, payload, label = path) {
-    const res = await fetch(path, {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: HEADERS, body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      let detail = '';
-      try { detail = norm(await res.text()).slice(0, 180); } catch {}
-      throw new Error(`${label}: HTTP ${res.status}${detail ? ` | ${detail}` : ''}`);
+    const started = performance.now();
+    let status = 0, ok = false;
+    try {
+      const res = await fetch(path, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: HEADERS, body: JSON.stringify(payload)
+      });
+      status = res.status;
+      if (!res.ok) {
+        let detail = '';
+        try { detail = norm(await res.text()).slice(0, 180); } catch {}
+        throw new Error(`${label}: HTTP ${res.status}${detail ? ` | ${detail}` : ''}`);
+      }
+      ok = true;
+      return res;
+    } finally {
+      traceAft('AFT_API_CALL', { endpoint:path.split('?')[0], method:'POST',
+        status, ok, ms:Math.round(performance.now()-started) });
     }
-    return res;
   }
 
   async function getHtml(label = 'GET') {
-    const res = await fetch(location.pathname + location.search, {
-      credentials: 'same-origin', cache: 'no-store'
-    });
-    if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
-    const html = await res.text();
+    const started = performance.now();
+    let status = 0, ok = false, html = '';
+    try {
+      const res = await fetch(location.pathname + location.search, {
+        credentials: 'same-origin', cache: 'no-store'
+      });
+      status = res.status;
+      if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
+      html = await res.text();
+      ok = true;
+    } finally {
+      traceAft('AFT_API_CALL', { endpoint:location.pathname, method:'GET',
+        status, ok, ms:Math.round(performance.now()-started), bytes:html.length });
+    }
 
     if (/\/app\/(?:edititems|moveitems)/i.test(location.pathname)) {
       const lower = html.toLowerCase();
@@ -1768,7 +1786,7 @@ if (ISS_DRIVE_WORKER === 'aft') {
 
       const aliases = [
         ['sellable', /^(?:Inventory|Sellable)$/i],
-        ['pending research', /^Pending Research$/i],
+        ['pending research', /^Pending[\s_]+Research$/i],
         ['unsellable', /^Unsellable$/i]
       ];
 
@@ -1820,19 +1838,21 @@ if (ISS_DRIVE_WORKER === 'aft') {
         }
 
         const label = norm(labels.join(' '));
-        if (!/Quantity\s*:/i.test(label) || !/Owner\s*:/i.test(label)) continue;
+        if (!/\bQuantity\s*:\s*\d+/i.test(label)) continue;
 
+        const value = radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : '';
+        const valueState = value.replace(/\s+/g, '_').toUpperCase();
         let state = '';
-        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = 'PENDING_RESEARCH';
-        else if (/Unsellable|UNSELLABLE/i.test(label)) state = 'UNSELLABLE';
-        else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
+        if (valueState === 'PENDING_RESEARCH' || /Pending[\s_]+Research/i.test(label)) state = 'PENDING_RESEARCH';
+        else if (valueState === 'UNSELLABLE' || /\bUnsellable\b/i.test(label)) state = 'UNSELLABLE';
+        else if (['INVENTORY','SELLABLE'].includes(valueState) || /\b(?:Inventory|Sellable)\b/i.test(label)) state = 'SELLABLE';
         if (!state) continue;
 
         const qtyMatch = label.match(/\bQuantity\s*:\s*(\d{1,7})\b/i);
         out.push({
           state,
           label,
-          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : '',
+          value,
           qty: qtyMatch ? Number(qtyMatch[1]) : null,
           disabled: !!radio.disabled
         });
