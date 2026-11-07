@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.49
+// @version      0.9.50
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -32,7 +32,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.49';
+  const VERSION = '0.9.50';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -74,7 +74,7 @@
   ];
   const EDIT_QTY_PATTERNS = {
     sellable: /\b(?:Inventory|Sellable)\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
-    'pending research': /\bPending Research\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
+    'pending research': /\bPending[\s_]+Research\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i,
     unsellable: /\bUnsellable\s*\(\s*Quantity\s*:\s*(\d{1,7})\s*\)/i
   };
 
@@ -85,24 +85,42 @@
   };
 
   async function post(path, payload, label = path) {
-    const res = await fetch(path, {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: HEADERS, body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      let detail = '';
-      try { detail = norm(await res.text()).slice(0, 180); } catch {}
-      throw new Error(`${label}: HTTP ${res.status}${detail ? ` | ${detail}` : ''}`);
+    const started = performance.now();
+    let status = 0, ok = false;
+    try {
+      const res = await fetch(path, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: HEADERS, body: JSON.stringify(payload)
+      });
+      status = res.status;
+      if (!res.ok) {
+        let detail = '';
+        try { detail = norm(await res.text()).slice(0, 180); } catch {}
+        throw new Error(`${label}: HTTP ${res.status}${detail ? ` | ${detail}` : ''}`);
+      }
+      ok = true;
+      return res;
+    } finally {
+      traceAft('AFT_API_CALL', { endpoint:path.split('?')[0], method:'POST',
+        status, ok, ms:Math.round(performance.now()-started) });
     }
-    return res;
   }
 
   async function getHtml(label = 'GET') {
-    const res = await fetch(location.pathname + location.search, {
-      credentials: 'same-origin', cache: 'no-store'
-    });
-    if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
-    const html = await res.text();
+    const started = performance.now();
+    let status = 0, ok = false, html = '';
+    try {
+      const res = await fetch(location.pathname + location.search, {
+        credentials: 'same-origin', cache: 'no-store'
+      });
+      status = res.status;
+      if (!res.ok) throw new Error(`${label}: GET HTTP ${res.status}`);
+      html = await res.text();
+      ok = true;
+    } finally {
+      traceAft('AFT_API_CALL', { endpoint:location.pathname, method:'GET',
+        status, ok, ms:Math.round(performance.now()-started), bytes:html.length });
+    }
 
     if (/\/app\/(?:edititems|moveitems)/i.test(location.pathname)) {
       const lower = html.toLowerCase();
@@ -1468,7 +1486,7 @@
 
       const aliases = [
         ['sellable', /^(?:Inventory|Sellable)$/i],
-        ['pending research', /^Pending Research$/i],
+        ['pending research', /^Pending[\s_]+Research$/i],
         ['unsellable', /^Unsellable$/i]
       ];
 
@@ -1520,19 +1538,21 @@
         }
 
         const label = norm(labels.join(' '));
-        if (!/Quantity\s*:/i.test(label) || !/Owner\s*:/i.test(label)) continue;
+        if (!/\bQuantity\s*:\s*\d+/i.test(label)) continue;
 
+        const value = radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : '';
+        const valueState = value.replace(/\s+/g, '_').toUpperCase();
         let state = '';
-        if (/Pending Research|PENDING_RESEARCH/i.test(label)) state = 'PENDING_RESEARCH';
-        else if (/Unsellable|UNSELLABLE/i.test(label)) state = 'UNSELLABLE';
-        else if (/(?:Inventory|Sellable)|\bSELLABLE\b/i.test(label)) state = 'SELLABLE';
+        if (valueState === 'PENDING_RESEARCH' || /Pending[\s_]+Research/i.test(label)) state = 'PENDING_RESEARCH';
+        else if (valueState === 'UNSELLABLE' || /\bUnsellable\b/i.test(label)) state = 'UNSELLABLE';
+        else if (['INVENTORY','SELLABLE'].includes(valueState) || /\b(?:Inventory|Sellable)\b/i.test(label)) state = 'SELLABLE';
         if (!state) continue;
 
         const qtyMatch = label.match(/\bQuantity\s*:\s*(\d{1,7})\b/i);
         out.push({
           state,
           label,
-          value: radio.hasAttribute('value') ? norm(radio.getAttribute('value')) : '',
+          value,
           qty: qtyMatch ? Number(qtyMatch[1]) : null,
           disabled: !!radio.disabled
         });
