@@ -2,7 +2,7 @@
 // @name         v2 CORE v0.1.11 BWU2 Observability Core
 // @name:en      v2 CORE BWU2 Observability Core
 // @namespace    https://github.com/1Sirkkris
-// @version      0.1.43
+// @version      0.1.44
 // @description  High-signal cross-tool observability for errors, runtime versions, API/network evidence, workflow traces, and performance failures.
 // @include      /^https?:\/\/aft-poirot-website-nrt\.nrt\.proxy\.amazon\.com\//
 // @include      /^https?:\/\/aft-qt-[^\/]+(?:\.aka\.[^\/]+)?\.corp\.amazon\.com\//
@@ -14,6 +14,7 @@
 // @include      /^https?:\/\/river\.amazon\.com\//
 // @include      /^https?:\/\/console\.harmony\.a2z\.com\/poportal\/fe(?:[/?#]|$)/
 // @include      /^https?:\/\/tx-b-hierarchy-nrt\.nrt\.proxy\.amazon\.com\/(?:bindHierarchy|unbindHierarchy)(?:[/?#]|$)/
+// @include      /^https:\/\/drive-render\.corp\.amazon\.com\/view\/[^/]+\/BWU2_ISS_Console\.html(?:[?#]|$)/
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_getValue
@@ -186,7 +187,9 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.43';
+  // The Drive parent aggregates worker traces; instrumenting worker iframes duplicates events.
+  if (location.hostname === 'drive-render.corp.amazon.com' && window.top !== window) return;
+  const VERSION = '0.1.44';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('OBS', VERSION);
 
@@ -2302,6 +2305,20 @@
         emit(message.type || 'message', message.data || {});
       }
     }, true);
+
+    // The Drive document validates the exact worker window and random channel before
+    // forwarding bounded traces. Only its top-level document is monitored.
+    if (location.hostname === 'drive-render.corp.amazon.com') {
+      window.addEventListener('bwu2-iss-drive:trace', event => {
+        let detail;
+        try { detail = JSON.parse(String(event.detail || '')); } catch { return; }
+        if (!detail || !['aft','sideline','runtime'].includes(detail.component)) return;
+        const type = String(detail.type || '').slice(0, 80);
+        if (!/^[A-Z][A-Z0-9_]*$/.test(type)) return;
+        const taggedType = /^(?:AFT_|SIDELINE_|ISS_)/.test(type) ? type : `ISS_DRIVE_${type}`;
+        emit(taggedType, { ...detail.data, driveWorker:detail.component });
+      }, true);
+    }
 
     window.addEventListener('bwu2-observability:event', event => {
       let detail = event.detail;
