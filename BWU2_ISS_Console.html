@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="bwu2-iss-build" content="2.5.4"><meta name="bwu2-iss-ui-revision" content="r3"><title>BWU2 ISS Console</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="bwu2-iss-build" content="2.5.5"><meta name="bwu2-iss-ui-revision" content="r5"><title>BWU2 ISS Console</title></head>
 <body><p style="padding:24px;font:16px Arial">Loading BWU2 ISS Console…</p><noscript>JavaScript is required.</noscript>
 <script>(() => {
   'use strict';
   if (new URLSearchParams(location.hash.slice(1)).has('bwu2-iss-worker') || window.parent !== window) return;
 
-  const VERSION = '2.5.4';
+  const VERSION = '2.5.5';
 /* This code is inserted inside the existing ISS UI closure. */
-const DRIVE_BUILD = '2.5.4';
+const DRIVE_BUILD = '2.5.5';
 const DRIVE_PROTOCOL = 'bwu2-iss-drive/1';
-const DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.4';
+const DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.5';
 // Only connection probes use this bridge; the existing movement RPC is unchanged.
 function driveSessionMessage(message) {
   document.dispatchEvent(new CustomEvent(DRIVE_SESSION_BRIDGE,{detail:JSON.stringify(message)}));
@@ -51,8 +51,16 @@ function driveRecord(component, type, data = {}) {
       .slice(0,45).map(([key,v])=>[key,strip(v,depth+1)]));
     return typeof value === 'string' ? value.slice(0,1000) : value;
   };
-  driveLog.push({at:new Date().toISOString(),component,type,data:strip(data)});
+  const safe = strip(data);
+  driveLog.push({at:new Date().toISOString(),component,type,data:safe});
   if (driveLog.length > 400) driveLog.shift();
+  // Expose validated worker telemetry to OBS without network interception or
+  // a second worker listener. Console events already use the existing event bus.
+  if (component !== 'console') {
+    try { window.dispatchEvent(new CustomEvent('bwu2-iss-drive:trace', {
+      detail:JSON.stringify({component,type,data:safe})
+    })); } catch {}
+  }
 }
 
 function driveWorkerUrl(worker) {
@@ -292,9 +300,12 @@ async function driveStart() {
   let sidelineDraftComplete = false;
   let sidelineClearBusy = false;
   const sidelineClearUnknown = new Set();
-  let sideDatePrompt = null; // {code,source,dest,dateType,requestId,revision} from this active workflow only.
+  let sideDatePrompt = null; // {code,source,dest,dateType,requestId} from this active workflow only.
   let sideDateSaving = false;
   let sidelineDateRows = [];
+  const sideDateDismissed = new Set(); // LATER is only for the current source / item / date type.
+  const sideDateMonths = [['JAN',1],['FEB',2],['MAR',3],['APR',4],['MAY',5],['JUN',6],['JUL',7],['AUG',8],['SEP',9],['OCT',10],['NOV',11],['DEC',12]];
+  let sideDateSelection = {month:null,day:1,year:null};
 
   function sidelineDraftPayload(complete = false) {
     const source = clean($('[data-side-source]')?.value);
@@ -349,7 +360,21 @@ async function driveStart() {
       || message.revision !== sidelineDraftRevision) return;
     const payload = sidelineDraftPayload(true);
     if (upper(message.source)!==upper(payload.source) || upper(message.dest)!==upper(payload.dest)) return;
-    renderSidelineItems(message.items || [],false);
+    const rows = Array.isArray(message.items) ? message.items : [];
+    renderSidelineItems(rows,false);
+    // Preflight is non-blocking: display the first NEW date requirement immediately.
+    // LATER suppresses only that barcode until a new workflow or explicit ENTER DATE.
+    const active = sideDatePrompt;
+    if (active && !active.requestId &&
+        (upper(active.source) !== upper(payload.source) || upper(active.dest) !== upper(payload.dest) ||
+         !rows.some(item => upper(item.code) === upper(active.code) && upper(item.status) === 'DATE'))) {
+      closeSidelineDate({focus:false});
+    }
+    if (!sideDatePrompt && !sideDateSaving) {
+      const next = rows.find(item => upper(item.status) === 'DATE' &&
+        !sideDateDismissed.has(sidelineDateKey({...item,source:payload.source,dest:payload.dest})));
+      if (next) openSidelineDate({...next,source:payload.source,dest:payload.dest});
+    }
     // Draft input owns unit counts; a worker's empty/older list never does.
     paintLazyMetricsFromInput();
     panelStatus('sideline',message.message || 'Ready',message.error ? 'error' : message.pending ? 'working' : 'ok');
@@ -358,7 +383,68 @@ async function driveStart() {
         .map(item=>({code:item.code,status:item.status,reason:item.issue}))});
   }
 
+  function sidelineDateKey(request) {
+    return [upper(request.source),upper(request.dest),upper(request.code),upper(request.dateType)].join('\u0000');
+  }
+
+  function sideDateDays(month,year) {
+    return month && year ? new Date(year,month,0).getDate() : (month === 2 ? 29 : [4,6,9,11].includes(month) ? 30 : 31);
+  }
+
+  function sideDateAllowed(month,day,year,type) {
+    const value = new Date(year,month-1,day);
+    if (value.getFullYear() !== year || value.getMonth() !== month-1 || value.getDate() !== day) return false;
+    const today = new Date();today.setHours(0,0,0,0);
+    return type === 'PRODUCTION_DATE' ? value <= today : value >= today;
+  }
+
+  function drawSidelineDatePicker() {
+    const request = sideDatePrompt;
+    if (!request) return;
+    const {month,day,year} = sideDateSelection;
+    const nowYear = new Date().getFullYear();
+    const production = request.dateType === 'PRODUCTION_DATE';
+    const years = Array.from({length:16},(_,i) => production ? nowYear-i : nowYear+i);
+    const make = (name,values,cols) => {
+      const node = $('[data-side-date-grid="'+name+'"]');
+      if (!node) return;
+      node.innerHTML = values.map(([label,value,allowed]) =>
+        '<button type="button" data-side-date-part="'+name+'" data-value="'+value+'"'+
+        ((name === 'month' ? month === value : name === 'day' ? day === value : year === value) ? ' class="selected"' : '')+
+        (allowed ? '' : ' disabled')+'>'+label+'</button>').join('');
+      node.dataset.cols = String(cols);
+    };
+    make('month',sideDateMonths.map(([label,value])=>[label,value,true]),4);
+    make('day',Array.from({length:31},(_,i)=>[String(i+1),i+1,!!month && i+1<=sideDateDays(month,year)]),7);
+    make('year',years.map(value=>[String(value),value,!!month && !!day && sideDateAllowed(month,day,value,request.dateType)]),4);
+    $('[data-side-date-month-label]').textContent = sideDateMonths.find(([,v])=>v===month)?.[0] || '—';
+    $('[data-side-date-day-label]').textContent = day && month ? String(day).padStart(2,'0') : '—';
+    $('[data-side-date-year-label]').textContent = year || '—';
+    const valid = month && day && year && sideDateAllowed(month,day,year,request.dateType);
+    $('[data-side-date-value]').value = valid ? [year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-') : '';
+    const save = $('[data-side-date-save]');
+    if (save) {save.disabled = !valid;save.textContent = 'USE '+(production ? 'PRODUCTION' : 'EXPIRATION')+' DATE';}
+  }
+
+  function chooseSidelineDatePart(part,value) {
+    if (!sideDatePrompt || sideDateSaving) return;
+    const selection = sideDateSelection;
+    if (part === 'month') {selection.month=value;selection.day=1;selection.year=null;}
+    else if (part === 'day') {selection.day=value;selection.year=null;}
+    else if (part === 'year') {selection.year=value;}
+    else return;
+    drawSidelineDatePicker();
+    // Match standalone: choosing a valid expiration YEAR immediately saves the date;
+    // a production date requires an explicit confirmation button.
+    if (part === 'year' && sideDatePrompt.dateType === 'EXPIRATION_DATE' &&
+        $('[data-side-date-value]')?.value) void saveSidelineDate('date');
+  }
+
   function closeSidelineDate({focus = true} = {}) {
+    if (sideDatePrompt) {
+      if (sideDateDismissed.size > 250) sideDateDismissed.clear();
+      sideDateDismissed.add(sidelineDateKey(sideDatePrompt));
+    }
     sideDatePrompt = null;
     const panel = $('[data-side-date-editor]');
     if (panel) panel.hidden = true;
@@ -376,21 +462,27 @@ async function driveStart() {
         !['EXPIRATION_DATE','PRODUCTION_DATE'].includes(dateType) ||
         upper(source) !== upper($('[data-side-source]')?.value) ||
         upper(dest) !== upper($('[data-side-dest]')?.value)) return;
+    if (sideDatePrompt && sideDatePrompt.requestId === clean(request.requestId || '') &&
+        upper(sideDatePrompt.code) === upper(code) && upper(sideDatePrompt.source) === upper(source)) return;
     sideDatePrompt = {code,source,dest,dateType,requestId:clean(request.requestId || '')};
+    sideDateSelection = {month:null,day:1,year:null};
     const panel = $('[data-side-date-editor]');
     if (!panel) return;
     $('[data-side-date-title]').textContent = (dateType === 'PRODUCTION_DATE' ? 'PRODUCTION' : 'EXPIRATION') + ' DATE REQUIRED';
-    $('[data-side-date-code]').textContent = code + (request.asin ? ' • ASIN ' + clean(request.asin) : '');
-    $('[data-side-date-value]').value = '';
+    $('[data-side-date-code]').textContent = code;
+    $('[data-side-date-asin]').textContent = clean(request.asin) || '—';
+    $('[data-side-date-fnsku]').textContent = clean(request.fnsku) || '—';
     $('[data-side-date-pao]').hidden = dateType !== 'EXPIRATION_DATE';
     $('[data-side-date-hint]').textContent = request.requestId
-      ? 'Ready items processed first. Save, defer this item without moving, or return to source (stops run without closing it).'
-      : 'You may enter the date now or keep scanning. No move is sent until RUN.';
+      ? 'Ready items have been processed first. Save date, defer the item without moving, or return to source without closing.'
+      : 'Barcode scanning remains active. Enter the date now, or choose LATER and continue scanning.';
     $('[data-side-date-later]').textContent = request.requestId ? 'DEFER THIS ITEM' : 'LATER / KEEP SCANNING';
     $('[data-side-date-error]').textContent = '';
+    drawSidelineDatePicker();
     panel.hidden = false;
-    if (request.requestId) panel.scrollIntoView?.({block:'nearest',inline:'nearest'});
-    // Do not steal scanner focus; operator deliberately clicks the date control.
+    // A date question cannot be covered by the running spinner.
+    setPanelLoading('sideline', false);
+    // Never steal barcode scanner focus or scroll the scanning panel.
   }
 
   async function saveSidelineDate(mode) {
@@ -809,6 +901,9 @@ async function driveStart() {
   function setPanelLoading(area, on, message = '', options = {}) {
     const panel = $('[data-panel="' + area + '"]');
     if (!panel) return;
+    // A pending date answer is an operator-input state, not a blocking operation.
+    // Other progress/recovery messages must not re-cover the active date controls.
+    if (area === 'sideline' && on && sideDatePrompt) on = false;
     const lock = options.lock !== false;
     panel.dataset.loading = on ? '1' : '0';
     if (message) {
@@ -993,6 +1088,8 @@ async function driveStart() {
   }
 
   function resetSidelineLazyInputs() {
+    closeSidelineDate({focus:false});
+    sideDateDismissed.clear();
     for (const el of $$('[data-side-source],[data-side-dest],[data-side-items]')) el.value = '';
     $('[data-side-source]')?.focus();
   }
@@ -1385,12 +1482,19 @@ async function driveStart() {
       '        <div class="iss-side-alert" data-side-alert><strong>⚠ ACTION REQUIRED — RESCAN DESTINATION</strong><span data-side-alert-text>Scan the destination again in ITEM BARCODES to continue.</span></div>',
       '        <div class="iss-side-items" data-side-items-state></div>',
       '        <section class="iss-date-editor" data-side-date-editor hidden role="region" aria-label="Sideline date entry">',
-      '          <strong data-side-date-title>DATE REQUIRED</strong><span data-side-date-code></span>',
-      '          <label>SELECT DATE <input data-side-date-value type="date" aria-label="Enter expiration or production date"></label>',
-      '          <span class="iss-date-hint" data-side-date-hint></span><span class="iss-date-error" data-side-date-error></span>',
-      '          <div class="iss-date-actions"><button type="button" data-side-date-save>SAVE DATE</button><button type="button" data-side-date-pao>PAO +900 DAYS</button><button type="button" data-side-date-later>LATER / KEEP SCANNING</button><button type="button" data-side-date-return>RETURN TO SOURCE</button></div>',
-      '        </section>',
-      '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden></div>',
+      '          <div class="iss-date-window">',
+      '            <div class="iss-date-id"><strong data-side-date-title>DATE REQUIRED</strong><span data-side-date-code></span></div>',
+      '            <div class="iss-date-preview"><div><strong>ASIN</strong><span data-side-date-asin>—</span></div><div><strong>FNSKU</strong><span data-side-date-fnsku>—</span></div></div>',
+      '            <div class="iss-date-picker-wrap">',
+      '              <section class="iss-date-picker-panel"><div class="iss-date-grid-head"><span>MONTH</span><strong data-side-date-month-label>—</strong></div><div class="iss-date-button-grid" data-side-date-grid="month"></div></section>',
+      '              <section class="iss-date-picker-panel"><div class="iss-date-grid-head"><span>DAY</span><strong data-side-date-day-label>—</strong></div><div class="iss-date-button-grid" data-side-date-grid="day"></div></section>',
+      '              <section class="iss-date-picker-panel"><div class="iss-date-grid-head"><span>YEAR</span><strong data-side-date-year-label>—</strong></div><div class="iss-date-button-grid" data-side-date-grid="year"></div></section>',
+      '            </div>',
+      '            <input data-side-date-value type="hidden" value="">',
+      '            <span class="iss-date-hint" data-side-date-hint></span><span class="iss-date-error" data-side-date-error></span>',
+      '            <div class="iss-date-actions"><button type="button" data-side-date-save disabled>USE DATE</button><button type="button" data-side-date-pao>PAO +900 DAYS</button><button type="button" data-side-date-later>LATER / KEEP SCANNING</button><button type="button" data-side-date-return>RETURN TO SOURCE</button></div>',
+      '          </div>',
+      '        </section>',       '        <div class="iss-lazy-options" data-clear-source-wrap><button type="button" class="iss-toggle-button" data-clear-source-toggle>CLEAR SOURCE: OFF</button><button type="button" class="iss-toggle-button" data-lazy-delay-toggle>DELAY 2–8s: ON</button><input type="checkbox" data-clear-source hidden><input type="checkbox" data-lazy-delay hidden></div>',
       '        <div class="iss-actions"><button type="button" class="iss-primary" data-side-run>RUN SIDELINE</button><button type="button" data-stop="sideline">STOP</button><button type="button" data-clear="sideline">CLEAR</button></div>',
       '        <div class="iss-status-line"><div class="iss-status" data-status="sideline" data-kind="">Ready</div><span class="iss-progress" data-progress="sideline"></span></div>',
       '        <div class="iss-queue-report" data-side-queue-report hidden><div data-side-queue-summary></div><div class="iss-queue-review" data-side-queue-failures></div><button type="button" class="iss-queue-authorize" data-side-queue-approve hidden>AUTHORIZE RETRY</button><button type="button" class="iss-queue-copy" data-side-queue-copy hidden>COPY ERRORS</button></div>',
@@ -1432,7 +1536,7 @@ async function driveStart() {
       '.iss-container-row{display:grid;grid-template-columns:minmax(0,1fr) 49px;gap:7px}.iss-container-row input{min-width:0}.iss-container-clear{height:38px;padding:0!important;background:#fff4e8!important;color:#85440b!important;border-color:#c8925e!important}.iss-container-hint{text-align:right;color:#536171;font-size:11px;margin-top:-3px}.iss-side-item[data-state="LOOKUP_FAILED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}',
       '.iss-inline-field{display:none;grid-template-columns:auto 90px;align-items:center;gap:8px;padding:7px 8px;background:#f7f8fa;border:1px solid #cbd2d9;border-radius:3px}.iss-inline-field[data-show="1"]{display:grid}.iss-inline-field input{height:32px;padding:0 7px;text-align:center}',
       '.iss-queue-report{padding:8px;border:1px solid #91a3b6;background:#f8fafc;border-radius:4px;font-size:11px;color:#17262d}.iss-queue-report[hidden]{display:none!important}.iss-queue-summary{font-weight:900}.iss-queue-review{max-height:180px;overflow:auto;margin-top:5px}.iss-queue-entry{margin:3px 0;padding:5px 7px;border-left:5px solid #8b3a19;background:#fff3e7;color:#41250f;overflow-wrap:anywhere}.iss-queue-entry[data-kind="verify"]{border-left-color:#8b1d1d;background:#fff0f0}.iss-queue-entry code{font-weight:900;margin-right:5px}.iss-queue-authorize,.iss-queue-copy{margin:6px 6px 0 0;padding:8px;border:1px solid #385f84;border-radius:3px;background:#e4f0ff;color:#123960;font-weight:900;cursor:pointer}.iss-queue-authorize{background:#fff0ce;border-color:#855318;color:#58310b}',
-      '.iss-date-editor{display:grid;gap:7px;padding:10px;border:2px solid #dc8a25;border-radius:4px;background:#fff9ed;color:#58310b;font-size:12px}.iss-date-editor[hidden]{display:none!important}.iss-date-editor>strong{font-size:13px}.iss-date-editor>span{overflow-wrap:anywhere}.iss-date-editor label{display:grid;gap:4px;font-weight:900}.iss-date-editor input{height:38px;padding:5px;border:1px solid #9caebc;border-radius:3px;background:#fff;font:700 14px Arial}.iss-date-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.iss-date-actions button,.iss-date-open{border:1px solid #b47a28;border-radius:3px;background:#fff0d7;color:#6f3600;padding:8px;font:900 11px Arial;cursor:pointer}.iss-date-open{margin-top:5px;padding:5px 9px}.iss-date-actions button[data-side-date-save]{background:#146eb4;color:#fff;border-color:#146eb4}.iss-date-actions button[data-side-date-return]{border-color:#9b431b;color:#8b2a0a}.iss-date-actions button:disabled{opacity:.5}.iss-date-error{color:#9d1e1e;font-weight:900}.iss-date-hint{color:#6b4a19;font-size:11px}',
+      '.iss-date-editor{position:fixed;inset:0;z-index:2147483000;pointer-events:none;background:rgba(31,41,55,.09);font:700 12px Arial,sans-serif;color:#172033}.iss-date-editor[hidden]{display:none!important}.iss-date-window{box-sizing:border-box;position:absolute;top:36px;left:50%;transform:translateX(-50%);width:900px;max-width:calc(100vw - 24px);max-height:calc(100vh - 56px);overflow-y:auto;pointer-events:auto;background:#4b5563;border:6px solid #4b5563;border-radius:13px;box-shadow:0 12px 30px rgba(0,0,0,.35)}.iss-date-id{padding:10px;background:#fff;border-radius:7px 7px 0 0;text-align:center;display:grid;gap:4px}.iss-date-id strong{font-size:19px;font-weight:900;color:#9a3412}.iss-date-id span{font:900 16px Consolas,monospace;color:#0f3d73}.iss-date-preview{background:white;margin-top:7px;padding:12px;display:flex;flex-wrap:wrap;gap:12px;border-radius:7px;justify-content:center}.iss-date-preview>div{display:flex;gap:8px;align-items:center;padding:7px 12px;background:#f8fafc;border:1px solid #d7dee8;border-radius:5px;font:800 14px Consolas,monospace}.iss-date-preview strong{font:900 12px Arial;color:#5f6b76}.iss-date-picker-wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:7px}.iss-date-picker-panel{background:#fff;border:2px solid #f97316;border-radius:10px;padding:9px;min-width:0}.iss-date-grid-head{display:flex;align-items:center;justify-content:space-between;font:900 13px Arial;margin-bottom:8px;color:#9a3412}.iss-date-grid-head strong{color:#111827}.iss-date-button-grid{display:grid;gap:5px}.iss-date-button-grid[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr))}.iss-date-button-grid[data-cols="7"]{grid-template-columns:repeat(7,minmax(0,1fr))}.iss-date-button-grid button{min-width:0;height:34px;border:1px solid #c7d2fe;border-radius:6px;background:#f5f7ff;color:#1e3a8a;font:850 12px Arial;cursor:pointer}.iss-date-button-grid button.selected{background:#2563eb;color:#fff;border-color:#1d4ed8}.iss-date-button-grid button:disabled{opacity:.3;cursor:default}.iss-date-button-grid button:hover:not(:disabled){background:#e0e7ff}.iss-date-hint{display:block;margin:7px 0 0;padding:8px;background:#fff;border-radius:5px;color:#334155;font:800 12px Arial;text-align:center}.iss-date-error{display:block;color:#9d1e1e;font:900 13px Arial;background:#fff;padding:0 6px;text-align:center}.iss-date-error:empty{display:none}.iss-date-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:7px}.iss-date-actions button{min-height:45px;border:1px solid #6d28d9;border-radius:6px;background:#7c3aed;color:white;padding:9px;font:900 13px Arial;cursor:pointer}.iss-date-actions button[data-side-date-save]{background:#146eb4;border-color:#0f5c99}.iss-date-actions button[data-side-date-return]{background:#eff6ff;color:#0f3d73;border:2px solid #146eb4}.iss-date-actions button:disabled{opacity:.38;cursor:default}@media(max-width:850px){.iss-date-window{top:8px;max-height:calc(100vh - 16px)}.iss-date-picker-wrap{gap:4px}.iss-date-picker-panel{padding:5px}.iss-date-button-grid{gap:2px}.iss-date-button-grid button{height:30px;font-size:10px}}',
       '.iss-lazy-options{display:none}.iss-lazy-options[data-show="1"]{display:flex;gap:6px;flex-wrap:wrap}.iss-toggle-button{height:34px;padding:0 12px;border:1px solid #aeb8c2;border-radius:3px;background:#f7f8fa;color:#33475b;font-size:10px;font-weight:900;cursor:pointer}.iss-toggle-button[data-active="1"]{background:#365f7e;color:#fff;border-color:#294d69}.iss-side-metrics{display:none;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.iss-side-metrics[data-show="1"]{display:grid}.iss-side-metric{padding:7px 4px;border:1px solid #c7d0dd;background:#f8fafc;text-align:center}.iss-side-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.2px;color:#536171}.iss-side-metric b{display:block;margin-top:2px;font-size:20px;line-height:1;color:#17324d}',
       '.iss-actions{display:grid;grid-template-columns:1.5fr .7fr .7fr;gap:6px;margin-top:2px}.iss-actions button{height:36px;border:1px solid #a9b3bd;border-radius:3px;background:#f5f6f7;color:#26384a;font-weight:900;cursor:pointer}.iss-actions .iss-primary{background:#146eb4;border-color:#0f5f9d;color:#fff}.iss-actions button:hover:not(:disabled){filter:brightness(.97)}.iss-actions button:disabled{opacity:.5;cursor:not-allowed}',
       '.iss-status{min-height:31px;padding:7px 8px;border:1px solid #c7d0d8;background:#f8f9fa;color:#38495a;font-size:11px;font-weight:800}.iss-status[data-kind="working"]{border-color:#8db3d0;background:#eef6fb;color:#174a70}.iss-status[data-kind="ok"]{border-color:#8fbea0;background:#f0f8f2;color:#1d5f32}.iss-status[data-kind="error"]{border-color:#d7a0a0;background:#fff3f3;color:#8c2525}.iss-status[data-kind="attention"]{border:3px solid #f59e0b;border-left:8px solid #dc2626;background:#fff7ed;color:#7c2d12;font-size:13px;font-weight:1000}.iss-status-line{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}.iss-progress{font-size:10px;font-weight:800;color:#65727f;white-space:nowrap}.iss-side-alert{display:none;margin:7px 0;padding:10px 12px;border:3px solid #f59e0b;border-left:8px solid #dc2626;border-radius:5px;background:#fff7ed;color:#7c2d12;text-align:center;box-shadow:0 0 0 2px rgba(245,158,11,.12);animation:issSideAttention .85s ease-in-out infinite alternate}.iss-side-alert[data-show="1"]{display:grid;gap:4px}.iss-side-alert strong{font-size:15px;font-weight:1000}.iss-side-alert span{font-size:12px;font-weight:900}.iss-panel[data-side-attention="rescan-destination"]{border-color:#f59e0b!important;box-shadow:0 0 0 3px rgba(245,158,11,.24),0 2px 8px rgba(0,0,0,.13)!important}.iss-panel[data-side-attention="rescan-destination"] [data-side-items]{outline:4px solid #f59e0b!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:#fff7ed!important}.iss-side-items{display:none;max-height:190px;overflow:auto;border:1px solid #c7d0d8;border-radius:4px;background:#f8fafc;padding:5px;gap:5px}.iss-side-items[data-show="1"]{display:grid}.iss-side-item{padding:7px 8px;border:1px solid #cbd5e1;border-left:5px solid #64748b;border-radius:3px;background:#fff;color:#334155}.iss-side-item[data-state="READY"]{border-left-color:#146eb4;background:#eff6ff;color:#0f3d73}.iss-side-item[data-state="DATE"]{border-left-color:#f59e0b;background:#fff7ed;color:#7c2d12}.iss-side-item[data-state="MOVED"]{border-left-color:#146eb4;background:#f0f8ff;color:#0f3d73}.iss-side-item[data-state="FAILED"],.iss-side-item[data-state="INVALID"],.iss-side-item[data-state="SKIPPED"]{border:2px solid #ef4444;border-left-width:7px;background:#fff1f2;color:#7f1d1d}.iss-side-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:1000}.iss-side-item-top code{font:900 12px Consolas,monospace}.iss-side-item-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 7px;margin-top:5px;font-size:11px;line-height:1.25}.iss-side-item-meta b{font-weight:1000}.iss-side-item[data-state="FAILED"] .iss-side-item-meta b,.iss-side-item[data-state="INVALID"] .iss-side-item-meta b,.iss-side-item[data-state="SKIPPED"] .iss-side-item-meta b{color:#991b1b}@keyframes issSideAttention{from{background:#fff7ed;box-shadow:0 0 0 2px rgba(245,158,11,.10)}to{background:#fef3c7;box-shadow:0 0 0 6px rgba(245,158,11,.22)}}',
@@ -1678,6 +1782,7 @@ async function driveStart() {
 
     const previous = sidelineMode;
     closeSidelineDate({focus:false});
+    sideDateDismissed.clear();
     sidelineMode = mode;
     sidelineCompletionStatus = '';
     syncSidelineModeUi();
@@ -2021,7 +2126,7 @@ async function driveStart() {
   }
 
   async function stopArea(area) {
-    if (area === 'sideline') { invalidateSidelineDraft(); closeSidelineDate({focus:false}); }
+    if (area === 'sideline') { invalidateSidelineDraft(); closeSidelineDate({focus:false}); sideDateDismissed.clear(); }
     try {
       if (area === 'edit' || area === 'move') await rpc('aft', 'stop', {}, 8000);
       else await rpc('sideline', 'stop', {}, 8000);
@@ -2278,6 +2383,14 @@ async function driveStart() {
       const row = sidelineDateRows.find(item => upper(item.code) === upper(code) && upper(item.status) === 'DATE');
       if (row) openSidelineDate({...row,source:$('[data-side-source]')?.value,dest:$('[data-side-dest]')?.value});
     });
+    $('[data-side-date-editor]')?.addEventListener('mousedown', event => {
+      if (event.target.closest('[data-side-date-part]')) event.preventDefault();
+    });
+    $('[data-side-date-editor]')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-side-date-part]');
+      if (!button || button.disabled) return;
+      chooseSidelineDatePart(button.dataset.sideDatePart, Number(button.dataset.value));
+    });
     $('[data-side-date-save]')?.addEventListener('click', () => { void saveSidelineDate('date'); });
     $('[data-side-date-pao]')?.addEventListener('click', () => { void saveSidelineDate('pao'); });
     $('[data-side-date-later]')?.addEventListener('click', () => { void laterSidelineDate(); });
@@ -2363,6 +2476,8 @@ async function driveStart() {
     const root = document.createElement('div');
     root.innerHTML = appMarkup();
     document.body.append(...root.childNodes);
+    const datePopup = $('[data-side-date-editor]');
+    if (datePopup) document.body.appendChild(datePopup);
     document.documentElement.style.visibility = '';
 
     wireEvents();
