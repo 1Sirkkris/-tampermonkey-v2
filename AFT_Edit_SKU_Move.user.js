@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2 | MAIN AFT Edit/SKU/Move master
 // @namespace    https://github.com/1Sirkkris
-// @version      0.9.50
+// @version      0.9.51
 // @description  Lean AFT-only master: EditItems/FcSku/MoveItems native QualityTools API.
 // @include      *://aft-qt-*.corp.amazon.com/app/edititems*
 // @include      *://aft-qt-*.corp.amazon.com/app/fcskuflip*
@@ -32,7 +32,7 @@
   window.__bwu2AftEditSkuMove = true;
   if (!/^aft-qt-/i.test(location.hostname) || !/\.corp\.amazon\.com$/i.test(location.hostname)) return;
 
-  const VERSION = '0.9.50';
+  const VERSION = '0.9.51';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('AFT', VERSION);
 
@@ -3299,6 +3299,7 @@
 
     classify(text) {
       const value = low(text);
+      if (value.includes('select iog')) return 'iog';
       if (value.includes('success')) return 'success';
       if (value.includes('confirm flip')) return 'confirm';
       if (value.includes('enter new fnsku') || value.includes('enter new fcsku')) return 'new';
@@ -3449,9 +3450,48 @@
       );
     },
 
+    chooseIog(snapshot) {
+      // Use the native radio values, not checked/default position or text-only guesses.
+      const choices = [...snapshot.doc.querySelectorAll('input[type="radio"]')]
+        .filter(radio => !radio.matches(':disabled'))
+        .map(radio => {
+          const label = [...(radio.labels || [])].map(el => el.textContent).join(' ') ||
+            radio.closest('label')?.textContent || radio.parentElement?.textContent || '';
+          const iog = (norm(label).match(/\b\d{6,12}\b/) ||
+            norm(radio.value).match(/^\d{6,12}$/) || [])[0] || '';
+          return { iog, value: norm(radio.value) };
+        })
+        .filter(choice => choice.iog && choice.value && low(choice.value) !== 'on');
+
+      if (!choices.length) throw new Error('IOG: native radio options unavailable; no selection submitted');
+      const preferred = choices.find(choice => choice.iog !== '1230450') || choices[0];
+      traceAft('AFT_FCSKU_IOG_CHOICE', {
+        options: choices.map(choice => choice.iog),
+        selected: preferred.iog,
+        policy: '1230450-last'
+      });
+      return preferred.value;
+    },
+
+    async handleIog(workflowId) {
+      const before = await this.fetchState('After OLD');
+      assertObject(workflowId, before.objectId, 'After OLD');
+      if (before.state === 'new') return; // Existing single-IOG native path.
+      if (before.state !== 'iog') {
+        throw new Error(`Expected New or Select IOG after OLD; got ${before.state}`);
+      }
+
+      await FcApi.input(workflowId, this.chooseIog(before), 'IOG');
+      const after = await this.fetchState('After IOG');
+      assertObject(workflowId, after.objectId, 'After IOG');
+      if (after.state !== 'new') {
+        throw new Error(`IOG selection did not advance to New; got ${after.state}`);
+      }
+    },
+
     async runOne(workflowId, container, oldCode, newCode, index, total, needNext) {
       const started = performance.now();
-      this.tracker?.begin(container, `${oldCode} → ${newCode}`, ['Container', 'OLD', 'NEW', 'Confirm', 'End']);
+      this.tracker?.begin(container, `${oldCode} → ${newCode}`, ['Container', 'OLD', 'IOG', 'NEW', 'Confirm', 'End']);
       const step = async (name, fn) => {
         this.tracker?.active(name); this.status(`${index}/${total} ${name}`);
         try {
@@ -3464,6 +3504,7 @@
       };
       await step('Container', () => FcApi.input(workflowId, container, 'Container'));
       await step('OLD', () => FcApi.input(workflowId, oldCode, 'Old'));
+      await step('IOG', () => this.handleIog(workflowId));
       await step('NEW', () => FcApi.input(workflowId, newCode, 'New'));
       await step('Confirm', () => FcApi.confirm(workflowId));
       await step('End', () => FcApi.end(workflowId));
