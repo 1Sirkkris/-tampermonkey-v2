@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BWU2 SIM Duplicate Review
 // @namespace    bwu2.local.sim.duplicate-review.test
-// @version      0.3.25
+// @version      0.3.26
 // @description  ISS duplicate discovery with exact ASIN/RPI-set checks (order ignored); original one-click ISS and two-step manual closures preserved.
 // @match        https://t.corp.amazon.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (function () {
     'use strict';
-    const VER='0.3.25', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
+    const VER='0.3.26', FC='BWU2', SIM='https://t.corp.amazon.com/issues/';
     const GRAPH='https://sim-ticketing-graphql-fleet.corp.amazon.com/graphql';
     const WAVE='https://wave.qubit.amazon.dev/api/graphql';
     const WAVE_PAGE='https://wave.qubit.amazon.dev/command-center/ISS';
@@ -90,7 +90,7 @@
       #bwu-dr-panel button.dr-primary{background:#215b80;border:1px solid #7baac9;font-weight:700}
       #bwu-dr-panel .dr-progress{color:#d6e6f5;flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
       #bwu-dr-panel .dr-ticket{display:inline-flex;align-items:center;gap:7px}
-      #bwu-dr-panel .dr-grid table{table-layout:fixed;min-width:800px}
+      #bwu-dr-panel .dr-grid table{table-layout:fixed;min-width:0}
       #bwu-dr-panel .dr-grid th:nth-child(1){width:17%}
       #bwu-dr-panel .dr-grid th:nth-child(2){width:13%}
       #bwu-dr-panel .dr-grid th:nth-child(3){width:44%}
@@ -167,6 +167,23 @@
       #bwu-dr-inspector .dr-insp-description .dr-insp-body{max-height:230px;overflow:auto}
       #bwu-dr-inspector .dr-insp-compare-label{color:#c5d9ef;font-weight:700;margin:8px 0}
       @media(max-width:700px){#bwu-dr-inspector .dr-insp-layout{grid-template-columns:104px minmax(0,1fr)}#bwu-dr-inspector .dr-insp-descriptions{grid-template-columns:1fr}#bwu-dr-panel .dr-compact .dr-actions-cell button{font-size:11px;padding:4px 6px}#bwu-dr-panel .dr-compact th:nth-child(5){width:24%}#bwu-dr-panel .dr-compact th:nth-child(6){width:24%}}
+      /* At narrow widths, avoid a six-column squeeze or clipped right-hand actions.
+         Each duplicate becomes a compact grid card; all controls stay inside view. */
+      @media(max-width:1000px){
+        #bwu-dr-panel .dr-grid table.dr-compact{display:block;width:100%;min-width:0;table-layout:auto}
+        #bwu-dr-panel .dr-compact tbody{display:block;width:100%}
+        #bwu-dr-panel .dr-compact tr:first-child{display:none}
+        #bwu-dr-panel .dr-compact tr:not(:first-child){display:grid;grid-template-columns:30px minmax(0,1fr) minmax(92px,.68fr);gap:3px 9px;align-items:start;margin:9px 0;padding:9px 11px;border:1px solid #3e5872;border-radius:8px;background:#13283d;min-width:0}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) td{display:block;width:auto;min-width:0;border:0;padding:3px 1px;overflow-wrap:anywhere}
+        #bwu-dr-panel .dr-compact .dr-select{grid-column:1;grid-row:1;align-self:center}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) td:nth-child(2){grid-column:2 / 4;grid-row:1}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) td:nth-child(3){grid-column:2;grid-row:2}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) td:nth-child(4){grid-column:3;grid-row:2}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) td:nth-child(5){grid-column:2 / 4;grid-row:3}
+        #bwu-dr-panel .dr-compact tr:not(:first-child) .dr-actions-cell{grid-column:1 / 4;grid-row:4;display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:7px;border-top:1px solid #39506a}
+        #bwu-dr-panel .dr-compact .dr-actions-cell button{margin:0}
+        #bwu-dr-panel .dr-compact .dr-actions-cell .dr-small{flex-basis:100%}
+      }
       @media(max-width:680px){#bwu-dr-inspector .dr-insp-nav{padding:4px}#bwu-dr-inspector .dr-insp-detail{padding:8px}}
     `;
     const style=document.createElement('style');style.textContent=CSS;(document.head||document.documentElement).appendChild(style);
