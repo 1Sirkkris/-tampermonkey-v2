@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         V2.5 | TEST BWU2 ISS Drive Runtime
 // @namespace    https://github.com/1Sirkkris/iss-drive
-// @version      2.5.5
+// @version      2.5.6
 // @description  Standalone Drive ISS runtime; pinned EDIT/MOVE and Sideline engines, scoped to one HTML file.
 // @match        https://drive-render.corp.amazon.com/view/krmclenn@/BWU2_ISS_Console.html*
 // @match        https://drive-render.corp.amazon.com/view/krmclenn%40/BWU2_ISS_Console.html*
@@ -16,12 +16,12 @@
 'use strict';
 /* Network and protocol boundary. No request URL or request body comes from the HTML UI. */
 const ISS_DRIVE_PROTOCOL = 'bwu2-iss-drive/1';
-const ISS_DRIVE_VERSION = '2.5.5';
+const ISS_DRIVE_VERSION = '2.5.6';
 const ISS_DRIVE_ORIGIN = 'https://drive-render.corp.amazon.com';
 const ISS_DRIVE_PATH = '/view/krmclenn@/BWU2_ISS_Console.html';
 // A DOM event with a JSON-string payload works across Firefox's userscript sandbox.
 // Requests are read-only, accepted only in this top-level Drive document.
-const ISS_DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.5';
+const ISS_DRIVE_SESSION_BRIDGE = 'bwu2-iss-drive:session-v2.5.6';
 const ISS_AFT_ORIGIN = 'https://aft-qt-jp.aka.nrt.corp.amazon.com';
 const ISS_POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
 const issDriveFragment = new URLSearchParams(location.hash.slice(1));
@@ -8060,6 +8060,8 @@ if (ISS_DRIVE_WORKER === 'aft') {
       lazy.dateResolve = settle;
       issSideSend('ISS_CONSOLE_DATE_REQUEST',{
         requestId,code:item.code,asin:item.ctx?.asin || '',fnsku:item.ctx?.fnsku || '',
+        title:clean(item.ctx?.sku?.title || item.ctx?.sku?.normalizedTitle || ''),
+        imageUrl:productImageUrl(item.ctx),
         dateType:item.ctx?.dateType || '',source:lazy.src,revision:issSideRunRevision
       });
     });
@@ -9075,7 +9077,9 @@ if (ISS_DRIVE_WORKER === 'aft') {
       asin:clean(item.ctx?.asin || ''),
       fnsku:clean(item.ctx?.fnsku || ''),
       issue:clean(item.failReason || ''),
-      dateType:clean(item.ctx?.dateType || '')
+      dateType:clean(item.ctx?.dateType || ''),
+      title:clean(item.ctx?.sku?.title || item.ctx?.sku?.normalizedTitle || ''),
+      imageUrl:productImageUrl(item.ctx)
     }));
   }
 
@@ -9113,6 +9117,8 @@ if (ISS_DRIVE_WORKER === 'aft') {
         : result?.kind === 'green' ? 'READY' : 'CHECKING';
       return {code:item.code,qty:item.qty,status,asin:result?.ctx?.asin || '',
         fnsku:result?.ctx?.fnsku || '',dateType:result?.ctx?.dateType || '',
+        title:clean(result?.ctx?.sku?.title || result?.ctx?.sku?.normalizedTitle || ''),
+        imageUrl:productImageUrl(result?.ctx),
         issue:chosen ? 'DATE SET — ' + dateLabel(chosen.enteredMs) : (entry?.error?.message || result?.reason || '')};
     });
     const bad = rows.filter(row => ['INVALID','LOOKUP_FAILED'].includes(row.status));
