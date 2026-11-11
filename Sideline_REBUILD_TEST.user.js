@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.40
-// @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select. Live/Scrub removed.
+// @version      0.0.41
+// @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select + standalone Live QTY 1.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.40-REBUILD';
+  const VERSION = '0.0.41-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -36,6 +36,8 @@
   const LOOKUP_CONCURRENCY = 5;
   const PANEL_STATE_KEY = 'sidelineRebuild.panelStates.v1';
   const LAZY_DELAY_KEY = 'sidelineRebuild.lazyDelay.v1';
+  const LIVE_CLEAR_KEY = 'sidelineRebuild.liveClearSource.v1';
+  const LIVE_UNKNOWN_KEY = 'sidelineRebuild.liveUnknown.v1';
   const LAZY_DELAY_MIN_MS = 2000;
   const LAZY_DELAY_MAX_MS = 8000;
   const CLEAR_SOURCE_KEY = 'sidelineApiLazy.clearSource';
@@ -401,7 +403,7 @@
     return payload;
   }
 
-  const helperSelector = '#sh-dock,#sh-queue,#sh-qty,#sh-lazy,#sh-og-expiry,#sh-lazy-running-indicator,#sh-move-corner';
+  const helperSelector = '#sh-dock,#sh-queue,#sh-qty,#sh-lazy,#sh-live,#sh-og-expiry,#sh-lazy-running-indicator,#sh-move-corner';
   const shared = { owner:'', queueBusy:false, expiryBusy:false };
   let returnSourceBusy = false;
   let expiryRequestSeq = 0;
@@ -928,6 +930,37 @@
 }
 @media(max-width:1100px){#sh-aside{right:14px;bottom:calc(58px + 330px);width:230px;max-height:220px}}
 
+
+/* Standalone LIVE: fourth equal dock button; simple, high-contrast single scan lane. */
+#sh-dock{grid-template-columns:repeat(4,minmax(0,1fr))}
+#sh-live{width:720px;max-width:calc(100vw - 28px);max-height:calc(100vh - 76px);overflow-y:auto;overflow-x:hidden;box-sizing:border-box}
+#sh-live .sh-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+#sh-live .sh-live-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#sh-live .sh-live-field{min-width:0;display:grid;gap:3px}
+#sh-live .sh-live-field label{font-weight:900;font-size:10px;color:#385674}
+#sh-live .sh-input{min-width:0}
+#sh-live .sh-live-scan{display:block;width:100%;min-height:54px;margin-top:7px;border:2px solid #315f7f;border-radius:4px;background:#fff;font:900 18px Consolas,monospace;text-align:center}
+#sh-live .sh-live-scan:disabled{background:#edf0f3;color:#667789;border-color:#9ca3af}
+#sh-live .sh-live-state{margin:8px 0 5px;padding:13px 11px;min-height:76px;border:3px solid #315f7f;border-left-width:9px;border-radius:5px;background:#f0f7fb;color:#0f3655;text-align:center;box-sizing:border-box}
+#sh-live .sh-live-state strong{display:block;font:1000 20px/1.2 Arial,sans-serif;letter-spacing:.25px}
+#sh-live .sh-live-state span{display:block;margin-top:6px;font:800 12px/1.35 Arial,sans-serif;overflow-wrap:anywhere}
+#sh-live .sh-live-state.red{border-color:#7a0000;background:#b00020;color:white;box-shadow:0 0 0 2px #fff,0 0 0 4px #b00020}
+#sh-live .sh-live-state.yellow{border-color:#b45309;background:#fffbeb;color:#78350f}
+#sh-live .sh-live-state.busy{border-color:#2563eb;background:#eff6ff;color:#1e40af}
+#sh-live .sh-live-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:5px 0}
+#sh-live .sh-live-metrics div{padding:6px;border:1px solid #becbd7;background:#f8fafc;text-align:center;font-size:10px;font-weight:900}
+#sh-live .sh-live-metrics b{display:block;font-size:22px;line-height:1.2}
+#sh-live .sh-live-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:7px 0}
+#sh-live .sh-live-actions button,#sh-live .sh-live-recovery button{min-height:35px}
+#sh-live .sh-live-recovery{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0}
+#sh-live .sh-live-recovery:empty{display:none}
+#sh-live .sh-live-history{max-height:140px;overflow-y:auto;border-top:1px solid #cbd5e1;margin-top:8px;padding-top:4px;font:800 11px/1.45 Consolas,monospace}
+#sh-live .sh-live-history div{padding:4px 5px;border-bottom:1px solid #e2e8f0;overflow-wrap:anywhere}
+#sh-live .sh-live-history .red{color:#991b1b;background:#fff1f2}
+#sh-live .sh-live-history .ok{color:#166534}
+#sh-live .sh-live-alert{font-size:11px;font-weight:900;color:#991b1b;min-height:0;margin:3px 0}
+#sh-og-expiry .og-cancel-live{background:#b91c1c!important;border-color:#991b1b!important}
+@media(max-width:760px){#sh-live{width:calc(100vw - 28px)}#sh-live .sh-live-pair{grid-template-columns:1fr}}
 `;
   document.documentElement.appendChild(style);
 
@@ -1007,7 +1040,7 @@
     renderMoveCorner();
   }
 
-  const feature = { queue:false, qty:false, lazy:false };
+  const feature = { queue:false, qty:false, lazy:false, live:false };
   const panels = {};
   const dockButtons = [];
 
@@ -1035,7 +1068,7 @@
   function restorePanelStates() {
     try {
       const saved = JSON.parse(localStorage.getItem(PANEL_STATE_KEY) || '{}');
-      for (const key of ['queue','lazy','qty']) feature[key] = saved[key] === true;
+      for (const key of ['queue','lazy','qty','live']) feature[key] = saved[key] === true;
     } catch {}
   }
 
@@ -1044,14 +1077,25 @@
     restorePanelStates();
     const dock = document.createElement('div');
     dock.id = 'sh-dock';
-    for (const [key,label] of [['queue','QUEUE'],['lazy','LAZY'],['qty','QTY']]) {
+    for (const [key,label] of [['queue','QUEUE'],['lazy','LAZY'],['qty','QTY'],['live','LIVE']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.key = key;
       b.onclick = () => {
-        feature[key] = !feature[key];
+        if (key !== 'qty' && liveSessionBlocksModeChange(key)) return;
+        const next = !feature[key];
+        if (key === 'live' && next) {
+          feature.lazy = false;
+          feature.queue = false;
+        } else if (next && (key === 'lazy' || key === 'queue')) {
+          feature.live = false;
+          liveResetStoppedSession();
+        }
+        feature[key] = next;
         savePanelStates();
         applyPanels();
+        if (key === 'live' && next) setTimeout(() => liveFocus(), 0);
+        renderAsidePanel();
       };
       dockButtons.push(b);
       dock.appendChild(b);
@@ -1066,7 +1110,7 @@
       if (p.style.display !== display) p.style.display = display;
     }
     let bottom = 58;
-    for (const key of ['lazy','queue']) {
+    for (const key of ['live','lazy','queue']) {
       const p = panels[key];
       if (!p || !feature[key]) continue;
       p.style.top = 'auto';
@@ -1179,7 +1223,7 @@
     if (!action) return;
 
     if (action === 'start') {
-
+      if (!ISS_CONSOLE_WORKER && shared.owner && shared.owner !== 'queue') { renderQueue('another Sideline mode is active'); return; }
       q.runSeq++;
       q.list = parseContainers(qText.value);
       q.index = 0;
@@ -1630,7 +1674,7 @@
       .sort((a,b) => a.code.localeCompare(b.code));
     const total = entries.reduce((sum,entry) => sum + entry.qty,0);
 
-    asidePanel.hidden = !entries.length;
+    asidePanel.hidden = !entries.length || feature.live;
     if (!entries.length) {
       asideList.innerHTML = '';
       asideTotal.textContent = '';
@@ -3407,12 +3451,12 @@
     (hostDoc.head || hostDoc.documentElement).appendChild(hostStyle);
   }
 
-  function showApiDatePicker(item) {
-    const owner = lazy;
+  function showApiDatePicker(item, options = {}) {
+    const owner = options.owner || lazy;
     const generation = preflightLookup.generation;
     const run = lazy.activeRun;
-    const current = () => generation === preflightLookup.generation &&
-      (run ? currentLazyRun(run) : currentPreflightContext(generation));
+    const current = options.isCurrent || (() => generation === preflightLookup.generation &&
+      (run ? currentLazyRun(run) : currentPreflightContext(generation)));
     owner.dateResolve?.(null);
     return new Promise(resolve => {
       const ctx = item.ctx;
@@ -3423,7 +3467,7 @@
       hostDoc.getElementById('sh-og-expiry')?.remove();
       const root = hostDoc.createElement('div');
       root.id = 'sh-og-expiry';
-      root.dataset.owner = 'lazy';
+      root.dataset.owner = owner === lazy ? 'lazy' : 'live';
       root.innerHTML = '<div class="og-wrap"></div>';
       hostDoc.body.appendChild(root);
       const wrap = $('.og-wrap',root);
@@ -3485,7 +3529,7 @@
             production
               ? `<button class="production-confirm" data-a="apply" ${selection.month&&selection.day&&selection.year?'':'disabled'}>USE PRODUCTION DATE</button>`
               : `<button data-a="pao">PAO +900 DAYS &nbsp; ${dateLabel(paoDateMs())}</button>`
-          }${hostDoc === document ? `<button type="button" class="og-return-source" data-return-source>↩ RETURN TO SOURCE</button>` : ''}</div>`;
+          }${owner !== lazy ? `<button type="button" class="og-cancel-live" data-a="cancel">CANCEL ITEM</button>` : (hostDoc === document ? `<button type="button" class="og-return-source" data-return-source>↩ RETURN TO SOURCE</button>` : '')}</div>`;
       }
 
       root.addEventListener('click',e=>{
@@ -3493,6 +3537,7 @@
         const b=e.target.closest('button[data-a]');
         if(!b||b.disabled)return;
         const a=b.dataset.a,v=Number(b.dataset.v);
+        if (a === 'cancel' && owner !== lazy) { settle(null); return; }
 
         if(a==='month'){selection.month=v;selection.day=1;selection.year=null;renderPicker();return;}
         if(a==='day'){selection.day=v;selection.year=null;renderPicker();return;}
@@ -3858,6 +3903,11 @@
 
   async function startLazy() {
     if (lazy.running || lazy.preflightStart) return;
+    if (!ISS_CONSOLE_WORKER && shared.owner && !/^lazy(?:-|$)/.test(shared.owner)) {
+      lazy.error = 'Another Sideline mode is active — stop it first.';
+      renderLazy();
+      return;
+    }
 
     lazy.src = clean(lSrc.value);
     lazy.dest = clean(lDest.value);
@@ -4383,6 +4433,557 @@
     event.stopImmediatePropagation();
     universalReturnToSource(returnModeFromButton(button));
   }
+
+  // LIVE is standalone-only. One scanner event owns one item and one QTY=1 move.
+  // No deferred queue, merged scans, artificial pacing, or parallel mutations.
+  function storedLiveUnknown() {
+    try {
+      const value = JSON.parse(localStorage.getItem(LIVE_UNKNOWN_KEY) || 'null');
+      return value && typeof value === 'object' ? value : null;
+    } catch { return null; }
+  }
+
+  const live = {
+    phase:'source', running:false, busy:false, movePending:false, closePending:false,
+    src:'',dest:'',sourceMeta:null,current:null,runSeq:0,activeRun:null,dateResolve:null,
+    moved:0,issues:0,scans:0,history:[],lastIssue:'',note:'',
+    clearEnabled:localStorage.getItem(LIVE_CLEAR_KEY) === '1',
+    dateCache:new Map(),unknown:storedLiveUnknown()
+  };
+  if (live.unknown) live.phase = 'unknown';
+
+  const livePanel = panel('sh-live', `LIVE QTY 1 v${VERSION}`, 'live');
+  livePanel.innerHTML = ''; // The Live header is supplied by its own compact layout.
+  livePanel.insertAdjacentHTML('beforeend',
+    '<div class="sh-title"><strong>LIVE — QTY 1</strong><span>NO QUEUE · NO DELAY</span></div>' +
+    '<div class="sh-live-pair">' +
+      '<div class="sh-live-field"><label>SOURCE</label><input class="sh-input" data-live="src" placeholder="Scan tsX / csX"></div>' +
+      '<div class="sh-live-field"><label>DESTINATION</label><input class="sh-input" data-live="dest" placeholder="Scan tsX / csX" disabled></div>' +
+    '</div>' +
+    '<input class="sh-input sh-live-scan" data-live="scan" placeholder="SCAN ITEM — QTY 1" disabled>' +
+    '<div class="sh-live-state" role="status" aria-live="polite"><strong>SCAN SOURCE</strong><span>Source → destination → item</span></div>' +
+    '<div class="sh-live-alert" aria-live="polite"></div>' +
+    '<div class="sh-live-recovery"></div>' +
+    '<div class="sh-live-metrics"><div>MOVED<b data-lm="moved">0</b></div><div>ISSUES<b data-lm="issues">0</b></div><div>SCANS<b data-lm="scans">0</b></div></div>' +
+    '<div class="sh-live-actions">' +
+      '<button class="sh-btn" data-la="clear">CLEAR SOURCE: OFF</button>' +
+      '<button class="sh-btn" data-la="finish">FINISH / CHANGE SOURCE</button>' +
+      '<button class="sh-btn sh-stop" data-la="stop">STOP</button>' +
+      '<button class="sh-btn" data-la="focus">FOCUS SCANNER</button>' +
+    '</div>' +
+    '<div class="sh-live-history" aria-label="Recent live scans"></div>'
+  );
+  const liveSrc = $('[data-live="src"]',livePanel);
+  const liveDest = $('[data-live="dest"]',livePanel);
+  const liveScan = $('[data-live="scan"]',livePanel);
+  const liveState = $('.sh-live-state',livePanel);
+  const liveAlert = $('.sh-live-alert',livePanel);
+  const liveRecovery = $('.sh-live-recovery',livePanel);
+  const liveHistory = $('.sh-live-history',livePanel);
+  const liveClear = $('[data-la="clear"]',livePanel);
+  const liveStopButton = $('[data-la="stop"]',livePanel);
+
+  function liveTrace(type, extra={}) {
+    traceSideline('LIVE_'+type, {source:live.src,destination:live.dest,
+      phase:live.phase, ...extra});
+  }
+
+  function liveRecord(status, code, reason='') {
+    live.history.unshift({status,code:clean(code),reason:clean(reason),source:live.src});
+    if (live.history.length > 30) live.history.length = 30;
+    liveTrace('RESULT',{barcode:code,outcome:status,reason});
+  }
+
+  function liveHasPending() {
+    return live.busy || live.movePending || live.closePending ||
+      !!live.current || ['date','predicant','damaged','lookup-pause','unknown'].includes(live.phase);
+  }
+
+  function liveSessionBlocksModeChange(key) {
+    if (key === 'qty') return false;
+    if (key === 'live' && !feature.live && shared.owner && !/^live(?:-|$)/.test(shared.owner)) {
+      if (q.running) renderQueue('STOP QUEUE before switching to LIVE');
+      if (lazy.running) { lazy.error = 'STOP LAZY before switching to LIVE'; renderLazy(); }
+      return true;
+    }
+    if (feature.live && (live.running || live.busy || liveHasPending() || shared.owner === 'live')) {
+      live.note = 'STOP LIVE before switching modes — in-flight moves cannot be cancelled';
+      renderLive();
+      return true;
+    }
+    return false;
+  }
+
+  function liveFocus() {
+    if (!feature.live) return;
+    const target = live.phase === 'ready' || live.phase === 'predicant' ? liveScan
+      : live.phase === 'destination' || live.phase === 'damaged' ? liveDest
+      : live.phase === 'source' ? liveSrc : null;
+    if (target && !target.disabled) target.focus();
+  }
+
+  function renderLive() {
+    const phase = live.phase;
+    liveSrc.disabled = phase !== 'source';
+    liveDest.disabled = !['destination','damaged'].includes(phase);
+    liveScan.disabled = !['ready','predicant'].includes(phase);
+    const statuses = {
+      source:['SCAN SOURCE','Enter a source container to begin',''],
+      'source-check':['CHECKING SOURCE','Validating source container','busy'],
+      destination:['SCAN DESTINATION','Select a different destination container',''],
+      ready:live.lastIssue ? ['RED — ITEM SKIPPED',live.lastIssue,'red'] : ['READY — SCAN ITEM','Quantity 1 · scan one item at a time',''],
+      checking:['CHECKING ITEM','Validating barcode, flags and hazmat restrictions','busy'],
+      date:['DATE REQUIRED','Select the date or CANCEL ITEM; further scans are blocked','yellow'],
+      moving:['MOVING QTY 1','Waiting for confirmed inventory movement','busy'],
+      'lookup-pause':['CHECK FAILED','Retry Check or Skip Item — no move attempted','yellow'],
+      predicant:['PREDICANT — DESTINATION RESCAN','Rescan the same destination to clear it and retry','yellow'],
+      damaged:['DESTINATION DAMAGED','Scan a different destination to retry this item','red'],
+      stopped:['LIVE STOPPED','Resume to revalidate source and destination','yellow'],
+      closing:['FINISHING SOURCE','Waiting for confirmed source-close response','busy'],
+      unknown:['OUTCOME UNKNOWN — VERIFY','Verify source/destination inventory before resetting','red']
+    };
+    const [title,description,variant] = statuses[phase] || statuses.source;
+    liveState.className = `sh-live-state ${variant}`;
+    liveState.innerHTML = `<strong>${esc(title)}</strong><span>${esc(live.note || description)}</span>`;
+    setTextIfChanged(liveAlert, live.unknown ?
+      `${live.unknown.barcode || 'ITEM'} — ${live.unknown.reason || 'VERIFY MOVEMENT'}` :
+      live.current && phase === 'predicant' ? `DESTINATION: ${live.dest}` : '');
+    $('[data-lm="moved"]',livePanel).textContent = live.moved;
+    $('[data-lm="issues"]',livePanel).textContent = live.issues;
+    $('[data-lm="scans"]',livePanel).textContent = live.scans;
+    liveClear.textContent = `CLEAR SOURCE: ${live.clearEnabled ? 'ON' : 'OFF'}`;
+    liveClear.classList.toggle('sh-on', live.clearEnabled);
+    liveStopButton.textContent = phase === 'stopped' ? 'RESUME' : 'STOP';
+    const recovery = phase === 'lookup-pause'
+      ? [['retry','RETRY CHECK'],['skip','SKIP ITEM']]
+      : phase === 'predicant' || phase === 'damaged'
+        ? [['skip','SKIP ITEM']]
+        : phase === 'unknown' ? [['ack','VERIFIED — RESET SESSION']] : [];
+    const recoveryHtml = recovery.map(([a,label]) => `<button type="button" class="sh-btn ${a==='skip'?'sh-stop':''}" data-la="${a}">${label}</button>`).join('');
+    if (liveRecovery.innerHTML !== recoveryHtml) liveRecovery.innerHTML = recoveryHtml;
+    const rows = live.history.slice(0,12).map(row =>
+      `<div class="${row.status === 'MOVED' ? 'ok' : 'red'}">${esc(row.status)} · ${esc(row.code)}${row.reason ? ' · '+esc(row.reason) : ''}</div>`
+    ).join('');
+    if (liveHistory.innerHTML !== rows) liveHistory.innerHTML = rows;
+    requestPanelLayout();
+  }
+
+  function liveResetStoppedSession() {
+    if (live.running || live.busy || live.movePending || live.closePending || live.unknown) return;
+    cancelRun(live);
+    live.dateResolve?.(null);
+    live.dateCache.clear();
+    live.src = ''; live.dest = ''; live.sourceMeta = null; live.current = null;
+    liveSrc.value = ''; liveDest.value = ''; liveScan.value = '';
+    live.phase = 'source'; live.note = ''; live.lastIssue = '';
+    if (/^live(?:-|$)/.test(shared.owner)) shared.owner = '';
+    renderLive();
+  }
+
+  function liveHardStop(item, reason) {
+    live.unknown = {source:live.src,destination:live.dest,
+      barcode:item?.code || '',reason:clean(reason),at:new Date().toISOString()};
+    try { localStorage.setItem(LIVE_UNKNOWN_KEY,JSON.stringify(live.unknown)); } catch {}
+    liveRecord('UNKNOWN',item?.code,reason);
+    live.phase = 'unknown'; live.running = false; live.busy = false;
+    live.movePending = false; live.lastIssue = ''; live.note = '';
+    live.issues++;
+    liveTrace('HARD_STOP',{barcode:item?.code,reason});
+    // Keep ownership and source context locked until manual verification.
+    renderLive();
+  }
+
+  function liveSkip(reason) {
+    const item = live.current;
+    if (!item || live.movePending || live.closePending || live.unknown) return;
+    const explanation = clean(reason || 'NOT PROCESSED');
+    live.issues++;
+    liveRecord('SKIPPED',item.code,explanation);
+    liveTrace('BLOCK',{barcode:item.code,reason:explanation});
+    live.current = null;
+    live.phase = 'ready'; live.busy = false;
+    live.note = ''; live.lastIssue = `${item.code} — ${explanation} — NOT MOVED`;
+    renderLive();
+    setTimeout(liveFocus,0);
+  }
+
+  function liveDateKey(ctx) {
+    return [itemKey(ctx.fnsku || ctx.fcsku || ctx.asin || ctx.barcode),
+      itemKey(ctx.asin),itemKey(ctx.dateType),String(ctx.dateDetail?.shelfLife ?? '')].join('|');
+  }
+
+  async function liveSourceScan(code) {
+    if (live.unknown || (live.phase !== 'source' && live.phase !== 'stopped')) return;
+    const src = clean(code);
+    if (!validContainer(src)) { live.note = 'INVALID SOURCE — scan tsX / csX'; renderLive(); return; }
+    if (shared.owner && !/^live(?:-|$)/.test(shared.owner)) {
+      live.note = 'Another Sideline mode is active'; renderLive(); return;
+    }
+    const run = beginRun(live);
+    live.phase = 'source-check'; live.busy = true; live.lastIssue = '';
+    shared.owner = 'live';
+    liveTrace('SOURCE_CHECK',{source:src});
+    renderLive();
+    try {
+      const result = await scanSourceDirect(src);
+      if (!currentRun(live,run)) return;
+      live.src = src; live.sourceMeta = result;
+      live.dateCache.clear();
+      live.phase = 'destination'; live.note = ''; live.busy = false;
+      liveSrc.value = src;
+      liveTrace('SOURCE_READY');
+      renderLive(); setTimeout(liveFocus,0);
+    } catch (error) {
+      if (!currentRun(live,run)) return;
+      cancelRun(live);
+      live.src = ''; live.sourceMeta = null; live.busy = false;
+      live.phase = 'source'; live.note = `SOURCE BLOCKED — ${clean(error?.message || error)}`;
+      liveSrc.value = ''; shared.owner = '';
+      liveTrace('SOURCE_REJECTED',{reason:clean(error?.message || error)});
+      renderLive();setTimeout(liveFocus,0);
+    }
+  }
+
+  function liveDestinationScan(code) {
+    if (!['destination','damaged'].includes(live.phase)) return;
+    const dest = clean(code);
+    if (!validContainer(dest) || norm(dest) === norm(live.src) ||
+        (live.phase === 'damaged' && norm(dest) === norm(live.dest))) {
+      live.note = 'SCAN A VALID DIFFERENT DESTINATION'; renderLive(); return;
+    }
+    const changing = norm(dest) !== norm(live.dest);
+    const fromDamage = live.phase === 'damaged';
+    live.dest = dest; liveDest.value = dest; live.running = true;
+    live.phase = 'ready'; live.lastIssue = ''; live.note = '';
+    if (changing) live.dateCache.clear();
+    liveTrace('DEST_READY',{changed:changing});
+    renderLive();
+    if (fromDamage && live.current?.ctx) {
+      // Previous move was explicitly rejected. New destination is a new date context.
+      live.current.date = null;
+      void liveProceed(live.current,live.current.ctx,live.activeRun);
+    } else setTimeout(liveFocus,0);
+  }
+
+  async function liveReadItem(item,run) {
+    const response = await sidelineRead(attempt => sidelineFetch(API_SCAN_ITEM,{
+      method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},
+      body:JSON.stringify(scanItemPayload(live.src,item.code)),signal:run.controller.signal,
+      obs:{phase:'live.scan',attempt,readOnly:true}
+    }),{phase:'live.scan'});
+    if (!currentRun(live,run)) throw makeAbortError('Live context changed');
+    return response.json();
+  }
+
+  async function liveCheck(item,run) {
+    if (!currentRun(live,run) || live.current !== item) return;
+    live.phase = 'checking'; live.busy = true;
+    live.note = `CHECKING ${item.code}`;
+    renderLive();
+    try {
+      const response = await liveReadItem(item,run);
+      if (!currentRun(live,run) || live.current !== item) return;
+      const result = await deepenHazmatPreflight(classifyPreflight(response,item.code));
+      if (!currentRun(live,run) || live.current !== item) return;
+      liveTrace('PREFLIGHT',{barcode:item.code,decision:result.kind,reason:result.reason});
+      if (result.kind === 'retry') {
+        live.phase = 'lookup-pause'; live.busy = false;
+        live.note = `${item.code} — ${result.reason}`;
+        renderLive();return;
+      }
+      if (result.kind === 'red') { liveSkip(result.reason); return; }
+      if (!result.ctx?.ok) { liveSkip('UNRESOLVED ITEM'); return; }
+      item.ctx = result.ctx;
+      await liveProceed(item,result.ctx,run);
+    } catch (error) {
+      if (!currentRun(live,run) || live.current !== item) return;
+      if (error?.name === 'AbortError') return;
+      live.phase = 'lookup-pause';live.busy = false;
+      live.note = `${item.code} — CHECK FAILED: ${clean(error?.message || error)}`;
+      liveTrace('LOOKUP_FAILED',{barcode:item.code,reason:clean(error?.message || error)});
+      renderLive();
+    }
+  }
+
+  async function liveProceed(item,ctx,run) {
+    if (!currentRun(live,run) || live.current !== item || live.unknown) return;
+    if (ctx.dateType === 'EXPIRATION_DATE' || ctx.dateType === 'PRODUCTION_DATE') {
+      const dateKey = liveDateKey(ctx);
+      let choice = live.dateCache.get(dateKey);
+      if (!choice) {
+        live.phase = 'date'; live.busy = false;
+        live.note = `${item.code} — ${ctx.dateType === 'PRODUCTION_DATE' ? 'PRODUCTION' : 'EXPIRATION'} DATE`;
+        renderLive();
+        choice = await showApiDatePicker(item,{
+          owner:live,
+          isCurrent:() => currentRun(live,run) && live.current === item && live.phase === 'date'
+        });
+        if (!currentRun(live,run) || live.current !== item) return;
+        if (!choice) { liveSkip('DATE CANCELLED'); return; }
+      }
+      if (!Number.isFinite(Number(choice.finalExpirationMs))) {
+        liveSkip('INVALID DATE');return;
+      }
+      item.date = choice;
+      item.dateKey = dateKey;
+    }
+    await liveMove(item,ctx,run);
+  }
+
+  async function liveMove(item,ctx,run) {
+    if (!currentRun(live,run) || live.current !== item || live.unknown) return;
+    live.phase = 'moving';live.busy = true;live.movePending = true;
+    live.note = `${item.code} — QTY 1 → ${live.dest}`;
+    renderLive();
+    const payload = buildMovePayload(live.src,live.dest,live.sourceMeta,ctx,1,item.date?.finalExpirationMs ?? null);
+    let result;
+    try {
+      result = await postJson(API_MOVE_ITEMS,payload,live,run);
+    } catch (error) {
+      live.movePending = false;
+      if (!currentRun(live,run) || live.current !== item) {
+        liveHardStop(item,'MOVE RESPONSE LOST DURING SESSION CHANGE');return;
+      }
+      const rejection = error?.payload;
+      const knownRejection = error?.responseReceived === true && rejection &&
+        typeof rejection === 'object' && rejection.success === false &&
+        !/HTTP 5\d\d/.test(String(error.message || '')) &&
+        (isHazmatRejectionResponse(rejection) || isDamagedDestinationResponse(rejection) ||
+          hasPredicant(rejection) || isAllowedOverageResponse(rejection) ||
+          rejection.filterResult?.compatible === false); 
+      if (!knownRejection) { liveHardStop(item,error?.message || 'MOVE RESPONSE UNKNOWN');return; }
+      result = error.payload;
+    }
+    if (!currentRun(live,run) || live.current !== item || live.unknown) {
+      liveHardStop(item,'MOVE CONFIRMATION CONTEXT CHANGED');return;
+    }
+    live.movePending = false;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      liveHardStop(item,'UNREADABLE MOVE CONFIRMATION');return;
+    }
+    if (moveOk(result)) {
+      live.moved++;
+      if (item.date && item.dateKey) live.dateCache.set(item.dateKey,item.date);
+      liveRecord('MOVED',item.code,`QTY 1 → ${live.dest}`);
+      liveTrace('MOVE_CONFIRMED',{barcode:item.code,qty:1});
+      live.current = null;live.phase = 'ready';live.busy = false;
+      live.lastIssue = '';live.note = '';
+      renderLive();setTimeout(liveFocus,0);
+      return;
+    }
+    if (hasPredicant(result)) {
+      live.phase = 'predicant';live.busy = false;
+      live.note = `RESCAN DESTINATION ${live.dest} — item NOT MOVED`;
+      liveTrace('PREDICANT',{barcode:item.code});
+      renderLive();setTimeout(liveFocus,0);return;
+    }
+    if (isDamagedDestinationResponse(result)) {
+      live.phase = 'damaged';live.busy = false;
+      live.note = `DESTINATION ${live.dest} DAMAGED — scan replacement`;
+      liveTrace('DEST_DAMAGED',{barcode:item.code});
+      renderLive();setTimeout(liveFocus,0);return;
+    }
+    liveSkip(moveReason(result) || 'MOVE REJECTED');
+  }
+
+  async function liveRescanPredicant(code) {
+    if (live.phase !== 'predicant' || !live.current || live.busy) return;
+    if (norm(code) !== norm(live.dest)) {
+      live.note = `RESCAN DESTINATION ${live.dest} — OTHER SCANS BLOCKED`;
+      renderLive();return;
+    }
+    const item = live.current;
+    const run = live.activeRun;
+    live.busy = true;live.closePending = true;
+    live.note = `CLEARING DESTINATION ${live.dest}`;
+    liveTrace('PREDICANT_RESCAN',{barcode:item.code});
+    renderLive();
+    try {
+      await closeContainerDirect(live.dest,true);
+      if (!currentRun(live,run) || item !== live.current) {
+        liveHardStop(item,'DESTINATION CLEAR RESULT LOST');return;
+      }
+      live.closePending = false;live.busy = false;
+      live.dateCache.clear(); // Container was emptied: no automatic expiry reuse.
+      liveTrace('PREDICANT_CLEARED',{barcode:item.code});
+      await liveMove(item,item.ctx,run); // Known rejected move; fresh requestId.
+    } catch (error) {
+      live.closePending = false;
+      if (error?.outcomeUnknown) { liveHardStop(item,error.message);return; }
+      live.busy = false;live.phase = 'predicant';
+      live.note = `CLEAR FAILED — RESCAN DESTINATION: ${clean(error?.message || error)}`;
+      renderLive();
+    }
+  }
+
+  function liveScanItem(code) {
+    if (live.phase === 'predicant') {void liveRescanPredicant(code);return;}
+    if (live.phase !== 'ready' || !live.running || live.current || live.busy) {
+      live.note = 'SCAN BLOCKED — RESCAN WHEN READY';renderLive();return;
+    }
+    const barcode = clean(code);
+    if (!barcode) return;
+    if (norm(barcode) === norm(live.src) || norm(barcode) === norm(live.dest)) {
+      live.lastIssue = '';live.note = 'SOURCE / DESTINATION IS NOT AN ITEM SCAN';renderLive();return;
+    }
+    live.scans++;
+    live.lastIssue = '';live.note = '';
+    const item = {code:barcode,ctx:null,date:null,dateKey:''};
+    live.current = item;
+    liveTrace('SCAN',{barcode,qty:1});
+    void liveCheck(item,live.activeRun);
+  }
+
+  function liveStop() {
+    if (live.unknown) {live.note = 'MANUAL VERIFICATION REQUIRED';renderLive();return;}
+    if (live.movePending || live.closePending || live.busy) {
+      live.note = 'WAIT FOR CURRENT REQUEST — STOP CANNOT CANCEL IT';renderLive();return;
+    }
+    if (live.phase === 'stopped') {
+      if (!live.src || !validContainer(live.dest)) {
+        live.phase = 'source';live.note = 'SCAN SOURCE TO RESTART';renderLive();return;
+      }
+      live.note = 'REVALIDATING SOURCE';
+      const savedDest = live.dest;
+      live.phase = 'source';
+      void liveSourceScan(live.src).then(() => {
+        if (live.phase === 'destination' && !live.unknown) liveDestinationScan(savedDest);
+      });
+      return;
+    }
+    if (live.current) {
+      live.dateResolve?.(null);
+      liveRecord('STOPPED',live.current.code,'NOT MOVED — session stopped');
+      live.current = null;
+    }
+    cancelRun(live);
+    live.dateCache.clear();
+    live.running = false;live.busy = false;
+    live.phase = 'stopped';live.lastIssue = '';live.note = '';
+    if (/^live(?:-|$)/.test(shared.owner)) shared.owner = '';
+    liveTrace('STOP');renderLive();
+  }
+
+  async function liveFinish() {
+    if (live.unknown) {live.note = 'VERIFY UNKNOWN MOVE BEFORE FINISH';renderLive();return;}
+    if (live.movePending || live.closePending || live.busy || live.current) {
+      live.note = 'RESOLVE OR SKIP CURRENT ITEM BEFORE FINISH';renderLive();return;
+    }
+    if (!live.src) {liveResetStoppedSession();return;}
+    const source = live.src;
+    if (live.clearEnabled && live.issues === 0) {
+      live.phase = 'closing';live.closePending = true;live.busy = true;
+      shared.owner = 'live-close';live.note = `CLOSING SOURCE ${source}`;
+      liveTrace('SOURCE_CLOSE_START');renderLive();
+      try {
+        await closeContainerDirect(source,true);
+        liveTrace('SOURCE_CLOSE_OK');
+      } catch (error) {
+        live.closePending = false;live.busy = false;
+        if (error?.outcomeUnknown) {
+          liveHardStop({code:source},'SOURCE CLOSE OUTCOME UNKNOWN — VERIFY SOURCE');
+          return;
+        }
+        live.phase = 'stopped';live.note = `SOURCE NOT CLOSED — ${clean(error?.message || error)}`;
+        renderLive();return;
+      }
+    }
+    const leftOpen = !live.clearEnabled || live.issues > 0;
+    const summary = leftOpen
+      ? `SOURCE ${source} LEFT OPEN${live.issues?' — ISSUES PRESENT':''}`
+      : `SOURCE ${source} CLOSED`;
+    cancelRun(live);
+    live.running = false;live.busy = false;live.closePending = false;
+    live.src = '';live.dest = '';live.sourceMeta = null;live.current = null;
+    live.dateCache.clear();liveSrc.value = '';liveDest.value = '';liveScan.value = '';
+    live.phase = 'source';live.note = summary;live.lastIssue = '';
+    live.moved = 0;live.issues = 0;live.scans = 0;
+    if (/^live(?:-|$)/.test(shared.owner)) shared.owner = '';
+    liveTrace('FINISH',{source,leftOpen});
+    renderLive();setTimeout(liveFocus,0);
+  }
+
+  function liveAcknowledgeUnknown() {
+    if (!live.unknown || live.busy || live.movePending || live.closePending) return;
+    liveTrace('MANUAL_VERIFY_ACK',{barcode:live.unknown.barcode});
+    try {localStorage.removeItem(LIVE_UNKNOWN_KEY);} catch {}
+    live.unknown = null;
+    live.current = null;live.running = false;
+    live.busy = false;live.movePending = false;
+    live.src = '';live.dest = '';live.sourceMeta = null;
+    liveSrc.value = '';liveDest.value = '';liveScan.value = '';
+    live.dateCache.clear();cancelRun(live);
+    live.phase = 'source';live.note = 'MANUAL VERIFICATION ACKNOWLEDGED — SCAN SOURCE';
+    live.lastIssue = '';live.moved = 0;live.issues = 0;live.scans = 0;
+    if (/^live(?:-|$)/.test(shared.owner)) shared.owner = '';
+    renderLive();setTimeout(liveFocus,0);
+  }
+
+  liveSrc.addEventListener('keydown',e=>{
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    e.preventDefault();e.stopPropagation();
+    if (live.phase === 'source') void liveSourceScan(liveSrc.value);
+  });
+  liveDest.addEventListener('keydown',e=>{
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    e.preventDefault();e.stopPropagation();
+    liveDestinationScan(liveDest.value);
+  });
+  liveScan.addEventListener('keydown',e=>{
+    if (e.key !== 'Enter') return;
+    e.preventDefault();e.stopPropagation();
+    const code = clean(liveScan.value);
+    liveScan.value = '';
+    if (code) liveScanItem(code);
+  });
+  livePanel.addEventListener('click',e=>{
+    const action = e.target.closest?.('[data-la]')?.dataset.la;
+    if (!action) return;
+    if (action === 'focus') {liveFocus();return;}
+    if (action === 'clear') {
+      live.clearEnabled = !live.clearEnabled;
+      localStorage.setItem(LIVE_CLEAR_KEY,live.clearEnabled?'1':'0');
+      renderLive();return;
+    }
+    if (action === 'finish') {void liveFinish();return;}
+    if (action === 'stop') {liveStop();return;}
+    if (action === 'skip' && ['lookup-pause','predicant','damaged'].includes(live.phase)) {
+      liveSkip(live.phase === 'lookup-pause' ? 'CHECK FAILED — USER SKIPPED' :
+        live.phase === 'predicant' ? 'PREDICANT — USER SKIPPED' : 'DAMAGED DESTINATION — USER SKIPPED');
+      return;
+    }
+    if (action === 'retry' && live.phase === 'lookup-pause' && live.current) {
+      void liveCheck(live.current,live.activeRun);return;
+    }
+    if (action === 'ack') liveAcknowledgeUnknown();
+  });
+
+  // Barcode scanners are keyboard wedges. During a lock, do not allow a scan
+  // to fall through to the native page or accidentally activate date controls.
+  let liveBlockedCharacters = 0;
+  let liveBlockedTimer = 0;
+  document.addEventListener('keydown',e=>{
+    if (!feature.live || !live.src || !live.running || e.ctrlKey || e.altKey || e.metaKey) return;
+    const allowed = (live.phase === 'ready' && e.target === liveScan) ||
+      (live.phase === 'predicant' && e.target === liveScan) ||
+      (live.phase === 'damaged' && e.target === liveDest);
+    if (allowed) return;
+    if (typeof e.key === 'string' && e.key.length === 1) {
+      liveBlockedCharacters++;
+      clearTimeout(liveBlockedTimer);
+      liveBlockedTimer = setTimeout(()=>{liveBlockedCharacters=0;},1200);
+      e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+      if (liveBlockedCharacters === 1 && live.phase !== 'date') {
+        live.note = 'SCAN NOT ACCEPTED — USE SCAN FIELD WHEN READY';renderLive();
+      }
+    } else if (e.key === 'Enter' && liveBlockedCharacters) {
+      liveBlockedCharacters = 0;
+      clearTimeout(liveBlockedTimer);
+      e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+    }
+  },true);
+
+  renderLive();
 
   // ISS Console worker bridge: REBUILD supports Queue + Lazy only.
   let issSideWorkerBusy = false;
