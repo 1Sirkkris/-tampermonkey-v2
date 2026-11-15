@@ -2,7 +2,7 @@
 // @name         v2 TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @name:en      v2 TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.11
+// @version      7.4.14
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,42 +19,63 @@
   if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2BinCheckOverlay = true;
 
-  const VERSION = '7.4.11';
+  const VERSION = '7.4.14';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('BIN', VERSION);
 
   const POD_REGEX = /\bP-\d-(?:[A-Z]\d{3}){2}\b/i;
   const FLOORS = ['P2', 'P3', 'P4'];
-  const RETRY_DELAY_MS = 2500;
-  const MAX_RETRIES = 1;
-  const MAX_CONCURRENT_REQUESTS = 12;
+  const FLOOR_FILTERS = ['P1', 'P2', 'P3', 'P4', 'OTHER'];
+  const SORTS = ['DEFAULT', 'QTY_DESC', 'QTY_ASC', 'SIZE_ASC', 'SIZE_DESC'];
+  const PREFERENCES_KEY = 'bwu2-bin-overlay-preferences-v1';
+  const MAX_ATTEMPTS = 3;
+  const REQUEST_GAP_MS = 400;
+  const MIN_REQUEST_GAP_MS = 250; // At most four starts/second; still one request in flight.
+  const MAX_REQUEST_GAP_MS = 5000;
+  const CLEAN_WINDOW = 20;
+  const PACE_KEY = 'bwu2-bin-overlay-pace-v1';
+  const PACE_TTL_MS = 24 * 60 * 60 * 1000;
+  const REQUEST_TIMEOUT_MS = 25000;
   const FLOOR_CACHE_TTL = 30 * 60 * 1000;
 
   const { clean } = globalThis.BWU2Fleet;
 
   const usage = (key, ms = 0, count = 1) => globalThis.BWU2Fleet.usage('overlay', key, ms, count);
 
-  const trace = globalThis.BWU2Fleet.trace;
+  const fleetTrace = globalThis.BWU2Fleet.trace;
+  const trace = (type, data = {}) => fleetTrace(type,
+    { script: 'BIN_OVERLAY', version: VERSION, run: state.runId, ...data });
+
+  const preferences = readPreferences();
+  const rememberedPace = readPace();
 
   const state = {
     rows: [],
     podBuckets: new Map(),
     podCache: new Map(),
-    attempts: new Map(),
+    jobs: new Map(),
     queue: [],
     queued: new Set(),
     activeRequests: 0,
-    processedPods: 0,
     totalPods: 0,
     totalRows: 0,
-    filter: 'ALL',
-    sort: 'DEFAULT',
+    selectedFloors: new Set(preferences.floors),
+    sort: preferences.sort,
     paused: false,
     overlayBuilt: false,
     refreshTimer: null,
     runId: 0,
     controllers: new Set(),
-    retryTimers: new Set(),
+    pumpTimer: null,
+    cooldownUntil: rememberedPace.cooldownUntil,
+    nextRequestAt: 0,
+    requestGapMs: rememberedPace.gapMs,
+    holdSpeedUntil: rememberedPace.holdUntil,
+    cleanStreak: 0,
+    accelerationBlocked: Date.now() < rememberedPace.holdUntil,
+    stats: makeStats(),
+    throttleCount: 0,
+    readyReported: false,
     inventoryMs: 0,
     hierarchyStartedAt: 0,
     snapshotRows: 0,
@@ -289,6 +310,7 @@
         if (!record) continue;
 
         state.totalRows++;
+        state.rows.push(record);
         if (!state.podBuckets.has(record.pod)) state.podBuckets.set(record.pod, []);
         state.podBuckets.get(record.pod).push(record);
       }
@@ -315,15 +337,16 @@
 
       for (const pod of state.podBuckets.keys()) {
         const cached = readFloorCache(pod);
-        if (cached) {
-          state.podCache.set(pod, cached);
-          applyPodResult(pod, cached);
-          state.processedPods++;
-        } else {
-          enqueuePod(pod);
-        }
+        state.jobs.set(pod, { status: cached ? 'ready' : 'pending', attempts: 0,
+          nextAt: 0, error: '', result: cached || unknownFloor() });
+        if (cached) { applyPodResult(pod, cached); state.stats.cacheHits++; }
+        else enqueuePod(pod);
       }
 
+      trace('BIN_OVERLAY_SCAN_START', { total: state.totalPods, cacheHits: state.stats.cacheHits,
+        networkNeeded: state.totalPods - state.stats.cacheHits,
+        gapMs: state.requestGapMs, minGapMs: MIN_REQUEST_GAP_MS,
+        maxInFlight: 1, cleanWindow: CLEAN_WINDOW });
       scheduleRefresh();
       pumpQueue();
       updateStatus();
@@ -344,7 +367,9 @@
 
     return {
       pod,
-      floorLabel: '',
+      binType: '',
+      binSize: '',
+      floorLabel: 'P-',
       floorClass: 'px',
       floorNum: 99,
       containerText,
@@ -358,33 +383,37 @@
 
   function resetRun() {
     state.runId++;
-
     for (const controller of state.controllers) controller.abort();
     state.controllers.clear();
-
-    for (const timer of state.retryTimers) clearTimeout(timer);
-    state.retryTimers.clear();
-
+    clearTimeout(state.pumpTimer);
+    clearTimeout(state.refreshTimer);
+    state.pumpTimer = null;
+    state.refreshTimer = null;
     state.rows.length = 0;
     state.podBuckets.clear();
-    state.attempts.clear();
+    state.jobs.clear();
     state.queue.length = 0;
     state.queued.clear();
     state.activeRequests = 0;
-    state.processedPods = 0;
     state.totalPods = 0;
     state.totalRows = 0;
-    state.filter = 'ALL';
-    state.sort = 'DEFAULT';
     state.paused = false;
+    state.readyReported = false;
+    state.cleanStreak = 0;
+    state.accelerationBlocked = Date.now() < state.holdSpeedUntil;
+    state.stats = makeStats();
     state.inventoryMs = 0;
     state.hierarchyStartedAt = 0;
     state.snapshotRows = 0;
     state.snapshotSource = '';
-
+    // Keep preferences and the shared rate-limit cooldown across snapshots.
     updateControlStates();
     updatePauseButton();
     refreshOverlay();
+  }
+
+  function isComplete(result) {
+    return Boolean(result?.num && result?.binSize);
   }
 
   function enqueuePod(pod) {
@@ -393,69 +422,249 @@
     state.queue.push(pod);
   }
 
+  function schedulePump(delay) {
+    clearTimeout(state.pumpTimer);
+    const runId = state.runId;
+    state.pumpTimer = setTimeout(() => {
+      state.pumpTimer = null;
+      if (runId === state.runId) pumpQueue();
+    }, Math.max(1, Math.min(delay, 1000)));
+  }
+
   function pumpQueue() {
-    if (state.paused) {
-      updateStatus();
+    clearTimeout(state.pumpTimer);
+    state.pumpTimer = null;
+    updateStatus();
+    if (state.paused || state.activeRequests) return;
+    if (!state.queue.length) {
+      if (state.totalPods && !state.readyReported) {
+        state.readyReported = true;
+        const counts = lookupCounts();
+        const hierarchyMs = Math.round(performance.now() - state.hierarchyStartedAt);
+        usage('hierarchy.complete', hierarchyMs);
+        trace('BIN_OVERLAY_READY', { inventoryMs: state.inventoryMs, hierarchyMs,
+          rows: state.totalRows, pods: state.totalPods, ...counts });
+        trace('BIN_OVERLAY_SCAN_SUMMARY', statsSnapshot());
+      }
       return;
     }
-
-    while (state.activeRequests < MAX_CONCURRENT_REQUESTS && state.queue.length) {
-      const pod = state.queue.shift();
-      state.queued.delete(pod);
-      fetchPodFloor(pod);
+    const now = Date.now();
+    const allowedAt = Math.max(state.cooldownUntil, state.nextRequestAt);
+    if (now < allowedAt) return schedulePump(allowedAt - now);
+    // Initial lookups take priority over delayed retries, without blocking the queue.
+    let index = state.queue.findIndex(pod => state.jobs.get(pod)?.status === 'pending');
+    if (index < 0) index = state.queue.findIndex(pod => state.jobs.get(pod)?.nextAt <= now);
+    if (index < 0) {
+      const nextAt = Math.min(...state.queue.map(pod => state.jobs.get(pod).nextAt));
+      return schedulePump(nextAt - now);
     }
+    const [pod] = state.queue.splice(index, 1);
+    state.queued.delete(pod);
+    void fetchPodFloor(pod);
+  }
 
-    if (!state.queue.length && state.activeRequests === 0 && state.totalPods && state.processedPods >= state.totalPods) {
-      const hierarchyMs = state.hierarchyStartedAt
-        ? Math.round(performance.now() - state.hierarchyStartedAt)
-        : 0;
+  function retryAfterMs(value) {
+    if (!value) return 0;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : 0;
+  }
 
-      usage('hierarchy.complete', hierarchyMs);
-      trace('BIN_OVERLAY_READY', {
-        inventoryMs: state.inventoryMs,
-        hierarchyMs,
-        rows: state.totalRows,
-        pods: state.totalPods,
-        snapshotRows: state.snapshotRows,
-        snapshotSource: state.snapshotSource
+  async function fetchPodFloor(pod) {
+    const runId = state.runId;
+    const job = state.jobs.get(pod);
+    if (!job) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    state.controllers.add(controller);
+    state.activeRequests++;
+    job.status = 'loading';
+    job.attempts++;
+    const startedAt = performance.now();
+    const stats = state.stats;
+    const sequence = ++stats.requests;
+    if (job.attempts > 1) stats.retries++;
+    stats.peakInFlight = Math.max(stats.peakInFlight, state.activeRequests);
+    trace('BIN_OVERLAY_REQUEST', { pod, sequence, attempt: job.attempts,
+      gapMs: state.requestGapMs, inFlight: state.activeRequests,
+      startOffsetMs: Math.round(startedAt - state.hierarchyStartedAt) });
+    state.nextRequestAt = Date.now() + state.requestGapMs;
+    scheduleRefresh();
+    let result = job.result;
+    let errorMessage = '';
+    let httpStatus = 0, responseChars = 0, errorKind = '';
+    let parsed = unknownFloor();
+    try {
+      const response = await fetch(hierarchyUrl(pod), {
+        credentials: 'same-origin', cache: 'no-store', signal: controller.signal
       });
+      if (runId !== state.runId) return;
+      httpStatus = response.status;
+      stats.httpStatusCounts[httpStatus] = (stats.httpStatusCounts[httpStatus] || 0) + 1;
+      if (response.status === 429) {
+        state.throttleCount++;
+        stats.throttles++;
+        state.cleanStreak = 0;
+        state.accelerationBlocked = true;
+        state.holdSpeedUntil = Date.now() + 10 * 60 * 1000;
+        const previousGapMs = state.requestGapMs;
+        state.requestGapMs = Math.min(MAX_REQUEST_GAP_MS, state.requestGapMs * 2);
+        const waitMs = Math.max(retryAfterMs(response.headers?.get('Retry-After')),
+          Math.min(60000, 10000 * (2 ** Math.min(state.throttleCount - 1, 3))));
+        state.cooldownUntil = Math.max(state.cooldownUntil, Date.now() + waitMs);
+        savePace(state.requestGapMs);
+        trace('BIN_OVERLAY_THROTTLED', { pod, status: 429, waitMs,
+          retryAfterMs: retryAfterMs(response.headers?.get('Retry-After')),
+          previousGapMs, gapMs: state.requestGapMs, attempt: job.attempts });
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const html = await response.text();
+      if (runId !== state.runId) return;
+      responseChars = html.length;
+      parsed = parseFloor(html);
+      // A failed refresh must not erase a previously confirmed field.
+      result = {
+        ...(parsed.num ? parsed : result),
+        binType: parsed.binType || result.binType,
+        binSize: parsed.binSize || result.binSize
+      };
+      if (!isComplete(result)) {
+        errorKind = 'incomplete';
+        stats.incomplete++;
+        errorMessage = !result.num ? 'Floor missing from response'
+          : !result.binType ? 'Bin type missing from response'
+          : `Size not recognised: ${result.binType}`;
+      }
+    } catch (error) {
+      if (runId !== state.runId) return;
+      errorKind = error?.name === 'AbortError' ? 'timeout' : httpStatus >= 400 ? 'http' : 'network';
+      errorMessage = error?.name === 'AbortError' ? 'Request timed out' : clean(error?.message || error);
+      if (errorKind === 'timeout') stats.timeouts++;
+      if (errorKind === 'network') stats.networkErrors++;
+    } finally {
+      clearTimeout(timeout);
+      state.controllers.delete(controller);
+      if (runId === state.runId) {
+        const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
+        stats.completed++;
+        stats.durationTotalMs += durationMs;
+        if (stats.durations.length < 512) stats.durations.push(durationMs);
+        if (!errorMessage) stats.successes++;
+        adjustPace(!errorMessage, errorKind, httpStatus);
+        finalizePod(pod, result, errorMessage, runId);
+        trace('BIN_OVERLAY_RESULT', { pod, sequence, attempt: job.attempts,
+          httpStatus, durationMs, responseChars, errorKind,
+          floorFound: Boolean(parsed.num), sizeFound: Boolean(parsed.binSize),
+          outcome: job.status, willRetry: job.status === 'retry',
+          retryInMs: job.status === 'retry' ? Math.max(0, job.nextAt - Date.now()) : 0,
+          gapMs: state.requestGapMs });
+        if (stats.completed % CLEAN_WINDOW === 0 || Date.now() - stats.lastProgressAt >= 10000) {
+          stats.lastProgressAt = Date.now();
+          trace('BIN_OVERLAY_SCAN_PROGRESS', statsSnapshot());
+        }
+        state.activeRequests = Math.max(0, state.activeRequests - 1);
+        pumpQueue();
+      }
     }
   }
 
-  function fetchPodFloor(pod) {
-    const runId = state.runId;
-    const controller = new AbortController();
+  function makeStats() {
+    return { startedAt: Date.now(), lastProgressAt: Date.now(), requests: 0, completed: 0,
+      cacheHits: 0, successes: 0, retries: 0, throttles: 0, timeouts: 0,
+      networkErrors: 0, incomplete: 0, peakInFlight: 0, durationTotalMs: 0,
+      durations: [], httpStatusCounts: {}, pausedMs: 0, pauseStartedAt: 0 };
+  }
 
-    state.controllers.add(controller);
-    state.activeRequests++;
+  function statsSnapshot() {
+    const stats = state.stats;
+    const durations = stats.durations.slice().sort((a, b) => a - b);
+    const elapsedMs = Math.max(0, Date.now() - stats.startedAt);
+    return { total: state.totalPods, ...lookupCounts(), requests: stats.requests,
+      completed: stats.completed, cacheHits: stats.cacheHits, successes: stats.successes,
+      retries: stats.retries, throttles: stats.throttles, timeouts: stats.timeouts,
+      networkErrors: stats.networkErrors, incomplete: stats.incomplete,
+      httpStatusCounts: { ...stats.httpStatusCounts }, elapsedMs,
+      pausedMs: stats.pausedMs + (stats.pauseStartedAt ? Date.now() - stats.pauseStartedAt : 0),
+      averageMs: stats.completed ? Math.round(stats.durationTotalMs / stats.completed) : 0,
+      p95Ms: durations[Math.max(0, Math.ceil(durations.length * .95) - 1)] || 0,
+      requestsPerSecond: elapsedMs ? Math.round(stats.requests * 100000 / elapsedMs) / 100 : 0,
+      gapMs: state.requestGapMs, minGapMs: MIN_REQUEST_GAP_MS,
+      peakInFlight: stats.peakInFlight, accelerationBlocked: state.accelerationBlocked,
+      cooldownMs: Math.max(0, state.cooldownUntil - Date.now()) };
+  }
 
-    fetch(hierarchyUrl(pod), {
-      credentials: 'same-origin',
-      cache: 'no-store',
-      signal: controller.signal
-    })
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
-      })
-      .then(html => {
-        if (runId !== state.runId) return;
-        const result = parseFloor(html);
+  function readPace() {
+    const fallback = { gapMs: REQUEST_GAP_MS, cooldownUntil: 0, holdUntil: 0 };
+    try {
+      const value = JSON.parse(localStorage.getItem(PACE_KEY) || 'null');
+      if (!value || !Number.isFinite(value.ts) || Date.now() < value.ts || Date.now() - value.ts > PACE_TTL_MS
+        || !Number.isFinite(value.gapMs) || value.gapMs < MIN_REQUEST_GAP_MS || value.gapMs > MAX_REQUEST_GAP_MS) return fallback;
+      return { gapMs: Math.min(MAX_REQUEST_GAP_MS, value.gapMs + 25),
+        cooldownUntil: Number.isFinite(value.cooldownUntil) ? value.cooldownUntil : 0,
+        holdUntil: Number.isFinite(value.holdUntil) ? value.holdUntil : 0 };
+    } catch { return fallback; }
+  }
 
-        if (!result.num && scheduleRetry(pod, runId)) return;
-        finalizePod(pod, result, runId);
-      })
-      .catch(error => {
-        if (runId !== state.runId || error?.name === 'AbortError') return;
-        if (scheduleRetry(pod, runId)) return;
-        finalizePod(pod, unknownFloor(), runId);
-      })
-      .finally(() => {
-        state.controllers.delete(controller);
-        if (runId !== state.runId) return;
-        state.activeRequests = Math.max(0, state.activeRequests - 1);
-        pumpQueue();
-      });
+  function savePace(gapMs) {
+    try { localStorage.setItem(PACE_KEY, JSON.stringify({ ts: Date.now(), gapMs,
+      cooldownUntil: state.cooldownUntil, holdUntil: state.holdSpeedUntil })); } catch {}
+  }
+
+  function adjustPace(success, errorKind, httpStatus) {
+    if (!success) {
+      state.cleanStreak = 0;
+      state.accelerationBlocked = true;
+      if (httpStatus !== 429) {
+        const before = state.requestGapMs;
+        state.requestGapMs = Math.min(MAX_REQUEST_GAP_MS, Math.max(REQUEST_GAP_MS, Math.ceil(before * 1.25)));
+        state.nextRequestAt = Math.max(state.nextRequestAt, Date.now() + state.requestGapMs);
+        savePace(state.requestGapMs);
+        trace('BIN_OVERLAY_RATE_CHANGE', { reason: errorKind || 'error', previousGapMs: before,
+          gapMs: state.requestGapMs, cleanLookups: 0 });
+      }
+      return;
+    }
+    if (++state.cleanStreak < CLEAN_WINDOW) return;
+    state.cleanStreak = 0;
+    // Save the proven interval before trying a slightly faster one.
+    savePace(state.requestGapMs);
+    if (state.accelerationBlocked || Date.now() < state.holdSpeedUntil) return;
+    const before = state.requestGapMs;
+    state.requestGapMs = Math.max(MIN_REQUEST_GAP_MS, before - 25);
+    if (before !== state.requestGapMs) trace('BIN_OVERLAY_RATE_CHANGE', {
+      reason: 'clean-window', previousGapMs: before, gapMs: state.requestGapMs,
+      cleanLookups: CLEAN_WINDOW });
+  }
+
+  function lookupCounts() {
+    let ready = 0, failed = 0, pending = 0;
+    for (const job of state.jobs.values()) {
+      if (job.status === 'ready') ready++;
+      else if (job.status === 'failed') failed++;
+      else pending++;
+    }
+    return { ready, failed, pending };
+  }
+
+  function recheckFailed(pod = '') {
+    let count = 0;
+    for (const [key, job] of state.jobs) {
+      if ((pod && key !== pod) || job.status !== 'failed') continue;
+      job.status = 'retry';
+      job.attempts = 0;
+      job.nextAt = Date.now();
+      job.error = '';
+      state.podCache.delete(key);
+      try { sessionStorage.removeItem(floorCacheKey(key)); } catch {}
+      enqueuePod(key);
+      count++;
+    }
+    if (!count) return;
+    state.readyReported = false;
+    trace('BIN_OVERLAY_RECHECK', { count, scope: pod ? 'row' : 'failed' });
+    scheduleRefresh();
+    pumpQueue();
   }
 
   function hierarchyUrl(pod) {
@@ -472,91 +681,120 @@
     }
   }
 
-  function scheduleRetry(pod, runId = state.runId) {
-    const attempts = state.attempts.get(pod) || 0;
-    if (attempts >= MAX_RETRIES) return false;
-
-    state.attempts.set(pod, attempts + 1);
-
-    const timer = setTimeout(() => {
-      state.retryTimers.delete(timer);
-      if (runId !== state.runId) return;
-      enqueuePod(pod);
-      pumpQueue();
-    }, RETRY_DELAY_MS);
-
-    state.retryTimers.add(timer);
-    return true;
-  }
-
   function parseFloor(html) {
     const documentCopy = new DOMParser().parseFromString(html, 'text/html');
 
-    const cell = documentCopy.querySelector(
-      'div.a-span6:nth-child(1) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(2)'
-    );
+    // Read native field labels so another row cannot shift the values.
+    const fields = new Map();
+    for (const row of documentCopy.querySelectorAll('tr')) {
+      const cells = [...row.children].filter(cell => /^(TH|TD)$/.test(cell.tagName));
+      if (cells.length !== 2) continue;
+      const label = clean(cells[0].textContent).replace(/:$/, '').toLowerCase();
+      if ((label === 'location' || label === 'bin type') && !fields.has(label)) {
+        fields.set(label, clean(cells[1].textContent));
+      }
+    }
 
-    const raw = (cell?.textContent || '').split(',')[0];
-    const num = raw.match(/\b(\d+)\b/)?.[1] || '';
+    const num = fields.get('location')?.match(/\bfloor\s*:\s*(\d+)\b/i)?.[1] || '';
+    const binType = fields.get('bin type') || '';
+    const size = binType.match(/^(\d+(?:\.\d+)?)-KIVA(?:-|$)/i)?.[1] || '';
+    const binSize = size ? `${Number(size)}"` : '';
 
-    return num
-      ? { num, label: `P${num}`, cls: `p${num}`, floorNum: Number(num) }
-      : unknownFloor();
+    return {
+      ...(num ? { num, label: `P${num}`, cls: `p${num}`, floorNum: Number(num) } : unknownFloor()),
+      binType,
+      binSize
+    };
   }
 
   function unknownFloor() {
-    return { num: '', label: 'P-', cls: 'px', floorNum: 99 };
+    return { num: '', label: 'P-', cls: 'px', floorNum: 99, binType: '', binSize: '' };
   }
 
   function floorCacheKey(pod) {
-    return `bwu2-bin-floor-v1:${pod}`;
+    return `bwu2-bin-floor-v2:${pod}`;
   }
 
   function readFloorCache(pod) {
-    if (state.podCache.has(pod)) return state.podCache.get(pod);
-
-    try {
-      const raw = sessionStorage.getItem(floorCacheKey(pod));
-      if (!raw) return null;
-      const packed = JSON.parse(raw);
-
-      if (!packed?.ts || Date.now() - packed.ts > FLOOR_CACHE_TTL) {
-        sessionStorage.removeItem(floorCacheKey(pod));
-        return null;
-      }
-
-      return packed.value || null;
-    } catch {
+    // Timestamped successes only; failed or partial lookups never poison the cache.
+    let packed = state.podCache.get(pod);
+    if (!packed) {
+      try { packed = JSON.parse(sessionStorage.getItem(floorCacheKey(pod)) || 'null'); }
+      catch { return null; }
+    }
+    if (!packed?.ts || Date.now() - packed.ts > FLOOR_CACHE_TTL || !isComplete(packed.value)) {
+      state.podCache.delete(pod);
+      try { sessionStorage.removeItem(floorCacheKey(pod)); } catch {}
       return null;
     }
+    state.podCache.set(pod, packed);
+    return packed.value;
   }
 
   function writeFloorCache(pod, value) {
-    if (!value?.num) return;
-    try {
-      sessionStorage.setItem(floorCacheKey(pod), JSON.stringify({ ts: Date.now(), value }));
-    } catch {}
+    if (!isComplete(value)) return;
+    const packed = { ts: Date.now(), value };
+    state.podCache.set(pod, packed);
+    try { sessionStorage.setItem(floorCacheKey(pod), JSON.stringify(packed)); } catch {}
   }
 
-  function finalizePod(pod, result, runId = state.runId) {
+  function finalizePod(pod, result, error = '', runId = state.runId) {
     if (runId !== state.runId) return;
-
-    state.podCache.set(pod, result);
-    writeFloorCache(pod, result);
+    const job = state.jobs.get(pod);
+    if (!job) return;
+    job.result = result;
+    job.error = error;
+    if (!error && isComplete(result)) {
+      job.status = 'ready';
+      writeFloorCache(pod, result);
+    } else if (job.attempts < MAX_ATTEMPTS) {
+      job.status = 'retry';
+      job.nextAt = Math.max(state.cooldownUntil, Date.now() + 10000 * (2 ** (job.attempts - 1)));
+      enqueuePod(pod);
+    } else {
+      job.status = 'failed';
+    }
+    if (error) trace('BIN_OVERLAY_LOOKUP_FAILED', { pod, error,
+      attempt: job.attempts, willRetry: job.status === 'retry' });
     applyPodResult(pod, result);
-    state.processedPods++;
-
     scheduleRefresh();
     updateStatus();
   }
 
   function applyPodResult(pod, result) {
     for (const record of state.podBuckets.get(pod) || []) {
+      record.binType = result.binType || '';
+      record.binSize = result.binSize || '';
       record.floorLabel = result.label;
       record.floorClass = result.cls;
       record.floorNum = result.floorNum;
-      state.rows.push(record);
     }
+  }
+
+  function readPreferences() {
+    try {
+      const value = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || 'null');
+      if (value && Array.isArray(value.floors) && value.floors.every(floor => FLOOR_FILTERS.includes(floor))) {
+        return { floors: value.floors, sort: SORTS.includes(value.sort) ? value.sort : 'DEFAULT' };
+      }
+    } catch {}
+    return { floors: FLOOR_FILTERS.slice(), sort: 'DEFAULT' };
+  }
+
+  function savePreferences() {
+    try { localStorage.setItem(PREFERENCES_KEY,
+      JSON.stringify({ floors: [...state.selectedFloors], sort: state.sort })); } catch {}
+  }
+
+  function toggleFloor(floor) {
+    if (floor === 'ALL') state.selectedFloors = new Set(FLOOR_FILTERS);
+    else if (FLOOR_FILTERS.includes(floor)) {
+      if (state.selectedFloors.has(floor)) state.selectedFloors.delete(floor);
+      else state.selectedFloors.add(floor);
+    }
+    savePreferences();
+    updateControlStates();
+    refreshOverlay();
   }
 
   function buildOverlay() {
@@ -579,6 +817,7 @@
           <span id="pLevelOverlayStatus">Snapshot ready</span>
         </div>
         <div id="pLevelOverlayActions">
+          <button type="button" id="pLevelRecheckBtn" disabled>Recheck failed</button>
           <button type="button" id="pLevelPauseBtn">Pause</button>
           <button type="button" id="pLevelCloseBtn">Hide</button>
         </div>
@@ -590,16 +829,19 @@
           <button type="button" data-filter="P3" class="p3btn">P3</button>
           <button type="button" data-filter="P4" class="p4btn">P4</button>
           <button type="button" data-filter="P1" class="p1btn">P1</button>
+          <button type="button" data-filter="OTHER" title="Other floors and unresolved locations">Other / ?</button>
           <span class="p-level-divider" aria-hidden="true"></span>
           <button type="button" data-sort="DEFAULT" class="active">Floor</button>
           <button type="button" data-sort="QTY_DESC">Qty ↓</button>
           <button type="button" data-sort="QTY_ASC">Qty ↑</button>
+          <button type="button" data-sort="SIZE_ASC">Size ↑</button>
+          <button type="button" data-sort="SIZE_DESC">Size ↓</button>
           <span class="p-level-divider" aria-hidden="true"></span>
-          <button type="button" id="pLevelLazyBtn">Lazy bin check</button>
+          <button type="button" id="pLevelLazyBtn" title="Copies all scanned floors regardless of display filters; unresolved floors are omitted">Lazy bin check</button>
         </div>
-        <div class="p-level-muted" id="pLevelOverlayHint">Uses the Inventory rows matching your current filter at click • P-level location bins only.</div>
+        <div class="p-level-muted" id="pLevelOverlayHint">Snapshot of filtered Inventory • Floor buttons toggle independently • Lazy copy uses all scanned floors.</div>
         <table id="pLevelOverlayTable">
-          <thead><tr><th>Floor</th><th>Container</th><th>Qty</th><th>FNSKU</th><th>FcSku</th></tr></thead>
+          <thead><tr><th>Floor</th><th>Container</th><th>Size</th><th>Qty</th><th>FNSKU</th><th>FcSku</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>`;
@@ -615,8 +857,16 @@
       }
     });
 
+    document.getElementById('pLevelRecheckBtn').addEventListener('click', () => recheckFailed());
+
     document.getElementById('pLevelPauseBtn').addEventListener('click', () => {
       state.paused = !state.paused;
+      if (state.paused) state.stats.pauseStartedAt = Date.now();
+      else if (state.stats.pauseStartedAt) {
+        state.stats.pausedMs += Date.now() - state.stats.pauseStartedAt;
+        state.stats.pauseStartedAt = 0;
+      }
+      trace('BIN_OVERLAY_PAUSE', { paused: state.paused });
       updatePauseButton();
       updateStatus();
       if (!state.paused) pumpQueue();
@@ -626,39 +876,46 @@
       const button = event.target.closest('button');
       if (!button) return;
 
-      if (button.dataset.filter) state.filter = button.dataset.filter;
-      if (button.dataset.sort) state.sort = button.dataset.sort;
+      if (button.dataset.filter) toggleFloor(button.dataset.filter);
+      if (SORTS.includes(button.dataset.sort)) { state.sort = button.dataset.sort; savePreferences(); }
       if (button.id === 'pLevelLazyBtn') copyLazyBinCheck();
 
       updateControlStates();
       refreshOverlay();
     });
 
+    updateControlStates();
     refreshOverlay();
   }
 
   function updateControlStates() {
     document.querySelectorAll('#pLevelOverlayControls [data-filter]').forEach(button => {
-      button.classList.toggle('active', button.dataset.filter === state.filter);
+      const active = button.dataset.filter === 'ALL'
+        ? FLOOR_FILTERS.every(floor => state.selectedFloors.has(floor))
+        : state.selectedFloors.has(button.dataset.filter);
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
     });
 
     document.querySelectorAll('#pLevelOverlayControls [data-sort]').forEach(button => {
       button.classList.toggle('active', button.dataset.sort === state.sort);
+      button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort));
     });
   }
 
   function visibleRows() {
-    const rows = state.filter === 'ALL'
-      ? state.rows.slice()
-      : state.rows.filter(row => row.floorLabel === state.filter);
-
+    const rows = state.rows.filter(row => state.selectedFloors.has(
+      FLOOR_FILTERS.includes(row.floorLabel) ? row.floorLabel : 'OTHER'));
     return rows.sort((a, b) => {
-      if (state.sort !== 'DEFAULT') {
-        const direction = state.sort === 'QTY_ASC' ? 1 : -1;
-        const quantityDifference = (a.quantityValue - b.quantityValue) * direction;
-        if (quantityDifference) return quantityDifference;
+      if (state.sort === 'SIZE_ASC' || state.sort === 'SIZE_DESC') {
+        const aSize = Number.parseFloat(a.binSize), bSize = Number.parseFloat(b.binSize);
+        const aKnown = Number.isFinite(aSize), bKnown = Number.isFinite(bSize);
+        if (aKnown !== bKnown) return aKnown ? -1 : 1;
+        if (aKnown && aSize !== bSize) return (aSize - bSize) * (state.sort === 'SIZE_ASC' ? 1 : -1);
+      } else if (state.sort === 'QTY_ASC' || state.sort === 'QTY_DESC') {
+        const difference = (a.quantityValue - b.quantityValue) * (state.sort === 'QTY_ASC' ? 1 : -1);
+        if (difference) return difference;
       }
-
       return (a.floorNum - b.floorNum) || a.containerText.localeCompare(b.containerText);
     });
   }
@@ -683,9 +940,9 @@
     if (!rows.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 5;
+      cell.colSpan = 6;
       cell.className = 'p-level-muted';
-      cell.textContent = state.totalPods ? 'Loading floors…' : 'No rows yet.';
+      cell.textContent = state.rows.length ? 'No bins match your floor toggles.' : 'No rows yet.';
       row.appendChild(cell);
       tbody.appendChild(row);
       updateStatus();
@@ -719,10 +976,27 @@
     }
 
     containerCell.appendChild(container);
+    const job = state.jobs.get(record.pod);
+    if (job && job.status !== 'ready') {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'p-level-retry';
+      retry.textContent = job.status === 'failed' ? '↻' : '…';
+      retry.disabled = job.status !== 'failed';
+      retry.title = job.status === 'failed' ? `Retry this bin: ${job.error}`
+        : `${job.status === 'retry' ? 'Automatic retry queued' : 'Lookup pending'}${job.error ? ': ' + job.error : ''}`;
+      retry.setAttribute('aria-label', `${retry.title} (${record.containerText})`);
+      retry.addEventListener('click', () => recheckFailed(record.pod));
+      containerCell.appendChild(retry);
+    }
+
+    const sizeCell = textCell(record.binSize || '—');
+    sizeCell.title = record.binType || 'Bin size unavailable';
 
     row.append(
       floorCell,
       containerCell,
+      sizeCell,
       textCell(record.quantity),
       textCell(record.fnsku),
       textCell(record.fcsku)
@@ -751,19 +1025,20 @@
   }
 
   function updateStatus() {
-    const status = document.getElementById('pLevelOverlayStatus');
-    if (!status) return;
-
-    const loaded = state.processedPods;
-    const total = state.totalPods;
-    const remaining = Math.max(total - loaded, 0);
-
-    if (!total && state.snapshotSource) {
-      status.textContent = `Snapshot ${state.snapshotRows} rows • no P-level bins`;
+    const counts = lookupCounts();
+    const recheck = document.getElementById('pLevelRecheckBtn');
+    if (recheck) {
+      recheck.disabled = !counts.failed;
+      recheck.textContent = counts.failed ? `Recheck failed (${counts.failed})` : 'Recheck failed';
+    }
+    if (!state.totalPods && state.snapshotSource) {
+      setStatusText(`Snapshot ${state.snapshotRows} rows • no P-level bins`);
       return;
     }
-
-    status.textContent = `Snapshot ${state.snapshotRows || '-'} rows • ${loaded}/${total} pods • ${remaining} left`;
+    const cooldown = Math.ceil((state.cooldownUntil - Date.now()) / 1000);
+    const phase = state.paused ? ' • Paused'
+      : cooldown > 0 && counts.pending ? ` • Rate limit: ${cooldown}s` : '';
+    setStatusText(`${counts.ready}/${state.totalPods} loaded • ${counts.pending} pending • ${counts.failed} failed${phase}`);
   }
 
   function copyLazyBinCheck() {
@@ -771,7 +1046,7 @@
 
     if (!state.rows.length) return flashButton('pLevelLazyBtn', 'No bins');
 
-    if (state.totalPods && state.processedPods < state.totalPods) {
+    if (lookupCounts().pending) {
       return flashButton('pLevelLazyBtn', 'Wait for scan');
     }
 
@@ -859,19 +1134,22 @@
     const style = document.createElement('style');
     style.id = 'p-level-overlay-style';
     style.textContent = `
-      #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
+      #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
       #pLevelOverlay[hidden]{display:none}
-      #pLevelOverlayHeader{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#111827;color:#fff;padding:8px 10px;font-weight:800}
-      #pLevelOverlaySummary{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
+      #pLevelOverlayHeader{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0;background:#111827;color:#fff;padding:8px 10px;font-weight:800}
+      #pLevelOverlaySummary{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
       #pLevelOverlayTitle{font-size:14px;line-height:1.15}
       #pLevelOverlayStatus{font-size:12px;font-weight:700;opacity:.95}
-      #pLevelOverlayActions{display:flex;align-items:center;gap:6px;flex-shrink:0}
-      #pLevelOverlayControls{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;white-space:nowrap;overflow-x:auto;scrollbar-width:thin}
+      #pLevelOverlayActions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;flex-shrink:0;max-width:52%}
+      #pLevelOverlayControls{display:flex;flex-wrap:wrap;align-items:center;gap:4px;white-space:nowrap;overflow-x:auto;scrollbar-width:thin}
       #pLevelOverlay button{cursor:pointer;border:1px solid #374151;border-radius:6px;padding:5px 8px;font-size:12px;font-weight:800;background:#f3f4f6;color:#111827}
       #pLevelOverlayControls button{padding:4px 7px;flex:0 0 auto}
       #pLevelOverlay button:hover{background:#e5e7eb}
+      #pLevelOverlay button:disabled{cursor:default;opacity:.55}
+      #pLevelOverlayControls [data-filter]:not(.active){background:#e5e7eb;color:#6b7280;box-shadow:none}
+      #pLevelOverlay .p-level-retry{margin-left:5px;padding:1px 5px;font-size:12px}
       #pLevelOverlay button.active{outline:3px solid #111827;outline-offset:1px}
-      #pLevelOverlayBody{padding:9px;overflow:auto;max-height:calc(78vh - 46px)}
+      #pLevelOverlayBody{padding:9px;overflow:auto;min-height:0;flex:1}
       #pLevelOverlayControls{margin-bottom:8px;padding-bottom:2px}
       #pLevelOverlayControls .p-level-divider{width:1px;height:22px;background:#cbd5e1;margin:0 2px;flex:0 0 1px}
       #pLevelOverlayControls .p1btn{background:#F0E442;color:#111}
