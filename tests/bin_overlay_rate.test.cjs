@@ -2,7 +2,7 @@ const fs=require('fs'), vm=require('vm'), assert=require('assert/strict');
 const path=require('path');
 const source=fs.readFileSync(path.join(__dirname,'..','Bin_Check_Overlay.user.js'),'utf8');
 const fixture=(size='9',floor=4)=>`<table><tr><th>Bin type</th><td>${size}-KIVA-DEEP</td></tr><tr><th>Noise</th><td>99</td></tr>${floor===null?'':`<tr><th>Location</th><td>Floor: ${floor}, Aisle: 1, Shelf: C, Slot: 52</td></tr>`}</table>`;
-const exported='state,parseFloor,unknownFloor,makeInventoryRecord,applyPodResult,writeFloorCache,readFloorCache,renderRow,visibleRows,copyLazyBinCheck,lookupCounts,pumpQueue,resetRun,recheckFailed,enqueuePod,toggleFloor,savePreferences,readPreferences,updateControlStates,updateStatus,retryAfterMs,loadSnapshot,readPace,adjustPace,statsSnapshot';
+const exported='state,parseFloor,unknownFloor,makeInventoryRecord,applyPodResult,writeFloorCache,readFloorCache,renderRow,visibleRows,copyLazyBinCheck,lookupCounts,pumpQueue,resetRun,recheckUnresolved,enqueuePod,toggleFloor,savePreferences,readPreferences,updateControlStates,updateStatus,retryAfterMs,loadSnapshot,readPace,adjustPace,statsSnapshot,sortByHeader,renderDetailsRow,sizeBadgeClass,unresolvedPods,buildOverlay';
 const names=['P-1-A000B000','P-1-A001B000','P-1-A002B000'];
 function harness({prefs=null,session=null,fetcher=null,pace=null,clockStart=1800000000000}={}){
  let clock=clockStart,nextTimer=0;const timers=new Map(),ids=new Map(),calls=[],traces=[];
@@ -12,8 +12,9 @@ function harness({prefs=null,session=null,fetcher=null,pace=null,clockStart=1800
   append(...x){this.children.push(...x)} appendChild(x){this.append(x);return x} get cells(){return this.children}
   focus(){document.activeElement=this} select(){} setSelectionRange(){} remove(){} addEventListener(k,fn){this.listeners[k]=fn}
   setAttribute(k,v){this.attributes[k]=v} replaceChildren(...x){this.children=x}
+  querySelector(tag){return this.children.find(child=>child.tagName===tag.toUpperCase())||null}
  }
- const document={createElement:t=>new Element(t),createDocumentFragment:()=>new Element('fragment'),body:new Element('body'),activeElement:null,getElementById:id=>ids.get(id)||null,querySelector:()=>null,querySelectorAll:sel=>[...ids.values()].filter(e=>sel.includes('[data-filter]')?e.dataset?.filter:sel.includes('[data-sort]')?e.dataset?.sort:false)};
+ const document={createElement:t=>new Element(t),createDocumentFragment:()=>new Element('fragment'),body:new Element('body'),activeElement:null,getElementById:id=>ids.get(id)||null,querySelector:()=>null,querySelectorAll:sel=>[...ids.values()].filter(e=>sel.includes('[data-filter]')?e.dataset?.filter:sel.includes('[data-sort-column]')?e.dataset?.sortColumn:false)};
  const storage=m=>({getItem:k=>m.get(k)||null,setItem:(k,v)=>m.set(k,v),removeItem:k=>m.delete(k)});
  const date=class extends Date{constructor(...args){super(...(args.length?args:[clock]))} static now(){return clock}};
  const c={window:{},location:{hash:'',href:'https://offline.test/BWU2/results?s=item'},URL,document,Date:date,performance:{now:()=>clock},AbortController,
@@ -72,17 +73,18 @@ await test('automatic retries wait until initial lookups complete and recover in
 await test('size-only failures retry; confirmed floor survives a partial response',async()=>{
  const h=harness({fetcher:(_,__,calls)=>calls.length===1?response(200,'<table><tr><th>Location</th><td>Floor: 3, Aisle: 1</td></tr></table>'):response(200,fixture('18.5',null))});h.add(names[0]);h.t.pumpQueue();await h.flush();assert.equal(h.t.state.rows[0].floorLabel,'P3');assert.equal(h.t.lookupCounts().pending,1);await h.advance(11000);assert.equal(h.t.lookupCounts().ready,1);assert.equal(h.t.state.rows[0].binSize,'18.5"');assert.equal(h.t.state.rows[0].floorLabel,'P3');
 });
-await test('bounded failures, truthful counts, row retry, bulk retry and repeated-click deduplication',async()=>{
+await test('bounded failures, truthful counts, bulk-only recovery and repeated-click deduplication',async()=>{
  let fail=true;const h=harness({fetcher:()=>fail?response(429):response()});const a=h.add(names[0]);h.add(names[0],2);h.add(names[1]);h.t.pumpQueue();await h.advance(400000);
  assert.equal(h.calls.length,6);assert.equal(h.t.lookupCounts().failed,2);assert.equal(h.t.state.rows.length,3);assert.equal(h.stored.size,0);
- const status=h.element('pLevelOverlayStatus','span'),bulk=h.element('pLevelRecheckBtn');h.t.updateStatus();assert.equal(status.textContent,'0/2 loaded • 0 pending • 2 failed');assert.equal(bulk.disabled,false);
- const row=h.t.renderRow(a);assert.equal(row.cells[1].children[1].disabled,false);assert.match(row.cells[1].children[1].title,/HTTP 429/);
- fail=false;row.cells[1].children[1].listeners.click();h.t.recheckFailed(names[0]);await h.flush();assert.equal(h.calls.length,7);assert.equal(h.t.lookupCounts().ready,1);assert.equal(h.t.lookupCounts().failed,1);
- h.t.recheckFailed();h.t.recheckFailed();await h.advance(6000);assert.equal(h.calls.length,8);assert.equal(h.t.lookupCounts().ready,2);assert.equal(h.t.state.rows.length,3);assert.equal(h.t.renderRow(a).cells[1].children.length,1);
+ const status=h.element('pLevelOverlayStatus','span'),bulk=h.element('pLevelRecheckBtn');h.t.updateStatus();assert.equal(status.textContent,'0/2 loaded • 0 pending • 2 unresolved');assert.equal(bulk.disabled,false);assert.equal(bulk.textContent,'Recheck unresolved (2)');
+ const row=h.t.renderRow(a);assert.equal(row.cells[1].children.filter(child=>child.tagName==='BUTTON').length,1);assert.match(row.cells[1].children[2].title,/HTTP 429/);assert.equal(row.cells[1].children[2].textContent,'⚠ Unresolved');
+ fail=false;h.t.recheckUnresolved();h.t.recheckUnresolved();await h.flush();assert.equal(h.calls.length,7);assert.equal(h.t.lookupCounts().ready,1);
+ await h.advance(6000);assert.equal(h.calls.length,8);assert.equal(h.t.lookupCounts().ready,2);assert.equal(h.t.state.rows.length,3);assert.equal(h.t.renderRow(a).cells[1].children.length,2);
+ h.t.updateStatus();assert.equal(bulk.textContent,'Recheck unresolved (0)');assert.equal(bulk.disabled,true);
 });
 await test('manual recheck and reset do not bypass a current rate-limit cooldown',async()=>{
  const h=harness({fetcher:()=>response(429,'','60')});h.add(names[0]);h.t.pumpQueue();await h.flush();const until=h.t.state.cooldownUntil;
- h.t.state.jobs.get(names[0]).status='failed';h.t.state.queue=[];h.t.state.queued.clear();h.t.recheckFailed();await h.advance(1000);assert.equal(h.calls.length,1);h.t.resetRun();assert.equal(h.t.state.cooldownUntil,until);h.add(names[0]);h.t.pumpQueue();await h.advance(58000);assert.equal(h.calls.length,1);await h.advance(1000);assert.equal(h.calls.length,2);
+ h.t.state.jobs.get(names[0]).status='failed';h.t.state.queue=[];h.t.state.queued.clear();h.t.recheckUnresolved();await h.advance(1000);assert.equal(h.calls.length,1);h.t.resetRun();assert.equal(h.t.state.cooldownUntil,until);h.add(names[0]);h.t.pumpQueue();await h.advance(58000);assert.equal(h.calls.length,1);await h.advance(1000);assert.equal(h.calls.length,2);
 });
 await test('pause prevents queued attempts; Resume continues; one request in flight at a time',async()=>{
  let resolve;const h=harness({fetcher:()=>new Promise(r=>resolve=r)});h.add(names[0]);h.add(names[1]);h.t.pumpQueue();h.t.pumpQueue();assert.equal(h.calls.length,1);h.t.state.paused=true;resolve(response());await h.advance(5000);assert.equal(h.calls.length,1);h.t.state.paused=false;h.t.pumpQueue();assert.equal(h.calls.length,2);resolve(response());await h.flush();assert.equal(h.t.lookupCounts().ready,2);
@@ -142,5 +144,30 @@ await test('realistic response latency is measured and never creates overlapping
  h.t.pumpQueue();await h.advance(30000);const summary=h.traces.find(e=>e.name==='BIN_OVERLAY_SCAN_SUMMARY').data;
  assert.equal(summary.averageMs,300);assert.equal(summary.p95Ms,300);assert.equal(summary.peakInFlight,1);assert.equal(summary.requests,60);assert(h.calls.slice(1).every((r,i)=>r.at-h.calls[i].at>=300));
 });
+await test('clickable header cycles, unknown floors/sizes last and saved sort migration',()=>{
+ const h=harness();const a=h.add(names[0]),b=h.add(names[1]),u=h.add(names[2]);h.t.applyPodResult(a.pod,h.t.parseFloor(fixture('9',2)));h.t.applyPodResult(b.pod,h.t.parseFloor(fixture('18.5',4)));
+ assert.equal(h.t.state.sort,'FLOOR_DESC');assert.deepEqual([...h.t.visibleRows()].map(r=>r.floorLabel),['P4','P2','P-']);
+ h.t.sortByHeader('FLOOR');assert.equal(h.t.state.sort,'FLOOR_ASC');assert.deepEqual([...h.t.visibleRows()].map(r=>r.floorLabel),['P2','P4','P-']);
+ h.t.sortByHeader('SIZE');assert.equal(h.t.state.sort,'SIZE_DESC');assert.deepEqual([...h.t.visibleRows()].map(r=>r.binSize),['18.5"','9"','']);h.t.sortByHeader('SIZE');assert.equal(h.t.state.sort,'SIZE_ASC');assert.equal(h.t.visibleRows()[2].binSize,'');
+ h.t.sortByHeader('QTY');assert.equal(h.t.state.sort,'QTY_DESC');h.t.sortByHeader('QTY');assert.equal(h.t.state.sort,'QTY_ASC');
+ assert.equal(harness({prefs:{floors:['P4'],sort:'DEFAULT'}}).t.state.sort,'FLOOR_ASC');assert.equal(harness({prefs:JSON.parse(h.persisted.get('bwu2-bin-overlay-preferences-v1'))}).t.state.sort,'QTY_ASC');
+ const unchanged=h.t.state.sort;h.t.sortByHeader('INVALID');assert.equal(h.t.state.sort,unchanged);
+});
+await test('sort header accessibility, visible FcSKU, FNSKU disclosure and preserved FCResearch link',()=>{
+ const h=harness();const header=h.element('sizeHeader','th'),button=h.element('sizeButton');header.dataset.sortColumn='SIZE';header.appendChild(button);h.t.sortByHeader('SIZE');assert.equal(header.attributes['aria-sort'],'descending');assert.equal(button.textContent,'Size ↓');h.t.sortByHeader('SIZE');assert.equal(header.attributes['aria-sort'],'ascending');assert.equal(button.textContent,'Size ↑');
+ const a=h.add(names[0],7,'FNSKU_TEST');a.fcsku='FCSKU_TEST';h.t.applyPodResult(a.pod,h.t.parseFloor(fixture('18.5',4)));const row=h.t.renderRow(a);assert.equal(row.cells.length,5);assert.equal(row.cells[3].textContent,'FCSKU_TEST');assert.equal(row.cells[4].textContent,'7');assert.equal(row.cells[2].children[0].className,'p-size-badge p-size-18-5');
+ row.cells[1].children[0].listeners.click();assert(h.t.state.openDetails.has(a.rowId));assert(h.t.renderDetailsRow(a).cells[0].textContent.includes('FNSKU_TEST'));assert.equal(row.cells[1].children[1].href,a.containerHref);assert.equal(row.cells[1].children[1].target,'_blank');h.t.resetRun();assert.equal(h.t.state.openDetails.size,0);
+});
+await test('bulk unresolved includes hidden floors and partial data; active jobs stay deduplicated',async()=>{
+ const h=harness();const a=h.add(names[0]);const partial=h.t.parseFloor('<table><tr><td>Location</td><td>Floor: 2</td></tr></table>');const job=h.t.state.jobs.get(a.pod);job.result=partial;job.status='failed';h.t.applyPodResult(a.pod,partial);h.t.toggleFloor('P2');assert.equal(h.t.visibleRows().length,0);
+ h.t.state.queue=[];h.t.state.queued.clear();h.t.recheckUnresolved();h.t.recheckUnresolved();await h.advance(1000);assert.equal(h.calls.length,1);assert.equal(h.t.lookupCounts().ready,1);assert.equal(h.t.state.rows.length,1);
+ const pending=h.add(names[1]);const before=h.t.state.jobs.get(pending.pod).attempts;h.t.recheckUnresolved();assert.equal(h.t.state.jobs.get(pending.pod).attempts,before);assert.equal(h.t.state.queue.filter(x=>x===pending.pod).length,1);
+});
+await test('blue size badges retain readable contrast and no per-row retry listener exists',()=>{
+ const lum=hex=>{const c=[0,2,4].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return .2126*c[0]+.7152*c[1]+.0722*c[2]};
+ for(const [size,bg,fg] of [['6','e7f1ff','17365f'],['9','bdd7f5','16355c'],['11','82afe2','102e50'],['14','386fae','ffffff'],['18.5','16457a','ffffff']]){const a=lum(bg),b=lum(fg);assert((Math.max(a,b)+.05)/(Math.min(a,b)+.05)>=4.5);assert.equal(harness().t.sizeBadgeClass(size+'"'),'p-size-'+size.replace('.','-'));}
+ assert(!source.includes('Retry this bin'));assert(!source.includes('p-level-retry'));assert(!source.includes('data-sort="'));assert(source.includes('Recheck unresolved'));
+});
 console.log(`${checks} scenario groups passed. Actual-source VM execution with deterministic fetch/clock and DOM fixtures. No browser rendering or live FCResearch calls.`);
 })().catch(e=>{console.error(e);process.exit(1)});
+

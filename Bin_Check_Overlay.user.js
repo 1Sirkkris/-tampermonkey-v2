@@ -2,7 +2,7 @@
 // @name         v2 TEST v7.4.3 Bin check Overlay — Filter Snapshot
 // @name:en      v2 TEST Bin check Overlay — Filter Snapshot
 // @namespace    https://github.com/1Sirkkris
-// @version      7.4.14
+// @version      7.4.15
 // @description  Snapshots the current filtered FCResearch Inventory view and resolves floor locations for matching P-level containers.
 // @include      /^https?:\/\/.*fcresearch.*\//
 // @include      /^https?:\/\/qifcr\.fe\.aftx\.amazonoperations\.app\//
@@ -19,14 +19,14 @@
   if (window.__bwu2BinCheckOverlay || location.hash.startsWith('#fcr-tote-checker') || location.hash.startsWith('#iss-console')) return;
   window.__bwu2BinCheckOverlay = true;
 
-  const VERSION = '7.4.14';
+  const VERSION = '7.4.15';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('BIN', VERSION);
 
   const POD_REGEX = /\bP-\d-(?:[A-Z]\d{3}){2}\b/i;
   const FLOORS = ['P2', 'P3', 'P4'];
   const FLOOR_FILTERS = ['P1', 'P2', 'P3', 'P4', 'OTHER'];
-  const SORTS = ['DEFAULT', 'QTY_DESC', 'QTY_ASC', 'SIZE_ASC', 'SIZE_DESC'];
+  const SORTS = ['FLOOR_DESC', 'FLOOR_ASC', 'QTY_DESC', 'QTY_ASC', 'SIZE_ASC', 'SIZE_DESC'];
   const PREFERENCES_KEY = 'bwu2-bin-overlay-preferences-v1';
   const MAX_ATTEMPTS = 3;
   const REQUEST_GAP_MS = 400;
@@ -51,6 +51,8 @@
 
   const state = {
     rows: [],
+    rowSequence: 0,
+    openDetails: new Set(),
     podBuckets: new Map(),
     podCache: new Map(),
     jobs: new Map(),
@@ -367,6 +369,7 @@
 
     return {
       pod,
+      rowId: ++state.rowSequence,
       binType: '',
       binSize: '',
       floorLabel: 'P-',
@@ -390,6 +393,8 @@
     state.pumpTimer = null;
     state.refreshTimer = null;
     state.rows.length = 0;
+    state.rowSequence = 0;
+    state.openDetails.clear();
     state.podBuckets.clear();
     state.jobs.clear();
     state.queue.length = 0;
@@ -647,10 +652,15 @@
     return { ready, failed, pending };
   }
 
-  function recheckFailed(pod = '') {
+  function unresolvedPods() {
+    return [...state.jobs].filter(([, job]) => !isComplete(job.result));
+  }
+
+  function recheckUnresolved() {
+    // Leave in-flight and automatically queued jobs alone; never duplicate a request.
     let count = 0;
-    for (const [key, job] of state.jobs) {
-      if ((pod && key !== pod) || job.status !== 'failed') continue;
+    for (const [key, job] of unresolvedPods()) {
+      if (job.status !== 'failed' && job.status !== 'ready') continue;
       job.status = 'retry';
       job.attempts = 0;
       job.nextAt = Date.now();
@@ -662,7 +672,7 @@
     }
     if (!count) return;
     state.readyReported = false;
-    trace('BIN_OVERLAY_RECHECK', { count, scope: pod ? 'row' : 'failed' });
+    trace('BIN_OVERLAY_RECHECK', { count, scope: 'unresolved' });
     scheduleRefresh();
     pumpQueue();
   }
@@ -775,10 +785,11 @@
     try {
       const value = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || 'null');
       if (value && Array.isArray(value.floors) && value.floors.every(floor => FLOOR_FILTERS.includes(floor))) {
-        return { floors: value.floors, sort: SORTS.includes(value.sort) ? value.sort : 'DEFAULT' };
+        return { floors: value.floors, sort: value.sort === 'DEFAULT' ? 'FLOOR_ASC'
+          : SORTS.includes(value.sort) ? value.sort : 'FLOOR_DESC' };
       }
     } catch {}
-    return { floors: FLOOR_FILTERS.slice(), sort: 'DEFAULT' };
+    return { floors: FLOOR_FILTERS.slice(), sort: 'FLOOR_DESC' };
   }
 
   function savePreferences() {
@@ -812,38 +823,40 @@
 
     overlay.innerHTML = `
       <div id="pLevelOverlayHeader">
-        <div id="pLevelOverlaySummary">
-          <span id="pLevelOverlayTitle">Overlay v${VERSION}</span>
-          <span id="pLevelOverlayStatus">Snapshot ready</span>
-        </div>
+        <div id="pLevelOverlaySummary"><span id="pLevelOverlayTitle">Bin check</span><span class="p-level-version">v${VERSION}</span></div>
         <div id="pLevelOverlayActions">
-          <button type="button" id="pLevelRecheckBtn" disabled>Recheck failed</button>
           <button type="button" id="pLevelPauseBtn">Pause</button>
           <button type="button" id="pLevelCloseBtn">Hide</button>
         </div>
       </div>
       <div id="pLevelOverlayBody">
-        <div id="pLevelOverlayControls">
-          <button type="button" data-filter="ALL" class="active">All</button>
-          <button type="button" data-filter="P2" class="p2btn">P2</button>
-          <button type="button" data-filter="P3" class="p3btn">P3</button>
-          <button type="button" data-filter="P4" class="p4btn">P4</button>
-          <button type="button" data-filter="P1" class="p1btn">P1</button>
-          <button type="button" data-filter="OTHER" title="Other floors and unresolved locations">Other / ?</button>
-          <span class="p-level-divider" aria-hidden="true"></span>
-          <button type="button" data-sort="DEFAULT" class="active">Floor</button>
-          <button type="button" data-sort="QTY_DESC">Qty ↓</button>
-          <button type="button" data-sort="QTY_ASC">Qty ↑</button>
-          <button type="button" data-sort="SIZE_ASC">Size ↑</button>
-          <button type="button" data-sort="SIZE_DESC">Size ↓</button>
-          <span class="p-level-divider" aria-hidden="true"></span>
-          <button type="button" id="pLevelLazyBtn" title="Copies all scanned floors regardless of display filters; unresolved floors are omitted">Lazy bin check</button>
+        <div id="pLevelOverlayStatus" role="status" aria-live="polite">Snapshot ready</div>
+        <div id="pLevelProgress" role="progressbar" aria-label="Bins with floor and size loaded" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span></span></div>
+        <div id="pLevelOverlayControls" aria-label="Visible floors">
+          <button type="button" data-filter="ALL">All</button>
+          <button type="button" data-filter="P4">P4</button>
+          <button type="button" data-filter="P3">P3</button>
+          <button type="button" data-filter="P2">P2</button>
+          <button type="button" data-filter="P1">P1</button>
+          <button type="button" data-filter="OTHER" title="Unknown locations and other floors">Other / ?</button>
         </div>
-        <div class="p-level-muted" id="pLevelOverlayHint">Snapshot of filtered Inventory • Floor buttons toggle independently • Lazy copy uses all scanned floors.</div>
-        <table id="pLevelOverlayTable">
-          <thead><tr><th>Floor</th><th>Container</th><th>Size</th><th>Qty</th><th>FNSKU</th><th>FcSku</th></tr></thead>
-          <tbody></tbody>
-        </table>
+        <div id="pLevelSizeLegend" aria-label="Bin size shades from smallest to largest"><span>Small → large</span>${['6', '9', '11', '14', '18.5'].map(size => `<span class="p-size-badge ${sizeBadgeClass(size)}">${size}&quot;</span>`).join('')}</div>
+        <div class="p-level-table-wrap"><table id="pLevelOverlayTable">
+          <thead><tr>
+            <th scope="col" data-sort-column="FLOOR" aria-sort="none"><button type="button" data-sort-key="FLOOR">Floor ↕</button></th>
+            <th scope="col">Container</th>
+            <th scope="col" data-sort-column="SIZE" aria-sort="none"><button type="button" data-sort-key="SIZE">Size ↕</button></th>
+            <th scope="col">FcSKU</th>
+            <th scope="col" data-sort-column="QTY" aria-sort="none"><button type="button" data-sort-key="QTY">Qty ↕</button></th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+      <div id="pLevelOverlayFooter">
+        <span class="p-level-muted" id="pLevelOverlayHint">Details shows FNSKU</span>
+        <div class="p-level-footer-actions">
+          <button type="button" id="pLevelRecheckBtn" disabled>Recheck unresolved (0)</button>
+          <button type="button" id="pLevelLazyBtn" title="Copies all scanned floors regardless of display filters; unresolved floors are omitted">Lazy copy</button>
+        </div>
       </div>`;
 
     document.body.appendChild(overlay);
@@ -857,7 +870,7 @@
       }
     });
 
-    document.getElementById('pLevelRecheckBtn').addEventListener('click', () => recheckFailed());
+    document.getElementById('pLevelRecheckBtn').addEventListener('click', () => recheckUnresolved());
 
     document.getElementById('pLevelPauseBtn').addEventListener('click', () => {
       state.paused = !state.paused;
@@ -877,13 +890,24 @@
       if (!button) return;
 
       if (button.dataset.filter) toggleFloor(button.dataset.filter);
-      if (SORTS.includes(button.dataset.sort)) { state.sort = button.dataset.sort; savePreferences(); }
-      if (button.id === 'pLevelLazyBtn') copyLazyBinCheck();
 
       updateControlStates();
       refreshOverlay();
     });
 
+    document.getElementById('pLevelLazyBtn').addEventListener('click', copyLazyBinCheck);
+    document.querySelector('#pLevelOverlayTable thead').addEventListener('click', event => {
+      const button = event.target.closest('button[data-sort-key]');
+      if (button) sortByHeader(button.dataset.sortKey);
+    });
+    updateControlStates();
+    refreshOverlay();
+  }
+
+  function sortByHeader(key) {
+    if (!['FLOOR', 'SIZE', 'QTY'].includes(key)) return;
+    state.sort = state.sort === `${key}_DESC` ? `${key}_ASC` : `${key}_DESC`;
+    savePreferences();
     updateControlStates();
     refreshOverlay();
   }
@@ -897,25 +921,31 @@
       button.setAttribute('aria-pressed', String(active));
     });
 
-    document.querySelectorAll('#pLevelOverlayControls [data-sort]').forEach(button => {
-      button.classList.toggle('active', button.dataset.sort === state.sort);
-      button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort));
+    document.querySelectorAll('#pLevelOverlayTable [data-sort-column]').forEach(header => {
+      const key = header.dataset.sortColumn;
+      const active = state.sort.startsWith(`${key}_`);
+      const descending = state.sort.endsWith('_DESC');
+      header.setAttribute('aria-sort', active ? descending ? 'descending' : 'ascending' : 'none');
+      const button = header.querySelector('button');
+      button.classList.toggle('active-sort', active);
+      const label = { FLOOR: 'Floor', SIZE: 'Size', QTY: 'Qty' }[key];
+      button.textContent = `${label} ${active ? descending ? '↓' : '↑' : '↕'}`;
+      button.setAttribute('aria-label', `Sort ${label}: ${active && descending ? 'smallest to largest' : 'largest to smallest'}`);
     });
   }
 
   function visibleRows() {
     const rows = state.rows.filter(row => state.selectedFloors.has(
       FLOOR_FILTERS.includes(row.floorLabel) ? row.floorLabel : 'OTHER'));
+    const key = state.sort.split('_')[0];
+    const direction = state.sort.endsWith('_DESC') ? -1 : 1;
+    const numberFor = row => key === 'SIZE' ? Number.parseFloat(row.binSize)
+      : key === 'QTY' ? row.quantityValue : row.floorNum === 99 ? NaN : row.floorNum;
     return rows.sort((a, b) => {
-      if (state.sort === 'SIZE_ASC' || state.sort === 'SIZE_DESC') {
-        const aSize = Number.parseFloat(a.binSize), bSize = Number.parseFloat(b.binSize);
-        const aKnown = Number.isFinite(aSize), bKnown = Number.isFinite(bSize);
-        if (aKnown !== bKnown) return aKnown ? -1 : 1;
-        if (aKnown && aSize !== bSize) return (aSize - bSize) * (state.sort === 'SIZE_ASC' ? 1 : -1);
-      } else if (state.sort === 'QTY_ASC' || state.sort === 'QTY_DESC') {
-        const difference = (a.quantityValue - b.quantityValue) * (state.sort === 'QTY_ASC' ? 1 : -1);
-        if (difference) return difference;
-      }
+      const av = numberFor(a), bv = numberFor(b);
+      const aKnown = Number.isFinite(av), bKnown = Number.isFinite(bv);
+      if (aKnown !== bKnown) return aKnown ? -1 : 1;
+      if (aKnown && av !== bv) return (av - bv) * direction;
       return (a.floorNum - b.floorNum) || a.containerText.localeCompare(b.containerText);
     });
   }
@@ -938,9 +968,11 @@
     tbody.replaceChildren();
 
     if (!rows.length) {
+      const hint = document.getElementById('pLevelOverlayHint');
+      if (hint) hint.textContent = '0 shown • Lazy copy uses all scanned floors';
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 6;
+      cell.colSpan = 5;
       cell.className = 'p-level-muted';
       cell.textContent = state.rows.length ? 'No bins match your floor toggles.' : 'No rows yet.';
       row.appendChild(cell);
@@ -950,58 +982,82 @@
     }
 
     const fragment = document.createDocumentFragment();
-    for (const record of rows) fragment.appendChild(renderRow(record));
+    for (const record of rows) {
+      fragment.appendChild(renderRow(record));
+      if (state.openDetails.has(record.rowId)) fragment.appendChild(renderDetailsRow(record));
+    }
+    const hint = document.getElementById('pLevelOverlayHint');
+    if (hint) hint.textContent = `${rows.length} shown • Bin: FNSKU details • ↗: FCResearch`;
     tbody.appendChild(fragment);
     updateStatus();
   }
 
+  function sizeBadgeClass(value) {
+    const size = String(value || '').replace(/"/g, '');
+    return ['6', '9', '11', '14', '18.5'].includes(size) ? `p-size-${size.replace('.', '-')}` : 'p-size-unknown';
+  }
+
   function renderRow(record) {
     const row = document.createElement('tr');
-
     const floorCell = document.createElement('td');
     const floorPill = document.createElement('span');
     floorPill.className = `p-sort-pill ${record.floorClass}`;
     floorPill.textContent = record.floorLabel;
     floorCell.appendChild(floorPill);
-
     const containerCell = document.createElement('td');
-    const container = document.createElement(record.containerHref ? 'a' : 'span');
+    const container = document.createElement('button');
+    container.type = 'button';
     container.className = 'p-level-copy';
+    container.id = `p-bin-toggle-${state.runId}-${record.rowId}`;
     container.textContent = record.containerText;
-
-    if (record.containerHref) {
-      container.href = record.containerHref;
-      container.target = '_blank';
-      container.rel = 'noopener';
-    }
-
+    container.setAttribute('aria-expanded', String(state.openDetails.has(record.rowId)));
+    container.setAttribute('aria-controls', `p-bin-detail-${state.runId}-${record.rowId}`);
+    container.addEventListener('click', () => {
+      if (state.openDetails.has(record.rowId)) state.openDetails.delete(record.rowId);
+      else state.openDetails.add(record.rowId);
+      refreshOverlay();
+      document.getElementById(container.id)?.focus({ preventScroll: true });
+    });
     containerCell.appendChild(container);
+    if (record.containerHref) {
+      const link = document.createElement('a');
+      link.className = 'p-level-open';
+      link.textContent = '↗';
+      link.href = record.containerHref;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.setAttribute('aria-label', `Open ${record.containerText} in FCResearch`);
+      link.title = 'Open in FCResearch';
+      containerCell.appendChild(link);
+    }
     const job = state.jobs.get(record.pod);
     if (job && job.status !== 'ready') {
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'p-level-retry';
-      retry.textContent = job.status === 'failed' ? '↻' : '…';
-      retry.disabled = job.status !== 'failed';
-      retry.title = job.status === 'failed' ? `Retry this bin: ${job.error}`
-        : `${job.status === 'retry' ? 'Automatic retry queued' : 'Lookup pending'}${job.error ? ': ' + job.error : ''}`;
-      retry.setAttribute('aria-label', `${retry.title} (${record.containerText})`);
-      retry.addEventListener('click', () => recheckFailed(record.pod));
-      containerCell.appendChild(retry);
+      const note = document.createElement('span');
+      note.className = 'p-level-issue';
+      note.textContent = job.status === 'failed' ? '⚠ Unresolved'
+        : job.status === 'retry' ? '… Auto retry queued' : '… Loading';
+      note.title = job.error || 'Waiting for floor and size';
+      containerCell.appendChild(note);
+      if (job.status === 'failed') row.className = 'p-level-unresolved';
     }
-
-    const sizeCell = textCell(record.binSize || '—');
+    const sizeCell = document.createElement('td');
+    const sizeBadge = document.createElement('span');
+    sizeBadge.className = `p-size-badge ${sizeBadgeClass(record.binSize)}`;
+    sizeBadge.textContent = record.binSize || '—';
     sizeCell.title = record.binType || 'Bin size unavailable';
+    sizeCell.appendChild(sizeBadge);
+    row.append(floorCell, containerCell, sizeCell, textCell(record.fcsku || '—'), textCell(record.quantity));
+    return row;
+  }
 
-    row.append(
-      floorCell,
-      containerCell,
-      sizeCell,
-      textCell(record.quantity),
-      textCell(record.fnsku),
-      textCell(record.fcsku)
-    );
-
+  function renderDetailsRow(record) {
+    const row = document.createElement('tr');
+    row.id = `p-bin-detail-${state.runId}-${record.rowId}`;
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.className = 'p-level-detail';
+    cell.textContent = `FNSKU: ${record.fnsku || 'Unavailable'}${record.binType ? ` • ${record.binType}` : ''}`;
+    row.appendChild(cell);
     return row;
   }
 
@@ -1026,10 +1082,19 @@
 
   function updateStatus() {
     const counts = lookupCounts();
+    const unresolved = unresolvedPods().length;
     const recheck = document.getElementById('pLevelRecheckBtn');
     if (recheck) {
-      recheck.disabled = !counts.failed;
-      recheck.textContent = counts.failed ? `Recheck failed (${counts.failed})` : 'Recheck failed';
+      recheck.disabled = !unresolved || Boolean(counts.pending) || state.paused;
+      recheck.textContent = `Recheck unresolved (${unresolved})`;
+      recheck.title = counts.pending ? 'Automatic checks are still running; pending jobs are not duplicated'
+        : 'Recheck every bin missing its floor or size, including hidden floors';
+    }
+    const progress = document.getElementById('pLevelProgress');
+    if (progress) {
+      progress.setAttribute('aria-valuemax', String(state.totalPods || 1));
+      progress.setAttribute('aria-valuenow', String(counts.ready));
+      progress.querySelector('span').style.width = `${state.totalPods ? counts.ready / state.totalPods * 100 : 0}%`;
     }
     if (!state.totalPods && state.snapshotSource) {
       setStatusText(`Snapshot ${state.snapshotRows} rows • no P-level bins`);
@@ -1038,7 +1103,7 @@
     const cooldown = Math.ceil((state.cooldownUntil - Date.now()) / 1000);
     const phase = state.paused ? ' • Paused'
       : cooldown > 0 && counts.pending ? ` • Rate limit: ${cooldown}s` : '';
-    setStatusText(`${counts.ready}/${state.totalPods} loaded • ${counts.pending} pending • ${counts.failed} failed${phase}`);
+    setStatusText(`${counts.ready}/${state.totalPods} loaded • ${counts.pending} pending • ${counts.failed} unresolved${phase}`);
   }
 
   function copyLazyBinCheck() {
@@ -1134,39 +1199,53 @@
     const style = document.createElement('style');
     style.id = 'p-level-overlay-style';
     style.textContent = `
-      #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:660px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;border:2px solid #111827;border-radius:10px;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:Arial,Helvetica,sans-serif;color:#111827;overflow:hidden}
+      #pLevelOverlay{position:fixed;right:14px;bottom:14px;width:670px;max-width:calc(100vw - 28px);max-height:78vh;z-index:999999;background:#fff;color:#172033;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 35px #16233a35;font:13px/1.45 Arial,Helvetica,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+      #pLevelOverlay *{box-sizing:border-box}
       #pLevelOverlay[hidden]{display:none}
-      #pLevelOverlayHeader{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0;background:#111827;color:#fff;padding:8px 10px;font-weight:800}
-      #pLevelOverlaySummary{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
-      #pLevelOverlayTitle{font-size:14px;line-height:1.15}
-      #pLevelOverlayStatus{font-size:12px;font-weight:700;opacity:.95}
-      #pLevelOverlayActions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;flex-shrink:0;max-width:52%}
-      #pLevelOverlayControls{display:flex;flex-wrap:wrap;align-items:center;gap:4px;white-space:nowrap;overflow-x:auto;scrollbar-width:thin}
-      #pLevelOverlay button{cursor:pointer;border:1px solid #374151;border-radius:6px;padding:5px 8px;font-size:12px;font-weight:800;background:#f3f4f6;color:#111827}
-      #pLevelOverlayControls button{padding:4px 7px;flex:0 0 auto}
-      #pLevelOverlay button:hover{background:#e5e7eb}
-      #pLevelOverlay button:disabled{cursor:default;opacity:.55}
-      #pLevelOverlayControls [data-filter]:not(.active){background:#e5e7eb;color:#6b7280;box-shadow:none}
-      #pLevelOverlay .p-level-retry{margin-left:5px;padding:1px 5px;font-size:12px}
-      #pLevelOverlay button.active{outline:3px solid #111827;outline-offset:1px}
-      #pLevelOverlayBody{padding:9px;overflow:auto;min-height:0;flex:1}
-      #pLevelOverlayControls{margin-bottom:8px;padding-bottom:2px}
-      #pLevelOverlayControls .p-level-divider{width:1px;height:22px;background:#cbd5e1;margin:0 2px;flex:0 0 1px}
-      #pLevelOverlayControls .p1btn{background:#F0E442;color:#111}
-      #pLevelOverlayControls .p2btn{background:#009E73;color:#fff}
-      #pLevelOverlayControls .p3btn{background:#E69F00;color:#111}
-      #pLevelOverlayControls .p4btn{background:#0072B2;color:#fff}
-      #pLevelPauseBtn.paused{background:#F59E0B;color:#111827;border-color:#92400E}
-      #pLevelOverlayHint{margin-bottom:7px}
+      #pLevelOverlayHeader{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-shrink:0;background:#152033;color:#f3f6fc;padding:12px 16px}
+      #pLevelOverlaySummary,#pLevelOverlayActions,.p-level-footer-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+      #pLevelOverlayTitle{font-size:17px;font-weight:600}.p-level-version{font-size:11px;color:#b6c4d7}
+      #pLevelOverlay button{font:inherit;font-weight:500;cursor:pointer;border:1px solid #d3dbe5;border-radius:6px;padding:7px 10px;background:#fff;color:#172033}
+      #pLevelOverlay button:hover{background:#f1f5f9}
+      #pLevelOverlay button:disabled{cursor:default;opacity:.5}
+      #pLevelOverlayHeader button{background:#ffffff12;color:#f3f6fc;border-color:#ffffff3a;padding:6px 10px}
+      #pLevelOverlayHeader button:hover{background:#ffffff25}
+      #pLevelOverlayBody{padding:14px 16px 0;overflow:auto;min-height:0;flex:1}
+      #pLevelOverlayStatus{font-size:12px;margin-bottom:8px;font-weight:500;overflow-wrap:anywhere}
+      #pLevelProgress{height:4px;background:#eef2f7;border-radius:8px;overflow:hidden;margin-bottom:15px}
+      #pLevelProgress span{height:100%;display:block;background:#1766ae;border-radius:8px;transition:width .15s}
+      #pLevelOverlayControls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+      #pLevelOverlayControls button{padding:5px 9px;font-size:12px;background:#f1f5f9;color:#586579}
+      #pLevelOverlayControls button.active{background:#172033;border-color:#172033;color:#fff}
+      #pLevelSizeLegend{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:13px;font-size:11px;color:#5d697c}
+      #pLevelSizeLegend>span:first-child{margin-right:4px}
+      #pLevelSizeLegend .p-size-badge{min-width:38px;padding:3px 7px}
+      .p-level-table-wrap{overflow-x:auto}
       #pLevelOverlayTable{width:100%;border-collapse:collapse;font-size:12px}
-      #pLevelOverlayTable th,#pLevelOverlayTable td{border-bottom:1px solid #e5e7eb;padding:6px 5px;text-align:left;vertical-align:middle;white-space:nowrap}
-      #pLevelOverlayTable th{position:sticky;top:0;background:#f9fafb;z-index:1;font-weight:900}
-      #pLevelOverlayTable tr:hover{background:#f3f4f6}
-      .p-sort-pill{display:inline-block;min-width:28px;text-align:center;border-radius:7px;padding:3px 7px;font-weight:900;box-shadow:0 0 0 1.5px rgba(0,0,0,.25) inset}
-      .p-sort-pill.p1{background:#F0E442;color:#111}.p-sort-pill.p2{background:#009E73;color:#fff}.p-sort-pill.p3{background:#E69F00;color:#111}.p-sort-pill.p4{background:#0072B2;color:#fff}
-      .p-sort-pill.px{background:repeating-linear-gradient(135deg,#E5E7EB 0 8px,#CBD5E1 8px 16px);color:#111}
-      .p-level-copy{color:#005eb8;font-weight:800;text-decoration:none;cursor:pointer}
-      .p-level-muted{color:#6b7280;font-size:12px;font-weight:700}
+      #pLevelOverlayTable th,#pLevelOverlayTable td{padding:10px 6px;text-align:left;vertical-align:middle;white-space:nowrap;border-bottom:1px solid #e0e6ee}
+      #pLevelOverlayTable th{position:sticky;top:0;background:#f4f7fb;z-index:1;padding:0 6px;height:39px;font-size:11px;color:#5d697c;font-weight:500}
+      #pLevelOverlayTable th button{padding:10px 0;background:transparent;border:0;border-radius:0;color:#5d697c;font-size:12px;white-space:nowrap}
+      #pLevelOverlayTable th button.active-sort{color:#172033;font-weight:600}
+      #pLevelOverlayTable th button:hover{background:transparent;color:#172033}
+      #pLevelOverlayTable th:last-child,#pLevelOverlayTable td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+      #pLevelOverlayTable td:nth-child(4){font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
+      #pLevelOverlayTable tr:hover{background:#f8fafc}
+      .p-sort-pill{display:inline-flex;align-items:center;justify-content:center;padding:3px 8px;border-radius:5px;background:#f1f5f9;color:#172033;box-shadow:inset 0 0 0 1px #dce3ec;font-weight:600;font-size:12px;min-width:32px}
+      .p-sort-pill.px{color:#5d697c}
+      .p-size-badge{display:inline-flex;align-items:center;justify-content:center;padding:5px 8px;border-radius:5px;min-width:48px;font-size:12px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+      .p-size-6{background:#e7f1ff;color:#17365f}.p-size-9{background:#bdd7f5;color:#16355c}.p-size-11{background:#82afe2;color:#102e50}.p-size-14{background:#386fae;color:#fff}.p-size-18-5{background:#16457a;color:#fff}.p-size-unknown{background:#f1f5f9;color:#5d697c}
+      #pLevelOverlay .p-level-copy{font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;border:0;background:transparent;color:#1766ae;padding:0;font-weight:600}
+      #pLevelOverlay .p-level-copy:hover{text-decoration:underline;background:transparent}
+      .p-level-open{margin-left:5px;color:#5d697c;text-decoration:none;font-size:14px}
+      .p-level-issue{display:block;font-size:11px;color:#735113;margin-top:3px;white-space:normal}
+      #pLevelOverlayTable .p-level-unresolved{background:#fff5df}
+      #pLevelOverlayTable .p-level-detail{white-space:normal;overflow-wrap:anywhere;background:#f4f7fb;color:#5d697c;font:12px/1.45 Arial,Helvetica,sans-serif}
+      #pLevelOverlayFooter{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#f4f7fb;border-top:1px solid #e0e6ee;flex-shrink:0}
+      #pLevelLazyBtn{background:#172033!important;color:#fff!important;border-color:#172033!important}
+      .p-level-muted{color:#5d697c;font-size:11px}
+      @media(max-width:480px){#pLevelOverlayBody{padding:12px 10px 0}#pLevelOverlayHeader,#pLevelOverlayFooter{padding:12px 10px}#pLevelOverlayTable th,#pLevelOverlayTable td{padding-left:4px;padding-right:4px}}
+      @media(pointer:coarse){#pLevelOverlay button{min-height:44px}#pLevelOverlay .p-level-copy{min-height:40px}.p-level-open{display:inline-flex;align-items:center;justify-content:center;min-height:40px;min-width:30px}}
+      @media(prefers-reduced-motion:reduce){#pLevelProgress span{transition:none}}
     `;
 
     document.head.appendChild(style);
@@ -1174,3 +1253,4 @@
 
   start();
 })();
+
