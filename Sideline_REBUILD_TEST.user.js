@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         v2 Sideline REBUILD TEST v0.0.9
 // @namespace    https://github.com/1Sirkkris
-// @version      0.0.41
+// @version      0.0.42
 // @description  CLEAN REBUILD TEST: Tote Queue + Lazy Sideline + QTY quick select + standalone Live QTY 1.
 // @match        https://aft-poirot-website-nrt.nrt.proxy.amazon.com/*
 // @include      /^https?:\/\/.*fcresearch.*\//
@@ -26,7 +26,7 @@
   if (window.__sidelineRebuildTest_v009) return;
   window.__sidelineRebuildTest_v009 = true;
 
-  const VERSION = '0.0.41-REBUILD';
+  const VERSION = '0.0.42-REBUILD';
   const POIROT_ORIGIN = 'https://aft-poirot-website-nrt.nrt.proxy.amazon.com';
   const { registerRuntimeVersion } = globalThis.BWU2Fleet;
   registerRuntimeVersion('SIDELINE-REBUILD', VERSION);
@@ -4496,7 +4496,7 @@
 
   function liveHasPending() {
     return live.busy || live.movePending || live.closePending ||
-      !!live.current || ['date','predicant','damaged','lookup-pause','unknown'].includes(live.phase);
+      !!live.current || ['date','predicant','lookup-pause','unknown'].includes(live.phase);
   }
 
   function liveSessionBlocksModeChange(key) {
@@ -4517,7 +4517,7 @@
   function liveFocus() {
     if (!feature.live) return;
     const target = live.phase === 'ready' || live.phase === 'predicant' ? liveScan
-      : live.phase === 'destination' || live.phase === 'damaged' ? liveDest
+      : live.phase === 'destination' ? liveDest
       : live.phase === 'source' ? liveSrc : null;
     if (target && !target.disabled) target.focus();
   }
@@ -4525,7 +4525,7 @@
   function renderLive() {
     const phase = live.phase;
     liveSrc.disabled = phase !== 'source';
-    liveDest.disabled = !['destination','damaged'].includes(phase);
+    liveDest.disabled = phase !== 'destination';
     liveScan.disabled = !['ready','predicant'].includes(phase);
     const statuses = {
       source:['SCAN SOURCE','Enter a source container to begin',''],
@@ -4537,7 +4537,6 @@
       moving:['MOVING QTY 1','Waiting for confirmed inventory movement','busy'],
       'lookup-pause':['CHECK FAILED','Retry Check or Skip Item — no move attempted','yellow'],
       predicant:['PREDICANT — DESTINATION RESCAN','Rescan the same destination to clear it and retry','yellow'],
-      damaged:['DESTINATION DAMAGED','Scan a different destination to retry this item','red'],
       stopped:['LIVE STOPPED','Resume to revalidate source and destination','yellow'],
       closing:['FINISHING SOURCE','Waiting for confirmed source-close response','busy'],
       unknown:['OUTCOME UNKNOWN — VERIFY','Verify source/destination inventory before resetting','red']
@@ -4556,7 +4555,7 @@
     liveStopButton.textContent = phase === 'stopped' ? 'RESUME' : 'STOP';
     const recovery = phase === 'lookup-pause'
       ? [['retry','RETRY CHECK'],['skip','SKIP ITEM']]
-      : phase === 'predicant' || phase === 'damaged'
+      : phase === 'predicant'
         ? [['skip','SKIP ITEM']]
         : phase === 'unknown' ? [['ack','VERIFIED — RESET SESSION']] : [];
     const recoveryHtml = recovery.map(([a,label]) => `<button type="button" class="sh-btn ${a==='skip'?'sh-stop':''}" data-la="${a}">${label}</button>`).join('');
@@ -4645,24 +4644,18 @@
   }
 
   function liveDestinationScan(code) {
-    if (!['destination','damaged'].includes(live.phase)) return;
+    if (live.phase !== 'destination') return;
     const dest = clean(code);
-    if (!validContainer(dest) || norm(dest) === norm(live.src) ||
-        (live.phase === 'damaged' && norm(dest) === norm(live.dest))) {
+    if (!validContainer(dest) || norm(dest) === norm(live.src)) {
       live.note = 'SCAN A VALID DIFFERENT DESTINATION'; renderLive(); return;
     }
     const changing = norm(dest) !== norm(live.dest);
-    const fromDamage = live.phase === 'damaged';
     live.dest = dest; liveDest.value = dest; live.running = true;
     live.phase = 'ready'; live.lastIssue = ''; live.note = '';
     if (changing) live.dateCache.clear();
     liveTrace('DEST_READY',{changed:changing});
     renderLive();
-    if (fromDamage && live.current?.ctx) {
-      // Previous move was explicitly rejected. New destination is a new date context.
-      live.current.date = null;
-      void liveProceed(live.current,live.current.ctx,live.activeRun);
-    } else setTimeout(liveFocus,0);
+    setTimeout(liveFocus,0);
   }
 
   async function liveReadItem(item,run) {
@@ -4778,10 +4771,10 @@
       renderLive();setTimeout(liveFocus,0);return;
     }
     if (isDamagedDestinationResponse(result)) {
-      live.phase = 'damaged';live.busy = false;
-      live.note = `DESTINATION ${live.dest} DAMAGED — scan replacement`;
-      liveTrace('DEST_DAMAGED',{barcode:item.code});
-      renderLive();setTimeout(liveFocus,0);return;
+      // A damage compatibility rejection applies to this item/destination pair.
+      // Keep the destination locked and accept the next item, without a retry.
+      liveSkip('DAMAGE / DESTINATION INCOMPATIBLE');
+      return;
     }
     liveSkip(moveReason(result) || 'MOVE REJECTED');
   }
@@ -4947,9 +4940,9 @@
     }
     if (action === 'finish') {void liveFinish();return;}
     if (action === 'stop') {liveStop();return;}
-    if (action === 'skip' && ['lookup-pause','predicant','damaged'].includes(live.phase)) {
+    if (action === 'skip' && ['lookup-pause','predicant'].includes(live.phase)) {
       liveSkip(live.phase === 'lookup-pause' ? 'CHECK FAILED — USER SKIPPED' :
-        live.phase === 'predicant' ? 'PREDICANT — USER SKIPPED' : 'DAMAGED DESTINATION — USER SKIPPED');
+        'PREDICANT — USER SKIPPED');
       return;
     }
     if (action === 'retry' && live.phase === 'lookup-pause' && live.current) {
@@ -4965,8 +4958,7 @@
   document.addEventListener('keydown',e=>{
     if (!feature.live || !live.src || !live.running || e.ctrlKey || e.altKey || e.metaKey) return;
     const allowed = (live.phase === 'ready' && e.target === liveScan) ||
-      (live.phase === 'predicant' && e.target === liveScan) ||
-      (live.phase === 'damaged' && e.target === liveDest);
+      (live.phase === 'predicant' && e.target === liveScan);
     if (allowed) return;
     if (typeof e.key === 'string' && e.key.length === 1) {
       liveBlockedCharacters++;
@@ -5709,3 +5701,4 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',launch,{once:true});
   else launch();
 })();
+
